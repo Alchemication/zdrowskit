@@ -55,7 +55,7 @@ The full picture:
 - **`goals.md`** — current health and fitness goals with timelines
 - **`plan.md`** — active workout plan, diet approach, sleep targets
 
-These three files, combined with the structured data zdrowskit produces, get passed to an LLM that generates a personalised weekly report and smart, context-aware notifications — including knowing when *not* to push you. Sick? Sleep-deprived? Life disrupted? It should know.
+These four files, combined with the structured data zdrowskit produces, get passed to an LLM that generates a personalised weekly report and smart, context-aware notifications — including knowing when *not* to push you. Sick? Sleep-deprived? Life disrupted? It should know.
 
 Apple tells you that you closed your rings. zdrowskit will tell you whether that actually mattered.
 
