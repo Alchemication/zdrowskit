@@ -1,43 +1,75 @@
 # zdrowskit
 
-> What Apple Health notifications should be.
+> What Apple Health notifications *should* be.
 
 Apple sends you a nudge when you close your rings. zdrowskit reads your actual data — runs, lifts, heart rate variability, recovery — and tells you something worth knowing.
 
-And it will allow you to manage the week the way you want. Off Monday and Tuesday? No problem. You can catch up over next days - if this is what YOU want!
+Had a rough Monday and skipped your workout? No panic. zdrowskit knows your plan, your goals, and your week so far. It tells you what matters — not what a streak counter thinks matters.
 
-Built by Adam Napora (adamsky). *Zdrowie* is Polish for health. *Kit* is the tool. You do the math.
+Built by Adam Napora (adamsky). *Zdrowie* is Polish for health. *Kit* is the tool.
 
 ---
 
-## What it does today
-
-A local Python pipeline that:
-
-1. **Parses** weekly Apple Health exports from iCloud Drive — activity rings, workouts, heart metrics, GPS routes, mobility data
-2. **Stores** everything in a local SQLite database, upserted on each import
-3. **Reports** weekly summaries and per-day breakdowns: run distance, pace, HR, HRV, elevation, lift time, recovery index, and more
-4. **Exports LLM-ready JSON** — current week in detail plus months of weekly history, structured for feeding to a language model
-5. **Generates personalised insights** — calls an LLM with your profile, goals, training plan, weekly journal, and health data to produce an actionable weekly report
+## How it works
 
 ```
-MyHealth/Metrics/     — steps, energy, heart rate, HRV, VO2max, mobility
-MyHealth/Workouts/    — workout sessions with per-minute HR, energy, temp
-MyHealth/Routes/      — GPX tracks matched to workouts by timestamp
-        ↓
-    zdrowskit import
-        ↓
-    SQLite database
-        ↓
-    zdrowskit report [--llm]
-        ↓
-    zdrowskit insights
-        + soul.md, me.md, goals.md, plan.md, log.md
-        ↓
-    LLM → personalised weekly report
+Apple Health export (iCloud Drive)
+    MyHealth/Metrics/     — steps, energy, HR, HRV, VO2max, mobility
+    MyHealth/Workouts/    — sessions with per-minute HR, energy, temp
+    MyHealth/Routes/      — GPX tracks matched to workouts by timestamp
+            ↓
+        zdrowskit import          → SQLite database
+            ↓
+        zdrowskit report          → weekly summary + daily breakdown
+        zdrowskit report --llm    → structured JSON for LLM consumption
+            ↓
+        zdrowskit insights        → personalised weekly report
+            + context files: your profile, goals, plan, journal
+            ↓
+        Email / Telegram          → delivered to your inbox or phone
 ```
 
-## Usage
+zdrowskit is a local pipeline. Your data stays on your machine in a SQLite database. The only external call is the LLM API when you run `insights`.
+
+## Quick start
+
+**Prerequisites:** Python 3.11+ and [uv](https://github.com/astral-sh/uv).
+
+```bash
+# Clone and install
+git clone <repo-url> && cd zdrowskit
+uv sync
+
+# Import your Apple Health data
+uv run python main.py import --data-dir ~/Documents/zdrowskit/MyHealth
+
+# See what's in the database
+uv run python main.py status
+
+# Get a weekly report
+uv run python main.py report
+```
+
+### Setting up insights (LLM reports)
+
+1. Copy the example context files:
+   ```bash
+   mkdir -p ~/Documents/zdrowskit/ContextFiles
+   cp examples/context/*.md ~/Documents/zdrowskit/ContextFiles/
+   ```
+2. Edit them with your real data — at minimum `me.md`, `goals.md`, and `plan.md`
+3. Add your API key to `.env`:
+   ```
+   ANTHROPIC_API_KEY=sk-ant-...
+   ```
+4. Generate your first report:
+   ```bash
+   uv run python main.py insights
+   ```
+
+The LLM reads your profile, goals, training plan, and weekly journal alongside your health data. After each run it appends a brief memory to `history.md` so it can track your progress across weeks.
+
+## Commands
 
 ```bash
 uv run python main.py import                   # parse export, upsert into DB
@@ -47,73 +79,56 @@ uv run python main.py report --llm             # JSON for LLM: current + 3mo his
 uv run python main.py report --llm --months 6  # same, 6 months
 uv run python main.py status                   # DB row counts + date range
 uv run python main.py context                  # show context files and their status
-uv run python main.py insights                 # LLM-driven personalised weekly report
+uv run python main.py insights                 # personalised weekly report via LLM
 uv run python main.py insights --week last     # full review of previous week
 uv run python main.py insights --explain       # show diagnostics (tokens, cost, context)
 uv run python main.py insights --email         # send report via email
 uv run python main.py insights --telegram      # send report via Telegram
 ```
 
-Data dir defaults to `~/Documents/zdrowskit/MyHealth/`. Override with `--data-dir` or `HEALTH_DATA_DIR`.
+Data dir defaults to `~/Documents/zdrowskit/MyHealth/`. Override with `--data-dir` or the `HEALTH_DATA_DIR` env var. Run any command with `--help` for the full flag list.
 
-### Setting up insights
+## Context files
 
-1. Copy example context files: `cp examples/context/*.md ~/Documents/zdrowskit/ContextFiles/`
-2. Edit them with your real data (at minimum: `me.md`, `goals.md`, `plan.md`)
-3. Add your API key to `.env`: `ANTHROPIC_API_KEY=sk-...`
-4. Run: `uv run python main.py insights`
+The `insights` command uses markdown files from `~/Documents/zdrowskit/ContextFiles/` to give the LLM real context about *you* — not just your numbers:
 
-The LLM reads your profile, goals, training plan, and weekly journal alongside your health data to generate a personalised report. After each run it appends a brief memory to `history.md` for continuity across weeks.
+| File | Who edits | Purpose |
+|------|-----------|---------|
+| `me.md` | you + auto | Your profile — age, weight, injuries, personal baselines |
+| `goals.md` | you | Health and fitness goals with timelines |
+| `plan.md` | you | Weekly training schedule, diet approach, sleep targets |
+| `log.md` | you | Freeform weekly journal — *why* things happened (travel, illness, life) |
+| `soul.md` | you | AI coach persona — tone, style, coaching philosophy |
+| `prompt.md` | you | Prompt template — controls what the report looks like |
+| `history.md` | auto | LLM's own memory — appended after each run for week-over-week continuity |
 
-### Notifications
+Example versions of all files are in `examples/context/`.
 
-Reports can be delivered via email or Telegram directly from the `insights` command.
+The journal (`log.md`) is what makes this different from a dashboard. Numbers say *what* happened. The journal says *why*. The LLM connects both.
 
-**Email (via [Resend](https://resend.com)):**
-```bash
-# .env
+## Notifications
+
+Reports can be delivered straight to your inbox or phone.
+
+**Email** via [Resend](https://resend.com):
+```env
 RESEND_API_KEY=re_xxxxx
 EMAIL_TO=you@example.com
 ```
 
-**Telegram:**
-```bash
-# .env
+**Telegram** via Bot API:
+```env
 TELEGRAM_BOT_TOKEN=123456789:ABCdefGHI...
 TELEGRAM_CHAT_ID=123456789
 ```
 
 Then: `uv run python main.py insights --email --telegram`
 
----
-
-## Context files
-
-The `insights` command reads markdown files from `~/Documents/zdrowskit/ContextFiles/` that give the LLM the context it needs to generate truly personalised reports:
-
-| File | Purpose |
-|------|---------|
-| **`soul.md`** | AI coach persona — tone, style, coaching philosophy |
-| **`me.md`** | Your profile — age, weight, injuries, personal baselines (resting HR, HRV, pace) |
-| **`goals.md`** | Health and fitness goals with timelines |
-| **`plan.md`** | Weekly training schedule, diet approach, sleep targets |
-| **`log.md`** | Freeform weekly journal — *why* things happened (travel, illness, life) |
-| **`history.md`** | LLM's own memory — auto-appended after each run for week-over-week continuity |
-| **`prompt.md`** | Prompt template — controls report structure and instructions to the LLM |
-
-These files, combined with the structured health data zdrowskit produces, get passed to an LLM that generates a personalised weekly report — including knowing when *not* to push you. Sick? Sleep-deprived? Life disrupted? It should know.
-
-Apple tells you that you closed your rings. zdrowskit will tell you whether that actually mattered.
-
-And it will allow you to manage the week the way you want. Off Monday and Tuesday? No problem. You can catch up over next days!
-
----
-
 ## Stack
 
 - Python + [uv](https://github.com/astral-sh/uv)
 - SQLite (local, no cloud)
-- Apple Health export format (MyHealth app)
-- [litellm](https://github.com/BerriAI/litellm) for LLM calls
+- Apple Health export format ([MyHealth](https://apps.apple.com/app/myhealth-export-to-icloud/id6737380982) app)
+- [litellm](https://github.com/BerriAI/litellm) for LLM calls (Claude Haiku by default)
 - [Resend](https://resend.com) for email delivery (optional)
 - Telegram Bot API for mobile notifications (optional)
