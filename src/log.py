@@ -1,4 +1,4 @@
-"""Colored console logging setup for adamskit.
+"""Colored console logging setup for zdrowskit.
 
 Public API:
     setup_logging(verbose) -- configure root logger with a colored stderr handler

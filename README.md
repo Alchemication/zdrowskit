@@ -40,7 +40,7 @@ uv run python main.py report --llm --months 6  # same, 6 months
 uv run python main.py status                   # DB row counts + date range
 ```
 
-Data dir defaults to `~/Documents/adamskit/MyHealth/`. Override with `--data-dir` or `HEALTH_DATA_DIR`.
+Data dir defaults to `~/Documents/zdrowskit/MyHealth/`. Override with `--data-dir` or `HEALTH_DATA_DIR`.
 
 ---
 

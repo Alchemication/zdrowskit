@@ -10,7 +10,7 @@ Example:
     from pathlib import Path
     from store import open_db, store_snapshots, load_snapshots
 
-    conn = open_db(Path("~/.local/share/adamskit/health.db").expanduser())
+    conn = open_db(Path("~/.local/share/zdrowskit/health.db").expanduser())
     store_snapshots(conn, snapshots)
     days = load_snapshots(conn, start="2026-01-01")
 """
@@ -26,7 +26,7 @@ from models import DailySnapshot, WorkoutSnapshot
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_DB = Path.home() / "Documents" / "adamskit" / "health.db"
+_DEFAULT_DB = Path.home() / "Documents" / "zdrowskit" / "health.db"
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS daily (
@@ -85,12 +85,12 @@ def default_db_path() -> Path:
     """Return the default database path.
 
     Returns:
-        Path to ~/.local/share/adamskit/health.db, or the value of the
-        ADAMSKIT_DB environment variable if set.
+        Path to ~/.local/share/zdrowskit/health.db, or the value of the
+        zdrowskit_DB environment variable if set.
     """
     import os
 
-    env = os.environ.get("ADAMSKIT_DB")
+    env = os.environ.get("zdrowskit_DB")
     if env:
         return Path(env).expanduser().resolve()
     return _DEFAULT_DB

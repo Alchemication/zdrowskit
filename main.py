@@ -1,4 +1,4 @@
-"""adamskit — Apple Health data pipeline.
+"""zdrowskit — Apple Health data pipeline.
 
 Subcommands:
     import   Parse a MyHealth export directory and upsert into the database.
@@ -69,7 +69,7 @@ from store import (
 logger = logging.getLogger(__name__)
 
 
-DEFAULT_DATA_DIR = Path.home() / "Documents/adamskit/MyHealth"
+DEFAULT_DATA_DIR = Path.home() / "Documents/zdrowskit/MyHealth"
 
 
 def _resolve_data_dir(arg: str | None) -> Path:
@@ -413,7 +413,7 @@ def main() -> None:
         "--db",
         metavar="PATH",
         default=db_default,
-        help=f"Path to SQLite database (default: {db_default}, or ADAMSKIT_DB env var)",
+        help=f"Path to SQLite database (default: {db_default}, or zdrowskit_DB env var)",
     )
 
     sub = parser.add_subparsers(dest="cmd", required=True)

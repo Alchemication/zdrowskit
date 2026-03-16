@@ -2,12 +2,18 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Zdrowskit - why this project exists
+
+> What Apple Health notifications should be.
+
+Apple sends you a nudge when you close your rings. zdrowskit reads your actual data — runs, lifts, heart rate variability, recovery — and tells you something worth knowing.
+
 ## Commands
 
 Always use `uv run` — never plain `python`. The three subcommands are `import`, `report`, and `status`. Run any with `--help` for the full flag list. Key defaults and overrides:
 
-- **Data dir:** `~/Documents/adamskit/MyHealth/` — override with `--data-dir PATH` or `HEALTH_DATA_DIR` env var.
-- **Database:** `~/Documents/adamskit/health.db` — override with `--db PATH` or `ADAMSKIT_DB` env var.
+- **Data dir:** `~/Documents/zdrowskit/MyHealth/` — override with `--data-dir PATH` or `HEALTH_DATA_DIR` env var.
+- **Database:** `~/Documents/zdrowskit/health.db` — override with `--db PATH` or `zdrowskit_DB` env var.
 
 ```bash
 uv run python main.py import                        # parse default data dir, upsert into DB
@@ -78,7 +84,7 @@ MyHealth/Routes/*.xml     ─┘                                            │
 - `src/assembler.py` — joins all parser outputs by date into `list[DailySnapshot]`. This is the only module that knows about inter-source relationships (GPX↔workout matching, date alignment).
 - `src/aggregator.py` — computes `WeeklySummary` from the daily snapshots. Contains `WEEKLY_RUN_TARGET` and `WEEKLY_LIFT_TARGET` constants used for consistency scoring.
 - `src/log.py` — configures a colored stderr logger via `setup_logging()`. Call once at startup in `main()`; all other modules just `getLogger(__name__)`.
-- `src/store.py` — SQLite persistence layer. `open_db()` creates/migrates the DB; `store_snapshots()` upserts; `load_snapshots()` re-hydrates `DailySnapshot` objects with nested workouts. Default DB: `~/Documents/adamskit/health.db`.
+- `src/store.py` — SQLite persistence layer. `open_db()` creates/migrates the DB; `store_snapshots()` upserts; `load_snapshots()` re-hydrates `DailySnapshot` objects with nested workouts. Default DB: `~/Documents/zdrowskit/health.db`.
 - `main.py` — CLI entry point. Adds `src/` to `sys.path` so modules import without a package prefix. Dispatches `import` / `report` / `status` subcommands. The `report` subcommand has three modes: default (current week + daily), `--history` (one summary per ISO week), and `--llm` (combined JSON for LLM consumption).
 
 **Data directory layout** (configurable via `--data-dir` or `HEALTH_DATA_DIR` env var):
