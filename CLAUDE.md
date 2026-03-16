@@ -10,7 +10,7 @@ Apple sends you a nudge when you close your rings. zdrowskit reads your actual d
 
 ## Commands
 
-Always use `uv run` — never plain `python`. The three subcommands are `import`, `report`, and `status`. Run any with `--help` for the full flag list. Key defaults and overrides:
+Always use `uv run` — never plain `python`. The four subcommands are `import`, `report`, `status`, and `insights`. Run any with `--help` for the full flag list. Key defaults and overrides:
 
 - **Data dir:** `~/Documents/zdrowskit/MyHealth/` — override with `--data-dir PATH` or `HEALTH_DATA_DIR` env var.
 - **Database:** `~/Documents/zdrowskit/health.db` — override with `--db PATH` or `zdrowskit_DB` env var.
@@ -24,6 +24,10 @@ uv run python main.py report --llm --months 6       # same, 6 months of history
 uv run python main.py report --json                 # current week as raw JSON
 uv run python main.py report --since DATE           # scope any mode to a date range
 uv run python main.py status                        # DB row counts + date range
+uv run python main.py insights                      # LLM-driven personalised weekly report
+uv run python main.py insights --months 6           # same, with 6 months of history
+uv run python main.py insights --no-history         # skip appending memory to history.md
+uv run python main.py insights --model MODEL        # use a different litellm model
 ```
 
 ## Logging
@@ -85,7 +89,8 @@ MyHealth/Routes/*.xml     ─┘                                            │
 - `src/aggregator.py` — computes `WeeklySummary` from the daily snapshots. Contains `WEEKLY_RUN_TARGET` and `WEEKLY_LIFT_TARGET` constants used for consistency scoring.
 - `src/log.py` — configures a colored stderr logger via `setup_logging()`. Call once at startup in `main()`; all other modules just `getLogger(__name__)`.
 - `src/store.py` — SQLite persistence layer. `open_db()` creates/migrates the DB; `store_snapshots()` upserts; `load_snapshots()` re-hydrates `DailySnapshot` objects with nested workouts. Default DB: `~/Documents/zdrowskit/health.db`.
-- `main.py` — CLI entry point. Adds `src/` to `sys.path` so modules import without a package prefix. Dispatches `import` / `report` / `status` subcommands. The `report` subcommand has three modes: default (current week + daily), `--history` (one summary per ISO week), and `--llm` (combined JSON for LLM consumption).
+- `src/llm.py` — LLM integration. Loads markdown context files (`soul.md`, `me.md`, `goals.md`, `plan.md`, `log.md`, `history.md`, `prompt.md`) from `~/Documents/zdrowskit/ContextFiles/`, assembles a prompt, calls an LLM via litellm, and manages the memory/history feedback loop. Default model: `anthropic/claude-haiku-4-5-20251001`.
+- `main.py` — CLI entry point. Adds `src/` to `sys.path` so modules import without a package prefix. Loads `.env` via python-dotenv. Dispatches `import` / `report` / `status` / `insights` subcommands. The `report` subcommand has three modes: default (current week + daily), `--history` (one summary per ISO week), and `--llm` (combined JSON for LLM consumption). The `insights` subcommand calls an LLM with context files + health data to generate a personalised report.
 
 **Data directory layout** (configurable via `--data-dir` or `HEALTH_DATA_DIR` env var):
 ```
@@ -96,3 +101,16 @@ MyHealth/
   Workouts/workouts.json  — workout sessions with per-minute energy, HR, temp, humidity
   Routes/*.xml            — GPX tracks for outdoor workouts (~1 point/sec)
 ```
+
+**Context files** for `insights` (live in `~/Documents/zdrowskit/ContextFiles/`):
+```
+soul.md      — AI coach persona and tone
+me.md        — user profile, baselines (resting HR, HRV, pace)
+goals.md     — fitness goals with timelines
+plan.md      — weekly training schedule, diet, sleep targets
+log.md       — freeform weekly journal (why things happened)
+history.md   — LLM's own memory (auto-appended after each run)
+prompt.md    — prompt template with {placeholders} for context + data
+```
+
+Example versions of all context files are in `examples/context/`.

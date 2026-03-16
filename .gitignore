@@ -11,3 +11,4 @@ wheels/
 
 # My files
 MyHealth
+.env

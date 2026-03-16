@@ -4,7 +4,11 @@ version = "0.1.0"
 description = "What Apple Health notifications should be."
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "litellm",
+    "python-dotenv",
+    "rich",
+]
 
 [dependency-groups]
 dev = [
