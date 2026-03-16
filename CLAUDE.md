@@ -10,7 +10,7 @@ Apple sends you a nudge when you close your rings. zdrowskit reads your actual d
 
 ## Commands
 
-Always use `uv run` — never plain `python`. The four subcommands are `import`, `report`, `status`, and `insights`. Run any with `--help` for the full flag list. Key defaults and overrides:
+Always use `uv run` — never plain `python`. The five subcommands are `import`, `report`, `status`, `context`, and `insights`. Run any with `--help` for the full flag list. Key defaults and overrides:
 
 - **Data dir:** `~/Documents/zdrowskit/MyHealth/` — override with `--data-dir PATH` or `HEALTH_DATA_DIR` env var.
 - **Database:** `~/Documents/zdrowskit/health.db` — override with `--db PATH` or `zdrowskit_DB` env var.
@@ -24,9 +24,15 @@ uv run python main.py report --llm --months 6       # same, 6 months of history
 uv run python main.py report --json                 # current week as raw JSON
 uv run python main.py report --since DATE           # scope any mode to a date range
 uv run python main.py status                        # DB row counts + date range
+uv run python main.py context                       # show context files and their status
 uv run python main.py insights                      # LLM-driven personalised weekly report
 uv run python main.py insights --months 6           # same, with 6 months of history
-uv run python main.py insights --no-history         # skip appending memory to history.md
+uv run python main.py insights --week last          # report on previous ISO week (Monday morning flow)
+uv run python main.py insights --no-update-history  # skip appending memory to history.md
+uv run python main.py insights --no-update-baselines # skip auto-computed baselines
+uv run python main.py insights --explain            # show context, prompt, token usage diagnostics
+uv run python main.py insights --email              # send report via email (Resend)
+uv run python main.py insights --telegram           # send report via Telegram bot
 uv run python main.py insights --model MODEL        # use a different litellm model
 ```
 
@@ -41,7 +47,18 @@ logger = logging.getLogger(__name__)
 
 `src/log.py` provides `setup_logging()`, which wires up a colored stderr handler. It is called once in `main()` before the pipeline runs.
 
-**Use `print()` only for intentional user-facing report output** (i.e. the formatted weekly summary and daily breakdown in `main.py`). Everything else — status messages, warnings, errors — goes through the logger.
+**Use `print()` only for intentional user-facing report output** (i.e. the formatted weekly summary and daily breakdown in `src/report.py`). Everything else — status messages, warnings, errors — goes through the logger.
+
+## CLI Output & UX
+
+The CLI is the primary user interface. **Great UX matters** — every command should produce output that is scannable, informative, and visually clean. Pick the right output tool for the job:
+
+- **`rich` for structured output:** Use `rich` tables, panels, and styled text for any diagnostic, status, or informational display (e.g. `--explain`, `context` command). Import `rich` lazily (inside the function) to keep startup fast. When the output is meant for the terminal and benefits from visual hierarchy, reach for `rich`.
+- **`print()` for primary content:** Report text, JSON output, and other "pipe-friendly" content goes to stdout via `print()`. Keep it clean — no ANSI codes, no rich markup. Use this when the output might be redirected or piped.
+- **`logger` for operational messages:** Progress updates, warnings, errors go to stderr via the logger. These should be concise and actionable (e.g. "Report saved to /path/file.md", not "The report has been successfully saved"). The logger is for what's happening behind the scenes, not the result itself.
+- **Stderr vs stdout separation:** Diagnostics (`--explain`, logger) go to stderr. Content (reports, JSON) goes to stdout. This lets users redirect output cleanly: `insights > report.md` captures only the report.
+- **Error messages:** Always tell the user what to do, not just what went wrong. "RESEND_API_KEY not set. Add it to your .env file." not "Missing API key."
+- **General principle:** If you're unsure which to use, ask: "Is this the result the user asked for?" → `print()`. "Is this a table/panel the user reads in the terminal?" → `rich`. "Is this a progress/status note?" → `logger`.
 
 ## Code Style
 
@@ -89,8 +106,13 @@ MyHealth/Routes/*.xml     ─┘                                            │
 - `src/aggregator.py` — computes `WeeklySummary` from the daily snapshots. Contains `WEEKLY_RUN_TARGET` and `WEEKLY_LIFT_TARGET` constants used for consistency scoring.
 - `src/log.py` — configures a colored stderr logger via `setup_logging()`. Call once at startup in `main()`; all other modules just `getLogger(__name__)`.
 - `src/store.py` — SQLite persistence layer. `open_db()` creates/migrates the DB; `store_snapshots()` upserts; `load_snapshots()` re-hydrates `DailySnapshot` objects with nested workouts. Default DB: `~/Documents/zdrowskit/health.db`.
-- `src/llm.py` — LLM integration. Loads markdown context files (`soul.md`, `me.md`, `goals.md`, `plan.md`, `log.md`, `history.md`, `prompt.md`) from `~/Documents/zdrowskit/ContextFiles/`, assembles a prompt, calls an LLM via litellm, and manages the memory/history feedback loop. Default model: `anthropic/claude-haiku-4-5-20251001`.
-- `main.py` — CLI entry point. Adds `src/` to `sys.path` so modules import without a package prefix. Loads `.env` via python-dotenv. Dispatches `import` / `report` / `status` / `insights` subcommands. The `report` subcommand has three modes: default (current week + daily), `--history` (one summary per ISO week), and `--llm` (combined JSON for LLM consumption). The `insights` subcommand calls an LLM with context files + health data to generate a personalised report.
+- `src/llm.py` — LLM integration. Loads markdown context files (`soul.md`, `me.md`, `goals.md`, `plan.md`, `log.md`, `history.md`, `prompt.md`) from the context directory, assembles a prompt, calls an LLM via litellm, and manages the memory/history feedback loop. Also builds the combined current-week + history JSON structure via `build_llm_data()`. Default model: `anthropic/claude-haiku-4-5-20251001`.
+- `src/notify.py` — notification delivery. `send_email()` sends HTML reports via Resend API. `send_telegram()` sends plain-text reports via Telegram Bot API. Both read credentials from env vars.
+- `src/config.py` — shared path constants (`DEFAULT_DATA_DIR`, `CONTEXT_DIR`, `REPORTS_DIR`) and `resolve_data_dir()`. Single source of truth for all `~/Documents/zdrowskit/` paths.
+- `src/report.py` — report formatting and display. `print_summary()`, `print_daily()` for terminal output. `to_dict()`, `fmt()`, `current_week_bounds()`, `group_by_week()` for data conversion and week arithmetic.
+- `src/baselines.py` — `compute_baselines()` runs rolling 30/90-day SQL averages and weekly training volume queries, returns formatted markdown.
+- `src/commands.py` — subcommand handlers (`cmd_import`, `cmd_report`, `cmd_status`, `cmd_context`, `cmd_insights`). All business logic lives here; `main.py` only dispatches to these.
+- `main.py` — CLI entry point. Thin layer: `sys.path` setup, `.env` loading, argparse definition, and dict-based dispatch to `src/commands.py`. **Keep this file slim** — new business logic belongs in `src/`.
 
 **Data directory layout** (configurable via `--data-dir` or `HEALTH_DATA_DIR` env var):
 ```

@@ -650,6 +650,15 @@ wheels = [
 ]
 
 [[package]]
+name = "markdown"
+version = "3.10.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/2b/f4/69fa6ed85ae003c2378ffa8f6d2e3234662abd02c10d216c0ba96081a238/markdown-3.10.2.tar.gz", hash = "sha256:994d51325d25ad8aa7ce4ebaec003febcce822c3f8c911e3b17c52f7f589f950", size = 368805, upload-time = "2026-02-09T14:57:26.942Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/de/1f/77fa3081e4f66ca3576c896ae5d31c3002ac6607f9747d2e3aa49227e464/markdown-3.10.2-py3-none-any.whl", hash = "sha256:e91464b71ae3ee7afd3017d9f358ef0baf158fd9a298db92f1d4761133824c36", size = 108180, upload-time = "2026-02-09T14:57:25.787Z" },
+]
+
+[[package]]
 name = "markdown-it-py"
 version = "4.0.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1212,6 +1221,19 @@ wheels = [
 ]
 
 [[package]]
+name = "resend"
+version = "2.24.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "requests" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/a3/17/a552eba700a42dbbd5d11cbde0cc4a950c26e1eb7074c516153f8d3f0843/resend-2.24.0.tar.gz", hash = "sha256:60c15e2c9007bd8bdb811f752f00298606a7264242d3a4c4e0ae14a493ec3e0e", size = 31106, upload-time = "2026-03-16T13:12:44.728Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c4/c2/13796ebb95b0d0990361c302fc4231c98184b6c489687cd27baaf3fcbc4d/resend-2.24.0-py2.py3-none-any.whl", hash = "sha256:f8d99718d3a23ab96b7d3df020ee7a9b56b7f536e0d77b50a16debd198b50e79", size = 51002, upload-time = "2026-03-16T13:12:43.581Z" },
+]
+
+[[package]]
 name = "rich"
 version = "14.3.3"
 source = { registry = "https://pypi.org/simple" }
@@ -1588,7 +1610,9 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "litellm" },
+    { name = "markdown" },
     { name = "python-dotenv" },
+    { name = "resend" },
     { name = "rich" },
 ]
 
@@ -1600,7 +1624,9 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "litellm" },
+    { name = "markdown" },
     { name = "python-dotenv" },
+    { name = "resend" },
     { name = "rich" },
 ]
 

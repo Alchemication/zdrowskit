@@ -46,8 +46,12 @@ uv run python main.py report --history         # all weeks, one block each
 uv run python main.py report --llm             # JSON for LLM: current + 3mo history
 uv run python main.py report --llm --months 6  # same, 6 months
 uv run python main.py status                   # DB row counts + date range
+uv run python main.py context                  # show context files and their status
 uv run python main.py insights                 # LLM-driven personalised weekly report
-uv run python main.py insights --no-history    # same, without appending to history.md
+uv run python main.py insights --week last     # full review of previous week
+uv run python main.py insights --explain       # show diagnostics (tokens, cost, context)
+uv run python main.py insights --email         # send report via email
+uv run python main.py insights --telegram      # send report via Telegram
 ```
 
 Data dir defaults to `~/Documents/zdrowskit/MyHealth/`. Override with `--data-dir` or `HEALTH_DATA_DIR`.
@@ -60,6 +64,26 @@ Data dir defaults to `~/Documents/zdrowskit/MyHealth/`. Override with `--data-di
 4. Run: `uv run python main.py insights`
 
 The LLM reads your profile, goals, training plan, and weekly journal alongside your health data to generate a personalised report. After each run it appends a brief memory to `history.md` for continuity across weeks.
+
+### Notifications
+
+Reports can be delivered via email or Telegram directly from the `insights` command.
+
+**Email (via [Resend](https://resend.com)):**
+```bash
+# .env
+RESEND_API_KEY=re_xxxxx
+EMAIL_TO=you@example.com
+```
+
+**Telegram:**
+```bash
+# .env
+TELEGRAM_BOT_TOKEN=123456789:ABCdefGHI...
+TELEGRAM_CHAT_ID=123456789
+```
+
+Then: `uv run python main.py insights --email --telegram`
 
 ---
 
@@ -91,3 +115,5 @@ And it will allow you to manage the week the way you want. Off Monday and Tuesda
 - SQLite (local, no cloud)
 - Apple Health export format (MyHealth app)
 - [litellm](https://github.com/BerriAI/litellm) for LLM calls
+- [Resend](https://resend.com) for email delivery (optional)
+- Telegram Bot API for mobile notifications (optional)

@@ -9,6 +9,7 @@ Public API:
     generate_report — call litellm and return a ReportResult with text + metadata
     extract_memory  — pull <memory> block from LLM response
     append_history  — append a timestamped memory entry to history.md
+    build_llm_data  — build current-week + history JSON for LLM consumption
     ReportResult    — dataclass holding response text and usage metadata
 
 Example:
@@ -21,13 +22,18 @@ from __future__ import annotations
 
 import logging
 import re
+import sqlite3
 import time
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 import litellm
+
+from aggregator import summarise
+from report import current_week_bounds, group_by_week, to_dict
+from store import load_date_range, load_snapshots
 
 logger = logging.getLogger(__name__)
 
@@ -211,3 +217,44 @@ def append_history(context_dir: Path, memory_block: str) -> None:
     with open(history_path, "a", encoding="utf-8") as f:
         f.write(entry)
     logger.info("Appended memory to %s", history_path)
+
+
+def build_llm_data(
+    conn: sqlite3.Connection, months: int, week: str = "current"
+) -> dict:
+    """Build the combined current-week + history JSON structure for LLM consumption.
+
+    Args:
+        conn: Open SQLite database connection.
+        months: Number of months of history to include.
+        week: Which week to report on — "current" for the ISO week containing
+              today, "last" for the previous ISO week.
+
+    Returns:
+        A dict with 'current_week' and 'history' keys, JSON-serialisable.
+        Returns empty structure if the database has no data.
+    """
+    dr = load_date_range(conn)
+    if dr is None:
+        return {"current_week": {"summary": None, "days": []}, "history": []}
+
+    anchor = date.fromisoformat(dr[1])
+    if week == "last":
+        anchor = anchor - timedelta(days=7)
+    week_start, week_end = current_week_bounds(anchor.isoformat())
+    current_snaps = load_snapshots(conn, start=week_start, end=week_end)
+
+    history_end = (date.fromisoformat(week_start) - timedelta(days=1)).isoformat()
+    history_start = (
+        date.fromisoformat(week_start) - timedelta(days=30 * months)
+    ).isoformat()
+    history_snaps = load_snapshots(conn, start=history_start, end=history_end)
+    history_weeks = group_by_week(history_snaps)
+
+    return {
+        "current_week": {
+            "summary": to_dict(summarise(current_snaps)) if current_snaps else None,
+            "days": [to_dict(s) for s in current_snaps],
+        },
+        "history": [{"summary": to_dict(summarise(w))} for w in history_weeks],
+    }

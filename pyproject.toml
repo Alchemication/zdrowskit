@@ -6,7 +6,9 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "litellm",
+    "markdown",
     "python-dotenv",
+    "resend",
     "rich",
 ]
 
