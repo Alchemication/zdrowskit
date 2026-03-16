@@ -52,6 +52,24 @@ Examples:
 
     uv run python main.py insights --no-update-baselines
         Generate report without auto-computed baselines from DB.
+
+    uv run python main.py insights --week last
+        Report on the previous ISO week (Monday morning flow after Sunday export).
+
+    uv run python main.py insights --explain
+        Show context files, assembled prompt, and token usage diagnostics on stderr.
+
+    uv run python main.py insights --email
+        Send the report via email (requires RESEND_API_KEY and EMAIL_TO in .env).
+
+    uv run python main.py insights --telegram
+        Send the report via Telegram (requires TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID).
+
+    uv run python main.py insights --model openai/gpt-4o
+        Use a different litellm model instead of the default Claude Haiku.
+
+    uv run python main.py context
+        Show context files used by insights and whether each exists.
 """
 
 from __future__ import annotations
