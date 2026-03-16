@@ -4,6 +4,8 @@
 
 Apple sends you a nudge when you close your rings. zdrowskit reads your actual data — runs, lifts, heart rate variability, recovery — and tells you something worth knowing.
 
+And it will allow you to manage the week the way you want. Off Monday and Tuesday? No problem. You can catch up over next days - if this is what YOU want!
+
 Built by Adam Napora (adamsky). *Zdrowie* is Polish for health. *Kit* is the tool. You do the math.
 
 ---
@@ -58,6 +60,8 @@ The full picture:
 These four files, combined with the structured data zdrowskit produces, get passed to an LLM that generates a personalised weekly report and smart, context-aware notifications — including knowing when *not* to push you. Sick? Sleep-deprived? Life disrupted? It should know.
 
 Apple tells you that you closed your rings. zdrowskit will tell you whether that actually mattered.
+
+And it will allow you to manage the week the way you want. Off Monday and Tuesday? No problem. You can catch up over next days!
 
 ---
 
