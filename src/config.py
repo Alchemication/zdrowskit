@@ -1,10 +1,11 @@
 """Shared paths and configuration resolution.
 
 Public API:
-    DEFAULT_DATA_DIR  — default Apple Health export directory.
-    CONTEXT_DIR       — directory containing LLM context files.
-    REPORTS_DIR       — directory where generated reports are saved.
-    resolve_data_dir  — resolve data directory from CLI arg, env var, or default.
+    DEFAULT_DATA_DIR      — default Apple Health export directory.
+    CONTEXT_DIR           — directory containing LLM context files.
+    REPORTS_DIR           — directory where generated reports are saved.
+    MAX_HISTORY_ENTRIES   — max entries kept in history.md.
+    resolve_data_dir      — resolve data directory from CLI arg, env var, or default.
 
 Example:
     from config import resolve_data_dir, CONTEXT_DIR
@@ -19,6 +20,9 @@ from pathlib import Path
 DEFAULT_DATA_DIR: Path = Path.home() / "Documents" / "zdrowskit" / "MyHealth"
 CONTEXT_DIR: Path = Path.home() / "Documents" / "zdrowskit" / "ContextFiles"
 REPORTS_DIR: Path = Path.home() / "Documents" / "zdrowskit" / "Reports"
+
+MAX_HISTORY_ENTRIES: int = 8
+"""Maximum number of entries to retain in history.md."""
 
 
 def resolve_data_dir(arg: str | None) -> Path:

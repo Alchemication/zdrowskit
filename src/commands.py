@@ -171,6 +171,34 @@ def _print_explain(
         stderr.print(f"\n[dim]Report saved to:[/dim] [cyan]{report_path}[/cyan]")
 
 
+def _update_me_baselines(me_path: Path, baselines: str) -> None:
+    """Replace or append the auto-computed baselines section in me.md.
+
+    Looks for a line starting with '## Baselines' and replaces everything
+    from that heading to the next '## ' heading (or EOF). If no such
+    section exists, appends the baselines at the end of the file.
+
+    Args:
+        me_path: Path to the me.md context file.
+        baselines: Markdown string produced by compute_baselines().
+    """
+    if not me_path.exists():
+        logger.warning("me.md not found at %s — skipping baselines update", me_path)
+        return
+
+    content = me_path.read_text(encoding="utf-8")
+
+    # Match from '## Baselines' to next '## ' heading or EOF
+    pattern = r"(?m)^## Baselines.*?(?=^## |\Z)"
+    if re.search(pattern, content, flags=re.DOTALL):
+        updated = re.sub(pattern, baselines.rstrip() + "\n\n", content, flags=re.DOTALL)
+    else:
+        updated = content.rstrip() + "\n\n" + baselines.rstrip() + "\n"
+
+    me_path.write_text(updated, encoding="utf-8")
+    logger.info("Updated baselines in %s", me_path)
+
+
 def _save_report(report: str, week: str) -> Path:
     """Save the report to a timestamped markdown file.
 
@@ -395,6 +423,7 @@ def cmd_insights(args: argparse.Namespace) -> None:
     baselines = None
     if not args.no_update_baselines:
         baselines = compute_baselines(conn)
+        _update_me_baselines(CONTEXT_DIR / "me.md", baselines)
 
     health_data_json = json.dumps(health_data, indent=2)
 

@@ -32,6 +32,7 @@ from pathlib import Path
 import litellm
 
 from aggregator import summarise
+from config import MAX_HISTORY_ENTRIES
 from report import current_week_bounds, group_by_week, to_dict
 from store import load_date_range, load_snapshots
 
@@ -205,7 +206,10 @@ def extract_memory(response: str) -> str | None:
 
 
 def append_history(context_dir: Path, memory_block: str) -> None:
-    """Append a timestamped memory entry to history.md.
+    """Append a timestamped memory entry to history.md, keeping only recent entries.
+
+    Splits the file on '## ' headings, appends the new entry, and trims
+    to the most recent MAX_HISTORY_ENTRIES entries so the file stays bounded.
 
     Args:
         context_dir: Directory containing history.md.
@@ -213,10 +217,27 @@ def append_history(context_dir: Path, memory_block: str) -> None:
     """
     history_path = context_dir / "history.md"
     today = date.today().isoformat()
-    entry = f"\n\n## {today}\n\n{memory_block}\n"
-    with open(history_path, "a", encoding="utf-8") as f:
-        f.write(entry)
-    logger.info("Appended memory to %s", history_path)
+    new_entry = f"## {today}\n\n{memory_block}"
+
+    if history_path.exists():
+        content = history_path.read_text(encoding="utf-8")
+    else:
+        content = ""
+
+    # Split into entries on '## ' at start of line
+    parts = re.split(r"(?m)(?=^## )", content)
+    # Filter out empty/whitespace-only parts (e.g. preamble before first heading)
+    entries = [p.strip() for p in parts if p.strip() and p.strip().startswith("## ")]
+    entries.append(new_entry)
+
+    # Keep only the last MAX_HISTORY_ENTRIES
+    trimmed = len(entries) - MAX_HISTORY_ENTRIES if len(entries) > MAX_HISTORY_ENTRIES else 0
+    entries = entries[-MAX_HISTORY_ENTRIES:]
+    if trimmed:
+        logger.info("Trimmed %d old entries from history.md", trimmed)
+
+    history_path.write_text("\n\n".join(entries) + "\n", encoding="utf-8")
+    logger.info("Appended memory to %s (%d entries)", history_path, len(entries))
 
 
 def build_llm_data(
