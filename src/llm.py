@@ -38,7 +38,7 @@ from store import load_date_range, load_snapshots
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL = "anthropic/claude-haiku-4-5-20251001"
+DEFAULT_MODEL = "anthropic/claude-opus-4-6"
 
 CONTEXT_FILES = ["soul", "me", "goals", "plan", "log", "history"]
 REQUIRED_FILES = ["prompt"]

@@ -1,10 +1,9 @@
 # Weekly Health Report
 
-Today is {today} ({weekday}). If the week is incomplete, frame this as a
-progress check with what's ahead. If the week is complete, frame it as a
-full weekly review.
-
-You are generating a personalized weekly health and fitness report.
+Today is {today} ({weekday}). If the week is incomplete, this is a progress
+check. If the week is complete, this is a full review. Title the report with
+the ISO week number, user's name, and date — e.g.
+`# W12 Progress Check — Adam (Mon, 16 Mar)` or `# W12 Review — Adam`.
 
 ## About the User
 {me}
@@ -38,16 +37,20 @@ and their own notes. Produce a report with these sections:
 
 1. **Week at a Glance** — 2-3 sentence executive summary of the week.
 2. **Training Review** — did they hit the plan? What deviated and why?
-   Compare planned vs actual sessions day by day.
+   Compare planned vs actual sessions day by day. Use workout timestamps
+   and specifics from the data to explain what happened.
 3. **Key Metrics** — highlight meaningful changes in HR, HRV, recovery index,
-   VO2max, pace. Compare to their baselines in the profile. Flag anything
-   that warrants attention.
+   VO2max, pace. Compare to baselines and reference multi-week trends where
+   meaningful, not just 30d averages. Flag anything that warrants attention.
 4. **Recovery Status** — based on HRV trend, resting HR, recovery index.
-   Simple verdict: ready to push / maintain / back off.
-5. **Next Week** — 2-3 specific, actionable suggestions based on the data
-   and their goals.
+   Simple verdict: ready to push / maintain / back off. Explain *why* —
+   connect the specific metrics to the conclusion.
+5. **This Week's Priorities** (if week is incomplete) or **Next Week** (if
+   complete) — 2-3 specific, actionable suggestions. Give concrete targets:
+   exact distances, session durations, timing windows. Explain the reasoning
+   behind each suggestion.
 
-Keep the report under 500 words. Be specific with numbers. Do not repeat
+Keep the report under 600 words. Be specific with numbers. Do not repeat
 raw data — interpret it.
 
 After your report, include a `<memory>` block with 2-3 bullet points that you
