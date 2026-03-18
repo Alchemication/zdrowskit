@@ -70,6 +70,15 @@ Examples:
 
     uv run python main.py context
         Show context files used by insights and whether each exists.
+
+    uv run python main.py nudge --trigger new_data
+        Send a short nudge via Telegram (default) for new health data.
+
+    uv run python main.py nudge --trigger log_update --email
+        Send a nudge via email responding to a log.md update.
+
+    uv run python main.py nudge --trigger missed_session
+        Send a missed-session reminder via Telegram.
 """
 
 from __future__ import annotations
@@ -83,7 +92,16 @@ from dotenv import load_dotenv
 # Ensure src/ is on the path when running from project root
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
-from commands import cmd_context, cmd_import, cmd_insights, cmd_report, cmd_status
+from commands import (
+    cmd_context,
+    cmd_daemon_restart,
+    cmd_import,
+    cmd_insights,
+    cmd_nudge,
+    cmd_report,
+    cmd_status,
+)
+from llm import DEFAULT_MODEL
 from log import setup_logging
 from store import default_db_path
 
@@ -175,9 +193,9 @@ def main() -> None:
     )
     p_insights.add_argument(
         "--model",
-        default="anthropic/claude-haiku-4-5-20251001",
+        default=DEFAULT_MODEL,
         metavar="MODEL",
-        help="litellm model string (default: claude-haiku-4-5)",
+        help=f"litellm model string (default: {DEFAULT_MODEL})",
     )
     p_insights.add_argument(
         "--week",
@@ -221,6 +239,50 @@ def main() -> None:
     )
     _add_db(p_insights)
 
+    # daemon
+    sub.add_parser("daemon-restart", help="Restart the background daemon service")
+
+    # nudge
+    p_nudge = sub.add_parser(
+        "nudge", help="Send a short context-aware notification (default: Telegram)"
+    )
+    p_nudge.add_argument(
+        "--trigger",
+        choices=[
+            "new_data",
+            "log_update",
+            "goal_updated",
+            "plan_updated",
+            "missed_session",
+        ],
+        default="new_data",
+        help="What triggered the nudge (default: new_data)",
+    )
+    p_nudge.add_argument(
+        "--months",
+        type=int,
+        default=1,
+        metavar="N",
+        help="History depth in months (default: 1)",
+    )
+    p_nudge.add_argument(
+        "--model",
+        default=DEFAULT_MODEL,
+        metavar="MODEL",
+        help=f"litellm model string (default: {DEFAULT_MODEL})",
+    )
+    p_nudge.add_argument(
+        "--email",
+        action="store_true",
+        help="Send via email instead of Telegram",
+    )
+    p_nudge.add_argument(
+        "--telegram",
+        action="store_true",
+        help="Send via Telegram (default when no flag given)",
+    )
+    _add_db(p_nudge)
+
     args = parser.parse_args()
 
     dispatch = {
@@ -229,6 +291,8 @@ def main() -> None:
         "status": cmd_status,
         "context": cmd_context,
         "insights": cmd_insights,
+        "nudge": cmd_nudge,
+        "daemon-restart": cmd_daemon_restart,
     }
     dispatch[args.cmd](args)
 

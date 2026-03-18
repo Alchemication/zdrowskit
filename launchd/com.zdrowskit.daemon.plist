@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.zdrowskit.daemon</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <!-- Adjust the path below if your project is in a different location -->
+        <string>/Users/adamsky/.local/bin/uv</string>
+        <string>run</string>
+        <string>python</string>
+        <string>/Users/adamsky/Projects/adamskit/src/daemon.py</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/adamsky/Projects/adamskit</string>
+
+    <!-- Keep the daemon running; launchd will restart it if it exits -->
+    <key>KeepAlive</key>
+    <true/>
+
+    <!-- Start automatically at login -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Logs — both stdout and stderr go here; daemon also writes to daemon.log -->
+    <key>StandardOutPath</key>
+    <string>/Users/adamsky/Library/Logs/zdrowskit.daemon.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/adamsky/Library/Logs/zdrowskit.daemon.log</string>
+
+    <!--
+        Environment variables.
+        The daemon loads .env itself via python-dotenv, so only PATH needs to
+        be set here to ensure `uv` and Python resolve correctly.
+    -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/Users/adamsky/.local/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <key>HOME</key>
+        <string>/Users/adamsky</string>
+    </dict>
+</dict>
+</plist>

@@ -6,6 +6,8 @@ Public API:
     cmd_status   — show DB row counts and date range.
     cmd_context  — show context files and their status.
     cmd_insights — generate LLM-driven health report.
+    cmd_nudge    — send a short context-aware notification.
+    cmd_daemon_restart — restart the launchd daemon service.
 
 Example:
     from commands import cmd_import
@@ -19,14 +21,17 @@ import json
 import logging
 import re
 import sys
+from collections import defaultdict
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from aggregator import summarise
 from assembler import assemble
 from baselines import compute_baselines
-from config import CONTEXT_DIR, REPORTS_DIR, resolve_data_dir
+from config import CONTEXT_DIR, NUDGES_DIR, REPORTS_DIR, resolve_data_dir
 from llm import (
+    DEFAULT_MODEL,
+    DEFAULT_SOUL,
     ReportResult,
     append_history,
     build_llm_data,
@@ -222,6 +227,27 @@ def _save_report(report: str, week: str) -> Path:
     path = REPORTS_DIR / filename
     path.write_text(report, encoding="utf-8")
     logger.info("Report saved to %s", path)
+    return path
+
+
+def _save_nudge(text: str, trigger: str) -> Path:
+    """Save a nudge to a timestamped markdown file.
+
+    Args:
+        text: The nudge text (including model signature).
+        trigger: The trigger type that prompted the nudge.
+
+    Returns:
+        The path to the saved file.
+    """
+    NUDGES_DIR.mkdir(parents=True, exist_ok=True)
+
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H%M")
+    filename = f"nudge_{timestamp}_{trigger}.md"
+
+    path = NUDGES_DIR / filename
+    path.write_text(text, encoding="utf-8")
+    logger.info("Nudge saved to %s", path)
     return path
 
 
@@ -481,3 +507,148 @@ def cmd_insights(args: argparse.Namespace) -> None:
         send_email(visible_report, week_label)
     if args.telegram:
         send_telegram(visible_report, week_label)
+
+
+def cmd_nudge(
+    args: argparse.Namespace,
+    trigger_type: str | None = None,
+) -> str | None:
+    """Handle the 'nudge' subcommand: send a short context-aware notification.
+
+    Nudge does not update history.md or baselines. It is designed for short
+    reactive notifications triggered by file changes or missed sessions.
+    Sent nudges are saved to the Reports directory for debugging and review.
+
+    Delivery defaults to Telegram. Pass --email or --telegram to override.
+
+    If the LLM determines there is nothing new worth saying, it responds with
+    "SKIP" and this function returns False without sending anything.
+
+    Args:
+        args: Parsed CLI arguments with db, model, email, telegram, trigger,
+              months, and optional recent_nudges attributes.
+        trigger_type: What triggered the nudge — overrides args.trigger when
+            called programmatically (e.g. from the daemon). One of:
+            "new_data", "log_update", "goal_updated", "plan_updated",
+            "missed_session".
+
+    Returns:
+        The nudge text if sent, None if the LLM chose to SKIP or an error
+        occurred.
+    """
+    _trigger = trigger_type or getattr(args, "trigger", "new_data")
+
+    try:
+        context = load_context(CONTEXT_DIR)
+    except FileNotFoundError as e:
+        logger.error("%s", e)
+        sys.exit(1)
+
+    nudge_prompt_path = CONTEXT_DIR / "nudge_prompt.md"
+    if not nudge_prompt_path.exists():
+        logger.error(
+            "nudge_prompt.md not found at %s. "
+            "Copy examples/context/nudge_prompt.md to %s/ to get started.",
+            nudge_prompt_path,
+            CONTEXT_DIR,
+        )
+        sys.exit(1)
+    nudge_prompt = nudge_prompt_path.read_text(encoding="utf-8")
+
+    conn = open_db(Path(args.db))
+    health_data = build_llm_data(conn, getattr(args, "months", 1))
+    health_data_json = json.dumps(health_data, indent=2)
+
+    soul = context.get("soul", "")
+    if not soul or soul == "(not provided)":
+        soul = DEFAULT_SOUL
+
+    recent_nudge_entries: list[dict] = getattr(args, "recent_nudges", [])
+    if recent_nudge_entries:
+        recent_nudges_text = "\n".join(
+            f"{i + 1}. [{e['ts'][:16]} / {e['trigger']}] {e['text']}"
+            for i, e in enumerate(recent_nudge_entries)
+        )
+    else:
+        recent_nudges_text = "(none yet)"
+
+    placeholders: dict = defaultdict(lambda: "(not provided)")
+    placeholders.update(
+        {
+            "me": context.get("me", "(not provided)"),
+            "goals": context.get("goals", "(not provided)"),
+            "plan": context.get("plan", "(not provided)"),
+            "log": context.get("log", "(not provided)"),
+            "history": context.get("history", "(not provided)"),
+            "health_data": health_data_json,
+            "today": date.today().isoformat(),
+            "weekday": date.today().strftime("%A"),
+            "trigger_type": _trigger,
+            "recent_nudges": recent_nudges_text,
+        }
+    )
+    user_content = nudge_prompt.format_map(placeholders)
+    messages = [
+        {"role": "system", "content": soul},
+        {"role": "user", "content": user_content},
+    ]
+
+    model = getattr(args, "model", DEFAULT_MODEL)
+    logger.info("Calling %s for nudge (trigger: %s) ...", model, _trigger)
+    try:
+        result = generate_report(messages, model=model)
+    except Exception as e:
+        err_name = type(e).__name__
+        if "authentication" in err_name.lower() or "auth" in str(e).lower():
+            logger.error(
+                "Authentication failed. Set ANTHROPIC_API_KEY in your .env file."
+            )
+        else:
+            logger.error("LLM call failed: %s: %s", err_name, e)
+        sys.exit(1)
+
+    nudge_text = result.text.strip()
+
+    if nudge_text.upper() == "SKIP":
+        logger.info("Nudge skipped by LLM — nothing new to say (trigger: %s)", _trigger)
+        return None
+
+    nudge_text += f"\n\n---\n*Generated by {result.model} — trigger: {_trigger}*"
+
+    _save_nudge(nudge_text, _trigger)
+    print(nudge_text)
+
+    use_email = getattr(args, "email", False)
+    use_telegram = getattr(args, "telegram", False)
+    if not use_email and not use_telegram:
+        use_telegram = True  # Default channel
+
+    subject = f"zdrowskit — {_trigger.replace('_', ' ')}"
+    if use_email:
+        send_email(nudge_text, subject)
+    if use_telegram:
+        send_telegram(nudge_text, subject)
+
+    return nudge_text
+
+
+def cmd_daemon_restart(args: argparse.Namespace) -> None:  # noqa: ARG001
+    """Restart the launchd daemon service.
+
+    Args:
+        args: Parsed CLI arguments (unused).
+    """
+    import subprocess
+
+    label = "com.zdrowskit.daemon"
+    uid = subprocess.check_output(["id", "-u"]).decode().strip()
+    result = subprocess.run(
+        ["launchctl", "kickstart", "-k", f"gui/{uid}/{label}"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0:
+        print(f"Daemon restarted (gui/{uid}/{label})")
+    else:
+        print(f"Failed to restart daemon: {result.stderr.strip()}")
+        sys.exit(1)

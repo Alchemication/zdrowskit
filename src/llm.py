@@ -231,7 +231,9 @@ def append_history(context_dir: Path, memory_block: str) -> None:
     entries.append(new_entry)
 
     # Keep only the last MAX_HISTORY_ENTRIES
-    trimmed = len(entries) - MAX_HISTORY_ENTRIES if len(entries) > MAX_HISTORY_ENTRIES else 0
+    trimmed = (
+        len(entries) - MAX_HISTORY_ENTRIES if len(entries) > MAX_HISTORY_ENTRIES else 0
+    )
     entries = entries[-MAX_HISTORY_ENTRIES:]
     if trimmed:
         logger.info("Trimmed %d old entries from history.md", trimmed)
