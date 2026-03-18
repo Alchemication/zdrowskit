@@ -4,16 +4,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Zdrowskit - why this project exists
 
-> What Apple Health notifications should be.
+> Your 24/7 ultra-personal trainer. Powered by your Apple Health data.
 
-Apple sends you a nudge when you close your rings. zdrowskit reads your actual data — runs, lifts, heart rate variability, recovery — and tells you something worth knowing.
+Apple sends you a nudge when you close your rings. zdrowskit reads your actual data — runs, lifts, heart rate variability, recovery — and tells you something worth knowing. A persistent daemon watches for new data and context file changes, then uses an LLM to decide whether there's anything worth saying — and sends a short nudge or full weekly report via Telegram.
 
 ## Commands
 
-Always use `uv run` — never plain `python`. The five subcommands are `import`, `report`, `status`, `context`, and `insights`. Run any with `--help` for the full flag list. Key defaults and overrides:
+Always use `uv run` — never plain `python`. The subcommands are `import`, `report`, `status`, `context`, `insights`, and `nudge`. The daemon runs as a separate process via `src/daemon.py`. Run any with `--help` for the full flag list. Key defaults and overrides:
 
 - **Data dir:** `~/Documents/zdrowskit/MyHealth/` — override with `--data-dir PATH` or `HEALTH_DATA_DIR` env var.
 - **Database:** `~/Documents/zdrowskit/health.db` — override with `--db PATH` or `zdrowskit_DB` env var.
+- **iCloud health data dir** (watched by daemon): `~/Library/Mobile Documents/iCloud~is~workflow~my~workflows/Documents/MyHealth`
 
 ```bash
 uv run python main.py import                        # parse default data dir, upsert into DB
@@ -34,6 +35,12 @@ uv run python main.py insights --explain            # show context, prompt, toke
 uv run python main.py insights --email              # send report via email (Resend)
 uv run python main.py insights --telegram           # send report via Telegram bot
 uv run python main.py insights --model MODEL        # use a different litellm model
+uv run python main.py nudge                         # short nudge via Telegram (default)
+uv run python main.py nudge --trigger log_update    # trigger types: new_data, log_update,
+uv run python main.py nudge --trigger missed_session#   goal_updated, plan_updated, missed_session
+uv run python main.py nudge --email                 # send via email instead of Telegram
+
+uv run python src/daemon.py --foreground            # run daemon (watches iCloud + ContextFiles)
 ```
 
 ## Logging
@@ -106,12 +113,13 @@ MyHealth/Routes/*.xml     ─┘                                            │
 - `src/aggregator.py` — computes `WeeklySummary` from the daily snapshots. Contains `WEEKLY_RUN_TARGET` and `WEEKLY_LIFT_TARGET` constants used for consistency scoring.
 - `src/log.py` — configures a colored stderr logger via `setup_logging()`. Call once at startup in `main()`; all other modules just `getLogger(__name__)`.
 - `src/store.py` — SQLite persistence layer. `open_db()` creates/migrates the DB; `store_snapshots()` upserts; `load_snapshots()` re-hydrates `DailySnapshot` objects with nested workouts. Default DB: `~/Documents/zdrowskit/health.db`.
-- `src/llm.py` — LLM integration. Loads markdown context files (`soul.md`, `me.md`, `goals.md`, `plan.md`, `log.md`, `history.md`, `prompt.md`) from the context directory, assembles a prompt, calls an LLM via litellm, and manages the memory/history feedback loop. Also builds the combined current-week + history JSON structure via `build_llm_data()`. Default model: `anthropic/claude-haiku-4-5-20251001`.
+- `src/llm.py` — LLM integration. Loads markdown context files (`soul.md`, `me.md`, `goals.md`, `plan.md`, `log.md`, `history.md`, `prompt.md`) from the context directory, assembles a prompt, calls an LLM via litellm, and manages the memory/history feedback loop. Also builds the combined current-week + history JSON structure via `build_llm_data()`. Default model: `anthropic/claude-opus-4-6`.
 - `src/notify.py` — notification delivery. `send_email()` sends HTML reports via Resend API. `send_telegram()` sends plain-text reports via Telegram Bot API. Both read credentials from env vars.
-- `src/config.py` — shared path constants (`DEFAULT_DATA_DIR`, `CONTEXT_DIR`, `REPORTS_DIR`) and `resolve_data_dir()`. Single source of truth for all `~/Documents/zdrowskit/` paths.
+- `src/config.py` — shared path constants (`DEFAULT_DATA_DIR`, `CONTEXT_DIR`, `REPORTS_DIR`, `NUDGES_DIR`) and `resolve_data_dir()`. Single source of truth for all `~/Documents/zdrowskit/` paths.
 - `src/report.py` — report formatting and display. `print_summary()`, `print_daily()` for terminal output. `to_dict()`, `fmt()`, `current_week_bounds()`, `group_by_week()` for data conversion and week arithmetic.
 - `src/baselines.py` — `compute_baselines()` runs rolling 30/90-day SQL averages and weekly training volume queries, returns formatted markdown.
-- `src/commands.py` — subcommand handlers (`cmd_import`, `cmd_report`, `cmd_status`, `cmd_context`, `cmd_insights`). All business logic lives here; `main.py` only dispatches to these.
+- `src/commands.py` — subcommand handlers (`cmd_import`, `cmd_report`, `cmd_status`, `cmd_context`, `cmd_insights`, `cmd_nudge`). All business logic lives here; `main.py` only dispatches to these.
+- `src/daemon.py` — always-on filesystem watcher. Uses `watchdog` to monitor the iCloud health data dir and `ContextFiles/`. Debounces events, enforces rate limits (state in `~/.daemon_state.json`), imports new data, then fires nudges. Weekly report runs independently on Monday mornings (8–9 AM). Run directly (`uv run python src/daemon.py`) or via launchd (`launchd/com.zdrowskit.daemon.plist`). Logs to `~/Library/Logs/zdrowskit.daemon.log`. See README for daemon operations (restart, plist reload, etc.).
 - `main.py` — CLI entry point. Thin layer: `sys.path` setup, `.env` loading, argparse definition, and dict-based dispatch to `src/commands.py`. **Keep this file slim** — new business logic belongs in `src/`.
 
 **Data directory layout** (configurable via `--data-dir` or `HEALTH_DATA_DIR` env var):
@@ -124,15 +132,19 @@ MyHealth/
   Routes/*.xml            — GPX tracks for outdoor workouts (~1 point/sec)
 ```
 
-**Context files** for `insights` (live in `~/Documents/zdrowskit/ContextFiles/`):
+**Context files** for `insights` and `nudge` (live in `~/Documents/zdrowskit/ContextFiles/`):
 ```
-soul.md      — AI coach persona and tone
-me.md        — user profile, baselines (resting HR, HRV, pace)
-goals.md     — fitness goals with timelines
-plan.md      — weekly training schedule, diet, sleep targets
-log.md       — freeform weekly journal (why things happened)
-history.md   — LLM's own memory (auto-appended after each run)
-prompt.md    — prompt template with {placeholders} for context + data
+soul.md           — AI coach persona and tone
+me.md             — user profile, baselines (resting HR, HRV, pace) — also auto-updated by baselines
+goals.md          — fitness goals with timelines
+plan.md           — weekly training schedule, diet, sleep targets
+log.md            — freeform weekly journal (why things happened)
+history.md        — LLM's own memory (auto-appended after each insights run)
+prompt.md         — weekly report prompt template with {placeholders}
+nudge_prompt.md   — short nudge prompt; supports {trigger_type} and {recent_nudges};
+                    LLM may respond "SKIP" if nothing new to say
 ```
 
 Example versions of all context files are in `examples/context/`.
+
+**Daemon state file** (`~/Documents/zdrowskit/.daemon_state.json`): tracks rate limits (`nudge_count_today`, `last_nudge_ts`, `last_weekly_report_week`) and the last 3 nudge texts (`recent_nudges`). Delete to reset all limits. Never commit this file.

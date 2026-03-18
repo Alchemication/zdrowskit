@@ -1,7 +1,2 @@
-- consider looking at location of work-out
-- consider maintaining full history.md and log.md, but only include last-n in the prompt
-- hook up file changes
-    - when md files or db changed - commit to priv repo (excluding raw data, not sure about db)
-    - when data arrives - trigger daily/weekly report
-        - how to manage notifications, so they are not sent every single day
-        - or allow to configure via config file
+- future: consider looking at location of work-out
+- consider maintaining full history.md and log.md, but only include last-n in the prompt, yes - do not delete any entries from there
