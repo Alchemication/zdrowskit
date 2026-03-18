@@ -74,6 +74,23 @@ DEFAULT_SOUL = (
 )
 
 
+def _recent_history(content: str, n: int) -> str:
+    """Return only the last n entries from history.md content.
+
+    Args:
+        content: Full history.md text with '## ' delimited entries.
+        n: Number of most recent entries to keep.
+
+    Returns:
+        The last n entries joined as text, or the original if fewer than n.
+    """
+    parts = re.split(r"(?m)(?=^## )", content)
+    entries = [p.strip() for p in parts if p.strip() and p.strip().startswith("## ")]
+    if len(entries) <= n:
+        return content
+    return "\n\n".join(entries[-n:]) + "\n"
+
+
 def load_context(context_dir: Path) -> dict[str, str]:
     """Read all markdown context files from the given directory.
 
@@ -102,7 +119,10 @@ def load_context(context_dir: Path) -> dict[str, str]:
     for name in CONTEXT_FILES:
         path = context_dir / f"{name}.md"
         if path.exists():
-            result[name] = path.read_text(encoding="utf-8")
+            content = path.read_text(encoding="utf-8")
+            if name == "history":
+                content = _recent_history(content, MAX_HISTORY_ENTRIES)
+            result[name] = content
             logger.debug("Loaded context: %s", path)
         else:
             logger.info("Optional context file not found: %s", path)
@@ -230,16 +250,8 @@ def append_history(context_dir: Path, memory_block: str) -> None:
     entries = [p.strip() for p in parts if p.strip() and p.strip().startswith("## ")]
     entries.append(new_entry)
 
-    # Keep only the last MAX_HISTORY_ENTRIES
-    trimmed = (
-        len(entries) - MAX_HISTORY_ENTRIES if len(entries) > MAX_HISTORY_ENTRIES else 0
-    )
-    entries = entries[-MAX_HISTORY_ENTRIES:]
-    if trimmed:
-        logger.info("Trimmed %d old entries from history.md", trimmed)
-
     history_path.write_text("\n\n".join(entries) + "\n", encoding="utf-8")
-    logger.info("Appended memory to %s (%d entries)", history_path, len(entries))
+    logger.info("Appended memory to %s (%d entries total)", history_path, len(entries))
 
 
 def build_llm_data(
