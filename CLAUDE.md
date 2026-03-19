@@ -67,6 +67,32 @@ The CLI is the primary user interface. **Great UX matters** — every command sh
 - **Error messages:** Always tell the user what to do, not just what went wrong. "RESEND_API_KEY not set. Add it to your .env file." not "Missing API key."
 - **General principle:** If you're unsure which to use, ask: "Is this the result the user asked for?" → `print()`. "Is this a table/panel the user reads in the terminal?" → `rich`. "Is this a progress/status note?" → `logger`.
 
+## Testing
+
+Tests live in `tests/`. Run with `uv run pytest`. Fixture data is in `tests/fixtures/` and shared fixtures (sample snapshots, in-memory DB) are in `tests/conftest.py`.
+
+```bash
+uv run pytest              # run all tests
+uv run pytest -v           # verbose
+uv run pytest --cov=src    # with coverage
+```
+
+**When to write tests:** New or changed code in the critical path **must** have tests. The critical path is:
+
+- **Parsers** (`src/parsers/`) — tricky schemas, silent data loss if broken. Test field mapping, edge cases, and special-case handling (e.g. heart_rate Min/Max).
+- **Aggregator** (`src/aggregator.py`) — math-heavy (HRV trend regression, consistency scoring, averages). Test with known inputs and verify numeric results.
+- **Store** (`src/store.py`) — store/load round-trips. If a field is added to the schema, add it to the round-trip test to ensure it survives the DB.
+- **Report utilities** (`src/report.py`) — date arithmetic (`current_week_bounds`, `group_by_week`) drives week scoping everywhere.
+
+**When tests are optional:** Orchestration code (`src/commands.py`), notification delivery (`src/notify.py`), and the daemon (`src/daemon.py`) are I/O-heavy and low bang-for-buck to test. Pure utility functions in `src/llm.py` (like `extract_memory`, `_recent_history`) should be tested; the `call_llm()` network call should not.
+
+**Test style:**
+- Group tests in classes (e.g. `class TestParseMetricsFile`).
+- Use `tmp_path` for file-based tests, `in_memory_db` fixture for DB tests.
+- Test the edge cases that would silently break (None handling, missing fields, empty inputs).
+- Keep fixtures minimal — 2 days of data is enough to prove correctness.
+- Run `uv run ruff check tests/ && uv run ruff format tests/` before committing.
+
 ## Code Style
 
 - **Linter/formatter:** ruff. Run with `uv run ruff check .` and `uv run ruff format .`.

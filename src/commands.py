@@ -7,6 +7,7 @@ Public API:
     cmd_context  — show context files and their status.
     cmd_insights — generate LLM-driven health report.
     cmd_nudge    — send a short context-aware notification.
+    cmd_llm_log  — query LLM call history from the database.
     cmd_daemon_restart — restart the launchd daemon service.
 
 Example:
@@ -32,12 +33,12 @@ from config import CONTEXT_DIR, NUDGES_DIR, REPORTS_DIR, resolve_data_dir
 from llm import (
     DEFAULT_MODEL,
     DEFAULT_SOUL,
-    ReportResult,
+    LLMResult,
     append_history,
     build_llm_data,
     build_messages,
+    call_llm,
     extract_memory,
-    generate_report,
     load_context,
 )
 from notify import send_email, send_telegram
@@ -67,7 +68,7 @@ def _print_explain(
     context: dict[str, str],
     context_dir: Path,
     messages: list[dict[str, str]],
-    result: ReportResult,
+    result: LLMResult,
     memory: str | None,
     baselines: str | None = None,
     report_path: Path | None = None,
@@ -78,7 +79,7 @@ def _print_explain(
         context: Dict from load_context() with file stems as keys.
         context_dir: Path to the context files directory.
         messages: The system + user messages sent to the LLM.
-        result: ReportResult from generate_report().
+        result: LLMResult from call_llm().
         memory: Extracted memory string, or None.
         baselines: Auto-computed baselines markdown, or None if skipped.
         report_path: Path where the report was saved, or None.
@@ -129,9 +130,6 @@ def _print_explain(
     stderr.print(params_table)
 
     # Response stats
-    cost_input = result.input_tokens * 0.80 / 1_000_000
-    cost_output = result.output_tokens * 4.00 / 1_000_000
-    total_cost = cost_input + cost_output
     stats_table = Table(title="Response Stats", show_lines=False)
     stats_table.add_column("Metric", style="cyan")
     stats_table.add_column("Value", justify="right")
@@ -139,7 +137,10 @@ def _print_explain(
     stats_table.add_row("Output tokens", f"{result.output_tokens:,}")
     stats_table.add_row("Total tokens", f"{result.total_tokens:,}")
     stats_table.add_row("Latency", f"{result.latency_s:.1f}s")
-    stats_table.add_row("Est. cost", f"${total_cost:.4f}")
+    if result.cost is not None:
+        stats_table.add_row("Cost", f"${result.cost:.4f}")
+    else:
+        stats_table.add_row("Cost", "unavailable")
     stderr.print(stats_table)
 
     # Baselines
@@ -461,7 +462,13 @@ def cmd_insights(args: argparse.Namespace) -> None:
 
     logger.info("Calling %s ...", args.model)
     try:
-        result = generate_report(messages, model=args.model)
+        result = call_llm(
+            messages,
+            model=args.model,
+            conn=conn,
+            request_type="insights",
+            metadata={"week": args.week, "months": args.months},
+        )
     except Exception as e:
         err_name = type(e).__name__
         if "authentication" in err_name.lower() or "auth" in str(e).lower():
@@ -596,7 +603,13 @@ def cmd_nudge(
     model = getattr(args, "model", DEFAULT_MODEL)
     logger.info("Calling %s for nudge (trigger: %s) ...", model, _trigger)
     try:
-        result = generate_report(messages, model=model)
+        result = call_llm(
+            messages,
+            model=model,
+            conn=conn,
+            request_type="nudge",
+            metadata={"trigger_type": _trigger},
+        )
     except Exception as e:
         err_name = type(e).__name__
         if "authentication" in err_name.lower() or "auth" in str(e).lower():
@@ -630,6 +643,199 @@ def cmd_nudge(
         send_telegram(nudge_text, subject)
 
     return nudge_text
+
+
+def cmd_llm_log(args: argparse.Namespace) -> None:
+    """Handle the 'llm-log' subcommand: query LLM call history from the database.
+
+    Three modes:
+      default   — list recent calls with summary info (last N, default 10).
+      --stats   — aggregate usage summary by request type and model.
+      --id N    — show full detail for a specific call.
+
+    Args:
+        args: Parsed CLI arguments with db, last, stats, id, and json attributes.
+    """
+    conn = open_db(Path(args.db))
+
+    # --- Detail mode ---
+    if args.id:
+        row = conn.execute("SELECT * FROM llm_call WHERE id = ?", (args.id,)).fetchone()
+        if row is None:
+            print(f"No LLM call found with id={args.id}")
+            sys.exit(1)
+
+        if args.json:
+            detail = {k: row[k] for k in row.keys()}
+            print(json.dumps(detail, indent=2))
+            return
+
+        from rich.console import Console
+        from rich.panel import Panel
+        from rich.table import Table
+
+        console = Console()
+
+        meta_table = Table(title=f"LLM Call #{row['id']}", show_lines=False)
+        meta_table.add_column("Field", style="cyan")
+        meta_table.add_column("Value")
+        meta_table.add_row("Timestamp", row["timestamp"])
+        meta_table.add_row("Request type", row["request_type"])
+        meta_table.add_row("Model", row["model"])
+        meta_table.add_row("Input tokens", f"{row['input_tokens']:,}")
+        meta_table.add_row("Output tokens", f"{row['output_tokens']:,}")
+        meta_table.add_row("Total tokens", f"{row['total_tokens']:,}")
+        meta_table.add_row("Latency", f"{row['latency_s']:.1f}s")
+        if row["cost"] is not None:
+            meta_table.add_row("Cost", f"${row['cost']:.4f}")
+        else:
+            meta_table.add_row("Cost", "unavailable")
+
+        if row["params_json"]:
+            meta_table.add_row("Params", row["params_json"])
+        if row["metadata_json"]:
+            meta_table.add_row("Metadata", row["metadata_json"])
+        console.print(meta_table)
+
+        messages = json.loads(row["messages_json"])
+        for msg in messages:
+            content = msg["content"]
+            max_chars = 2000
+            if len(content) > max_chars:
+                content = (
+                    content[:max_chars] + f"\n\n… ({len(msg['content']):,} chars total)"
+                )
+            console.print(
+                Panel(content, title=f"[bold]{msg['role']}[/bold]", border_style="dim")
+            )
+
+        response = row["response_text"]
+        if len(response) > 3000:
+            response = (
+                response[:3000] + f"\n\n… ({len(row['response_text']):,} chars total)"
+            )
+        console.print(
+            Panel(response, title="[bold]Response[/bold]", border_style="green")
+        )
+        return
+
+    # --- Stats mode ---
+    if args.stats:
+        rows = conn.execute(
+            """
+            SELECT
+                request_type,
+                model,
+                COUNT(*)           AS calls,
+                SUM(input_tokens)  AS total_input,
+                SUM(output_tokens) AS total_output,
+                SUM(total_tokens)  AS total_tokens,
+                AVG(latency_s)     AS avg_latency,
+                SUM(cost)          AS total_cost,
+                MIN(timestamp)     AS first_call,
+                MAX(timestamp)     AS last_call
+            FROM llm_call
+            GROUP BY request_type, model
+            ORDER BY last_call DESC
+            """
+        ).fetchall()
+
+        if not rows:
+            print("No LLM calls logged yet.")
+            return
+
+        if args.json:
+            output = [{k: r[k] for k in r.keys()} for r in rows]
+            print(json.dumps(output, indent=2))
+            return
+
+        from rich.console import Console
+        from rich.table import Table
+
+        console = Console()
+        table = Table(title="LLM Usage Summary", show_lines=False)
+        table.add_column("Type", style="cyan")
+        table.add_column("Model", style="dim")
+        table.add_column("Calls", justify="right")
+        table.add_column("Input tok", justify="right")
+        table.add_column("Output tok", justify="right")
+        table.add_column("Avg latency", justify="right")
+        table.add_column("Cost", justify="right", style="green")
+        table.add_column("Last call")
+
+        grand_cost = 0.0
+        grand_calls = 0
+        for r in rows:
+            cost = r["total_cost"] or 0.0
+            grand_cost += cost
+            grand_calls += r["calls"]
+            table.add_row(
+                r["request_type"],
+                r["model"],
+                f"{r['calls']:,}",
+                f"{r['total_input']:,}",
+                f"{r['total_output']:,}",
+                f"{r['avg_latency']:.1f}s",
+                f"${cost:.4f}" if r["total_cost"] is not None else "—",
+                r["last_call"][:16],
+            )
+
+        console.print(table)
+        console.print(f"\n[bold]Total:[/bold] {grand_calls} calls, ${grand_cost:.4f}")
+        return
+
+    # --- List mode (default) ---
+    rows = conn.execute(
+        """
+        SELECT id, timestamp, request_type, model,
+               input_tokens, output_tokens, total_tokens, latency_s,
+               cost, metadata_json
+        FROM llm_call
+        ORDER BY id DESC
+        LIMIT ?
+        """,
+        (args.last,),
+    ).fetchall()
+
+    if not rows:
+        print("No LLM calls logged yet.")
+        return
+
+    if args.json:
+        output = [{k: r[k] for k in r.keys()} for r in rows]
+        print(json.dumps(output, indent=2))
+        return
+
+    from rich.console import Console
+    from rich.table import Table
+
+    console = Console()
+    table = Table(title=f"Recent LLM Calls (last {args.last})", show_lines=False)
+    table.add_column("ID", justify="right", style="dim")
+    table.add_column("Timestamp")
+    table.add_column("Type", style="cyan")
+    table.add_column("Model", style="dim")
+    table.add_column("In tok", justify="right")
+    table.add_column("Out tok", justify="right")
+    table.add_column("Latency", justify="right")
+    table.add_column("Cost", justify="right", style="green")
+    table.add_column("Metadata", style="dim")
+
+    for r in rows:
+        meta = r["metadata_json"] or ""
+        table.add_row(
+            str(r["id"]),
+            r["timestamp"][:16],
+            r["request_type"],
+            r["model"].split("/")[-1],
+            f"{r['input_tokens']:,}",
+            f"{r['output_tokens']:,}",
+            f"{r['latency_s']:.1f}s",
+            f"${r['cost']:.4f}" if r["cost"] is not None else "—",
+            meta,
+        )
+
+    console.print(table)
 
 
 def cmd_daemon_restart(args: argparse.Namespace) -> None:  # noqa: ARG001

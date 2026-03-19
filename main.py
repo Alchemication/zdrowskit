@@ -97,6 +97,7 @@ from commands import (
     cmd_daemon_restart,
     cmd_import,
     cmd_insights,
+    cmd_llm_log,
     cmd_nudge,
     cmd_report,
     cmd_status,
@@ -283,6 +284,31 @@ def main() -> None:
     )
     _add_db(p_nudge)
 
+    # llm-log
+    p_llm_log = sub.add_parser(
+        "llm-log", help="Query LLM call history from the database"
+    )
+    p_llm_log.add_argument(
+        "--last",
+        type=int,
+        default=10,
+        metavar="N",
+        help="Number of recent calls to show (default: 10)",
+    )
+    p_llm_log.add_argument(
+        "--id",
+        type=int,
+        metavar="ID",
+        help="Show full detail for a specific call by row ID",
+    )
+    p_llm_log.add_argument(
+        "--stats",
+        action="store_true",
+        help="Show aggregate usage summary by request type and model",
+    )
+    p_llm_log.add_argument("--json", action="store_true", help="Output JSON")
+    _add_db(p_llm_log)
+
     args = parser.parse_args()
 
     dispatch = {
@@ -292,6 +318,7 @@ def main() -> None:
         "context": cmd_context,
         "insights": cmd_insights,
         "nudge": cmd_nudge,
+        "llm-log": cmd_llm_log,
         "daemon-restart": cmd_daemon_restart,
     }
     dispatch[args.cmd](args)

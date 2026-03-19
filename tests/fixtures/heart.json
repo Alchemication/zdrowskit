@@ -1,0 +1,45 @@
+{
+  "data": {
+    "metrics": [
+      {
+        "name": "heart_rate",
+        "units": "count/min",
+        "data": [
+          {"date": "2026-03-09 00:00:00 +0000", "Min": 48.0, "Max": 165.0},
+          {"date": "2026-03-10 00:00:00 +0000", "Min": 50.0, "Max": 178.0}
+        ]
+      },
+      {
+        "name": "resting_heart_rate",
+        "units": "count/min",
+        "data": [
+          {"date": "2026-03-09 00:00:00 +0000", "qty": 52.0},
+          {"date": "2026-03-10 00:00:00 +0000", "qty": 54.0}
+        ]
+      },
+      {
+        "name": "heart_rate_variability",
+        "units": "ms",
+        "data": [
+          {"date": "2026-03-09 00:00:00 +0000", "qty": 58.0},
+          {"date": "2026-03-10 00:00:00 +0000", "qty": 55.0}
+        ]
+      },
+      {
+        "name": "vo2_max",
+        "units": "mL/min·kg",
+        "data": [
+          {"date": "2026-03-10 00:00:00 +0000", "qty": 45.2}
+        ]
+      },
+      {
+        "name": "walking_heart_rate_average",
+        "units": "count/min",
+        "data": [
+          {"date": "2026-03-09 00:00:00 +0000", "qty": 98.0},
+          {"date": "2026-03-10 00:00:00 +0000", "qty": 102.0}
+        ]
+      }
+    ]
+  }
+}

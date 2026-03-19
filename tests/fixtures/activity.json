@@ -1,0 +1,61 @@
+{
+  "data": {
+    "metrics": [
+      {
+        "name": "step_count",
+        "units": "count",
+        "data": [
+          {"date": "2026-03-09 00:00:00 +0000", "qty": 9500.0},
+          {"date": "2026-03-10 00:00:00 +0000", "qty": 12000.0}
+        ]
+      },
+      {
+        "name": "active_energy",
+        "units": "kJ",
+        "data": [
+          {"date": "2026-03-09 00:00:00 +0000", "qty": 1800.0},
+          {"date": "2026-03-10 00:00:00 +0000", "qty": 2200.0}
+        ]
+      },
+      {
+        "name": "apple_exercise_time",
+        "units": "min",
+        "data": [
+          {"date": "2026-03-09 00:00:00 +0000", "qty": 30.0},
+          {"date": "2026-03-10 00:00:00 +0000", "qty": 55.0}
+        ]
+      },
+      {
+        "name": "walking_running_distance",
+        "units": "km",
+        "data": [
+          {"date": "2026-03-09 00:00:00 +0000", "qty": 6.2},
+          {"date": "2026-03-10 00:00:00 +0000", "qty": 9.8}
+        ]
+      },
+      {
+        "name": "apple_stand_hour",
+        "units": "count",
+        "data": [
+          {"date": "2026-03-09 00:00:00 +0000", "qty": 10},
+          {"date": "2026-03-10 00:00:00 +0000", "qty": 12}
+        ]
+      },
+      {
+        "name": "flights_climbed",
+        "units": "count",
+        "data": [
+          {"date": "2026-03-09 00:00:00 +0000", "qty": 5.0},
+          {"date": "2026-03-10 00:00:00 +0000", "qty": 8.0}
+        ]
+      },
+      {
+        "name": "totally_unknown_metric",
+        "units": "??",
+        "data": [
+          {"date": "2026-03-09 00:00:00 +0000", "qty": 999}
+        ]
+      }
+    ]
+  }
+}

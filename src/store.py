@@ -5,6 +5,7 @@ Public API:
     store_snapshots  -- upsert DailySnapshots (and their workouts) into the DB
     load_snapshots   -- load DailySnapshots with nested workouts from the DB
     load_date_range  -- return the (min, max) date stored, or None if empty
+    log_llm_call     -- insert an LLM call record (input, output, params, metadata)
 
 Example:
     from pathlib import Path
@@ -17,6 +18,7 @@ Example:
 
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
 from datetime import datetime, timezone
@@ -78,6 +80,25 @@ CREATE TABLE IF NOT EXISTS workout (
 
 CREATE INDEX IF NOT EXISTS workout_date     ON workout(date);
 CREATE INDEX IF NOT EXISTS workout_category ON workout(category);
+
+CREATE TABLE IF NOT EXISTS llm_call (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp       TEXT NOT NULL,
+    request_type    TEXT NOT NULL,
+    model           TEXT NOT NULL,
+    messages_json   TEXT NOT NULL,
+    response_text   TEXT NOT NULL,
+    params_json     TEXT,
+    input_tokens    INTEGER NOT NULL,
+    output_tokens   INTEGER NOT NULL,
+    total_tokens    INTEGER NOT NULL,
+    latency_s       REAL NOT NULL,
+    cost            REAL,
+    metadata_json   TEXT
+);
+
+CREATE INDEX IF NOT EXISTS llm_call_type ON llm_call(request_type);
+CREATE INDEX IF NOT EXISTS llm_call_ts   ON llm_call(timestamp);
 """
 
 
@@ -115,9 +136,22 @@ def open_db(path: Path) -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")
     conn.executescript(_DDL)
+    _migrate(conn)
     conn.commit()
     logger.debug("Opened database: %s", path)
     return conn
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Apply incremental schema migrations for columns added after initial DDL.
+
+    Each migration is guarded by a column-existence check so it runs at most
+    once and is safe to call on every startup.
+    """
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(llm_call)").fetchall()}
+    if "cost" not in cols:
+        conn.execute("ALTER TABLE llm_call ADD COLUMN cost REAL")
+        logger.info("Migrated llm_call: added 'cost' column")
 
 
 def store_snapshots(conn: sqlite3.Connection, snapshots: list[DailySnapshot]) -> int:
@@ -353,3 +387,67 @@ def load_date_range(conn: sqlite3.Connection) -> tuple[str, str] | None:
     if row[0] is None:
         return None
     return row[0], row[1]
+
+
+def log_llm_call(
+    conn: sqlite3.Connection,
+    request_type: str,
+    model: str,
+    messages: list[dict[str, str]],
+    response_text: str,
+    params: dict | None = None,
+    input_tokens: int = 0,
+    output_tokens: int = 0,
+    total_tokens: int = 0,
+    latency_s: float = 0.0,
+    cost: float | None = None,
+    metadata: dict | None = None,
+) -> int:
+    """Insert an LLM call record into the llm_call table.
+
+    Args:
+        conn: Open database connection returned by open_db().
+        request_type: Product-level call type, e.g. "insights" or "nudge".
+        model: The litellm model string used.
+        messages: The message list sent to the LLM.
+        response_text: The full LLM response text.
+        params: LLM call parameters (max_tokens, temperature, etc.).
+        input_tokens: Number of input tokens reported by the API.
+        output_tokens: Number of output tokens reported by the API.
+        total_tokens: Total tokens (input + output).
+        latency_s: Wall-clock time for the LLM call in seconds.
+        cost: Actual cost in USD as reported by litellm.
+        metadata: Product context (e.g. week, trigger_type).
+
+    Returns:
+        The row id of the inserted record.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    cursor = conn.execute(
+        """
+        INSERT INTO llm_call (
+            timestamp, request_type, model, messages_json, response_text,
+            params_json, input_tokens, output_tokens, total_tokens,
+            latency_s, cost, metadata_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            now,
+            request_type,
+            model,
+            json.dumps(messages),
+            response_text,
+            json.dumps(params) if params else None,
+            input_tokens,
+            output_tokens,
+            total_tokens,
+            latency_s,
+            cost,
+            json.dumps(metadata) if metadata else None,
+        ),
+    )
+    conn.commit()
+    logger.debug(
+        "Logged LLM call id=%d type=%s model=%s", cursor.lastrowid, request_type, model
+    )
+    return cursor.lastrowid

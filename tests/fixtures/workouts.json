@@ -1,0 +1,39 @@
+{
+  "data": {
+    "workouts": [
+      {
+        "name": "Traditional Strength Training",
+        "start": "2026-03-09 17:00:00 +0000",
+        "end": "2026-03-09 18:00:00 +0000",
+        "duration": 3600.0,
+        "activeEnergyBurned": {"qty": 600.0, "units": "kJ"},
+        "heartRate": {
+          "avg": {"qty": 110.0, "units": "count/min"},
+          "min": {"qty": 80.0, "units": "count/min"},
+          "max": {"qty": 145.0, "units": "count/min"}
+        }
+      },
+      {
+        "name": "Outdoor Run",
+        "start": "2026-03-10 07:00:00 +0000",
+        "end": "2026-03-10 07:35:00 +0000",
+        "duration": 2100.0,
+        "activeEnergyBurned": {"qty": 900.0, "units": "kJ"},
+        "heartRate": {
+          "avg": {"qty": 155.0, "units": "count/min"},
+          "min": {"qty": 120.0, "units": "count/min"},
+          "max": {"qty": 178.0, "units": "count/min"}
+        },
+        "temperature": {"qty": 8.0, "units": "degC"},
+        "humidity": {"qty": 65, "units": "%"}
+      },
+      {
+        "name": "Yoga",
+        "start": "2026-03-10 18:00:00 +0000",
+        "end": "2026-03-10 18:45:00 +0000",
+        "duration": 2700.0,
+        "activeEnergyBurned": {"qty": 200.0, "units": "kJ"}
+      }
+    ]
+  }
+}

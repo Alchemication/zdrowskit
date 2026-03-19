@@ -6,16 +6,16 @@ and manages the memory/history feedback loop.
 Public API:
     load_context    — read markdown context files from a directory
     build_messages  — assemble system + user messages for the LLM
-    generate_report — call litellm and return a ReportResult with text + metadata
+    call_llm        — call litellm and return an LLMResult with text + metadata
     extract_memory  — pull <memory> block from LLM response
     append_history  — append a timestamped memory entry to history.md
     build_llm_data  — build current-week + history JSON for LLM consumption
-    ReportResult    — dataclass holding response text and usage metadata
+    LLMResult       — dataclass holding response text and usage metadata
 
 Example:
     ctx = load_context(Path("~/Documents/zdrowskit/ContextFiles"))
     msgs = build_messages(ctx, health_data_json="...")
-    report = generate_report(msgs)
+    result = call_llm(msgs)
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ import litellm
 from aggregator import summarise
 from config import MAX_HISTORY_ENTRIES
 from report import current_week_bounds, group_by_week, to_dict
-from store import load_date_range, load_snapshots
+from store import load_date_range, load_snapshots, log_llm_call
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +45,7 @@ REQUIRED_FILES = ["prompt"]
 
 
 @dataclass
-class ReportResult:
+class LLMResult:
     """Container for LLM response text and call metadata.
 
     Attributes:
@@ -55,6 +55,7 @@ class ReportResult:
         output_tokens: Number of output tokens reported by the API.
         total_tokens: Total tokens (input + output).
         latency_s: Wall-clock time for the LLM call in seconds.
+        cost: Actual cost in USD as reported by litellm, or None if unavailable.
     """
 
     text: str
@@ -63,6 +64,7 @@ class ReportResult:
     output_tokens: int
     total_tokens: int
     latency_s: float
+    cost: float | None = None
 
 
 DEFAULT_SOUL = (
@@ -177,39 +179,91 @@ def build_messages(
     ]
 
 
-def generate_report(
-    messages: list[dict[str, str]], model: str = DEFAULT_MODEL
-) -> ReportResult:
+def call_llm(
+    messages: list[dict[str, str]],
+    model: str = DEFAULT_MODEL,
+    max_tokens: int = 4096,
+    temperature: float = 0.7,
+    reasoning_effort: str | None = None,
+    conn: sqlite3.Connection | None = None,
+    request_type: str = "",
+    metadata: dict | None = None,
+) -> LLMResult:
     """Call the LLM via litellm and return the response with metadata.
+
+    All calls are logged to the database when *conn* and *request_type* are
+    provided. A logging failure is never propagated — it is logged as a
+    warning and the result is returned normally.
 
     Args:
         messages: System + user messages for the LLM.
-        model: litellm model string (default: claude-haiku-4-5).
+        model: litellm model string.
+        max_tokens: Maximum tokens in the response.
+        temperature: Sampling temperature.
+        reasoning_effort: Optional reasoning effort hint (model-dependent).
+        conn: Open DB connection for logging. None to skip logging.
+        request_type: Product-level call type, e.g. "insights" or "nudge".
+        metadata: Product context dict stored alongside the call.
 
     Returns:
-        A ReportResult containing the response text and usage metadata.
+        An LLMResult containing the response text and usage metadata.
 
     Raises:
         litellm.AuthenticationError: If the API key is missing or invalid.
         litellm.APIError: On network or API failures.
     """
+    kwargs: dict = {
+        "model": model,
+        "messages": messages,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+    }
+    if reasoning_effort is not None:
+        kwargs["reasoning_effort"] = reasoning_effort
+
     t0 = time.perf_counter()
-    response = litellm.completion(
-        model=model,
-        messages=messages,
-        max_tokens=4096,
-        temperature=0.7,
-    )
+    response = litellm.completion(**kwargs)
     latency = time.perf_counter() - t0
     usage = response.usage
-    return ReportResult(
+
+    try:
+        cost = litellm.completion_cost(completion_response=response)
+    except Exception:
+        cost = None
+
+    result = LLMResult(
         text=response.choices[0].message.content,
         model=model,
         input_tokens=usage.prompt_tokens,
         output_tokens=usage.completion_tokens,
         total_tokens=usage.total_tokens,
         latency_s=latency,
+        cost=cost,
     )
+
+    if conn and request_type:
+        params = {"max_tokens": max_tokens, "temperature": temperature}
+        if reasoning_effort is not None:
+            params["reasoning_effort"] = reasoning_effort
+        try:
+            log_llm_call(
+                conn,
+                request_type=request_type,
+                model=model,
+                messages=messages,
+                response_text=result.text,
+                params=params,
+                input_tokens=result.input_tokens,
+                output_tokens=result.output_tokens,
+                total_tokens=result.total_tokens,
+                latency_s=result.latency_s,
+                cost=result.cost,
+                metadata=metadata,
+            )
+        except Exception:
+            logger.warning("Failed to log LLM call to DB", exc_info=True)
+
+    return result
 
 
 def extract_memory(response: str) -> str | None:

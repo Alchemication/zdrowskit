@@ -203,6 +203,17 @@ RESEND_API_KEY=re_xxxxx
 EMAIL_TO=you@example.com
 ```
 
+## Testing
+
+```bash
+uv run pytest                                    # run all tests
+uv run pytest -v                                 # verbose output
+uv run pytest --cov=src --cov-report=term-missing # with coverage
+uv run pytest tests/test_parsers_metrics.py      # single file
+```
+
+Tests live in `tests/` with fixture data in `tests/fixtures/`. The suite covers parsers (metrics, workouts, GPX), aggregation logic, the SQLite store round-trip, report formatting, and LLM utility functions. Shared fixtures (sample snapshots, in-memory DB) are in `tests/conftest.py`.
+
 ## Stack
 
 - Python + [uv](https://github.com/astral-sh/uv)
