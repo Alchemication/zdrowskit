@@ -2,7 +2,24 @@
 
 from __future__ import annotations
 
-from llm import _recent_history, extract_memory
+import sqlite3
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from llm import (
+    LLMResult,
+    _recent_history,
+    append_history,
+    build_llm_data,
+    build_messages,
+    call_llm,
+    extract_memory,
+    load_context,
+)
+from models import DailySnapshot
+from store import store_snapshots
 
 
 class TestExtractMemory:
@@ -40,3 +57,277 @@ class TestRecentHistory:
 
     def test_empty_string(self) -> None:
         assert _recent_history("", 5) == ""
+
+
+class TestLoadContext:
+    def test_loads_all_files(self, tmp_path: Path) -> None:
+        (tmp_path / "prompt.md").write_text("Hello {me}")
+        (tmp_path / "soul.md").write_text("Be direct.")
+        (tmp_path / "me.md").write_text("Runner, 30y")
+        ctx = load_context(tmp_path)
+        assert ctx["prompt"] == "Hello {me}"
+        assert ctx["soul"] == "Be direct."
+        assert ctx["me"] == "Runner, 30y"
+
+    def test_missing_prompt_raises(self, tmp_path: Path) -> None:
+        (tmp_path / "soul.md").write_text("Be direct.")
+        with pytest.raises(FileNotFoundError, match="prompt.md"):
+            load_context(tmp_path)
+
+    def test_optional_files_default(self, tmp_path: Path) -> None:
+        (tmp_path / "prompt.md").write_text("template")
+        ctx = load_context(tmp_path)
+        assert ctx["goals"] == "(not provided)"
+        assert ctx["log"] == "(not provided)"
+
+    def test_history_trimmed(self, tmp_path: Path) -> None:
+        (tmp_path / "prompt.md").write_text("template")
+        entries = "\n\n".join(f"## 2026-03-{i:02d}\n\nEntry {i}" for i in range(1, 20))
+        (tmp_path / "history.md").write_text(entries)
+        ctx = load_context(tmp_path)
+        # MAX_HISTORY_ENTRIES = 8, so only last 8 should remain
+        assert "## 2026-03-19" in ctx["history"]
+        assert "## 2026-03-12" in ctx["history"]
+        assert "## 2026-03-01" not in ctx["history"]
+
+
+class TestBuildMessages:
+    def test_basic_structure(self) -> None:
+        ctx = {
+            "soul": "Be a coach.",
+            "prompt": "Report for {me} on {today}. Goals: {goals}",
+            "me": "Adam",
+            "goals": "Run more",
+        }
+        msgs = build_messages(ctx, health_data_json='{"data": 1}')
+        assert len(msgs) == 2
+        assert msgs[0]["role"] == "system"
+        assert msgs[0]["content"] == "Be a coach."
+        assert msgs[1]["role"] == "user"
+        assert "Adam" in msgs[1]["content"]
+        assert "Run more" in msgs[1]["content"]
+
+    def test_soul_not_provided_uses_default(self) -> None:
+        ctx = {"soul": "(not provided)", "prompt": "Hello"}
+        msgs = build_messages(ctx, health_data_json="{}")
+        assert "no-nonsense" in msgs[0]["content"]
+
+    def test_missing_soul_uses_default(self) -> None:
+        ctx = {"prompt": "Hello"}
+        msgs = build_messages(ctx, health_data_json="{}")
+        assert "no-nonsense" in msgs[0]["content"]
+
+    def test_unknown_placeholder_defaults(self) -> None:
+        ctx = {"prompt": "Data: {health_data}, Unknown: {unknown_key}"}
+        msgs = build_messages(ctx, health_data_json='{"x":1}')
+        assert "(not provided)" in msgs[1]["content"]
+
+    def test_baselines_injected(self) -> None:
+        ctx = {"prompt": "Baselines: {baselines}"}
+        msgs = build_messages(ctx, health_data_json="{}", baselines="## HR: 52bpm")
+        assert "## HR: 52bpm" in msgs[1]["content"]
+
+    def test_baselines_none_shows_not_computed(self) -> None:
+        ctx = {"prompt": "Baselines: {baselines}"}
+        msgs = build_messages(ctx, health_data_json="{}", baselines=None)
+        assert "(not computed)" in msgs[1]["content"]
+
+
+class TestCallLlm:
+    def _mock_response(
+        self,
+        text: str = "Report text",
+        prompt_tokens: int = 100,
+        completion_tokens: int = 50,
+    ) -> MagicMock:
+        response = MagicMock()
+        response.choices = [MagicMock()]
+        response.choices[0].message.content = text
+        response.usage.prompt_tokens = prompt_tokens
+        response.usage.completion_tokens = completion_tokens
+        response.usage.total_tokens = prompt_tokens + completion_tokens
+        return response
+
+    @patch("llm.litellm")
+    def test_returns_llm_result(self, mock_litellm: MagicMock) -> None:
+        mock_litellm.completion.return_value = self._mock_response()
+        mock_litellm.completion_cost.return_value = 0.05
+
+        msgs = [{"role": "user", "content": "test"}]
+        result = call_llm(msgs, model="test-model")
+
+        assert isinstance(result, LLMResult)
+        assert result.text == "Report text"
+        assert result.model == "test-model"
+        assert result.input_tokens == 100
+        assert result.output_tokens == 50
+        assert result.total_tokens == 150
+        assert result.cost == 0.05
+        assert result.latency_s >= 0
+
+    @patch("llm.litellm")
+    def test_cost_fallback_on_exception(self, mock_litellm: MagicMock) -> None:
+        mock_litellm.completion.return_value = self._mock_response()
+        mock_litellm.completion_cost.side_effect = Exception("no pricing")
+
+        result = call_llm([{"role": "user", "content": "test"}])
+        assert result.cost is None
+
+    @patch("llm.litellm")
+    def test_reasoning_effort_passed(self, mock_litellm: MagicMock) -> None:
+        mock_litellm.completion.return_value = self._mock_response()
+        mock_litellm.completion_cost.return_value = None
+
+        call_llm(
+            [{"role": "user", "content": "test"}],
+            reasoning_effort="high",
+        )
+        kwargs = mock_litellm.completion.call_args[1]
+        assert kwargs["reasoning_effort"] == "high"
+
+    @patch("llm.litellm")
+    def test_reasoning_effort_omitted_by_default(self, mock_litellm: MagicMock) -> None:
+        mock_litellm.completion.return_value = self._mock_response()
+        mock_litellm.completion_cost.return_value = None
+
+        call_llm([{"role": "user", "content": "test"}])
+        kwargs = mock_litellm.completion.call_args[1]
+        assert "reasoning_effort" not in kwargs
+
+    @patch("llm.litellm")
+    def test_logs_to_db(
+        self, mock_litellm: MagicMock, in_memory_db: sqlite3.Connection
+    ) -> None:
+        mock_litellm.completion.return_value = self._mock_response()
+        mock_litellm.completion_cost.return_value = 0.02
+
+        call_llm(
+            [{"role": "user", "content": "test"}],
+            conn=in_memory_db,
+            request_type="insights",
+        )
+        row = in_memory_db.execute("SELECT * FROM llm_call").fetchone()
+        assert row is not None
+        assert row["request_type"] == "insights"
+
+    @patch("llm.litellm")
+    def test_db_logging_failure_swallowed(self, mock_litellm: MagicMock) -> None:
+        mock_litellm.completion.return_value = self._mock_response()
+        mock_litellm.completion_cost.return_value = None
+
+        # Pass a closed connection to trigger a logging error
+        conn = sqlite3.connect(":memory:")
+        conn.close()
+
+        result = call_llm(
+            [{"role": "user", "content": "test"}],
+            conn=conn,
+            request_type="insights",
+        )
+        # Should still return the result despite DB error
+        assert result.text == "Report text"
+
+    @patch("llm.litellm")
+    def test_no_logging_without_conn(self, mock_litellm: MagicMock) -> None:
+        mock_litellm.completion.return_value = self._mock_response()
+        mock_litellm.completion_cost.return_value = None
+
+        result = call_llm([{"role": "user", "content": "test"}])
+        assert result.text == "Report text"
+
+
+class TestAppendHistory:
+    def test_creates_new_file(self, tmp_path: Path) -> None:
+        append_history(tmp_path, "First memory block")
+        content = (tmp_path / "history.md").read_text()
+        assert "First memory block" in content
+        assert content.startswith("## ")
+
+    def test_appends_to_existing(self, tmp_path: Path) -> None:
+        (tmp_path / "history.md").write_text("## 2026-03-01\n\nOld entry\n")
+        append_history(tmp_path, "New memory block")
+        content = (tmp_path / "history.md").read_text()
+        assert "Old entry" in content
+        assert "New memory block" in content
+
+    def test_entries_are_separated(self, tmp_path: Path) -> None:
+        append_history(tmp_path, "Entry one")
+        append_history(tmp_path, "Entry two")
+        content = (tmp_path / "history.md").read_text()
+        # Both entries should be present as ## headings
+        assert content.count("## ") == 2
+
+    def test_grows_unbounded_without_trimming(self, tmp_path: Path) -> None:
+        """BUG: append_history does not trim despite its docstring claiming it does.
+
+        The file grows without bound — trimming only happens at read time
+        via _recent_history() in load_context(). This test documents the
+        current behavior; if trimming is added to append_history, update
+        this test to assert heading_count == MAX_HISTORY_ENTRIES.
+        """
+        from config import MAX_HISTORY_ENTRIES
+
+        entries = "\n\n".join(
+            f"## 2026-03-{i:02d}\n\nOld entry {i}"
+            for i in range(1, MAX_HISTORY_ENTRIES + 1)
+        )
+        (tmp_path / "history.md").write_text(entries)
+
+        append_history(tmp_path, "Brand new entry")
+        content = (tmp_path / "history.md").read_text()
+        heading_count = content.count("## ")
+        # Currently does NOT trim — grows to MAX + 1
+        assert heading_count == MAX_HISTORY_ENTRIES + 1
+        assert "Brand new entry" in content
+        # Oldest entry is still present (not trimmed)
+        assert "Old entry 1" in content
+
+
+class TestBuildLlmData:
+    def test_empty_db(self, in_memory_db: sqlite3.Connection) -> None:
+        result = build_llm_data(in_memory_db, months=3)
+        assert result["current_week"]["summary"] is None
+        assert result["current_week"]["days"] == []
+        assert result["history"] == []
+
+    def test_with_data(
+        self, in_memory_db: sqlite3.Connection, sample_snapshots: list[DailySnapshot]
+    ) -> None:
+        store_snapshots(in_memory_db, sample_snapshots)
+        result = build_llm_data(in_memory_db, months=3)
+        assert "current_week" in result
+        assert "history" in result
+        # Should have some days in the result
+        assert isinstance(result["current_week"]["days"], list)
+
+    def test_last_week_mode(
+        self, in_memory_db: sqlite3.Connection, sample_snapshots: list[DailySnapshot]
+    ) -> None:
+        store_snapshots(in_memory_db, sample_snapshots)
+        result = build_llm_data(in_memory_db, months=3, week="last")
+        assert "current_week" in result
+        assert "history" in result
+
+    def test_structure_has_expected_fields(
+        self, in_memory_db: sqlite3.Connection, sample_snapshots: list[DailySnapshot]
+    ) -> None:
+        """Verify the nested structure contains actual WeeklySummary and DailySnapshot fields."""
+        store_snapshots(in_memory_db, sample_snapshots)
+        result = build_llm_data(in_memory_db, months=3)
+
+        summary = result["current_week"]["summary"]
+        assert summary is not None
+        # WeeklySummary fields
+        assert "week_label" in summary
+        assert "run_count" in summary
+        assert "avg_resting_hr" in summary
+        assert "hrv_trend" in summary
+
+        days = result["current_week"]["days"]
+        assert len(days) > 0
+        day = days[0]
+        # DailySnapshot fields
+        assert "date" in day
+        assert "steps" in day
+        assert "workouts" in day
+        assert "recovery_index" in day

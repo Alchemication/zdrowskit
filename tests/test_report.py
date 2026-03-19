@@ -72,6 +72,27 @@ class TestGroupByWeek:
     def test_empty(self) -> None:
         assert group_by_week([]) == []
 
+    def test_year_boundary(self) -> None:
+        """ISO week at year boundary: 2025-12-29 is ISO week 2026-W01."""
+        snapshots = [
+            DailySnapshot(date="2025-12-28"),  # 2025-W52 (Sunday)
+            DailySnapshot(date="2025-12-29"),  # 2026-W01 (Monday)
+            DailySnapshot(date="2025-12-30"),  # 2026-W01
+            DailySnapshot(date="2026-01-01"),  # 2026-W01
+            DailySnapshot(date="2026-01-05"),  # 2026-W02 (Monday)
+        ]
+        groups = group_by_week(snapshots)
+        assert len(groups) == 3
+        # W52 has just the Sunday
+        assert len(groups[0]) == 1
+        assert groups[0][0].date == "2025-12-28"
+        # W01 has Mon-Thu
+        assert len(groups[1]) == 3
+        assert groups[1][0].date == "2025-12-29"
+        # W02 has just Monday
+        assert len(groups[2]) == 1
+        assert groups[2][0].date == "2026-01-05"
+
 
 class TestToDict:
     def test_dataclass_round_trip(self) -> None:
