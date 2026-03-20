@@ -6,6 +6,7 @@ Public API:
     REPORTS_DIR           — directory where generated reports are saved.
     NUDGES_DIR            — directory where sent nudges are saved.
     MAX_HISTORY_ENTRIES   — max entries kept in history.md.
+    MAX_CONVERSATION_MESSAGES — max messages in the Telegram chat buffer.
     resolve_data_dir      — resolve data directory from CLI arg, env var, or default.
 
 Example:
@@ -25,6 +26,9 @@ NUDGES_DIR: Path = Path.home() / "Documents" / "zdrowskit" / "Nudges"
 
 MAX_HISTORY_ENTRIES: int = 8
 """Maximum number of entries to retain in history.md."""
+
+MAX_CONVERSATION_MESSAGES: int = 20
+"""Maximum number of messages to keep in the in-memory chat conversation buffer."""
 
 
 def resolve_data_dir(arg: str | None) -> Path:

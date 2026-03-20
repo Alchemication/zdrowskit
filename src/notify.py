@@ -4,6 +4,7 @@ Public API:
     md_to_html      — convert markdown to a styled HTML document.
     send_email      — send HTML report via Resend API.
     send_telegram   — send plain-text report via Telegram Bot API.
+    chunk_text      — split text into chunks respecting line boundaries.
 
 Example:
     from notify import send_email, send_telegram
@@ -90,6 +91,38 @@ def send_email(report: str, week_label: str) -> None:
         logger.error("Failed to send email: %s", e)
 
 
+def chunk_text(text: str, max_len: int = 4000) -> list[str]:
+    """Split text into chunks respecting line boundaries.
+
+    Telegram has a 4096 character limit per message. This helper splits
+    on newline boundaries to stay under *max_len* per chunk.
+
+    Args:
+        text: The text to split.
+        max_len: Maximum characters per chunk.
+
+    Returns:
+        A list of text chunks, each at most *max_len* characters.
+    """
+    if len(text) <= max_len:
+        return [text]
+
+    chunks: list[str] = []
+    lines = text.split("\n")
+    buf: list[str] = []
+    buf_len = 0
+    for line in lines:
+        if buf and buf_len + len(line) + 1 > max_len:
+            chunks.append("\n".join(buf))
+            buf = []
+            buf_len = 0
+        buf.append(line)
+        buf_len += len(line) + 1
+    if buf:
+        chunks.append("\n".join(buf))
+    return chunks
+
+
 def send_telegram(report: str, week_label: str) -> None:
     """Send the report via Telegram Bot API.
 
@@ -113,26 +146,7 @@ def send_telegram(report: str, week_label: str) -> None:
 
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
 
-    # Telegram has a 4096 char limit per message; split if needed
-    max_len = 4000
-    chunks = []
-    if len(report) <= max_len:
-        chunks = [report]
-    else:
-        lines = report.split("\n")
-        chunk: list[str] = []
-        chunk_len = 0
-        for line in lines:
-            if chunk_len + len(line) + 1 > max_len:
-                chunks.append("\n".join(chunk))
-                chunk = []
-                chunk_len = 0
-            chunk.append(line)
-            chunk_len += len(line) + 1
-        if chunk:
-            chunks.append("\n".join(chunk))
-
-    for i, text in enumerate(chunks):
+    for i, text in enumerate(chunk_text(report)):
         data = json.dumps(
             {
                 "chat_id": chat_id,

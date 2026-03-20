@@ -95,6 +95,7 @@ sys.path.insert(0, str(Path(__file__).parent / "src"))
 from commands import (
     cmd_context,
     cmd_daemon_restart,
+    cmd_daemon_stop,
     cmd_import,
     cmd_insights,
     cmd_llm_log,
@@ -242,6 +243,7 @@ def main() -> None:
 
     # daemon
     sub.add_parser("daemon-restart", help="Restart the background daemon service")
+    sub.add_parser("daemon-stop", help="Stop the background daemon service")
 
     # nudge
     p_nudge = sub.add_parser(
@@ -320,6 +322,7 @@ def main() -> None:
         "nudge": cmd_nudge,
         "llm-log": cmd_llm_log,
         "daemon-restart": cmd_daemon_restart,
+        "daemon-stop": cmd_daemon_stop,
     }
     dispatch[args.cmd](args)
 

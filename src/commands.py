@@ -9,6 +9,7 @@ Public API:
     cmd_nudge    — send a short context-aware notification.
     cmd_llm_log  — query LLM call history from the database.
     cmd_daemon_restart — restart the launchd daemon service.
+    cmd_daemon_stop    — stop the launchd daemon service.
 
 Example:
     from commands import cmd_import
@@ -841,6 +842,63 @@ def cmd_llm_log(args: argparse.Namespace) -> None:
 def cmd_daemon_restart(args: argparse.Namespace) -> None:  # noqa: ARG001
     """Restart the launchd daemon service.
 
+    If the service is loaded, uses ``kickstart -k`` to restart it.
+    If it was previously stopped with ``daemon-stop`` (unloaded),
+    re-loads the plist via ``bootstrap``.
+
+    Args:
+        args: Parsed CLI arguments (unused).
+    """
+    import subprocess
+
+    label = "com.zdrowskit.daemon"
+    plist = Path.home() / "Library/LaunchAgents" / f"{label}.plist"
+    uid = subprocess.check_output(["id", "-u"]).decode().strip()
+    target = f"gui/{uid}/{label}"
+    domain = f"gui/{uid}"
+
+    # Check if the service is currently loaded.
+    info = subprocess.run(
+        ["launchctl", "print", target],
+        capture_output=True,
+        text=True,
+    )
+
+    if info.returncode == 0:
+        # Service is loaded — kickstart to restart it.
+        result = subprocess.run(
+            ["launchctl", "kickstart", "-k", target],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            print(f"Daemon restarted ({target})")
+        else:
+            print(f"Failed to restart daemon: {result.stderr.strip()}")
+            sys.exit(1)
+    else:
+        # Service was unloaded (e.g. after daemon-stop) — bootstrap it.
+        if not plist.exists():
+            print(f"Plist not found: {plist}")
+            sys.exit(1)
+        result = subprocess.run(
+            ["launchctl", "bootstrap", domain, str(plist)],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            print(f"Daemon loaded and started ({target})")
+        else:
+            print(f"Failed to load daemon: {result.stderr.strip()}")
+            sys.exit(1)
+
+
+def cmd_daemon_stop(args: argparse.Namespace) -> None:  # noqa: ARG001
+    """Stop the launchd daemon service.
+
+    Uses ``launchctl bootout`` to fully unload the service so launchd
+    does not respawn it. Use ``daemon-restart`` to bring it back.
+
     Args:
         args: Parsed CLI arguments (unused).
     """
@@ -848,13 +906,26 @@ def cmd_daemon_restart(args: argparse.Namespace) -> None:  # noqa: ARG001
 
     label = "com.zdrowskit.daemon"
     uid = subprocess.check_output(["id", "-u"]).decode().strip()
+    target = f"gui/{uid}/{label}"
+
+    # Check if the service is loaded first.
+    info = subprocess.run(
+        ["launchctl", "print", target],
+        capture_output=True,
+        text=True,
+    )
+    if info.returncode != 0:
+        print("Daemon is not loaded.")
+        return
+
     result = subprocess.run(
-        ["launchctl", "kickstart", "-k", f"gui/{uid}/{label}"],
+        ["launchctl", "bootout", target],
         capture_output=True,
         text=True,
     )
     if result.returncode == 0:
-        print(f"Daemon restarted (gui/{uid}/{label})")
+        print(f"Daemon stopped and unloaded ({target})")
+        print("Run 'uv run python main.py daemon-restart' to start it again.")
     else:
-        print(f"Failed to restart daemon: {result.stderr.strip()}")
+        print(f"Failed to stop daemon: {result.stderr.strip()}")
         sys.exit(1)

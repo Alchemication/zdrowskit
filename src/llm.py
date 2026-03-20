@@ -4,7 +4,7 @@ Loads user context files, assembles prompts, calls an LLM via litellm,
 and manages the memory/history feedback loop.
 
 Public API:
-    load_context    — read markdown context files from a directory
+    load_context    — read markdown context files from a directory (prompt_file selects template)
     build_messages  — assemble system + user messages for the LLM
     call_llm        — call litellm and return an LLMResult with text + metadata
     extract_memory  — pull <memory> block from LLM response
@@ -93,30 +93,37 @@ def _recent_history(content: str, n: int) -> str:
     return "\n\n".join(entries[-n:]) + "\n"
 
 
-def load_context(context_dir: Path) -> dict[str, str]:
+def load_context(context_dir: Path, prompt_file: str = "prompt") -> dict[str, str]:
     """Read all markdown context files from the given directory.
 
     Args:
         context_dir: Directory containing soul.md, me.md, goals.md,
             plan.md, log.md, history.md, and prompt.md.
+        prompt_file: Stem of the prompt template file to load (default
+            ``"prompt"``). Use ``"chat_prompt"`` for interactive chat
+            or ``"nudge_prompt"`` for nudges.
 
     Returns:
         A dict mapping file stems (e.g. "soul", "prompt") to their
         text content, or "(not provided)" for missing optional files.
+        The prompt template is always stored under the key ``"prompt"``
+        regardless of which file was loaded.
 
     Raises:
-        FileNotFoundError: If prompt.md is missing.
+        FileNotFoundError: If the prompt file is missing.
     """
     result: dict[str, str] = {}
 
-    for name in REQUIRED_FILES:
+    required = [prompt_file] if prompt_file != "prompt" else REQUIRED_FILES
+    for name in required:
         path = context_dir / f"{name}.md"
         if not path.exists():
             raise FileNotFoundError(
                 f"Required context file missing: {path}\n"
                 f"Copy examples/context/{name}.md to {context_dir}/ to get started."
             )
-        result[name] = path.read_text(encoding="utf-8")
+        # Always store under "prompt" key so build_messages() works unchanged
+        result["prompt"] = path.read_text(encoding="utf-8")
 
     for name in CONTEXT_FILES:
         path = context_dir / f"{name}.md"
@@ -171,6 +178,10 @@ def build_messages(
             "weekday": date.today().strftime("%A"),
         }
     )
+    # Forward any extra keys (e.g. recent_nudges) from context into placeholders.
+    for key, value in context.items():
+        if key not in placeholders and key not in ("soul", "prompt"):
+            placeholders[key] = value
     user_content = template.format_map(placeholders)
 
     return [

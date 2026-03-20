@@ -2,6 +2,7 @@
 
 Monitors iCloud health data files and context .md files, triggering
 LLM-powered notifications when meaningful changes are detected.
+Also runs a Telegram long-polling listener for interactive chat.
 
 Public API:
     main  — parse args and run the daemon loop
@@ -189,6 +190,7 @@ class ZdrowskitDaemon:
 
         self._state = _load_state()
         self._lock = threading.Lock()
+        self._stop_event = threading.Event()
         self._health_timer: threading.Timer | None = None
         self._context_timers: dict[str, threading.Timer] = {}
 
@@ -403,6 +405,180 @@ class ZdrowskitDaemon:
             logger.error("Nudge failed (trigger: %s)", trigger)
 
     # ------------------------------------------------------------------
+    # Telegram interactive chat
+    # ------------------------------------------------------------------
+
+    def _start_telegram_poller(self) -> None:
+        """Start Telegram long-polling in a daemon thread.
+
+        Does nothing if TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID are not set.
+        """
+        import os
+
+        from telegram_bot import ConversationBuffer, TelegramPoller
+
+        bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
+        chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+        if not bot_token or not chat_id:
+            logger.warning(
+                "TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set — "
+                "Telegram chat listener disabled"
+            )
+            return
+
+        self._poller = TelegramPoller(bot_token, chat_id)
+        self._conversation = ConversationBuffer()
+
+        thread = threading.Thread(
+            target=self._poller.poll_loop,
+            args=(self._handle_telegram_message, self._stop_event),
+            daemon=True,
+            name="telegram-poller",
+        )
+        thread.start()
+        logger.info("Telegram chat listener started")
+
+    def _handle_telegram_message(self, message: dict) -> None:
+        """Process an incoming Telegram message and reply via LLM.
+
+        If the message is a reply to an earlier bot message (e.g. a nudge or
+        report), the original text is injected into the conversation so the
+        LLM knows what the user is responding to.
+
+        Args:
+            message: Telegram message dict from the Bot API.
+        """
+        text = (message.get("text") or "").strip()
+        if not text:
+            return
+
+        message_id = message["message_id"]
+
+        # Handle bot commands before the LLM.
+        if text.startswith("/"):
+            self._handle_command(text, message_id)
+            return
+
+        # If the user replied to a specific bot message, inject its text
+        # so the LLM has the context of what they're responding to.
+        reply_to = message.get("reply_to_message")
+        if reply_to and reply_to.get("text"):
+            quoted = reply_to["text"]
+            # Truncate very long originals (e.g. full weekly reports)
+            if len(quoted) > 800:
+                quoted = quoted[:800] + "\n[...truncated]"
+            self._conversation.add(
+                "assistant", f"[Previous message you sent]\n{quoted}"
+            )
+
+        self._conversation.add("user", text)
+
+        try:
+            from store import open_db
+
+            conn = open_db(self.db)
+            try:
+                reply = self._chat_reply(conn)
+            finally:
+                conn.close()
+        except Exception:
+            logger.error("Chat LLM call failed", exc_info=True)
+            self._poller.send_reply(
+                "Something went wrong — try again in a minute.",
+                reply_to_message_id=message_id,
+            )
+            return
+
+        self._conversation.add("assistant", reply)
+        self._poller.send_reply(reply, reply_to_message_id=message_id)
+
+    def _handle_command(self, text: str, message_id: int) -> None:
+        """Handle a Telegram bot /command.
+
+        Args:
+            text: The full message text starting with ``/``.
+            message_id: Telegram message ID for replies.
+        """
+        cmd = text.split()[0].lower().split("@")[0]  # strip @botname suffix
+
+        if cmd == "/clear":
+            self._conversation.clear()
+            self._poller.send_reply(
+                "Conversation cleared.", reply_to_message_id=message_id
+            )
+        elif cmd == "/status":
+            nudge_count = self._state.get("nudge_count_today", 0)
+            buf_len = len(self._conversation)
+            lines = [
+                f"Buffer: {buf_len} messages",
+                f"Nudges today: {nudge_count}/{MAX_NUDGES_PER_DAY}",
+            ]
+            last_nudge = self._state.get("last_nudge_ts")
+            if last_nudge:
+                lines.append(f"Last nudge: {last_nudge[:16]}")
+            self._poller.send_reply("\n".join(lines), reply_to_message_id=message_id)
+        else:
+            self._poller.send_reply(
+                "Unknown command. Available: /clear, /status",
+                reply_to_message_id=message_id,
+            )
+
+    def _chat_reply(self, conn: sqlite3.Connection) -> str:
+        """Build context, call the LLM, and return the reply text.
+
+        Args:
+            conn: Open SQLite database connection.
+
+        Returns:
+            The LLM response text.
+        """
+        from baselines import compute_baselines
+        from llm import build_llm_data, build_messages, call_llm, load_context
+
+        ctx = load_context(self.context_dir, prompt_file="chat_prompt")
+
+        # Inject recent nudge history so the LLM knows what it recently sent.
+        recent = self._state.get("recent_nudges", [])
+        if recent:
+            ctx["recent_nudges"] = "\n".join(
+                f"{i + 1}. [{e['ts'][:16]} / {e['trigger']}] {e['text']}"
+                for i, e in enumerate(recent)
+            )
+
+        health_data = build_llm_data(conn, months=3)
+
+        try:
+            baselines = compute_baselines(conn)
+        except Exception:
+            logger.warning("Baselines computation failed", exc_info=True)
+            baselines = None
+
+        import json as _json
+
+        messages = build_messages(
+            ctx,
+            health_data_json=_json.dumps(health_data, default=str),
+            baselines=baselines,
+        )
+
+        # Inject conversation history before the last user message.
+        # build_messages returns [system, user-prompt]. We insert the
+        # conversation buffer between them so the LLM sees:
+        #   system → context prompt → ...conversation turns...
+        conv_msgs = self._conversation.to_messages()
+        if conv_msgs:
+            messages = messages[:2] + conv_msgs
+
+        result = call_llm(
+            messages,
+            model=self.model,
+            conn=conn,
+            request_type="chat",
+            max_tokens=1024,
+        )
+        return result.text
+
+    # ------------------------------------------------------------------
     # Scheduled checks
     # ------------------------------------------------------------------
 
@@ -491,6 +667,8 @@ class ZdrowskitDaemon:
         )
         scheduled_thread.start()
 
+        self._start_telegram_poller()
+
         logger.info("Daemon running — press Ctrl+C to stop")
         try:
             while observer.is_alive():
@@ -498,6 +676,7 @@ class ZdrowskitDaemon:
         except KeyboardInterrupt:
             logger.info("Shutting down daemon")
         finally:
+            self._stop_event.set()
             observer.stop()
             observer.join()
             logger.info("Daemon stopped")
