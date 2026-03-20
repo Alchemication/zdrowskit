@@ -6,6 +6,8 @@ Apple sends you a nudge when you close your rings. zdrowskit reads your actual d
 
 Had a rough Monday and skipped your workout? No panic. zdrowskit knows your plan, your goals, and your week so far. It tells you what matters — not what a streak counter thinks matters.
 
+Want to talk back? Send a message to your Telegram bot — ask about your data, reply to a nudge, or tell it to update your training log. It's a two-way coaching conversation, not a dashboard.
+
 Built by Adam Napora (adamsky). *Zdrowie* is Polish for health. *Kit* is the tool.
 
 ---
@@ -31,6 +33,7 @@ Apple Health export (iCloud Drive)
             ↑
         zdrowskit daemon          → watches for new data and context changes,
                                     triggers reports and nudges automatically
+                                    + listens for Telegram messages (interactive chat)
 ```
 
 zdrowskit is a local pipeline. Your data stays on your machine in a SQLite database. The only external calls are the LLM API and your chosen notification channel.
@@ -97,6 +100,9 @@ uv run python main.py nudge --trigger log_update        # respond to a log.md ch
 uv run python main.py nudge --trigger missed_session    # missed training day reminder
 uv run python main.py nudge --trigger goal_updated      # acknowledge a goals change
 uv run python main.py nudge --email                     # send nudge via email instead
+
+uv run python main.py daemon-stop                       # stop the background daemon
+uv run python main.py daemon-restart                    # restart (or re-load) the daemon
 ```
 
 Data dir defaults to `~/Documents/zdrowskit/MyHealth/`. Override with `--data-dir` or the `HEALTH_DATA_DIR` env var. Run any command with `--help` for the full flag list.
@@ -149,8 +155,9 @@ tail -f ~/Library/Logs/zdrowskit.daemon.log
 
 | Scenario | Command |
 |---|---|
-| Code change in `src/` (e.g. `daemon.py`, `commands.py`) | `launchctl kickstart -k gui/$(id -u)/com.zdrowskit.daemon` |
-| Change to `.env` (new API key, etc.) | `launchctl kickstart -k gui/$(id -u)/com.zdrowskit.daemon` |
+| Code change in `src/` (e.g. `daemon.py`, `commands.py`) | `uv run python main.py daemon-restart` |
+| Change to `.env` (new API key, etc.) | `uv run python main.py daemon-restart` |
+| Stop for testing in foreground | `uv run python main.py daemon-stop` |
 | Change to the `.plist` itself | See below |
 | Context file changes (`*.md`) | **No restart needed** — read at trigger time |
 | State file reset | **No restart needed** — read on every trigger |
@@ -168,9 +175,30 @@ cp launchd/com.zdrowskit.daemon.plist ~/Library/LaunchAgents/
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.zdrowskit.daemon.plist
 ```
 
+## Interactive chat — talk to your coach
+
+The daemon also runs a Telegram long-polling listener. Send a message to your bot from Telegram and get a coaching response backed by your full health context.
+
+**What you can do:**
+- Send any message — ask about your data, how your week is going, or what to do next
+- Reply to a nudge or weekly report — the bot knows which message you're responding to
+- `/clear` — reset the conversation buffer
+- `/status` — see buffer size and nudge count
+
+**Setup:**
+```bash
+# Copy the chat prompt template (one-time)
+cp examples/context/chat_prompt.md ~/Documents/zdrowskit/ContextFiles/
+
+# Run the daemon (chat listener starts automatically)
+uv run python src/daemon.py --foreground
+```
+
+The conversation buffer holds the last 20 messages in memory. It resets when the daemon restarts, but the LLM still has your context files and history for continuity.
+
 ## Context files
 
-The `insights` and `nudge` commands use markdown files from `~/Documents/zdrowskit/ContextFiles/` to give the LLM real context about *you* — not just your numbers:
+The `insights`, `nudge`, and `chat` commands use markdown files from `~/Documents/zdrowskit/ContextFiles/` to give the LLM real context about *you* — not just your numbers:
 
 | File | Who edits | Purpose |
 |------|-----------|---------|
@@ -181,6 +209,7 @@ The `insights` and `nudge` commands use markdown files from `~/Documents/zdrowsk
 | `soul.md` | you | AI coach persona — tone, style, coaching philosophy |
 | `prompt.md` | you | Weekly report prompt template |
 | `nudge_prompt.md` | you | Nudge prompt template — controls short notification style |
+| `chat_prompt.md` | you | Interactive chat prompt template — conversational coaching style |
 | `history.md` | auto | LLM's own memory — appended after each weekly report |
 
 Example versions of all files are in `examples/context/`.

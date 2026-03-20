@@ -2,7 +2,7 @@
 
 ## What is zdrowskit
 
-Your 24/7 ultra-personal trainer. Parses Apple Health exports (metrics, workouts, GPX routes), stores them in SQLite, and uses an LLM to generate personalised weekly reports and short nudges via Telegram/email. A daemon watches for new data and fires nudges automatically.
+Your 24/7 ultra-personal trainer. Parses Apple Health exports (metrics, workouts, GPX routes), stores them in SQLite, and uses an LLM to generate personalised weekly reports and short nudges via Telegram/email. A daemon watches for new data, fires nudges automatically, and listens for incoming Telegram messages for interactive two-way coaching chat.
 
 ## Commands
 
@@ -17,7 +17,8 @@ uv run python main.py status          # DB row counts + date range
 uv run python main.py context         # show context files and their status
 uv run python main.py llm-log         # query LLM call history (add --stats, --id N, --json)
 uv run python main.py daemon-restart  # restart the background launchd daemon
-uv run python src/daemon.py --foreground  # run filesystem watcher in foreground
+uv run python main.py daemon-stop     # stop and unload the background daemon
+uv run python src/daemon.py --foreground  # run filesystem watcher + chat in foreground
 ```
 
 ## Collaboration Style
@@ -68,6 +69,15 @@ Schema lives in `src/models.py` — start there when changing fields. `src/comma
 
 LLM context files live in `~/Documents/zdrowskit/ContextFiles/`:
 
-`soul.md`, `me.md`, `goals.md`, `plan.md`, `log.md`, `history.md`, `prompt.md`, `nudge_prompt.md`
+`soul.md`, `me.md`, `goals.md`, `plan.md`, `log.md`, `history.md`, `prompt.md`, `nudge_prompt.md`, `chat_prompt.md`
 
 Examples in `examples/context/`. `me.md` is also auto-updated by `src/baselines.py`.
+
+## Telegram Interactive Chat
+
+The daemon runs a Telegram long-polling listener (`src/telegram_bot.py`) for two-way coaching conversations. Key modules:
+
+- `src/telegram_bot.py` — `TelegramPoller` (long polling) + `ConversationBuffer` (thread-safe, 20-message in-memory buffer)
+- `examples/context/chat_prompt.md` — conversational prompt template (must be copied to ContextFiles)
+- Bot commands: `/clear` (reset buffer), `/status` (buffer size, nudge count)
+- Reply-to context: replying to a nudge/report injects the original text so the LLM knows what you're responding to
