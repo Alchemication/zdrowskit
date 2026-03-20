@@ -472,7 +472,15 @@ class ZdrowskitDaemon:
             )
 
         self._conversation.add("user", text)
-        self._poller.send_typing()
+
+        # Keep typing indicator alive during the LLM call.
+        typing_stop = threading.Event()
+        typing_thread = threading.Thread(
+            target=self._poller.start_typing_loop,
+            args=(typing_stop,),
+            daemon=True,
+        )
+        typing_thread.start()
 
         try:
             from store import open_db
@@ -489,6 +497,8 @@ class ZdrowskitDaemon:
                 reply_to_message_id=message_id,
             )
             return
+        finally:
+            typing_stop.set()
 
         self._conversation.add("assistant", reply)
         self._poller.send_reply(reply, reply_to_message_id=message_id)

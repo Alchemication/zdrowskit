@@ -101,7 +101,20 @@ class TelegramPoller:
         try:
             urllib.request.urlopen(req)  # noqa: S310
         except Exception:
-            pass  # Best-effort, not worth logging
+            logger.debug("Failed to send typing indicator", exc_info=True)
+
+    def start_typing_loop(self, stop: threading.Event) -> None:
+        """Send 'typing...' every 4 seconds until *stop* is set.
+
+        Telegram's typing indicator expires after ~5 seconds, so this
+        keeps it alive during long LLM calls. Run in a daemon thread.
+
+        Args:
+            stop: Event that signals the loop to stop.
+        """
+        while not stop.is_set():
+            self.send_typing()
+            stop.wait(4)
 
     def get_updates(self, offset: int, timeout: int = 30) -> list[dict]:
         """Fetch new updates via long polling.
