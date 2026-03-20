@@ -473,14 +473,8 @@ class ZdrowskitDaemon:
 
         self._conversation.add("user", text)
 
-        # Keep typing indicator alive during the LLM call.
-        typing_stop = threading.Event()
-        typing_thread = threading.Thread(
-            target=self._poller.start_typing_loop,
-            args=(typing_stop,),
-            daemon=True,
-        )
-        typing_thread.start()
+        # Send a placeholder so the user sees immediate feedback.
+        placeholder_id = self._poller.send_placeholder(reply_to_message_id=message_id)
 
         try:
             from store import open_db
@@ -492,16 +486,22 @@ class ZdrowskitDaemon:
                 conn.close()
         except Exception:
             logger.error("Chat LLM call failed", exc_info=True)
-            self._poller.send_reply(
-                "Something went wrong — try again in a minute.",
-                reply_to_message_id=message_id,
-            )
+            if placeholder_id:
+                self._poller.edit_message(
+                    placeholder_id, "Something went wrong — try again in a minute."
+                )
+            else:
+                self._poller.send_reply(
+                    "Something went wrong — try again in a minute.",
+                    reply_to_message_id=message_id,
+                )
             return
-        finally:
-            typing_stop.set()
 
         self._conversation.add("assistant", reply)
-        self._poller.send_reply(reply, reply_to_message_id=message_id)
+        if placeholder_id:
+            self._poller.edit_message(placeholder_id, reply)
+        else:
+            self._poller.send_reply(reply, reply_to_message_id=message_id)
 
     def _handle_command(self, text: str, message_id: int) -> None:
         """Handle a Telegram bot /command.

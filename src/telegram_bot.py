@@ -144,6 +144,70 @@ class TelegramPoller:
             logger.warning("Telegram polling error: %s", exc)
             return []
 
+    def send_placeholder(self, reply_to_message_id: int | None = None) -> int | None:
+        """Send a '...' placeholder message and return its message ID.
+
+        The caller can later replace it with the real response via
+        :meth:`edit_message`.
+
+        Args:
+            reply_to_message_id: Optional message ID to reply to.
+
+        Returns:
+            The message_id of the placeholder, or None on failure.
+        """
+        url = f"{self._base_url}/sendMessage"
+        payload: dict = {
+            "chat_id": self._chat_id,
+            "text": "\u2026",  # ellipsis character
+        }
+        if reply_to_message_id is not None:
+            payload["reply_to_message_id"] = reply_to_message_id
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            url, data=data, headers={"Content-Type": "application/json"}
+        )
+        try:
+            with urllib.request.urlopen(req) as resp:  # noqa: S310
+                body = json.loads(resp.read().decode("utf-8"))
+            if body.get("ok"):
+                return body["result"]["message_id"]
+        except Exception:
+            logger.debug("Failed to send placeholder", exc_info=True)
+        return None
+
+    def edit_message(self, message_id: int, text: str) -> None:
+        """Edit an existing message's text.
+
+        If the text is too long for a single message, edits the first
+        chunk into the placeholder and sends the rest as new messages.
+
+        Args:
+            message_id: ID of the message to edit.
+            text: New text content.
+        """
+        chunks = chunk_text(text)
+        url = f"{self._base_url}/editMessageText"
+        payload: dict = {
+            "chat_id": self._chat_id,
+            "message_id": message_id,
+            "text": chunks[0],
+            "disable_web_page_preview": True,
+        }
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            url, data=data, headers={"Content-Type": "application/json"}
+        )
+        try:
+            urllib.request.urlopen(req)  # noqa: S310
+        except Exception:
+            logger.warning("Failed to edit message %d", message_id, exc_info=True)
+            return
+
+        # Send remaining chunks as new messages.
+        for chunk in chunks[1:]:
+            self.send_reply(chunk)
+
     def send_reply(self, text: str, reply_to_message_id: int | None = None) -> None:
         """Send a text message, chunking if necessary.
 
