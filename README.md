@@ -101,6 +101,11 @@ uv run python main.py nudge --trigger missed_session    # missed training day re
 uv run python main.py nudge --trigger goal_updated      # acknowledge a goals change
 uv run python main.py nudge --email                     # send nudge via email instead
 
+uv run python main.py llm-log                           # last 10 LLM calls
+uv run python main.py llm-log --stats                   # usage summary by type and model
+uv run python main.py llm-log --id 42                   # full detail for a specific call
+uv run python main.py llm-log --json                    # output as JSON
+
 uv run python main.py daemon-stop                       # stop the background daemon
 uv run python main.py daemon-restart                    # restart (or re-load) the daemon
 ```
