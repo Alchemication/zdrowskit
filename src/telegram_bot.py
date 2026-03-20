@@ -89,6 +89,20 @@ class TelegramPoller:
         self._chat_id = chat_id
         self._base_url = f"https://api.telegram.org/bot{bot_token}"
 
+    def send_typing(self) -> None:
+        """Send a 'typing...' chat action indicator."""
+        url = f"{self._base_url}/sendChatAction"
+        data = json.dumps({"chat_id": self._chat_id, "action": "typing"}).encode(
+            "utf-8"
+        )
+        req = urllib.request.Request(
+            url, data=data, headers={"Content-Type": "application/json"}
+        )
+        try:
+            urllib.request.urlopen(req)  # noqa: S310
+        except Exception:
+            pass  # Best-effort, not worth logging
+
     def get_updates(self, offset: int, timeout: int = 30) -> list[dict]:
         """Fetch new updates via long polling.
 

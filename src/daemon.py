@@ -472,6 +472,7 @@ class ZdrowskitDaemon:
             )
 
         self._conversation.add("user", text)
+        self._poller.send_typing()
 
         try:
             from store import open_db
