@@ -25,6 +25,10 @@
     <key>RunAtLoad</key>
     <true/>
 
+    <!-- Prevent system sleep while the daemon is running -->
+    <key>PreventsSleep</key>
+    <true/>
+
     <!-- Logs — both stdout and stderr go here; daemon also writes to daemon.log -->
     <key>StandardOutPath</key>
     <string>/Users/adamsky/Library/Logs/zdrowskit.daemon.log</string>

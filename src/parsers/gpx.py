@@ -23,6 +23,7 @@ from __future__ import annotations
 import logging
 import math
 import statistics
+import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -150,7 +151,15 @@ def parse_gpx_file(path: Path) -> GPXStats:
     Raises:
         ValueError: If the file contains no trackpoints.
     """
-    tree = ET.parse(path)
+    for attempt in range(3):
+        try:
+            tree = ET.parse(path)
+            break
+        except OSError:
+            if attempt < 2:
+                time.sleep(5)
+            else:
+                raise
     root = tree.getroot()
 
     trkpts = root.findall(f".//{_TAG('trkpt')}")
