@@ -151,13 +151,15 @@ def parse_gpx_file(path: Path) -> GPXStats:
     Raises:
         ValueError: If the file contains no trackpoints.
     """
-    for attempt in range(3):
+    delays = (10, 30, 60)
+    for attempt in range(len(delays)):
         try:
             tree = ET.parse(path)
             break
         except OSError:
-            if attempt < 2:
-                time.sleep(5)
+            if attempt < len(delays) - 1:
+                logger.debug("Retry %d for %s (iCloud lock)", attempt + 1, path.name)
+                time.sleep(delays[attempt])
             else:
                 raise
     root = tree.getroot()

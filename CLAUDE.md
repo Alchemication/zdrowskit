@@ -9,14 +9,20 @@ Your 24/7 ultra-personal trainer. Parses Apple Health exports (metrics, workouts
 Always use `uv run` — never plain `python`. Run any subcommand with `--help` for full flags.
 
 ```bash
-uv run python main.py import       # parse health data, upsert into DB
-uv run python main.py insights     # LLM weekly report (add --telegram, --email, --explain)
-uv run python main.py nudge        # short LLM nudge (add --trigger TYPE)
-uv run python main.py report       # terminal summary (add --llm, --history, --json)
-uv run python main.py status       # DB row counts + date range
-uv run python main.py context      # show context files and their status
-uv run python src/daemon.py --foreground  # run filesystem watcher
+uv run python main.py import          # parse health data, upsert into DB
+uv run python main.py insights        # LLM weekly report (add --telegram, --email, --explain)
+uv run python main.py nudge           # short LLM nudge (add --trigger TYPE)
+uv run python main.py report          # terminal summary (add --llm, --history, --json)
+uv run python main.py status          # DB row counts + date range
+uv run python main.py context         # show context files and their status
+uv run python main.py llm-log         # query LLM call history (add --stats, --id N, --json)
+uv run python main.py daemon-restart  # restart the background launchd daemon
+uv run python src/daemon.py --foreground  # run filesystem watcher in foreground
 ```
+
+## Collaboration Style
+
+Challenge my ideas early. If an approach is over-engineered, fragile, or there's a simpler/better alternative I might be missing — say so directly with reasoning. Don't just execute instructions; flag knowledge gaps, hidden trade-offs, or narrowed thinking. Be pragmatic: save me from wasting time on something that could be done better.
 
 ## Code Style
 
