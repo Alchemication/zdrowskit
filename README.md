@@ -191,6 +191,9 @@ The daemon also runs a Telegram long-polling listener. Send a message to your bo
 - Share updates naturally ("my weight is 76kg now", "dropping strength to 1x/week") — the LLM proposes edits to your context files with Accept/Reject buttons
 - `/clear` — reset the conversation buffer
 - `/status` — see buffer size and nudge count
+- `/context` — list all context files with line counts
+- `/context <name>` — show full content of a file (e.g. `/context me`)
+- `/help` — list all available commands
 
 **Setup:**
 ```bash
