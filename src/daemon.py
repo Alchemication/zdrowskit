@@ -24,6 +24,10 @@ import time
 import types
 from datetime import date, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from context_edit import ContextEdit
 
 logger = logging.getLogger(__name__)
 
@@ -134,20 +138,20 @@ def _make_health_handler(on_json_modified, on_xml_created):  # type: ignore[no-u
 def _make_context_handler(on_file_changed):  # type: ignore[no-untyped-def]
     """Build a watchdog FileSystemEventHandler for the context .md files dir.
 
-    Triggers on modifications to log.md, goals.md, and plan.md only.
-    Ignores me.md (auto-rewritten by baselines), soul.md, history.md,
-    prompt.md, and nudge_prompt.md.
+    Triggers on modifications to user-editable context files: me.md,
+    log.md, goals.md, and plan.md. Ignores auto-managed files
+    (baselines.md, history.md) and prompt templates.
 
     Args:
         on_file_changed: Callable(stem: str) called with the file stem
-            (e.g. "log", "goals", "plan").
+            (e.g. "log", "goals", "plan", "me").
 
     Returns:
         A watchdog FileSystemEventHandler instance.
     """
     from watchdog.events import FileSystemEventHandler
 
-    WATCHED_STEMS = {"log", "goals", "plan"}
+    WATCHED_STEMS = {"me", "log", "goals", "plan"}
 
     class _Handler(FileSystemEventHandler):
         def on_modified(self, event) -> None:  # type: ignore[override]
@@ -244,6 +248,7 @@ class ZdrowskitDaemon:
             stem: File stem that changed.
         """
         trigger_map = {
+            "me": "profile_updated",
             "log": "log_update",
             "goals": "goal_updated",
             "plan": "plan_updated",
@@ -429,9 +434,14 @@ class ZdrowskitDaemon:
         self._poller = TelegramPoller(bot_token, chat_id)
         self._conversation = ConversationBuffer()
 
+        from context_edit import PendingEdits
+
+        self._pending_edits = PendingEdits()
+
         thread = threading.Thread(
             target=self._poller.poll_loop,
             args=(self._handle_telegram_message, self._stop_event),
+            kwargs={"on_callback": self._handle_telegram_callback},
             daemon=True,
             name="telegram-poller",
         )
@@ -482,7 +492,7 @@ class ZdrowskitDaemon:
 
             conn = open_db(self.db)
             try:
-                reply = self._chat_reply(conn)
+                raw_reply = self._chat_reply(conn)
             finally:
                 conn.close()
         except Exception:
@@ -498,11 +508,19 @@ class ZdrowskitDaemon:
                 )
             return
 
+        from context_edit import extract_context_update, strip_context_update
+
+        edit = extract_context_update(raw_reply)
+        reply = strip_context_update(raw_reply)
+
         self._conversation.add("assistant", reply)
         if placeholder_id:
             self._poller.edit_message(placeholder_id, reply)
         else:
             self._poller.send_reply(reply, reply_to_message_id=message_id)
+
+        if edit:
+            self._propose_context_edit(edit)
 
     def _handle_command(self, text: str, message_id: int) -> None:
         """Handle a Telegram bot /command.
@@ -534,6 +552,78 @@ class ZdrowskitDaemon:
                 "Unknown command. Available: /clear, /status",
                 reply_to_message_id=message_id,
             )
+
+    def _propose_context_edit(self, edit: "ContextEdit") -> None:
+        """Send a context edit proposal or auto-apply it.
+
+        Args:
+            edit: The validated context edit extracted from the LLM response.
+        """
+        from config import AUTO_ACCEPT_CONTEXT_EDITS
+        from context_edit import apply_edit
+
+        if AUTO_ACCEPT_CONTEXT_EDITS:
+            try:
+                apply_edit(self.context_dir, edit)
+                self._poller.send_reply(
+                    f"\u2705 Updated {edit.file}.md: {edit.summary}"
+                )
+            except Exception:
+                logger.error("Failed to auto-apply context edit", exc_info=True)
+            return
+
+        edit_id = self._pending_edits.store(edit)
+        preview = edit.content[:500]
+        if len(edit.content) > 500:
+            preview += "\n[...truncated]"
+        text = f"Proposed update to {edit.file}.md:\n{edit.summary}\n\n{preview}"
+        buttons = [
+            [
+                {"text": "\u2705 Accept", "callback_data": f"ctx_accept:{edit_id}"},
+                {"text": "\u274c Reject", "callback_data": f"ctx_reject:{edit_id}"},
+            ]
+        ]
+        self._poller.send_message_with_keyboard(text, buttons)
+
+    def _handle_telegram_callback(self, callback_query: dict) -> None:
+        """Handle an inline keyboard button press.
+
+        Args:
+            callback_query: Telegram callback_query dict from the Bot API.
+        """
+        from context_edit import apply_edit
+
+        cb_id = callback_query["id"]
+        data = callback_query.get("data", "")
+        msg = callback_query.get("message", {})
+        msg_id = msg.get("message_id")
+
+        if data.startswith("ctx_accept:"):
+            edit_id = data.split(":", 1)[1]
+            edit = self._pending_edits.pop(edit_id)
+            if edit:
+                try:
+                    apply_edit(self.context_dir, edit)
+                    self._poller.answer_callback_query(cb_id, "Applied!")
+                    if msg_id:
+                        self._poller.edit_message(
+                            msg_id, f"\u2705 Applied: {edit.summary}"
+                        )
+                except Exception:
+                    logger.error("Failed to apply context edit", exc_info=True)
+                    self._poller.answer_callback_query(cb_id, "Error applying edit.")
+            else:
+                self._poller.answer_callback_query(cb_id, "Expired or already handled.")
+                if msg_id:
+                    self._poller.edit_message(msg_id, "This edit has expired.")
+
+        elif data.startswith("ctx_reject:"):
+            edit_id = data.split(":", 1)[1]
+            edit = self._pending_edits.pop(edit_id)
+            self._poller.answer_callback_query(cb_id, "Discarded.")
+            if msg_id:
+                summary = edit.summary if edit else "unknown"
+                self._poller.edit_message(msg_id, f"\u274c Discarded: {summary}")
 
     def _chat_reply(self, conn: sqlite3.Connection) -> str:
         """Build context, call the LLM, and return the reply text.

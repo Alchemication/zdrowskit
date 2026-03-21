@@ -69,15 +69,24 @@ Schema lives in `src/models.py` — start there when changing fields. `src/comma
 
 LLM context files live in `~/Documents/zdrowskit/ContextFiles/`:
 
-`soul.md`, `me.md`, `goals.md`, `plan.md`, `log.md`, `history.md`, `prompt.md`, `nudge_prompt.md`, `chat_prompt.md`
-
-Examples in `examples/context/`. `me.md` is also auto-updated by `src/baselines.py`.
+| File | Ownership | Purpose |
+|------|-----------|---------|
+| `me.md` | user | Physical profile — age, weight, injuries, pace zones |
+| `goals.md` | user | Fitness goals with timelines |
+| `plan.md` | user | Weekly training schedule, diet, sleep targets |
+| `log.md` | user | Weekly journal — what happened and why |
+| `soul.md` | user | AI coach persona |
+| `baselines.md` | auto | Rolling averages from DB (written by `insights`) |
+| `history.md` | auto | LLM memory (appended after each weekly report) |
+| `prompt.md`, `nudge_prompt.md`, `chat_prompt.md` | user | Prompt templates (examples in `examples/context/`) |
 
 ## Telegram Interactive Chat
 
 The daemon runs a Telegram long-polling listener (`src/telegram_bot.py`) for two-way coaching conversations. Key modules:
 
 - `src/telegram_bot.py` — `TelegramPoller` (long polling) + `ConversationBuffer` (thread-safe, 20-message in-memory buffer)
+- `src/context_edit.py` — auto-update context files from chat (extract `<context_update>` from LLM response, confirm via inline keyboard, write file)
 - `examples/context/chat_prompt.md` — conversational prompt template (must be copied to ContextFiles)
 - Bot commands: `/clear` (reset buffer), `/status` (buffer size, nudge count)
 - Reply-to context: replying to a nudge/report injects the original text so the LLM knows what you're responding to
+- Context auto-updates: the LLM can propose edits to me/goals/plan/log.md; user confirms via Accept/Reject buttons (or auto-accept via `ZDROWSKIT_AUTO_ACCEPT_EDITS=1`)

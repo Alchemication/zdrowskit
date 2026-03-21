@@ -178,32 +178,16 @@ def _print_explain(
         stderr.print(f"\n[dim]Report saved to:[/dim] [cyan]{report_path}[/cyan]")
 
 
-def _update_me_baselines(me_path: Path, baselines: str) -> None:
-    """Replace or append the auto-computed baselines section in me.md.
-
-    Looks for a line starting with '## Baselines' and replaces everything
-    from that heading to the next '## ' heading (or EOF). If no such
-    section exists, appends the baselines at the end of the file.
+def _save_baselines(context_dir: Path, baselines: str) -> None:
+    """Write auto-computed baselines to a dedicated baselines.md file.
 
     Args:
-        me_path: Path to the me.md context file.
+        context_dir: Directory containing the context files.
         baselines: Markdown string produced by compute_baselines().
     """
-    if not me_path.exists():
-        logger.warning("me.md not found at %s — skipping baselines update", me_path)
-        return
-
-    content = me_path.read_text(encoding="utf-8")
-
-    # Match from '## Baselines' to next '## ' heading or EOF
-    pattern = r"(?m)^## Baselines.*?(?=^## |\Z)"
-    if re.search(pattern, content, flags=re.DOTALL):
-        updated = re.sub(pattern, baselines.rstrip() + "\n\n", content, flags=re.DOTALL)
-    else:
-        updated = content.rstrip() + "\n\n" + baselines.rstrip() + "\n"
-
-    me_path.write_text(updated, encoding="utf-8")
-    logger.info("Updated baselines in %s", me_path)
+    path = context_dir / "baselines.md"
+    path.write_text(baselines.rstrip() + "\n", encoding="utf-8")
+    logger.info("Saved baselines to %s", path)
 
 
 def _save_report(report: str, week: str) -> Path:
@@ -379,10 +363,11 @@ def cmd_context(args: argparse.Namespace) -> None:
     # (name, owner, purpose)
     # owner: "you" = user-edited, "auto" = system-managed, "you + auto" = both
     context_files = [
-        ("me.md", "you + auto", "Your profile + auto-computed baselines"),
+        ("me.md", "you", "Your physical profile — age, weight, injuries, pace zones"),
         ("goals.md", "you", "Your fitness goals with timelines"),
         ("plan.md", "you", "Weekly training schedule, diet, sleep targets"),
         ("log.md", "you", "Weekly journal — why things happened"),
+        ("baselines.md", "auto", "Auto-computed rolling averages from DB"),
         ("soul.md", "you", "AI coach persona — tone, style, philosophy"),
         ("prompt.md", "you", "Prompt template — controls report structure"),
         ("history.md", "auto", "LLM memory — appended after each insights run"),
@@ -391,7 +376,6 @@ def cmd_context(args: argparse.Namespace) -> None:
     owner_styles = {
         "you": "[green]you edit[/green]",
         "auto": "[blue]auto-managed[/blue]",
-        "you + auto": "[green]you edit[/green] + [blue]auto baselines[/blue]",
     }
 
     table = Table(title="Context Files", show_lines=False)
@@ -451,7 +435,7 @@ def cmd_insights(args: argparse.Namespace) -> None:
     baselines = None
     if not args.no_update_baselines:
         baselines = compute_baselines(conn)
-        _update_me_baselines(CONTEXT_DIR / "me.md", baselines)
+        _save_baselines(CONTEXT_DIR, baselines)
 
     health_data_json = json.dumps(health_data, indent=2)
 

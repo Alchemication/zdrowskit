@@ -131,6 +131,7 @@ launchctl load ~/Library/LaunchAgents/com.zdrowskit.daemon.plist
 |---|---|---|
 | Monday 8–9 AM | scheduled | Full weekly report (previous week) |
 | New health data synced | 3 min | Short nudge |
+| `me.md` updated | 60 sec | Nudge noting the profile change |
 | `log.md` updated | 60 sec | Nudge responding to your note |
 | `goals.md` updated | 60 sec | Nudge acknowledging the change |
 | `plan.md` updated | 60 sec | Nudge reviewing the new plan |
@@ -187,6 +188,7 @@ The daemon also runs a Telegram long-polling listener. Send a message to your bo
 **What you can do:**
 - Send any message — ask about your data, how your week is going, or what to do next
 - Reply to a nudge or weekly report — the bot knows which message you're responding to
+- Share updates naturally ("my weight is 76kg now", "dropping strength to 1x/week") — the LLM proposes edits to your context files with Accept/Reject buttons
 - `/clear` — reset the conversation buffer
 - `/status` — see buffer size and nudge count
 
@@ -207,11 +209,12 @@ The `insights`, `nudge`, and `chat` commands use markdown files from `~/Document
 
 | File | Who edits | Purpose |
 |------|-----------|---------|
-| `me.md` | you + auto | Your profile — age, weight, injuries, personal baselines |
-| `goals.md` | you | Health and fitness goals with timelines |
-| `plan.md` | you | Weekly training schedule, diet approach, sleep targets |
-| `log.md` | you | Freeform weekly journal — *why* things happened (travel, illness, life) |
+| `me.md` | you (or chat) | Your profile — age, weight, injuries, pace zones |
+| `goals.md` | you (or chat) | Health and fitness goals with timelines |
+| `plan.md` | you (or chat) | Weekly training schedule, diet approach, sleep targets |
+| `log.md` | you (or chat) | Freeform weekly journal — *why* things happened (travel, illness, life) |
 | `soul.md` | you | AI coach persona — tone, style, coaching philosophy |
+| `baselines.md` | auto | Rolling averages computed from DB (updated on each `insights` run) |
 | `prompt.md` | you | Weekly report prompt template |
 | `nudge_prompt.md` | you | Nudge prompt template — controls short notification style |
 | `chat_prompt.md` | you | Interactive chat prompt template — conversational coaching style |

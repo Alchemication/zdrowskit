@@ -30,6 +30,14 @@ MAX_HISTORY_ENTRIES: int = 8
 MAX_CONVERSATION_MESSAGES: int = 20
 """Maximum number of messages to keep in the in-memory chat conversation buffer."""
 
+EDITABLE_CONTEXT_FILES: set[str] = {"me", "goals", "plan", "log"}
+"""Context file stems that may be updated via chat."""
+
+AUTO_ACCEPT_CONTEXT_EDITS: bool = (
+    os.environ.get("ZDROWSKIT_AUTO_ACCEPT_EDITS", "") == "1"
+)
+"""When True, apply context edits without confirmation."""
+
 
 def resolve_data_dir(arg: str | None) -> Path:
     """Resolve the data directory from CLI arg, env var, or default path.

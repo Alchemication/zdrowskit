@@ -130,7 +130,7 @@ class TelegramPoller:
         url = (
             f"{self._base_url}/getUpdates"
             f"?offset={offset}&timeout={timeout}"
-            f"&allowed_updates=%5B%22message%22%5D"  # ["message"]
+            f"&allowed_updates=%5B%22message%22%2C%22callback_query%22%5D"  # ["message","callback_query"]
         )
         req = urllib.request.Request(url)
         try:
@@ -238,19 +238,81 @@ class TelegramPoller:
                 )
                 return
 
+    def send_message_with_keyboard(
+        self,
+        text: str,
+        buttons: list[list[dict[str, str]]],
+        reply_to_message_id: int | None = None,
+    ) -> int | None:
+        """Send a message with an inline keyboard.
+
+        Args:
+            text: Message text.
+            buttons: Rows of inline keyboard buttons. Each button is a dict
+                with ``"text"`` and ``"callback_data"`` keys.
+            reply_to_message_id: Optional message ID to reply to.
+
+        Returns:
+            The message_id of the sent message, or None on failure.
+        """
+        url = f"{self._base_url}/sendMessage"
+        payload: dict = {
+            "chat_id": self._chat_id,
+            "text": text,
+            "disable_web_page_preview": True,
+            "reply_markup": {"inline_keyboard": buttons},
+        }
+        if reply_to_message_id is not None:
+            payload["reply_to_message_id"] = reply_to_message_id
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            url, data=data, headers={"Content-Type": "application/json"}
+        )
+        try:
+            with urllib.request.urlopen(req) as resp:  # noqa: S310
+                body = json.loads(resp.read().decode("utf-8"))
+            if body.get("ok"):
+                return body["result"]["message_id"]
+        except Exception:
+            logger.warning("Failed to send message with keyboard", exc_info=True)
+        return None
+
+    def answer_callback_query(self, callback_query_id: str, text: str = "") -> None:
+        """Answer an inline keyboard callback to dismiss the loading indicator.
+
+        Args:
+            callback_query_id: The callback query ID from Telegram.
+            text: Optional short text shown as a toast notification.
+        """
+        url = f"{self._base_url}/answerCallbackQuery"
+        payload: dict = {"callback_query_id": callback_query_id}
+        if text:
+            payload["text"] = text
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            url, data=data, headers={"Content-Type": "application/json"}
+        )
+        try:
+            urllib.request.urlopen(req)  # noqa: S310
+        except Exception:
+            logger.debug("Failed to answer callback query", exc_info=True)
+
     def poll_loop(
         self,
         on_message: callable,
         stop_event: threading.Event,
+        on_callback: callable | None = None,
     ) -> None:
         """Run the long-polling loop until *stop_event* is set.
 
         For each text message from the allowed chat, calls
-        ``on_message(message_dict)``.
+        ``on_message(message_dict)``. For inline keyboard callbacks,
+        calls ``on_callback(callback_query_dict)`` if provided.
 
         Args:
             on_message: Callback receiving a Telegram message dict.
             stop_event: Event that signals the loop to stop.
+            on_callback: Optional callback for inline keyboard button presses.
         """
         offset = 0
         logger.info("Telegram poller started (chat_id=%s)", self._chat_id)
@@ -262,6 +324,20 @@ class TelegramPoller:
 
             for update in updates:
                 offset = update["update_id"] + 1
+
+                # Handle inline keyboard callbacks.
+                cb = update.get("callback_query")
+                if cb and on_callback:
+                    cb_chat_id = str(
+                        cb.get("message", {}).get("chat", {}).get("id", "")
+                    )
+                    if cb_chat_id == self._chat_id:
+                        try:
+                            on_callback(cb)
+                        except Exception:
+                            logger.error("Error handling callback query", exc_info=True)
+                    continue
+
                 msg = update.get("message")
                 if not msg:
                     continue
