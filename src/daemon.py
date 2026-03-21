@@ -547,11 +547,126 @@ class ZdrowskitDaemon:
             if last_nudge:
                 lines.append(f"Last nudge: {last_nudge[:16]}")
             self._poller.send_reply("\n".join(lines), reply_to_message_id=message_id)
+        elif cmd == "/context":
+            parts = text.split()
+            file_arg = parts[1] if len(parts) > 1 else None
+            self._send_context_overview(message_id, file_arg)
+        elif cmd == "/help":
+            from config import CONTEXT_DIR
+
+            ctx_names = sorted(
+                f.stem for f in CONTEXT_DIR.glob("*.md") if f.stat().st_size > 0
+            )
+            ctx_opts = ", ".join(ctx_names) if ctx_names else "none found"
+            help_text = (
+                "/clear — Reset conversation buffer\n"
+                "/status — Nudge count, buffer size, last nudge time\n"
+                "/context — List all context files\n"
+                f"/context <name> — Show full file ({ctx_opts})\n"
+                "/help — This message"
+            )
+            self._poller.send_reply(help_text, reply_to_message_id=message_id)
         else:
             self._poller.send_reply(
-                "Unknown command. Available: /clear, /status",
+                "Unknown command. Try /help",
                 reply_to_message_id=message_id,
             )
+
+    def _send_context_overview(
+        self, message_id: int, file_arg: str | None = None
+    ) -> None:
+        """Send context file info to Telegram.
+
+        With no argument, sends a compact index of all files.
+        With a file name (e.g. ``me``), sends the full content, split across
+        multiple messages if it exceeds Telegram's 4096-char limit.
+
+        Args:
+            message_id: Telegram message ID for reply threading.
+            file_arg: Optional file stem to show full content for.
+        """
+        from config import CONTEXT_DIR
+
+        if file_arg:
+            # Show full content of a specific file.
+            path = CONTEXT_DIR / f"{file_arg.removesuffix('.md')}.md"
+            if not path.exists():
+                self._poller.send_reply(
+                    f"File not found: {path.name}", reply_to_message_id=message_id
+                )
+                return
+            content = path.read_text(encoding="utf-8").strip()
+            if not content:
+                self._poller.send_reply(
+                    f"{path.name} is empty.", reply_to_message_id=message_id
+                )
+                return
+            # Split into chunks respecting Telegram's 4096 limit.
+            header = f"📄 {path.name}"
+            self._send_long_message(header, content, message_id)
+            return
+
+        # No argument — send compact index.
+        files = sorted(CONTEXT_DIR.glob("*.md"))
+        if not files:
+            self._poller.send_reply(
+                "No context files found.", reply_to_message_id=message_id
+            )
+            return
+
+        lines = []
+        for f in files:
+            try:
+                content = f.read_text(encoding="utf-8")
+                line_count = content.count("\n")
+                size = f.stat().st_size
+                lines.append(f"📄 {f.stem} — {line_count} lines ({size} B)")
+            except OSError:
+                lines.append(f"📄 {f.stem} — (unreadable)")
+        lines.append("\nUse /context <name> to view a file.")
+        self._poller.send_reply("\n".join(lines), reply_to_message_id=message_id)
+
+    def _send_long_message(self, header: str, content: str, message_id: int) -> None:
+        """Send content that may exceed Telegram's message limit.
+
+        Splits into multiple messages at line boundaries.
+
+        Args:
+            header: Header shown in the first message.
+            content: Full text content to send.
+            message_id: Telegram message ID for reply threading.
+        """
+        max_len = 4096
+        first_max = max_len - len(header) - 4  # room for header + newlines
+
+        if len(content) <= first_max:
+            self._poller.send_reply(
+                f"{header}\n\n{content}", reply_to_message_id=message_id
+            )
+            return
+
+        # Split at line boundaries.
+        chunks: list[str] = []
+        current_max = first_max
+        remaining = content
+        while remaining:
+            if len(remaining) <= current_max:
+                chunks.append(remaining)
+                break
+            # Find last newline within limit.
+            cut = remaining.rfind("\n", 0, current_max)
+            if cut <= 0:
+                cut = current_max
+            chunks.append(remaining[:cut])
+            remaining = remaining[cut:].lstrip("\n")
+            current_max = max_len - 20  # subsequent chunks get full space
+
+        for i, chunk in enumerate(chunks):
+            if i == 0:
+                text = f"{header}\n\n{chunk}"
+            else:
+                text = chunk
+            self._poller.send_reply(text, reply_to_message_id=message_id)
 
     def _propose_context_edit(self, edit: "ContextEdit") -> None:
         """Send a context edit proposal or auto-apply it.
@@ -573,10 +688,10 @@ class ZdrowskitDaemon:
             return
 
         edit_id = self._pending_edits.store(edit)
-        preview = edit.content[:500]
-        if len(edit.content) > 500:
-            preview += "\n[...truncated]"
-        text = f"Proposed update to {edit.file}.md:\n{edit.summary}\n\n{preview}"
+        action_label = (
+            "append to" if edit.action == "append" else f"replace {edit.section} in"
+        )
+        text = f"📝 {action_label} {edit.file}.md\n{edit.summary}"
         buttons = [
             [
                 {"text": "\u2705 Accept", "callback_data": f"ctx_accept:{edit_id}"},
