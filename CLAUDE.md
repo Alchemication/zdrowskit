@@ -85,7 +85,7 @@ LLM context files live in `~/Documents/zdrowskit/ContextFiles/`:
 The daemon runs a Telegram long-polling listener (`src/telegram_bot.py`) for two-way coaching conversations. Key modules:
 
 - `src/telegram_bot.py` — `TelegramPoller` (long polling) + `ConversationBuffer` (thread-safe, 20-message in-memory buffer)
-- `src/context_edit.py` — auto-update context files from chat (extract `<context_update>` from LLM response, confirm via inline keyboard, write file)
+- `src/context_edit.py` — auto-update context files from chat (extract `update_context` tool call from LLM response, confirm via inline keyboard, write file)
 - `examples/context/chat_prompt.md` — conversational prompt template (must be copied to ContextFiles)
 - Bot commands: `/clear` (reset buffer), `/status` (buffer size, nudge count), `/context` (list files or `/context <name>` for full content), `/help` (command reference)
 - Reply-to context: replying to a nudge/report injects the original text so the LLM knows what you're responding to

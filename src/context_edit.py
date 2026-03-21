@@ -98,6 +98,60 @@ def extract_context_update(response: str) -> ContextEdit | None:
     )
 
 
+def context_edit_from_tool_call(tool_call: object) -> ContextEdit | None:
+    """Build a ContextEdit from a litellm tool_call object.
+
+    Validates the same constraints as extract_context_update but reads
+    from parsed tool call arguments instead of regex-extracted JSON.
+
+    Args:
+        tool_call: A tool call object from litellm with .function.name
+            and .function.arguments attributes.
+
+    Returns:
+        A ContextEdit if valid, or None.
+    """
+    fn = getattr(tool_call, "function", None)
+    if fn is None or getattr(fn, "name", None) != "update_context":
+        return None
+
+    raw_args = getattr(fn, "arguments", "")
+    try:
+        data = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+    except (json.JSONDecodeError, ValueError):
+        logger.warning("Invalid JSON in tool call arguments: %s", raw_args[:200])
+        return None
+
+    file_stem = data.get("file", "")
+    if file_stem not in EDITABLE_CONTEXT_FILES:
+        logger.warning("Disallowed context file in tool call: %r", file_stem)
+        return None
+
+    action = data.get("action", "")
+    if action not in VALID_ACTIONS:
+        logger.warning("Unknown context edit action in tool call: %r", action)
+        return None
+
+    content = data.get("content", "")
+    summary = data.get("summary", "")
+    if not content or not summary:
+        logger.warning("Missing content or summary in tool call")
+        return None
+
+    section = data.get("section")
+    if action == "replace_section" and not section:
+        logger.warning("replace_section tool call requires a section heading")
+        return None
+
+    return ContextEdit(
+        file=file_stem,
+        action=action,
+        content=content,
+        summary=summary,
+        section=section,
+    )
+
+
 def strip_context_update(response: str) -> str:
     """Remove the <context_update> block from the visible reply.
 

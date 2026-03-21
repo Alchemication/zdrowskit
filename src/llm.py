@@ -65,6 +65,7 @@ class LLMResult:
     total_tokens: int
     latency_s: float
     cost: float | None = None
+    tool_calls: list | None = None
 
 
 DEFAULT_SOUL = (
@@ -192,12 +193,58 @@ def build_messages(
     ]
 
 
+def context_update_tool() -> list[dict]:
+    """Tool definition for context file updates, used in chat calls.
+
+    Returns:
+        A list with a single tool definition dict for litellm.
+    """
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": "update_context",
+                "description": "Update a user context file (me, goals, plan, or log).",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "file": {
+                            "type": "string",
+                            "enum": ["me", "goals", "plan", "log"],
+                            "description": "Which context file to update.",
+                        },
+                        "action": {
+                            "type": "string",
+                            "enum": ["append", "replace_section"],
+                            "description": "append: add to end of file. replace_section: replace a ## heading section.",
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "Exact markdown to write.",
+                        },
+                        "summary": {
+                            "type": "string",
+                            "description": "One-sentence description of the change.",
+                        },
+                        "section": {
+                            "type": "string",
+                            "description": "The exact ## heading to replace. Required when action is replace_section.",
+                        },
+                    },
+                    "required": ["file", "action", "content", "summary"],
+                },
+            },
+        }
+    ]
+
+
 def call_llm(
     messages: list[dict[str, str]],
     model: str = DEFAULT_MODEL,
     max_tokens: int = 4096,
     temperature: float = 0.7,
     reasoning_effort: str | None = None,
+    tools: list[dict] | None = None,
     conn: sqlite3.Connection | None = None,
     request_type: str = "",
     metadata: dict | None = None,
@@ -214,6 +261,7 @@ def call_llm(
         max_tokens: Maximum tokens in the response.
         temperature: Sampling temperature.
         reasoning_effort: Optional reasoning effort hint (model-dependent).
+        tools: Optional list of tool definitions for function calling.
         conn: Open DB connection for logging. None to skip logging.
         request_type: Product-level call type, e.g. "insights" or "nudge".
         metadata: Product context dict stored alongside the call.
@@ -233,6 +281,8 @@ def call_llm(
     }
     if reasoning_effort is not None:
         kwargs["reasoning_effort"] = reasoning_effort
+    if tools is not None:
+        kwargs["tools"] = tools
 
     t0 = time.perf_counter()
     response = litellm.completion(**kwargs)
@@ -244,14 +294,18 @@ def call_llm(
     except Exception:
         cost = None
 
+    message = response.choices[0].message
+    raw_tool_calls = getattr(message, "tool_calls", None)
+
     result = LLMResult(
-        text=response.choices[0].message.content,
+        text=message.content or "",
         model=model,
         input_tokens=usage.prompt_tokens,
         output_tokens=usage.completion_tokens,
         total_tokens=usage.total_tokens,
         latency_s=latency,
         cost=cost,
+        tool_calls=raw_tool_calls if raw_tool_calls else None,
     )
 
     if conn and request_type:

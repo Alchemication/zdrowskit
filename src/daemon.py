@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from context_edit import ContextEdit
+    from llm import LLMResult
 
 logger = logging.getLogger(__name__)
 
@@ -492,7 +493,7 @@ class ZdrowskitDaemon:
 
             conn = open_db(self.db)
             try:
-                raw_reply = self._chat_reply(conn)
+                result = self._chat_reply(conn)
             finally:
                 conn.close()
         except Exception:
@@ -508,10 +509,7 @@ class ZdrowskitDaemon:
                 )
             return
 
-        from context_edit import extract_context_update, strip_context_update
-
-        edit = extract_context_update(raw_reply)
-        reply = strip_context_update(raw_reply)
+        reply = result.text
 
         self._conversation.add("assistant", reply)
         if placeholder_id:
@@ -519,8 +517,15 @@ class ZdrowskitDaemon:
         else:
             self._poller.send_reply(reply, reply_to_message_id=message_id)
 
-        if edit:
-            self._propose_context_edit(edit)
+        # Extract context edit from tool calls (if the LLM invoked update_context).
+        if result.tool_calls:
+            from context_edit import context_edit_from_tool_call
+
+            for tc in result.tool_calls:
+                edit = context_edit_from_tool_call(tc)
+                if edit:
+                    self._propose_context_edit(edit)
+                    break  # At most one context update per response
 
     def _handle_command(self, text: str, message_id: int) -> None:
         """Handle a Telegram bot /command.
@@ -740,17 +745,23 @@ class ZdrowskitDaemon:
                 summary = edit.summary if edit else "unknown"
                 self._poller.edit_message(msg_id, f"\u274c Discarded: {summary}")
 
-    def _chat_reply(self, conn: sqlite3.Connection) -> str:
-        """Build context, call the LLM, and return the reply text.
+    def _chat_reply(self, conn: sqlite3.Connection) -> "LLMResult":
+        """Build context, call the LLM, and return the full result.
 
         Args:
             conn: Open SQLite database connection.
 
         Returns:
-            The LLM response text.
+            The LLMResult including text and any tool_calls.
         """
         from baselines import compute_baselines
-        from llm import build_llm_data, build_messages, call_llm, load_context
+        from llm import (
+            build_llm_data,
+            build_messages,
+            call_llm,
+            context_update_tool,
+            load_context,
+        )
 
         ctx = load_context(self.context_dir, prompt_file="chat_prompt")
 
@@ -786,14 +797,14 @@ class ZdrowskitDaemon:
         if conv_msgs:
             messages = messages[:2] + conv_msgs
 
-        result = call_llm(
+        return call_llm(
             messages,
             model=self.model,
+            tools=context_update_tool(),
             conn=conn,
             request_type="chat",
             max_tokens=1024,
         )
-        return result.text
 
     # ------------------------------------------------------------------
     # Scheduled checks
