@@ -74,10 +74,10 @@ LLM context files live in `~/Documents/zdrowskit/ContextFiles/`:
 | `me.md` | user | Physical profile — age, weight, injuries, pace zones |
 | `goals.md` | user | Fitness goals with timelines |
 | `plan.md` | user | Weekly training schedule, diet, sleep targets |
-| `log.md` | user | Weekly journal — what happened and why |
-| `soul.md` | user | AI coach persona |
+| `log.md` | user | Weekly journal — what happened and why (trimmed to last 5 entries in prompts) |
+| `soul.md` | user | AI coach persona (static — not auto-updated via chat) |
 | `baselines.md` | auto | Rolling averages from DB (written by `insights`) |
-| `history.md` | auto | LLM memory (appended after each weekly report) |
+| `history.md` | auto | LLM memory (appended after each weekly report; same-day runs replace, not duplicate) |
 | `prompt.md`, `nudge_prompt.md`, `chat_prompt.md` | user | Prompt templates (examples in `examples/context/`) |
 
 ## Telegram Interactive Chat
