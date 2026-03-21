@@ -467,6 +467,7 @@ class ZdrowskitDaemon:
             # Truncate very long originals (e.g. full weekly reports)
             if len(quoted) > 800:
                 quoted = quoted[:800] + "\n[...truncated]"
+            self._conversation.clear()
             self._conversation.add(
                 "assistant", f"[Previous message you sent]\n{quoted}"
             )
