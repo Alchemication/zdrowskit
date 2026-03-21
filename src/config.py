@@ -27,6 +27,9 @@ NUDGES_DIR: Path = Path.home() / "Documents" / "zdrowskit" / "Nudges"
 MAX_HISTORY_ENTRIES: int = 8
 """Maximum number of entries to retain in history.md."""
 
+MAX_LOG_ENTRIES: int = 5
+"""Maximum number of entries to inject from log.md into LLM prompts."""
+
 MAX_CONVERSATION_MESSAGES: int = 20
 """Maximum number of messages to keep in the in-memory chat conversation buffer."""
 

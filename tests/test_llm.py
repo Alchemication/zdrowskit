@@ -90,6 +90,16 @@ class TestLoadContext:
         assert "## 2026-03-12" in ctx["history"]
         assert "## 2026-03-01" not in ctx["history"]
 
+    def test_log_trimmed(self, tmp_path: Path) -> None:
+        (tmp_path / "prompt.md").write_text("template")
+        entries = "\n\n".join(f"## 2026-03-{i:02d}\n\nLog {i}" for i in range(1, 12))
+        (tmp_path / "log.md").write_text(entries)
+        ctx = load_context(tmp_path)
+        # MAX_LOG_ENTRIES = 5, so only last 5 should remain
+        assert "## 2026-03-11" in ctx["log"]
+        assert "## 2026-03-07" in ctx["log"]
+        assert "## 2026-03-06" not in ctx["log"]
+
 
 class TestBuildMessages:
     def test_basic_structure(self) -> None:
@@ -250,12 +260,22 @@ class TestAppendHistory:
         assert "Old entry" in content
         assert "New memory block" in content
 
-    def test_entries_are_separated(self, tmp_path: Path) -> None:
+    def test_replaces_same_day_entry(self, tmp_path: Path) -> None:
         append_history(tmp_path, "Entry one")
         append_history(tmp_path, "Entry two")
         content = (tmp_path / "history.md").read_text()
-        # Both entries should be present as ## headings
+        # Second call on the same day replaces, not appends
+        assert content.count("## ") == 1
+        assert "Entry one" not in content
+        assert "Entry two" in content
+
+    def test_appends_different_day_entry(self, tmp_path: Path) -> None:
+        (tmp_path / "history.md").write_text("## 2026-03-01\n\nOld day\n")
+        append_history(tmp_path, "New day")
+        content = (tmp_path / "history.md").read_text()
         assert content.count("## ") == 2
+        assert "Old day" in content
+        assert "New day" in content
 
     def test_grows_unbounded_without_trimming(self, tmp_path: Path) -> None:
         """BUG: append_history does not trim despite its docstring claiming it does.

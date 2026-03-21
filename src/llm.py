@@ -32,7 +32,7 @@ from pathlib import Path
 import litellm
 
 from aggregator import summarise
-from config import MAX_HISTORY_ENTRIES
+from config import MAX_HISTORY_ENTRIES, MAX_LOG_ENTRIES
 from report import current_week_bounds, group_by_week, to_dict
 from store import load_date_range, load_snapshots, log_llm_call
 
@@ -131,6 +131,8 @@ def load_context(context_dir: Path, prompt_file: str = "prompt") -> dict[str, st
             content = path.read_text(encoding="utf-8")
             if name == "history":
                 content = _recent_history(content, MAX_HISTORY_ENTRIES)
+            elif name == "log":
+                content = _recent_history(content, MAX_LOG_ENTRIES)
             result[name] = content
             logger.debug("Loaded context: %s", path)
         else:
@@ -313,10 +315,15 @@ def append_history(context_dir: Path, memory_block: str) -> None:
     parts = re.split(r"(?m)(?=^## )", content)
     # Filter out empty/whitespace-only parts (e.g. preamble before first heading)
     entries = [p.strip() for p in parts if p.strip() and p.strip().startswith("## ")]
-    entries.append(new_entry)
+    # Replace existing entry for today instead of duplicating
+    if entries and entries[-1].startswith(f"## {today}"):
+        entries[-1] = new_entry
+        logger.info("Replaced existing %s entry in %s", today, history_path)
+    else:
+        entries.append(new_entry)
 
     history_path.write_text("\n\n".join(entries) + "\n", encoding="utf-8")
-    logger.info("Appended memory to %s (%d entries total)", history_path, len(entries))
+    logger.info("History %s now has %d entries", history_path, len(entries))
 
 
 def build_llm_data(
