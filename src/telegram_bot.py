@@ -141,7 +141,7 @@ class TelegramPoller:
             logger.warning("Telegram getUpdates not ok: %s", data)
             return []
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
-            logger.warning("Telegram polling error: %s", exc)
+            logger.debug("Telegram polling error: %s", exc)
             return []
 
     def send_placeholder(self, reply_to_message_id: int | None = None) -> int | None:
