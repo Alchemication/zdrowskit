@@ -54,6 +54,13 @@ CREATE TABLE IF NOT EXISTS daily (
     running_stride_length_m     REAL,
     running_power_w             REAL,
     running_speed_kmh           REAL,
+    sleep_total_h               REAL,
+    sleep_in_bed_h              REAL,
+    sleep_efficiency_pct        REAL,
+    sleep_deep_h                REAL,
+    sleep_core_h                REAL,
+    sleep_rem_h                 REAL,
+    sleep_awake_h               REAL,
     recovery_index              REAL,
     imported_at                 TEXT NOT NULL
 );
@@ -153,6 +160,24 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE llm_call ADD COLUMN cost REAL")
         logger.info("Migrated llm_call: added 'cost' column")
 
+    daily_cols = {r[1] for r in conn.execute("PRAGMA table_info(daily)").fetchall()}
+    if not daily_cols:
+        return  # daily table doesn't exist yet (e.g. partial schema in tests)
+    sleep_cols = [
+        "sleep_total_h",
+        "sleep_in_bed_h",
+        "sleep_efficiency_pct",
+        "sleep_deep_h",
+        "sleep_core_h",
+        "sleep_rem_h",
+        "sleep_awake_h",
+    ]
+    for col in sleep_cols:
+        if col not in daily_cols:
+            conn.execute(f"ALTER TABLE daily ADD COLUMN {col} REAL")
+    if sleep_cols[0] not in daily_cols:
+        logger.info("Migrated daily: added sleep columns")
+
 
 def store_snapshots(conn: sqlite3.Connection, snapshots: list[DailySnapshot]) -> int:
     """Upsert DailySnapshots and their workouts into the database.
@@ -182,6 +207,8 @@ def store_snapshots(conn: sqlite3.Connection, snapshots: list[DailySnapshot]) ->
                     walking_asymmetry_pct, walking_double_support_pct,
                     stair_speed_up_ms, stair_speed_down_ms,
                     running_stride_length_m, running_power_w, running_speed_kmh,
+                    sleep_total_h, sleep_in_bed_h, sleep_efficiency_pct,
+                    sleep_deep_h, sleep_core_h, sleep_rem_h, sleep_awake_h,
                     recovery_index, imported_at
                 ) VALUES (
                     ?, ?, ?, ?,
@@ -192,6 +219,8 @@ def store_snapshots(conn: sqlite3.Connection, snapshots: list[DailySnapshot]) ->
                     ?, ?,
                     ?, ?,
                     ?, ?, ?,
+                    ?, ?, ?,
+                    ?, ?, ?, ?,
                     ?, ?
                 )
                 """,
@@ -218,6 +247,13 @@ def store_snapshots(conn: sqlite3.Connection, snapshots: list[DailySnapshot]) ->
                     s.running_stride_length_m,
                     s.running_power_w,
                     s.running_speed_kmh,
+                    s.sleep_total_h,
+                    s.sleep_in_bed_h,
+                    s.sleep_efficiency_pct,
+                    s.sleep_deep_h,
+                    s.sleep_core_h,
+                    s.sleep_rem_h,
+                    s.sleep_awake_h,
                     s.recovery_index,
                     now,
                 ),
@@ -366,6 +402,13 @@ def load_snapshots(
             running_stride_length_m=row["running_stride_length_m"],
             running_power_w=row["running_power_w"],
             running_speed_kmh=row["running_speed_kmh"],
+            sleep_total_h=row["sleep_total_h"],
+            sleep_in_bed_h=row["sleep_in_bed_h"],
+            sleep_efficiency_pct=row["sleep_efficiency_pct"],
+            sleep_deep_h=row["sleep_deep_h"],
+            sleep_core_h=row["sleep_core_h"],
+            sleep_rem_h=row["sleep_rem_h"],
+            sleep_awake_h=row["sleep_awake_h"],
             recovery_index=row["recovery_index"],
             workouts=workouts_by_date[row["date"]],
         )

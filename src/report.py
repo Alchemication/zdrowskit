@@ -118,6 +118,15 @@ def print_summary(snapshots: list[DailySnapshot], summary: WeeklySummary) -> Non
     print(f"  Walking HR avg:    {fmt(summary.avg_walking_hr, ' bpm')}")
     print(f"  VO2max (latest):   {fmt(summary.latest_vo2max, ' ml/kg·min')}")
     print(f"  Recovery index:    {fmt(summary.avg_recovery_index)}")
+
+    if summary.avg_sleep_total_h is not None:
+        print("\nSleep (nightly averages)")
+        print(f"  Total sleep:       {fmt(summary.avg_sleep_total_h, ' hr', 2)}")
+        print(f"  Efficiency:        {fmt(summary.avg_sleep_efficiency_pct, '%')}")
+        print(f"  Deep:              {fmt(summary.avg_sleep_deep_h, ' hr', 2)}")
+        print(f"  Core:              {fmt(summary.avg_sleep_core_h, ' hr', 2)}")
+        print(f"  REM:               {fmt(summary.avg_sleep_rem_h, ' hr', 2)}")
+        print(f"  Awake:             {fmt(summary.avg_sleep_awake_h, ' hr', 2)}")
     print()
 
 
@@ -161,6 +170,8 @@ def print_daily(snapshots: list[DailySnapshot]) -> None:
             daily_parts.append(
                 f"RI {s.recovery_index:.2f} ({ri_label(s.recovery_index)})"
             )
+        if s.sleep_total_h is not None:
+            daily_parts.append(f"Sleep {s.sleep_total_h:.1f}h")
         print(f"{indent}" + " · ".join(daily_parts))
     print()
 

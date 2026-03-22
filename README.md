@@ -19,6 +19,7 @@ Apple Health export (iCloud Drive)
     MyHealth/Metrics/     — steps, energy, HR, HRV, VO2max, mobility
     MyHealth/Workouts/    — sessions with per-minute HR, energy, temp
     MyHealth/Routes/      — GPX tracks matched to workouts by timestamp
+    MyHealth/Sleep/       — sleep stages (Deep, Core, REM, Awake) from Apple Watch
             ↓
         zdrowskit import          → SQLite database
             ↓

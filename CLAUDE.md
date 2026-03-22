@@ -2,7 +2,7 @@
 
 ## What is zdrowskit
 
-Your 24/7 ultra-personal trainer. Parses Apple Health exports (metrics, workouts, GPX routes), stores them in SQLite, and uses an LLM to generate personalised weekly reports and short nudges via Telegram/email. A daemon watches for new data, fires nudges automatically, and listens for incoming Telegram messages for interactive two-way coaching chat.
+Your 24/7 ultra-personal trainer. Parses Apple Health exports (metrics, workouts, GPX routes, sleep), stores them in SQLite, and uses an LLM to generate personalised weekly reports and short nudges via Telegram/email. A daemon watches for new data, fires nudges automatically, and listens for incoming Telegram messages for interactive two-way coaching chat.
 
 ## Commands
 
@@ -54,8 +54,9 @@ Run with `uv run pytest`. Fixtures in `tests/fixtures/` and `tests/conftest.py`.
 
 ```
 MyHealth/Metrics/*.json   ─┐
-MyHealth/Workouts/*.json  ─┤─→ src/parsers/ → src/assembler.py → list[DailySnapshot]
-MyHealth/Routes/*.xml     ─┘                                            │
+MyHealth/Workouts/*.json  ─┤
+MyHealth/Routes/*.xml     ─┤─→ src/parsers/ → src/assembler.py → list[DailySnapshot]
+MyHealth/Sleep/sleep.json ─┘                                            │
                                                                          ▼
                                                               src/aggregator.py
                                                                          │

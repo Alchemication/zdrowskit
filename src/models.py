@@ -83,6 +83,13 @@ class DailySnapshot:
         running_stride_length_m: Running stride length in metres; sparse.
         running_power_w: Running power in watts; sparse.
         running_speed_kmh: Running speed in km/h; sparse.
+        sleep_total_h: Total sleep duration in hours (excludes awake segments).
+        sleep_in_bed_h: Total time in bed in hours (includes awake segments).
+        sleep_efficiency_pct: Sleep efficiency (sleep_total_h / sleep_in_bed_h * 100).
+        sleep_deep_h: Hours in Deep sleep stage.
+        sleep_core_h: Hours in Core (light) sleep stage.
+        sleep_rem_h: Hours in REM sleep stage.
+        sleep_awake_h: Hours in Awake stage during the sleep session.
         workouts: List of WorkoutSnapshots that occurred on this day.
         recovery_index: Derived metric: hrv_ms / resting_hr.
     """
@@ -112,6 +119,14 @@ class DailySnapshot:
     running_stride_length_m: float | None = None  # sparse
     running_power_w: float | None = None  # sparse
     running_speed_kmh: float | None = None  # sparse
+    # Sleep (from Apple Watch sleep tracking; None for days without data)
+    sleep_total_h: float | None = None
+    sleep_in_bed_h: float | None = None
+    sleep_efficiency_pct: float | None = None
+    sleep_deep_h: float | None = None
+    sleep_core_h: float | None = None
+    sleep_rem_h: float | None = None
+    sleep_awake_h: float | None = None
     # Workouts on this day
     workouts: list[WorkoutSnapshot] = field(default_factory=list)
     # Derived
@@ -149,6 +164,12 @@ class WeeklySummary:
         latest_vo2max: Most recent VO2 max value recorded in the week.
         avg_recovery_index: Mean of hrv_ms / resting_hr across days.
         hrv_trend: Linear-regression direction: "improving" | "declining" | "stable" | None.
+        avg_sleep_total_h: Mean nightly sleep duration (hours); None if no sleep data.
+        avg_sleep_efficiency_pct: Mean sleep efficiency percentage.
+        avg_sleep_deep_h: Mean nightly Deep sleep (hours).
+        avg_sleep_core_h: Mean nightly Core/light sleep (hours).
+        avg_sleep_rem_h: Mean nightly REM sleep (hours).
+        avg_sleep_awake_h: Mean nightly awake time during sleep (hours).
         run_consistency_pct: run_count / WEEKLY_RUN_TARGET * 100, capped at 100.
         lift_consistency_pct: lift_count / WEEKLY_LIFT_TARGET * 100, capped at 100.
     """
@@ -185,5 +206,13 @@ class WeeklySummary:
     # Derived
     avg_recovery_index: float | None = None
     hrv_trend: str | None = None  # "improving" | "declining" | "stable"
+    # Sleep averages (None-safe: days without sleep data are skipped)
+    avg_sleep_total_h: float | None = None
+    avg_sleep_efficiency_pct: float | None = None
+    avg_sleep_deep_h: float | None = None
+    avg_sleep_core_h: float | None = None
+    avg_sleep_rem_h: float | None = None
+    avg_sleep_awake_h: float | None = None
+    # Consistency
     run_consistency_pct: float = 0.0  # run_count / target * 100, capped at 100
     lift_consistency_pct: float = 0.0

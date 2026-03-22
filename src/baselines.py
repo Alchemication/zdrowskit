@@ -36,6 +36,10 @@ def compute_baselines(conn: sqlite3.Connection) -> str:
         ("Walking HR", "walking_hr_avg", "bpm", 0),
         ("Steps", "steps", "", 0),
         ("Walking Speed", "walking_speed_kmh", "km/h", 1),
+        ("Sleep Duration", "sleep_total_h", "hr", 2),
+        ("Sleep Efficiency", "sleep_efficiency_pct", "%", 1),
+        ("Deep Sleep", "sleep_deep_h", "hr", 2),
+        ("REM Sleep", "sleep_rem_h", "hr", 2),
     ]
 
     lines.append("| Metric | 30-day avg | 90-day avg | Unit |")

@@ -23,6 +23,7 @@ from pathlib import Path
 
 from models import DailySnapshot, WorkoutSnapshot
 from parsers.metrics import parse_all_metrics
+from parsers.sleep import parse_sleep
 from parsers.workouts import parse_workouts
 from parsers.gpx import parse_all_gpx, match_gpx_to_workout
 
@@ -68,11 +69,13 @@ def assemble(data_dir: Path) -> list[DailySnapshot]:
     metrics_dir = data_dir / "Metrics"
     workouts_path = data_dir / "Workouts" / "workouts.json"
     routes_dir = data_dir / "Routes"
+    sleep_path = data_dir / "Sleep" / "sleep.json"
 
     # --- Parse all sources ---
     metrics_by_date = parse_all_metrics(metrics_dir) if metrics_dir.exists() else {}
     workouts = parse_workouts(workouts_path) if workouts_path.exists() else []
     gpx_index = parse_all_gpx(routes_dir) if routes_dir.exists() else {}
+    sleep_by_date = parse_sleep(sleep_path) if sleep_path.exists() else {}
 
     # --- Attach GPX stats to workouts that have a matching route ---
     for w in workouts:
@@ -89,12 +92,17 @@ def assemble(data_dir: Path) -> list[DailySnapshot]:
         workouts_by_date.setdefault(_workout_date(w), []).append(w)
 
     # --- Collect all dates ---
-    all_dates = sorted(set(metrics_by_date.keys()) | set(workouts_by_date.keys()))
+    all_dates = sorted(
+        set(metrics_by_date.keys())
+        | set(workouts_by_date.keys())
+        | set(sleep_by_date.keys())
+    )
 
     # --- Build DailySnapshots ---
     snapshots: list[DailySnapshot] = []
     for date in all_dates:
         m = metrics_by_date.get(date, {})
+        sl = sleep_by_date.get(date, {})
         day_workouts = workouts_by_date.get(date, [])
 
         # Cast numeric fields to appropriate types
@@ -137,6 +145,13 @@ def assemble(data_dir: Path) -> list[DailySnapshot]:
             running_stride_length_m=_safe_float(m.get("running_stride_length_m")),
             running_power_w=_safe_float(m.get("running_power_w")),
             running_speed_kmh=_safe_float(m.get("running_speed_kmh")),
+            sleep_total_h=_safe_float(sl.get("sleep_total_h")),
+            sleep_in_bed_h=_safe_float(sl.get("sleep_in_bed_h")),
+            sleep_efficiency_pct=_safe_float(sl.get("sleep_efficiency_pct")),
+            sleep_deep_h=_safe_float(sl.get("sleep_deep_h")),
+            sleep_core_h=_safe_float(sl.get("sleep_core_h")),
+            sleep_rem_h=_safe_float(sl.get("sleep_rem_h")),
+            sleep_awake_h=_safe_float(sl.get("sleep_awake_h")),
             workouts=day_workouts,
             recovery_index=recovery_index,
         )

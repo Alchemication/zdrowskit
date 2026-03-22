@@ -202,6 +202,14 @@ def summarise(snapshots: list[DailySnapshot]) -> WeeklySummary:
     avg_recovery = _safe_mean([s.recovery_index for s in snapshots])
     hrv_trend = _hrv_trend(snapshots)
 
+    # --- Sleep ---
+    avg_sleep_total = _safe_mean([s.sleep_total_h for s in snapshots])
+    avg_sleep_efficiency = _safe_mean([s.sleep_efficiency_pct for s in snapshots])
+    avg_sleep_deep = _safe_mean([s.sleep_deep_h for s in snapshots])
+    avg_sleep_core = _safe_mean([s.sleep_core_h for s in snapshots])
+    avg_sleep_rem = _safe_mean([s.sleep_rem_h for s in snapshots])
+    avg_sleep_awake = _safe_mean([s.sleep_awake_h for s in snapshots])
+
     run_consistency = min(100.0, (len(runs) / WEEKLY_RUN_TARGET) * 100)
     lift_consistency = min(100.0, (len(lifts) / WEEKLY_LIFT_TARGET) * 100)
 
@@ -242,6 +250,22 @@ def summarise(snapshots: list[DailySnapshot]) -> WeeklySummary:
         latest_vo2max=round(latest_vo2max, 2) if latest_vo2max is not None else None,
         avg_recovery_index=round(avg_recovery, 3) if avg_recovery is not None else None,
         hrv_trend=hrv_trend,
+        avg_sleep_total_h=round(avg_sleep_total, 2)
+        if avg_sleep_total is not None
+        else None,
+        avg_sleep_efficiency_pct=round(avg_sleep_efficiency, 1)
+        if avg_sleep_efficiency is not None
+        else None,
+        avg_sleep_deep_h=round(avg_sleep_deep, 2)
+        if avg_sleep_deep is not None
+        else None,
+        avg_sleep_core_h=round(avg_sleep_core, 2)
+        if avg_sleep_core is not None
+        else None,
+        avg_sleep_rem_h=round(avg_sleep_rem, 2) if avg_sleep_rem is not None else None,
+        avg_sleep_awake_h=round(avg_sleep_awake, 2)
+        if avg_sleep_awake is not None
+        else None,
         run_consistency_pct=round(run_consistency, 1),
         lift_consistency_pct=round(lift_consistency, 1),
     )
