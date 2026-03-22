@@ -49,6 +49,8 @@ headers or bullet points. Just plain conversational text.
 
 - **new_data**: New health data just synced. One data-driven observation and one
   concrete suggestion for the rest of the day or tomorrow. Skip the obvious.
+  If sleep data is available, factor it in — a bad night's sleep is a reason to
+  suggest an easier session or earlier bedtime, not just note the number.
 
 - **missed_session**: No workout was logged today. First check the Current
   Training Plan above — if today is a rest day or off day, respond with SKIP

@@ -248,6 +248,24 @@ class TestSummarise:
         assert summary.run_consistency_pct == 100.0
         assert summary.lift_consistency_pct == 100.0
 
+    def test_sleep_averages(self, sample_snapshots: list[DailySnapshot]) -> None:
+        """Sleep averages should be computed from days that have sleep data."""
+        summary = summarise(sample_snapshots)
+        # Only 2 of 7 days have sleep data (Mar 09 and Mar 10)
+        assert summary.avg_sleep_total_h is not None
+        assert summary.avg_sleep_total_h == round((7.4 + 7.0) / 2, 2)
+        assert summary.avg_sleep_efficiency_pct is not None
+        assert summary.avg_sleep_deep_h is not None
+        assert summary.avg_sleep_rem_h is not None
+
+    def test_sleep_none_when_no_data(self) -> None:
+        """Weeks without any sleep data should have None sleep averages."""
+        snaps = [DailySnapshot(date=f"2026-03-{9 + i:02d}") for i in range(7)]
+        summary = summarise(snaps)
+        assert summary.avg_sleep_total_h is None
+        assert summary.avg_sleep_efficiency_pct is None
+        assert summary.avg_sleep_deep_h is None
+
     def test_all_none_metrics(self) -> None:
         """A week of days with all metrics None should not crash."""
         snaps = [DailySnapshot(date=f"2026-03-{9 + i:02d}") for i in range(7)]

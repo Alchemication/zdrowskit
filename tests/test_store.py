@@ -63,6 +63,13 @@ class TestStoreAndLoad:
             resting_hr=54,
             hrv_ms=55.0,
             vo2max=45.2,
+            sleep_total_h=7.4,
+            sleep_in_bed_h=7.6,
+            sleep_efficiency_pct=97.4,
+            sleep_deep_h=0.73,
+            sleep_core_h=4.69,
+            sleep_rem_h=2.01,
+            sleep_awake_h=0.17,
             recovery_index=55.0 / 54,
             workouts=[workout],
         )
@@ -76,6 +83,13 @@ class TestStoreAndLoad:
         assert day.resting_hr == 54
         assert day.hrv_ms == 55.0
         assert day.vo2max == 45.2
+        assert day.sleep_total_h == 7.4
+        assert day.sleep_in_bed_h == 7.6
+        assert day.sleep_efficiency_pct == 97.4
+        assert day.sleep_deep_h == 0.73
+        assert day.sleep_core_h == 4.69
+        assert day.sleep_rem_h == 2.01
+        assert day.sleep_awake_h == 0.17
         assert len(day.workouts) == 1
 
         w = day.workouts[0]

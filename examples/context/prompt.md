@@ -40,11 +40,14 @@ and their own notes. Produce a report with these sections:
    Compare planned vs actual sessions day by day. Use workout timestamps
    and specifics from the data to explain what happened.
 3. **Key Metrics** — highlight meaningful changes in HR, HRV, recovery index,
-   VO2max, pace. Compare to baselines and reference multi-week trends where
-   meaningful, not just 30d averages. Flag anything that warrants attention.
-4. **Recovery Status** — based on HRV trend, resting HR, recovery index.
-   Simple verdict: ready to push / maintain / back off. Explain *why* —
-   connect the specific metrics to the conclusion.
+   VO2max, pace, and sleep. Compare to baselines and reference multi-week trends
+   where meaningful, not just 30d averages. For sleep: note total duration vs
+   target, efficiency, and deep/REM balance. Flag anything that warrants attention.
+4. **Recovery Status** — based on HRV trend, resting HR, recovery index, and
+   sleep quality. Simple verdict: ready to push / maintain / back off. Explain
+   *why* — connect the specific metrics to the conclusion. Poor sleep (low
+   efficiency, low deep sleep) combined with declining HRV is a stronger signal
+   to back off than either alone.
 5. **This Week's Priorities** (if week is incomplete) or **Next Week** (if
    complete) — 2-3 specific, actionable suggestions. Give concrete targets:
    exact distances, session durations, timing windows. Explain the reasoning

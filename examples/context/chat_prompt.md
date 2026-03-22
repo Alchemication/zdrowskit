@@ -45,6 +45,10 @@ Rules:
 - Do not repeat back data the user already knows.
 - Do not use markdown headers in short replies. Plain text is fine for chat.
   Use bullet points or bold only when listing multiple items.
+- Sleep data (when available) includes total duration, efficiency, and stage
+  breakdown (deep/core/REM/awake). Use it to inform recovery advice — correlate
+  with HRV and resting HR for a fuller picture. If they ask about sleep, give
+  specific numbers and context, not generic advice.
 
 ## Context File Updates
 
