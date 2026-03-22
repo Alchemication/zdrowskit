@@ -13,7 +13,7 @@ Public API:
     LLMResult       — dataclass holding response text and usage metadata
 
 Example:
-    ctx = load_context(Path("~/Documents/zdrowskit/ContextFiles"))
+    ctx = load_context(CONTEXT_DIR)
     msgs = build_messages(ctx, health_data_json="...")
     result = call_llm(msgs)
 """
@@ -32,7 +32,7 @@ from pathlib import Path
 import litellm
 
 from aggregator import summarise
-from config import MAX_HISTORY_ENTRIES, MAX_LOG_ENTRIES
+from config import MAX_HISTORY_ENTRIES, MAX_LOG_ENTRIES, PROMPTS_DIR
 from report import current_week_bounds, group_by_week, to_dict
 from store import load_date_range, load_snapshots, log_llm_call
 
@@ -40,8 +40,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "anthropic/claude-opus-4-6"
 
-CONTEXT_FILES = ["soul", "me", "goals", "plan", "log", "history"]
-REQUIRED_FILES = ["prompt"]
+CONTEXT_FILES = ["me", "goals", "plan", "log", "history"]
 
 
 @dataclass
@@ -94,15 +93,24 @@ def _recent_history(content: str, n: int) -> str:
     return "\n\n".join(entries[-n:]) + "\n"
 
 
-def load_context(context_dir: Path, prompt_file: str = "prompt") -> dict[str, str]:
-    """Read all markdown context files from the given directory.
+def load_context(
+    context_dir: Path,
+    prompt_file: str = "prompt",
+    prompts_dir: Path = PROMPTS_DIR,
+) -> dict[str, str]:
+    """Read prompt templates and user context files.
+
+    Prompt templates (prompt.md, nudge_prompt.md, chat_prompt.md, soul.md)
+    are loaded from *prompts_dir* (shipped with the repo in ``src/prompts/``).
+    User context files (me.md, goals.md, plan.md, log.md, history.md) are
+    loaded from *context_dir*.
 
     Args:
-        context_dir: Directory containing soul.md, me.md, goals.md,
-            plan.md, log.md, history.md, and prompt.md.
+        context_dir: Directory containing user context files.
         prompt_file: Stem of the prompt template file to load (default
             ``"prompt"``). Use ``"chat_prompt"`` for interactive chat
             or ``"nudge_prompt"`` for nudges.
+        prompts_dir: Directory containing prompt template files.
 
     Returns:
         A dict mapping file stems (e.g. "soul", "prompt") to their
@@ -115,17 +123,19 @@ def load_context(context_dir: Path, prompt_file: str = "prompt") -> dict[str, st
     """
     result: dict[str, str] = {}
 
-    required = [prompt_file] if prompt_file != "prompt" else REQUIRED_FILES
-    for name in required:
-        path = context_dir / f"{name}.md"
-        if not path.exists():
-            raise FileNotFoundError(
-                f"Required context file missing: {path}\n"
-                f"Copy examples/context/{name}.md to {context_dir}/ to get started."
-            )
-        # Always store under "prompt" key so build_messages() works unchanged
-        result["prompt"] = path.read_text(encoding="utf-8")
+    # Load prompt template from prompts_dir
+    prompt_path = prompts_dir / f"{prompt_file}.md"
+    if not prompt_path.exists():
+        raise FileNotFoundError(f"Required prompt template missing: {prompt_path}")
+    result["prompt"] = prompt_path.read_text(encoding="utf-8")
 
+    # Load soul.md from prompts_dir
+    soul_path = prompts_dir / "soul.md"
+    if soul_path.exists():
+        result["soul"] = soul_path.read_text(encoding="utf-8")
+        logger.debug("Loaded prompt: %s", soul_path)
+
+    # Load user context files from context_dir
     for name in CONTEXT_FILES:
         path = context_dir / f"{name}.md"
         if path.exists():

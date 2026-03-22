@@ -557,10 +557,13 @@ class ZdrowskitDaemon:
             file_arg = parts[1] if len(parts) > 1 else None
             self._send_context_overview(message_id, file_arg)
         elif cmd == "/help":
-            from config import CONTEXT_DIR
+            from config import CONTEXT_DIR, PROMPTS_DIR
 
             ctx_names = sorted(
-                f.stem for f in CONTEXT_DIR.glob("*.md") if f.stat().st_size > 0
+                f.stem
+                for d in (CONTEXT_DIR, PROMPTS_DIR)
+                for f in d.glob("*.md")
+                if f.stat().st_size > 0
             )
             ctx_opts = ", ".join(ctx_names) if ctx_names else "none found"
             help_text = (
@@ -590,14 +593,17 @@ class ZdrowskitDaemon:
             message_id: Telegram message ID for reply threading.
             file_arg: Optional file stem to show full content for.
         """
-        from config import CONTEXT_DIR
+        from config import CONTEXT_DIR, PROMPTS_DIR
 
         if file_arg:
             # Show full content of a specific file.
-            path = CONTEXT_DIR / f"{file_arg.removesuffix('.md')}.md"
+            stem = file_arg.removesuffix(".md")
+            path = CONTEXT_DIR / f"{stem}.md"
+            if not path.exists():
+                path = PROMPTS_DIR / f"{stem}.md"
             if not path.exists():
                 self._poller.send_reply(
-                    f"File not found: {path.name}", reply_to_message_id=message_id
+                    f"File not found: {stem}.md", reply_to_message_id=message_id
                 )
                 return
             content = path.read_text(encoding="utf-8").strip()
@@ -612,15 +618,9 @@ class ZdrowskitDaemon:
             return
 
         # No argument — send compact index.
-        files = sorted(CONTEXT_DIR.glob("*.md"))
-        if not files:
-            self._poller.send_reply(
-                "No context files found.", reply_to_message_id=message_id
-            )
-            return
-
-        lines = []
-        for f in files:
+        lines: list[str] = []
+        ctx_files = sorted(CONTEXT_DIR.glob("*.md"))
+        for f in ctx_files:
             try:
                 content = f.read_text(encoding="utf-8")
                 line_count = content.count("\n")
@@ -628,6 +628,13 @@ class ZdrowskitDaemon:
                 lines.append(f"📄 {f.stem} — {line_count} lines ({size} B)")
             except OSError:
                 lines.append(f"📄 {f.stem} — (unreadable)")
+
+        if not lines:
+            self._poller.send_reply(
+                "No context files found.", reply_to_message_id=message_id
+            )
+            return
+
         lines.append("\nUse /context <name> to view a file.")
         self._poller.send_reply("\n".join(lines), reply_to_message_id=message_id)
 

@@ -60,12 +60,13 @@ uv run python main.py report
 
 ### Setting up insights (LLM reports)
 
-1. Copy the example context files:
+1. Copy the example user context files:
    ```bash
    mkdir -p ~/Documents/zdrowskit/ContextFiles
    cp examples/context/*.md ~/Documents/zdrowskit/ContextFiles/
    ```
 2. Edit them with your real data — at minimum `me.md`, `goals.md`, and `plan.md`
+   (Prompt templates like `prompt.md` and `soul.md` are shipped in `src/prompts/` — no need to copy them)
 3. Add your API key and notification credentials to `.env`:
    ```
    ANTHROPIC_API_KEY=sk-ant-...
@@ -198,9 +199,6 @@ The daemon also runs a Telegram long-polling listener. Send a message to your bo
 
 **Setup:**
 ```bash
-# Copy the chat prompt template (one-time)
-cp examples/context/chat_prompt.md ~/Documents/zdrowskit/ContextFiles/
-
 # Run the daemon (chat listener starts automatically)
 uv run python src/daemon.py --foreground
 ```
@@ -217,14 +215,12 @@ The `insights`, `nudge`, and `chat` commands use markdown files from `~/Document
 | `goals.md` | you (or chat) | Health and fitness goals with timelines |
 | `plan.md` | you (or chat) | Weekly training schedule, diet approach, sleep targets |
 | `log.md` | you (or chat) | Freeform weekly journal — *why* things happened (travel, illness, life) |
-| `soul.md` | you | AI coach persona — tone, style, coaching philosophy |
 | `baselines.md` | auto | Rolling averages computed from DB (updated on each `insights` run) |
-| `prompt.md` | you | Weekly report prompt template |
-| `nudge_prompt.md` | you | Nudge prompt template — controls short notification style |
-| `chat_prompt.md` | you | Interactive chat prompt template — conversational coaching style |
 | `history.md` | auto | LLM's own memory — appended after each weekly report |
 
-Example versions of all files are in `examples/context/`.
+Example user context files are in `examples/context/`.
+
+Prompt templates (`soul.md`, `prompt.md`, `nudge_prompt.md`, `chat_prompt.md`) live in `src/prompts/` and are version-controlled — no need to copy them.
 
 The journal (`log.md`) is what makes this different from a dashboard. Numbers say *what* happened. The journal says *why*. The LLM connects both.
 

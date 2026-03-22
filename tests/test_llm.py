@@ -64,7 +64,7 @@ class TestLoadContext:
         (tmp_path / "prompt.md").write_text("Hello {me}")
         (tmp_path / "soul.md").write_text("Be direct.")
         (tmp_path / "me.md").write_text("Runner, 30y")
-        ctx = load_context(tmp_path)
+        ctx = load_context(tmp_path, prompts_dir=tmp_path)
         assert ctx["prompt"] == "Hello {me}"
         assert ctx["soul"] == "Be direct."
         assert ctx["me"] == "Runner, 30y"
@@ -72,11 +72,11 @@ class TestLoadContext:
     def test_missing_prompt_raises(self, tmp_path: Path) -> None:
         (tmp_path / "soul.md").write_text("Be direct.")
         with pytest.raises(FileNotFoundError, match="prompt.md"):
-            load_context(tmp_path)
+            load_context(tmp_path, prompts_dir=tmp_path)
 
     def test_optional_files_default(self, tmp_path: Path) -> None:
         (tmp_path / "prompt.md").write_text("template")
-        ctx = load_context(tmp_path)
+        ctx = load_context(tmp_path, prompts_dir=tmp_path)
         assert ctx["goals"] == "(not provided)"
         assert ctx["log"] == "(not provided)"
 
@@ -84,7 +84,7 @@ class TestLoadContext:
         (tmp_path / "prompt.md").write_text("template")
         entries = "\n\n".join(f"## 2026-03-{i:02d}\n\nEntry {i}" for i in range(1, 20))
         (tmp_path / "history.md").write_text(entries)
-        ctx = load_context(tmp_path)
+        ctx = load_context(tmp_path, prompts_dir=tmp_path)
         # MAX_HISTORY_ENTRIES = 8, so only last 8 should remain
         assert "## 2026-03-19" in ctx["history"]
         assert "## 2026-03-12" in ctx["history"]
@@ -94,7 +94,7 @@ class TestLoadContext:
         (tmp_path / "prompt.md").write_text("template")
         entries = "\n\n".join(f"## 2026-03-{i:02d}\n\nLog {i}" for i in range(1, 12))
         (tmp_path / "log.md").write_text(entries)
-        ctx = load_context(tmp_path)
+        ctx = load_context(tmp_path, prompts_dir=tmp_path)
         # MAX_LOG_ENTRIES = 5, so only last 5 should remain
         assert "## 2026-03-11" in ctx["log"]
         assert "## 2026-03-07" in ctx["log"]

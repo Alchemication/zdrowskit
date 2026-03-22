@@ -25,6 +25,8 @@ uv run python src/daemon.py --foreground  # run filesystem watcher + chat in for
 
 Challenge my ideas early. If an approach is over-engineered, fragile, or there's a simpler/better alternative I might be missing — say so directly with reasoning. Don't just execute instructions; flag knowledge gaps, hidden trade-offs, or narrowed thinking. Be pragmatic: save me from wasting time on something that could be done better.
 
+**Verification:** After completing a complex or cross-cutting feature (touches multiple modules, changes interfaces, moves files), automatically run a verification pass before reporting done. Grep for stale references, check all callers of changed functions, confirm imports, run lint + tests, and fix any issues found — don't wait to be asked.
+
 ## Code Style
 
 - **Linter/formatter:** `uv run ruff check .` and `uv run ruff format .`
@@ -76,10 +78,17 @@ LLM context files live in `~/Documents/zdrowskit/ContextFiles/`:
 | `goals.md` | user | Fitness goals with timelines |
 | `plan.md` | user | Weekly training schedule, diet, sleep targets |
 | `log.md` | user | Weekly journal — what happened and why (trimmed to last 5 entries in prompts) |
-| `soul.md` | user | AI coach persona (static — not auto-updated via chat) |
 | `baselines.md` | auto | Rolling averages from DB (written by `insights`) |
 | `history.md` | auto | LLM memory (appended after each weekly report; same-day runs replace, not duplicate) |
-| `prompt.md`, `nudge_prompt.md`, `chat_prompt.md` | user | Prompt templates (examples in `examples/context/`) |
+
+Prompt templates live in `src/prompts/` (version-controlled, single source of truth):
+
+| File | Purpose |
+|------|---------|
+| `soul.md` | AI coach persona (static — not auto-updated via chat) |
+| `prompt.md` | Weekly report prompt template |
+| `nudge_prompt.md` | Nudge prompt template |
+| `chat_prompt.md` | Conversational chat prompt template |
 
 ## Telegram Interactive Chat
 
@@ -87,7 +96,7 @@ The daemon runs a Telegram long-polling listener (`src/telegram_bot.py`) for two
 
 - `src/telegram_bot.py` — `TelegramPoller` (long polling) + `ConversationBuffer` (thread-safe, 20-message in-memory buffer)
 - `src/context_edit.py` — auto-update context files from chat (extract `update_context` tool call from LLM response, confirm via inline keyboard, write file)
-- `examples/context/chat_prompt.md` — conversational prompt template (must be copied to ContextFiles)
+- `src/prompts/chat_prompt.md` — conversational chat prompt template
 - Bot commands: `/clear` (reset buffer), `/status` (buffer size, nudge count), `/context` (list files or `/context <name>` for full content), `/help` (command reference)
 - Reply-to context: replying to a nudge/report injects the original text so the LLM knows what you're responding to
 - Context auto-updates: the LLM can propose edits to me/goals/plan/log.md; user confirms via Accept/Reject buttons (or auto-accept via `ZDROWSKIT_AUTO_ACCEPT_EDITS=1`)

@@ -23,17 +23,15 @@ import json
 import logging
 import re
 import sys
-from collections import defaultdict
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from aggregator import summarise
 from assembler import assemble
 from baselines import compute_baselines
-from config import CONTEXT_DIR, NUDGES_DIR, REPORTS_DIR, resolve_data_dir
+from config import CONTEXT_DIR, NUDGES_DIR, PROMPTS_DIR, REPORTS_DIR, resolve_data_dir
 from llm import (
     DEFAULT_MODEL,
-    DEFAULT_SOUL,
     LLMResult,
     append_history,
     build_llm_data,
@@ -368,8 +366,6 @@ def cmd_context(args: argparse.Namespace) -> None:
         ("plan.md", "you", "Weekly training schedule, diet, sleep targets"),
         ("log.md", "you", "Weekly journal — why things happened"),
         ("baselines.md", "auto", "Auto-computed rolling averages from DB"),
-        ("soul.md", "you", "AI coach persona — tone, style, philosophy"),
-        ("prompt.md", "you", "Prompt template — controls report structure"),
         ("history.md", "auto", "LLM memory — appended after each insights run"),
     ]
 
@@ -396,6 +392,7 @@ def cmd_context(args: argparse.Namespace) -> None:
 
     console.print(table)
     console.print(f"\n[dim]Context directory:[/dim] [cyan]{CONTEXT_DIR}[/cyan]")
+    console.print(f"[dim]Prompts directory:[/dim] [cyan]{PROMPTS_DIR}[/cyan]")
 
     max_preview_lines = 20
 
@@ -531,59 +528,26 @@ def cmd_nudge(
     _trigger = trigger_type or getattr(args, "trigger", "new_data")
 
     try:
-        context = load_context(CONTEXT_DIR)
+        context = load_context(CONTEXT_DIR, prompt_file="nudge_prompt")
     except FileNotFoundError as e:
         logger.error("%s", e)
         sys.exit(1)
-
-    nudge_prompt_path = CONTEXT_DIR / "nudge_prompt.md"
-    if not nudge_prompt_path.exists():
-        logger.error(
-            "nudge_prompt.md not found at %s. "
-            "Copy examples/context/nudge_prompt.md to %s/ to get started.",
-            nudge_prompt_path,
-            CONTEXT_DIR,
-        )
-        sys.exit(1)
-    nudge_prompt = nudge_prompt_path.read_text(encoding="utf-8")
 
     conn = open_db(Path(args.db))
     health_data = build_llm_data(conn, getattr(args, "months", 1))
     health_data_json = json.dumps(health_data, indent=2)
 
-    soul = context.get("soul", "")
-    if not soul or soul == "(not provided)":
-        soul = DEFAULT_SOUL
-
     recent_nudge_entries: list[dict] = getattr(args, "recent_nudges", [])
     if recent_nudge_entries:
-        recent_nudges_text = "\n".join(
+        context["recent_nudges"] = "\n".join(
             f"{i + 1}. [{e['ts'][:16]} / {e['trigger']}] {e['text']}"
             for i, e in enumerate(recent_nudge_entries)
         )
     else:
-        recent_nudges_text = "(none yet)"
+        context["recent_nudges"] = "(none yet)"
+    context["trigger_type"] = _trigger
 
-    placeholders: dict = defaultdict(lambda: "(not provided)")
-    placeholders.update(
-        {
-            "me": context.get("me", "(not provided)"),
-            "goals": context.get("goals", "(not provided)"),
-            "plan": context.get("plan", "(not provided)"),
-            "log": context.get("log", "(not provided)"),
-            "history": context.get("history", "(not provided)"),
-            "health_data": health_data_json,
-            "today": date.today().isoformat(),
-            "weekday": date.today().strftime("%A"),
-            "trigger_type": _trigger,
-            "recent_nudges": recent_nudges_text,
-        }
-    )
-    user_content = nudge_prompt.format_map(placeholders)
-    messages = [
-        {"role": "system", "content": soul},
-        {"role": "user", "content": user_content},
-    ]
+    messages = build_messages(context, health_data_json)
 
     model = getattr(args, "model", DEFAULT_MODEL)
     logger.info("Calling %s for nudge (trigger: %s) ...", model, _trigger)
