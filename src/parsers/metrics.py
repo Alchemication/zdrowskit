@@ -1,9 +1,15 @@
-"""Parse MyHealth/Metrics/*.json files.
+"""Parse health metrics JSON files.
 
-All three files (activity.json, heart.json, mobility.json) share the same schema:
+Supports two export formats:
+  - Shortcuts: 3 files by category (activity.json, heart.json, mobility.json)
+  - Auto Export: N files by time period (HealthAutoExport-YYYY-WW.json), all metrics
+    combined, with sleep_analysis embedded.
+
+Both share the schema:
   {"data": {"metrics": [{"name": str, "units": str, "data": [{"date": str, "qty"?: float, ...}]}]}}
 
 heart_rate entries use Min/Avg/Max instead of qty.
+sleep_analysis entries use pre-aggregated nightly totals (Auto Export format).
 
 Public API:
     parse_metrics_file(path)      -- parse a single metrics JSON file
@@ -14,12 +20,13 @@ Example:
     from pathlib import Path
     from parsers.metrics import parse_all_metrics
 
-    metrics = parse_all_metrics(Path("MyHealth/Metrics/"))
+    metrics = parse_all_metrics(Path("Metrics/"))
     # {"2026-03-13": {"steps": 9500.0, "resting_hr": 52.0, ...}, ...}
 """
 
 from __future__ import annotations
 import json
+from datetime import datetime, timedelta
 from pathlib import Path
 
 
@@ -95,8 +102,35 @@ def parse_metrics_file(path: Path) -> dict[str, dict[str, float]]:
                     day["hr_day_min"] = float(entry["Min"])
                 if "Max" in entry:
                     day["hr_day_max"] = float(entry["Max"])
-                # Avg is available but we already get avg from heart_rate metric;
-                # skip to avoid confusion with avg_run_hr
+            continue
+
+        if name == "sleep_analysis":
+            # Auto Export format: pre-aggregated nightly totals.
+            # Fields: totalSleep, deep, core, rem, awake (hours),
+            #         sleepStart/sleepEnd, date.
+            for entry in metric.get("data", []):
+                total = entry.get("totalSleep", 0.0)
+                deep = entry.get("deep", 0.0)
+                core = entry.get("core", 0.0)
+                rem = entry.get("rem", 0.0)
+                awake = entry.get("awake", 0.0)
+                in_bed = total + awake
+                efficiency = (total / in_bed * 100) if in_bed > 0 else 0.0
+
+                # Assign to the night's date: use sleepStart, and if the
+                # start time is before noon assign to the previous day.
+                sleep_start = entry.get("sleepStart", entry.get("date", ""))
+                dt = datetime.strptime(sleep_start[:19], "%Y-%m-%d %H:%M:%S")
+                night_date = (dt - timedelta(hours=12)).date().isoformat()
+
+                day = result.setdefault(night_date, {})
+                day["sleep_total_h"] = round(total, 2)
+                day["sleep_in_bed_h"] = round(in_bed, 2)
+                day["sleep_efficiency_pct"] = round(efficiency, 1)
+                day["sleep_deep_h"] = round(deep, 2)
+                day["sleep_core_h"] = round(core, 2)
+                day["sleep_rem_h"] = round(rem, 2)
+                day["sleep_awake_h"] = round(awake, 2)
             continue
 
         field = METRIC_MAP.get(name)

@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 
 ICLOUD_HEALTH_DIR = (
     Path.home()
-    / "Library/Mobile Documents/iCloud~is~workflow~my~workflows/Documents/MyHealth"
+    / "Library/Mobile Documents/iCloud~com~ifunography~HealthExport/Documents"
 )
 LOG_FILE = Path.home() / "Library/Logs/zdrowskit.daemon.log"
 STATE_FILE = Path.home() / "Documents/zdrowskit/.daemon_state.json"
@@ -198,6 +198,7 @@ class ZdrowskitDaemon:
         self._stop_event = threading.Event()
         self._health_timer: threading.Timer | None = None
         self._context_timers: dict[str, threading.Timer] = {}
+        self._context_fire_times: dict[str, float] = {}
 
     # ------------------------------------------------------------------
     # Scheduling / debounce
@@ -245,9 +246,24 @@ class ZdrowskitDaemon:
     def _fire_context(self, stem: str) -> None:
         """Handle a context file change trigger.
 
+        Guards against duplicate FSEvents that can fire for a single file save
+        on macOS (content write + metadata/xattr update).
+
         Args:
             stem: File stem that changed.
         """
+        now = time.monotonic()
+        with self._lock:
+            last = self._context_fire_times.get(stem, 0.0)
+            if now - last < CONTEXT_DEBOUNCE_S:
+                logger.debug(
+                    "Context trigger for %s.md suppressed (%.0fs since last fire)",
+                    stem,
+                    now - last,
+                )
+                return
+            self._context_fire_times[stem] = now
+
         trigger_map = {
             "me": "profile_updated",
             "log": "log_update",
@@ -345,6 +361,7 @@ class ZdrowskitDaemon:
 
         args = types.SimpleNamespace(
             data_dir=str(ICLOUD_HEALTH_DIR),
+            source="autoexport",
             db=str(self.db),
         )
         try:

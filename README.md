@@ -15,11 +15,9 @@ Built by Adam Napora (adamsky). *Zdrowie* is Polish for health. *Kit* is the too
 ## How it works
 
 ```
-Apple Health export (iCloud Drive)
-    MyHealth/Metrics/     — steps, energy, HR, HRV, VO2max, mobility
-    MyHealth/Workouts/    — sessions with per-minute HR, energy, temp
-    MyHealth/Routes/      — GPX tracks matched to workouts by timestamp
-    MyHealth/Sleep/       — sleep stages (Deep, Core, REM, Awake) from Apple Watch
+Auto Export iOS app (iCloud Drive, every 30 min)
+    Metrics/HealthAutoExport-*.json  — steps, energy, HR, HRV, VO2max, mobility, sleep
+    Workouts/HealthAutoExport-*.json — sessions with HR, energy, temp, embedded routes
             ↓
         zdrowskit import          → SQLite database
             ↓
@@ -39,6 +37,48 @@ Apple Health export (iCloud Drive)
 
 zdrowskit is a local pipeline. Your data stays on your machine in a SQLite database. The only external calls are the LLM API and your chosen notification channel.
 
+## Getting your data out of Apple Health
+
+Apple Health doesn't offer a usable export API. Getting daily data onto your Mac requires a third-party iOS app and some patience. zdrowskit supports two export methods via the `--source` flag.
+
+### Auto Export app (recommended, `--source autoexport`)
+
+[Auto Export](https://apps.apple.com/app/myhealth-export-to-icloud/id6737380982) (Premium, one-time purchase) can sync health data to iCloud Drive on a schedule — no taps required once configured.
+
+**Setup in the app:**
+1. Create two automations: one for **Metrics**, one for **Workouts**
+2. Set both to: **Date Range = Week**, **Aggregation = Day**, **Destination = iCloud Drive**
+3. Select all metrics you care about (steps, energy, HR, HRV, VO2max, mobility, resting heart rate, sleep analysis, etc.)
+4. Set the schedule to **every 30 minutes**
+
+**Important limitations:**
+- iOS requires the phone to be **unlocked** for health data access — automations silently skip if the phone is locked
+- 30-minute intervals work well in practice: your phone is unlocked often enough during the day to catch most windows
+- The app writes weekly JSON files to iCloud: `Metrics/HealthAutoExport-YYYY-WW.json` and `Workouts/HealthAutoExport-YYYY-WW.json`
+- **Date range gotcha:** "Year" only offers Week/Month/Year aggregation (no daily!). "Month" offers Day but you can't select which month. **"Week" with "Day" aggregation** is the sweet spot — gives daily granularity for the current week
+- Sleep data is embedded as a `sleep_analysis` metric with pre-aggregated nightly totals (no per-segment breakdown)
+- Workout routes are embedded as `route` arrays in the workout JSON (latitude, longitude, altitude, speed, timestamp)
+
+**Data path:** `~/Library/Mobile Documents/iCloud~com~ifunography~HealthExport/Documents/`
+
+### iOS Shortcuts export (one-time backfill, `--source shortcuts`)
+
+The original method — an iOS Shortcut that reads health data and writes JSON/GPX files to iCloud Drive. Useful for backfilling historical data before switching to Auto Export.
+
+**Limitations:**
+- Requires **5 manual "Done" taps** per export run (one per data category)
+- Must be triggered manually or via a scheduled automation (still needs taps to confirm)
+- Separate files for metrics, workouts, sleep, and GPX routes
+
+**Data path:** `~/Library/Mobile Documents/iCloud~is~workflow~my~workflows/Documents/MyHealth/`
+
+### Recommended workflow
+
+1. **Backfill** your historical data with a Shortcuts export: `uv run python main.py import --source shortcuts`
+2. **Set up Auto Export** automations (30-min schedule, Week + Day)
+3. **Run the daemon** — it watches the Auto Export iCloud folder and imports new data automatically
+4. Never think about exporting again (until Apple changes something)
+
 ## Quick start
 
 **Prerequisites:** Python 3.11+ and [uv](https://github.com/astral-sh/uv).
@@ -48,8 +88,11 @@ zdrowskit is a local pipeline. Your data stays on your machine in a SQLite datab
 git clone <repo-url> && cd zdrowskit
 uv sync
 
-# Import your Apple Health data
-uv run python main.py import --data-dir ~/Documents/zdrowskit/MyHealth
+# Import your Apple Health data (Auto Export app, default)
+uv run python main.py import
+
+# Or import from iOS Shortcuts export (one-time backfill)
+uv run python main.py import --source shortcuts
 
 # See what's in the database
 uv run python main.py status
@@ -83,7 +126,8 @@ The LLM reads your profile, goals, training plan, and weekly journal alongside y
 ## Commands
 
 ```bash
-uv run python main.py import                   # parse export, upsert into DB
+uv run python main.py import                   # import from Auto Export (default)
+uv run python main.py import --source shortcuts # one-time backfill from Shortcuts export
 uv run python main.py report                   # current week: summary + daily
 uv run python main.py report --history         # all weeks, one block each
 uv run python main.py report --llm             # JSON for LLM: current + 3mo history
@@ -112,7 +156,7 @@ uv run python main.py daemon-stop                       # stop the background da
 uv run python main.py daemon-restart                    # restart (or re-load) the daemon
 ```
 
-Data dir defaults to `~/Documents/zdrowskit/MyHealth/`. Override with `--data-dir` or the `HEALTH_DATA_DIR` env var. Run any command with `--help` for the full flag list.
+Each source has its own default iCloud data directory. Override with `--data-dir` or the `HEALTH_DATA_DIR` env var. Run any command with `--help` for the full flag list.
 
 ## The daemon — always-on trainer mode
 
@@ -218,9 +262,7 @@ The `insights`, `nudge`, and `chat` commands use markdown files from `~/Document
 | `baselines.md` | auto | Rolling averages computed from DB (updated on each `insights` run) |
 | `history.md` | auto | LLM's own memory — appended after each weekly report |
 
-Example user context files are in `examples/context/`.
-
-Prompt templates (`soul.md`, `prompt.md`, `nudge_prompt.md`, `chat_prompt.md`) live in `src/prompts/` and are version-controlled — no need to copy them.
+Example user context files are in `examples/context/`. Prompt templates (`soul.md`, `prompt.md`, `nudge_prompt.md`, `chat_prompt.md`) live in `src/prompts/` and are version-controlled — no need to copy them.
 
 The journal (`log.md`) is what makes this different from a dashboard. Numbers say *what* happened. The journal says *why*. The LLM connects both.
 

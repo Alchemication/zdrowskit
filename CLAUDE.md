@@ -9,7 +9,8 @@ Your 24/7 ultra-personal trainer. Parses Apple Health exports (metrics, workouts
 Always use `uv run` — never plain `python`. Run any subcommand with `--help` for full flags.
 
 ```bash
-uv run python main.py import          # parse health data, upsert into DB
+uv run python main.py import                      # import from Auto Export (default)
+uv run python main.py import --source shortcuts    # import from iOS Shortcuts export
 uv run python main.py insights        # LLM weekly report (add --telegram, --email, --explain)
 uv run python main.py nudge           # short LLM nudge (add --trigger TYPE)
 uv run python main.py report          # terminal summary (add --llm, --history, --json)
@@ -54,19 +55,29 @@ Run with `uv run pytest`. Fixtures in `tests/fixtures/` and `tests/conftest.py`.
 
 ## Architecture
 
+Two data sources, same pipeline output:
+
 ```
-MyHealth/Metrics/*.json   ─┐
-MyHealth/Workouts/*.json  ─┤
-MyHealth/Routes/*.xml     ─┤─→ src/parsers/ → src/assembler.py → list[DailySnapshot]
-MyHealth/Sleep/sleep.json ─┘                                            │
-                                                                         ▼
-                                                              src/aggregator.py
-                                                                         │
-                                                                         ▼
-                                                                  WeeklySummary
+autoexport (default, ongoing — Auto Export app iCloud Drive automation):
+  Metrics/HealthAutoExport-*.json  ─┐
+  Workouts/HealthAutoExport-*.json ─┤─→ src/parsers/ → src/assembler.py → list[DailySnapshot]
+  (sleep + routes embedded)        ─┘                                            │
+
+shortcuts (historical backfill — iOS Shortcuts export):                          │
+  Metrics/{activity,heart,mobility}.json ─┐                                      │
+  Workouts/workouts.json                 ─┤─→ same parsers + sleep/gpx ──────────┤
+  Sleep/sleep.json                       ─┤                                      │
+  Routes/*.xml                           ─┘                                      │
+                                                                                 ▼
+                                                                      src/aggregator.py
+                                                                                 │
+                                                                                 ▼
+                                                                          WeeklySummary
 ```
 
 Schema lives in `src/models.py` — start there when changing fields. `src/commands.py` has all subcommand handlers; `main.py` is just dispatch.
+
+Data source paths are in `src/config.py` (`AUTOEXPORT_DATA_DIR`, `SHORTCUTS_DATA_DIR`). The `--source` flag on the import command selects which parser path to use.
 
 ## Context Files
 

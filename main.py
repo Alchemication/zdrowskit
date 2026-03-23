@@ -139,7 +139,13 @@ def main() -> None:
     p_import = sub.add_parser(
         "import", help="Parse export directory and upsert into DB"
     )
-    p_import.add_argument("--data-dir", metavar="PATH", help="Path to MyHealth folder")
+    p_import.add_argument("--data-dir", metavar="PATH", help="Path to data folder")
+    p_import.add_argument(
+        "--source",
+        choices=["shortcuts", "autoexport"],
+        default="autoexport",
+        help="Data source format (default: autoexport)",
+    )
     _add_db(p_import)
 
     # report
