@@ -88,11 +88,8 @@ The original method — an iOS Shortcut that reads health data and writes JSON/G
 git clone <repo-url> && cd zdrowskit
 uv sync
 
-# Import your Apple Health data (Auto Export app, default)
+# Import your Apple Health data (see "Getting your data out" above)
 uv run python main.py import
-
-# Or import from iOS Shortcuts export (one-time backfill)
-uv run python main.py import --source shortcuts
 
 # See what's in the database
 uv run python main.py status
@@ -109,12 +106,9 @@ uv run python main.py report
    cp examples/context/*.md ~/Documents/zdrowskit/ContextFiles/
    ```
 2. Edit them with your real data — at minimum `me.md`, `goals.md`, and `plan.md`
-   (Prompt templates like `prompt.md` and `soul.md` are shipped in `src/prompts/` — no need to copy them)
-3. Add your API key and notification credentials to `.env`:
+3. Add your API key to `.env` (plus notification credentials — see [Notifications](#notifications)):
    ```
    ANTHROPIC_API_KEY=sk-ant-...
-   TELEGRAM_BOT_TOKEN=123456789:ABCdefGHI...
-   TELEGRAM_CHAT_ID=123456789
    ```
 4. Generate your first report:
    ```bash
@@ -241,13 +235,7 @@ The daemon also runs a Telegram long-polling listener. Send a message to your bo
 - `/context <name>` — show full content of a file (e.g. `/context me`)
 - `/help` — list all available commands
 
-**Setup:**
-```bash
-# Run the daemon (chat listener starts automatically)
-uv run python src/daemon.py --foreground
-```
-
-The conversation buffer holds the last 20 messages in memory. It resets when the daemon restarts, but the LLM still has your context files and history for continuity.
+The chat listener starts automatically when you run the daemon (see [above](#the-daemon--always-on-trainer-mode)). The conversation buffer holds the last 20 messages in memory. It resets when the daemon restarts, but the LLM still has your context files and history for continuity.
 
 ## Context files
 
@@ -262,7 +250,7 @@ The `insights`, `nudge`, and `chat` commands use markdown files from `~/Document
 | `baselines.md` | auto | Rolling averages computed from DB (updated on each `insights` run) |
 | `history.md` | auto | LLM's own memory — appended after each weekly report |
 
-Example user context files are in `examples/context/`. Prompt templates (`soul.md`, `prompt.md`, `nudge_prompt.md`, `chat_prompt.md`) live in `src/prompts/` and are version-controlled — no need to copy them.
+Example user context files are in `examples/context/`.
 
 The journal (`log.md`) is what makes this different from a dashboard. Numbers say *what* happened. The journal says *why*. The LLM connects both.
 
