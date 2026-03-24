@@ -14,8 +14,10 @@ Example:
 
 from __future__ import annotations
 
+import fcntl
 import json
 import logging
+import os
 import logging.handlers
 import sqlite3
 import sys
@@ -41,6 +43,7 @@ ICLOUD_HEALTH_DIR = (
     / "Library/Mobile Documents/iCloud~com~ifunography~HealthExport/Documents"
 )
 LOG_FILE = Path.home() / "Library/Logs/zdrowskit.daemon.log"
+LOCK_FILE = Path.home() / "Documents/zdrowskit/.daemon.lock"
 STATE_FILE = Path.home() / "Documents/zdrowskit/.daemon_state.json"
 
 # ---------------------------------------------------------------------------
@@ -878,6 +881,21 @@ class ZdrowskitDaemon:
     def run(self) -> None:
         """Start the observer and scheduled check thread, then block until interrupted."""
         from watchdog.observers import Observer
+
+        # Acquire an exclusive file lock to prevent concurrent daemon instances.
+        # The lock is held for the lifetime of the process (released on exit).
+        LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
+        self._lock_file = LOCK_FILE.open("w")
+        try:
+            fcntl.flock(self._lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            logger.error(
+                "Another daemon instance is already running (lock: %s). Exiting.",
+                LOCK_FILE,
+            )
+            sys.exit(1)
+        self._lock_file.write(str(os.getpid()))
+        self._lock_file.flush()
 
         if not ICLOUD_HEALTH_DIR.exists():
             logger.warning(
