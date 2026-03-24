@@ -370,8 +370,10 @@ def extract_memory(response: str) -> str | None:
     return match.group(1).strip() if match else None
 
 
-def append_history(context_dir: Path, memory_block: str) -> None:
-    """Append a timestamped memory entry to history.md, keeping only recent entries.
+def append_history(
+    context_dir: Path, memory_block: str, week_label: str | None = None
+) -> None:
+    """Append a memory entry to history.md, keyed by ISO week label.
 
     Splits the file on '## ' headings, appends the new entry, and trims
     to the most recent MAX_HISTORY_ENTRIES entries so the file stays bounded.
@@ -379,10 +381,12 @@ def append_history(context_dir: Path, memory_block: str) -> None:
     Args:
         context_dir: Directory containing history.md.
         memory_block: Text to append as this week's memory.
+        week_label: ISO week label (e.g. "2026-W12") used as the entry
+            heading.  Falls back to today's date if not provided.
     """
     history_path = context_dir / "history.md"
-    today = date.today().isoformat()
-    new_entry = f"## {today}\n\n{memory_block}"
+    heading = week_label or date.today().isoformat()
+    new_entry = f"## {heading}\n\n{memory_block}"
 
     if history_path.exists():
         content = history_path.read_text(encoding="utf-8")
@@ -393,11 +397,15 @@ def append_history(context_dir: Path, memory_block: str) -> None:
     parts = re.split(r"(?m)(?=^## )", content)
     # Filter out empty/whitespace-only parts (e.g. preamble before first heading)
     entries = [p.strip() for p in parts if p.strip() and p.strip().startswith("## ")]
-    # Replace existing entry for today instead of duplicating
-    if entries and entries[-1].startswith(f"## {today}"):
-        entries[-1] = new_entry
-        logger.info("Replaced existing %s entry in %s", today, history_path)
-    else:
+    # Replace existing entry for the same week instead of duplicating
+    replaced = False
+    for i, entry in enumerate(entries):
+        if entry.startswith(f"## {heading}"):
+            entries[i] = new_entry
+            replaced = True
+            logger.info("Replaced existing %s entry in %s", heading, history_path)
+            break
+    if not replaced:
         entries.append(new_entry)
 
     history_path.write_text("\n\n".join(entries) + "\n", encoding="utf-8")
@@ -456,6 +464,10 @@ def build_llm_data(
     history_snaps = load_snapshots(conn, start=history_start, end=history_end)
     history_weeks = group_by_week(history_snaps)
 
+    ws = date.fromisoformat(week_start)
+    iso = ws.isocalendar()
+    week_label = f"{iso.year}-W{iso.week:02d}"
+
     return {
         "current_week": {
             "summary": to_dict(summarise(current_snaps)) if current_snaps else None,
@@ -463,4 +475,5 @@ def build_llm_data(
         },
         "history": [{"summary": to_dict(summarise(w))} for w in history_weeks],
         "week_complete": today > date.fromisoformat(week_end),
+        "week_label": week_label,
     }

@@ -261,22 +261,31 @@ class TestAppendHistory:
         assert "Old entry" in content
         assert "New memory block" in content
 
-    def test_replaces_same_day_entry(self, tmp_path: Path) -> None:
-        append_history(tmp_path, "Entry one")
-        append_history(tmp_path, "Entry two")
+    def test_replaces_same_week_entry(self, tmp_path: Path) -> None:
+        append_history(tmp_path, "Entry one", week_label="2026-W12")
+        append_history(tmp_path, "Entry two", week_label="2026-W12")
         content = (tmp_path / "history.md").read_text()
-        # Second call on the same day replaces, not appends
+        # Second call for the same week replaces, not appends
         assert content.count("## ") == 1
         assert "Entry one" not in content
         assert "Entry two" in content
 
-    def test_appends_different_day_entry(self, tmp_path: Path) -> None:
-        (tmp_path / "history.md").write_text("## 2026-03-01\n\nOld day\n")
-        append_history(tmp_path, "New day")
+    def test_appends_different_week_entry(self, tmp_path: Path) -> None:
+        append_history(tmp_path, "W11 notes", week_label="2026-W11")
+        append_history(tmp_path, "W12 notes", week_label="2026-W12")
         content = (tmp_path / "history.md").read_text()
         assert content.count("## ") == 2
-        assert "Old day" in content
-        assert "New day" in content
+        assert "W11 notes" in content
+        assert "W12 notes" in content
+
+    def test_different_weeks_not_clobbered(self, tmp_path: Path) -> None:
+        """Running --week last and --week current on same day keeps both entries."""
+        append_history(tmp_path, "Last week review", week_label="2026-W12")
+        append_history(tmp_path, "Current week progress", week_label="2026-W13")
+        content = (tmp_path / "history.md").read_text()
+        assert content.count("## ") == 2
+        assert "Last week review" in content
+        assert "Current week progress" in content
 
     def test_grows_unbounded_without_trimming(self, tmp_path: Path) -> None:
         """BUG: append_history does not trim despite its docstring claiming it does.

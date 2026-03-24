@@ -436,6 +436,7 @@ def cmd_insights(args: argparse.Namespace) -> None:
         _save_baselines(CONTEXT_DIR, baselines)
 
     week_complete = health_data.pop("week_complete", False)
+    week_label = health_data.pop("week_label", None)
     health_data_json = json.dumps(health_data, indent=2)
 
     try:
@@ -488,21 +489,18 @@ def cmd_insights(args: argparse.Namespace) -> None:
     print(visible_report)
 
     if memory and not args.no_update_history:
-        append_history(CONTEXT_DIR, memory)
+        append_history(CONTEXT_DIR, memory, week_label=week_label)
     elif not memory:
         logger.info("No <memory> block in response; history.md unchanged")
 
     # Push notifications
-    target_date = date.today()
-    if args.week == "last":
-        target_date = target_date - timedelta(days=7)
-    iso_week = f"{target_date.isocalendar().year}-W{target_date.isocalendar().week:02d}"
-    week_label = f"Week {iso_week} {'Review' if args.week == 'last' else 'Progress'}"
+    report_type = "Review" if args.week == "last" else "Progress"
+    notify_subject = f"Week {week_label} {report_type}" if week_label else "Report"
 
     if args.email:
-        send_email(visible_report, week_label)
+        send_email(visible_report, notify_subject)
     if args.telegram:
-        send_telegram(visible_report, week_label)
+        send_telegram(visible_report, notify_subject)
 
 
 def cmd_nudge(
