@@ -435,10 +435,16 @@ def cmd_insights(args: argparse.Namespace) -> None:
         baselines = compute_baselines(conn)
         _save_baselines(CONTEXT_DIR, baselines)
 
+    week_complete = health_data.pop("week_complete", False)
     health_data_json = json.dumps(health_data, indent=2)
 
     try:
-        messages = build_messages(context, health_data_json, baselines=baselines)
+        messages = build_messages(
+            context,
+            health_data_json,
+            baselines=baselines,
+            week_complete=week_complete,
+        )
     except (KeyError, ValueError) as e:
         logger.error("Failed to render prompt.md template: %s", e)
         sys.exit(1)

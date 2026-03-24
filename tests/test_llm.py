@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from datetime import date
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -310,9 +311,15 @@ class TestBuildLlmData:
         assert result["current_week"]["days"] == []
         assert result["history"] == []
 
+    @patch("llm.date")
     def test_with_data(
-        self, in_memory_db: sqlite3.Connection, sample_snapshots: list[DailySnapshot]
+        self,
+        mock_date: MagicMock,
+        in_memory_db: sqlite3.Connection,
+        sample_snapshots: list[DailySnapshot],
     ) -> None:
+        mock_date.today.return_value = date(2026, 3, 11)
+        mock_date.fromisoformat = date.fromisoformat
         store_snapshots(in_memory_db, sample_snapshots)
         result = build_llm_data(in_memory_db, months=3)
         assert "current_week" in result
@@ -320,18 +327,30 @@ class TestBuildLlmData:
         # Should have some days in the result
         assert isinstance(result["current_week"]["days"], list)
 
+    @patch("llm.date")
     def test_last_week_mode(
-        self, in_memory_db: sqlite3.Connection, sample_snapshots: list[DailySnapshot]
+        self,
+        mock_date: MagicMock,
+        in_memory_db: sqlite3.Connection,
+        sample_snapshots: list[DailySnapshot],
     ) -> None:
+        mock_date.today.return_value = date(2026, 3, 16)
+        mock_date.fromisoformat = date.fromisoformat
         store_snapshots(in_memory_db, sample_snapshots)
         result = build_llm_data(in_memory_db, months=3, week="last")
         assert "current_week" in result
         assert "history" in result
 
+    @patch("llm.date")
     def test_structure_has_expected_fields(
-        self, in_memory_db: sqlite3.Connection, sample_snapshots: list[DailySnapshot]
+        self,
+        mock_date: MagicMock,
+        in_memory_db: sqlite3.Connection,
+        sample_snapshots: list[DailySnapshot],
     ) -> None:
         """Verify the nested structure contains actual WeeklySummary and DailySnapshot fields."""
+        mock_date.today.return_value = date(2026, 3, 11)
+        mock_date.fromisoformat = date.fromisoformat
         store_snapshots(in_memory_db, sample_snapshots)
         result = build_llm_data(in_memory_db, months=3)
 

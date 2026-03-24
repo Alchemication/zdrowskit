@@ -67,6 +67,9 @@ EVENING_HOUR_END = 21
 MORNING_REPORT_HOUR_START = 8
 MORNING_REPORT_HOUR_END = 9
 
+MIDWEEK_REPORT_HOUR_START = 9
+MIDWEEK_REPORT_HOUR_END = 10
+
 
 # ---------------------------------------------------------------------------
 # State management
@@ -334,24 +337,29 @@ class ZdrowskitDaemon:
 
         _save_state(self._state)
 
-    def _can_send_weekly_report(self) -> bool:
-        """Check whether a weekly report is allowed (once per ISO week).
+    def _can_send_report(self, report_type: str) -> bool:
+        """Check whether a report of the given type may be sent today.
+
+        Args:
+            report_type: "review" for full-week or "progress" for mid-week.
 
         Returns:
-            True if report may be sent; False if already sent this week.
+            True if report may be sent; False if already sent today.
         """
-        today = date.today()
-        iso_week = f"{today.isocalendar().year}-W{today.isocalendar().week:02d}"
-        if self._state.get("last_weekly_report_week") == iso_week:
-            logger.info("Weekly report suppressed: already sent for %s", iso_week)
+        key = f"last_{report_type}_date"
+        today_str = date.today().isoformat()
+        if self._state.get(key) == today_str:
+            logger.info("%s report suppressed: already sent today", report_type)
             return False
         return True
 
-    def _record_weekly_report(self) -> None:
-        """Update state after a weekly report is sent."""
-        today = date.today()
-        iso_week = f"{today.isocalendar().year}-W{today.isocalendar().week:02d}"
-        self._state["last_weekly_report_week"] = iso_week
+    def _record_report(self, report_type: str) -> None:
+        """Update state after a report is sent.
+
+        Args:
+            report_type: "review" for full-week or "progress" for mid-week.
+        """
+        self._state[f"last_{report_type}_date"] = date.today().isoformat()
         _save_state(self._state)
 
     # ------------------------------------------------------------------
@@ -375,8 +383,10 @@ class ZdrowskitDaemon:
 
     def _run_weekly_report(self) -> None:
         """Run the full weekly insights report and send via Telegram."""
-        if not self._can_send_weekly_report():
+        if not self._can_send_report("review"):
             return
+
+        self._run_import()
 
         from commands import cmd_insights
 
@@ -393,11 +403,39 @@ class ZdrowskitDaemon:
             data_dir=None,
         )
         try:
-            logger.info("Running weekly report")
+            logger.info("Running weekly review report")
             cmd_insights(args)
-            self._record_weekly_report()
+            self._record_report("review")
         except SystemExit:
-            logger.error("Weekly report command failed")
+            logger.error("Weekly review report failed")
+
+    def _run_midweek_report(self) -> None:
+        """Run a mid-week progress report and send via Telegram."""
+        if not self._can_send_report("progress"):
+            return
+
+        self._run_import()
+
+        from commands import cmd_insights
+
+        args = types.SimpleNamespace(
+            db=str(self.db),
+            model=self.model,
+            email=False,
+            telegram=True,
+            week="current",
+            months=3,
+            no_update_baselines=False,
+            no_update_history=False,
+            explain=False,
+            data_dir=None,
+        )
+        try:
+            logger.info("Running mid-week progress report")
+            cmd_insights(args)
+            self._record_report("progress")
+        except SystemExit:
+            logger.error("Mid-week progress report failed")
 
     def _run_nudge(self, trigger: str) -> None:
         """Run a nudge and send via Telegram.
@@ -843,12 +881,19 @@ class ZdrowskitDaemon:
             time.sleep(SCHEDULED_CHECK_INTERVAL_S)
             now = datetime.now()
 
-            # Monday morning: send weekly report (uses Sunday's data)
+            # Monday morning: full week review (previous Mon–Sun)
             if (
                 now.weekday() == 0
                 and MORNING_REPORT_HOUR_START <= now.hour < MORNING_REPORT_HOUR_END
             ):
                 self._run_weekly_report()
+
+            # Thursday morning: mid-week progress check (current Mon–Thu)
+            if (
+                now.weekday() == 3
+                and MIDWEEK_REPORT_HOUR_START <= now.hour < MIDWEEK_REPORT_HOUR_END
+            ):
+                self._run_midweek_report()
 
             # Evening: check for missed sessions on training days
             if EVENING_HOUR_START <= now.hour < EVENING_HOUR_END:

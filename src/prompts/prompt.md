@@ -1,9 +1,8 @@
 # Weekly Health Report
 
-Today is {today} ({weekday}). If the week is incomplete, this is a progress
-check. If the week is complete, this is a full review. Title the report with
-the ISO week number, user's name, and date — e.g.
-`# W12 Progress Check — Adam (Mon, 16 Mar)` or `# W12 Review — Adam`.
+Today is {today} ({weekday}). {week_status}
+Title the report with the ISO week number, user's name, and date — e.g.
+`# W12 Progress Check — Adam (Thu, 19 Mar)` or `# W12 Review — Adam`.
 
 ## About the User
 {me}
@@ -38,7 +37,9 @@ and their own notes. Produce a report with these sections:
 1. **Week at a Glance** — 2-3 sentence executive summary of the week.
 2. **Training Review** — did they hit the plan? What deviated and why?
    Compare planned vs actual sessions day by day. Use workout timestamps
-   and specifics from the data to explain what happened.
+   and specifics from the data to explain what happened. For mid-week
+   progress checks, only evaluate days that have elapsed — do not penalize
+   for sessions scheduled later in the week.
 3. **Key Metrics** — highlight meaningful changes in HR, HRV, recovery index,
    VO2max, pace, and sleep. Compare to baselines and reference multi-week trends
    where meaningful, not just 30d averages. For sleep: note total duration vs

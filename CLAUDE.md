@@ -11,7 +11,7 @@ Always use `uv run` — never plain `python`. Run any subcommand with `--help` f
 ```bash
 uv run python main.py import                      # import from Auto Export (default)
 uv run python main.py import --source shortcuts    # import from iOS Shortcuts export
-uv run python main.py insights        # LLM weekly report (add --telegram, --email, --explain)
+uv run python main.py insights        # LLM weekly report (add --week last|current, --telegram, --email, --explain)
 uv run python main.py nudge           # short LLM nudge (add --trigger TYPE)
 uv run python main.py report          # terminal summary (add --llm, --history, --json)
 uv run python main.py status          # DB row counts + date range
@@ -100,6 +100,15 @@ Prompt templates live in `src/prompts/` (version-controlled, single source of tr
 | `prompt.md` | Weekly report prompt template |
 | `nudge_prompt.md` | Nudge prompt template |
 | `chat_prompt.md` | Conversational chat prompt template |
+
+## Daemon Scheduled Reports
+
+The daemon (`src/daemon.py`) runs a background thread that fires reports on a schedule:
+
+- **Monday 8–9am** — full week review (`--week last`, previous Mon–Sun)
+- **Thursday 9–10am** — mid-week progress check (`--week current`, current Mon–Thu)
+
+Both triggers import fresh data before generating the report. Rate-limited to once per day per report type via `~/.daemon_state.json`.
 
 ## Telegram Interactive Chat
 

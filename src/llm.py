@@ -33,7 +33,7 @@ import litellm
 
 from aggregator import summarise
 from config import MAX_HISTORY_ENTRIES, MAX_LOG_ENTRIES, PROMPTS_DIR
-from report import current_week_bounds, group_by_week, to_dict
+from report import group_by_week, to_dict
 from store import load_date_range, load_snapshots, log_llm_call
 
 logger = logging.getLogger(__name__)
@@ -157,6 +157,7 @@ def build_messages(
     context: dict[str, str],
     health_data_json: str,
     baselines: str | None = None,
+    week_complete: bool = True,
 ) -> list[dict[str, str]]:
     """Assemble system and user messages for the LLM call.
 
@@ -168,6 +169,7 @@ def build_messages(
         context: Dict from load_context() with file stems as keys.
         health_data_json: JSON string of current week + history data.
         baselines: Auto-computed baselines markdown, or None to skip.
+        week_complete: Whether the reported week has fully elapsed.
 
     Returns:
         A list of message dicts ready for litellm.completion().
@@ -175,6 +177,17 @@ def build_messages(
     system_content = context.get("soul", DEFAULT_SOUL)
     if system_content == "(not provided)":
         system_content = DEFAULT_SOUL
+
+    today = date.today()
+    if week_complete:
+        week_status = "This is a full week review (Mon–Sun complete)."
+    else:
+        weekday = today.strftime("%A")
+        week_status = (
+            f"This is a mid-week progress check (Mon–{weekday}). "
+            "The week is not over — do not flag missing sessions for days "
+            "that haven't happened yet."
+        )
 
     template = context["prompt"]
     placeholders: dict[str, str] = defaultdict(lambda: "(not provided)")
@@ -187,8 +200,9 @@ def build_messages(
             "history": context.get("history", "(not provided)"),
             "health_data": health_data_json,
             "baselines": baselines or "(not computed)",
-            "today": date.today().isoformat(),
-            "weekday": date.today().strftime("%A"),
+            "today": today.isoformat(),
+            "weekday": today.strftime("%A"),
+            "week_status": week_status,
         }
     )
     # Forward any extra keys (e.g. recent_nudges) from context into placeholders.
@@ -399,20 +413,40 @@ def build_llm_data(
         conn: Open SQLite database connection.
         months: Number of months of history to include.
         week: Which week to report on — "current" for the ISO week containing
-              today, "last" for the previous ISO week.
+              today, "last" for the previous full Mon–Sun week.
 
     Returns:
-        A dict with 'current_week' and 'history' keys, JSON-serialisable.
-        Returns empty structure if the database has no data.
+        A dict with 'current_week', 'history', and 'week_complete' keys,
+        JSON-serialisable.  Returns empty structure if the database has no data.
     """
     dr = load_date_range(conn)
     if dr is None:
-        return {"current_week": {"summary": None, "days": []}, "history": []}
+        return {
+            "current_week": {"summary": None, "days": []},
+            "history": [],
+            "week_complete": False,
+        }
 
-    anchor = date.fromisoformat(dr[1])
+    today = date.today()
     if week == "last":
-        anchor = anchor - timedelta(days=7)
-    week_start, week_end = current_week_bounds(anchor.isoformat())
+        last_sunday = today - timedelta(days=today.weekday() + 1)
+        week_start = (last_sunday - timedelta(days=6)).isoformat()
+        week_end = last_sunday.isoformat()
+    else:
+        monday = today - timedelta(days=today.weekday())
+        week_start = monday.isoformat()
+        week_end = (monday + timedelta(days=6)).isoformat()
+
+    logger.info(
+        "Report dates: mode=%s, week=%s..%s, today=%s, db_range=%s..%s",
+        week,
+        week_start,
+        week_end,
+        today,
+        dr[0],
+        dr[1],
+    )
+
     current_snaps = load_snapshots(conn, start=week_start, end=week_end)
 
     history_end = (date.fromisoformat(week_start) - timedelta(days=1)).isoformat()
@@ -428,4 +462,5 @@ def build_llm_data(
             "days": [to_dict(s) for s in current_snaps],
         },
         "history": [{"summary": to_dict(summarise(w))} for w in history_weeks],
+        "week_complete": today > date.fromisoformat(week_end),
     }
