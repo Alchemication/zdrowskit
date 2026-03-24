@@ -15,7 +15,7 @@ Built by Adam Napora (adamsky). *Zdrowie* is Polish for health. *Kit* is the too
 ## How it works
 
 ```
-Auto Export iOS app (iCloud Drive, every 30 min)
+Auto Export iOS app (iCloud Drive, on a schedule)
     Metrics/HealthAutoExport-*.json  — steps, energy, HR, HRV, VO2max, mobility, sleep
     Workouts/HealthAutoExport-*.json — sessions with HR, energy, temp, embedded routes
             ↓
@@ -39,43 +39,47 @@ zdrowskit is a local pipeline. Your data stays on your machine in a SQLite datab
 
 ## Getting your data out of Apple Health
 
-Apple Health doesn't offer a usable export API. Getting daily data onto your Mac requires a third-party iOS app and some patience. zdrowskit supports two export methods via the `--source` flag.
+Apple's built-in health export dumps everything into a single massive XML file. On any non-trivial data size, this crashes or overheats the iPhone — it's not a real solution.
 
-### Auto Export app (recommended, `--source autoexport`)
+The workaround is a third-party iOS app that reads HealthKit directly and writes structured JSON to iCloud Drive. zdrowskit uses [Auto Export](https://apps.apple.com/app/myhealth-export-to-icloud/id6737380982) for this. It works on iOS 26 (some alternatives don't yet). The Basic tier unlocks Shortcut actions; **Premium** (still cheap, one-time purchase) is needed for scheduled Automations.
 
-[Auto Export](https://apps.apple.com/app/myhealth-export-to-icloud/id6737380982) (Premium, one-time purchase) can sync health data to iCloud Drive on a schedule — no taps required once configured.
+**One universal constraint:** iOS requires the phone to be **unlocked** for any health data export — automations silently skip when the phone is locked.
+
+### Auto Export automations (ongoing, `--source autoexport`)
+
+The Automations feature syncs health data to iCloud Drive on a schedule — no taps required once configured.
 
 **Setup in the app:**
 1. Create two automations: one for **Metrics**, one for **Workouts**
 2. Set both to: **Date Range = Week**, **Aggregation = Day**, **Destination = iCloud Drive**
 3. Select all metrics you care about (steps, energy, HR, HRV, VO2max, mobility, resting heart rate, sleep analysis, etc.)
-4. Set the schedule to **every 30 minutes**
+4. Set the schedule — **every 5 minutes recommended** (shorter intervals catch more unlock windows)
 
-**Important limitations:**
-- iOS requires the phone to be **unlocked** for health data access — automations silently skip if the phone is locked
-- 30-minute intervals work well in practice: your phone is unlocked often enough during the day to catch most windows
-- The app writes weekly JSON files to iCloud: `Metrics/HealthAutoExport-YYYY-WW.json` and `Workouts/HealthAutoExport-YYYY-WW.json`
-- **Date range gotcha:** "Year" only offers Week/Month/Year aggregation (no daily!). "Month" offers Day but you can't select which month. **"Week" with "Day" aggregation** is the sweet spot — gives daily granularity for the current week
-- Sleep data is embedded as a `sleep_analysis` metric with pre-aggregated nightly totals (no per-segment breakdown)
-- Workout routes are embedded as `route` arrays in the workout JSON (latitude, longitude, altitude, speed, timestamp)
+**Limitations:**
+- Automations only export the **current week** — you can't pull historical data at daily granularity this way ("Year" aggregation has no daily option; "Month" has daily but you can't choose which month)
+- Sleep data is pre-aggregated nightly totals (no per-segment breakdown)
+- Workout routes are embedded as `route` arrays (latitude, longitude, altitude, speed, timestamp)
+- The app writes weekly JSON files: `Metrics/HealthAutoExport-YYYY-WW.json` and `Workouts/HealthAutoExport-YYYY-WW.json`
 
 **Data path:** `~/Library/Mobile Documents/iCloud~com~ifunography~HealthExport/Documents/`
 
-### iOS Shortcuts export (one-time backfill, `--source shortcuts`)
+### Auto Export shortcuts actions (one-time backfill, `--source shortcuts`)
 
-The original method — an iOS Shortcut that reads health data and writes JSON/GPX files to iCloud Drive. Useful for backfilling historical data before switching to Auto Export.
+Auto Export also provides iOS Shortcut actions with flexible date ranges — useful for backfilling historical data that automations can't reach.
 
 **Limitations:**
-- Requires **5 manual "Done" taps** per export run (one per data category)
-- Must be triggered manually or via a scheduled automation (still needs taps to confirm)
-- Separate files for metrics, workouts, sleep, and GPX routes
+- Each action supports **max 10 metrics** — you need a chain of actions to cover everything (metrics, workouts, routes)
+- Every action in the chain requires a **manual confirmation tap** (iOS limitation on health data access), and the whole shortcut must be kicked off manually on an unlocked phone
+- Separate output files for metrics, workouts, sleep, and GPX routes
+
+Tedious, but it's a one-time chore. Once historical data is imported, automations handle everything going forward.
 
 **Data path:** `~/Library/Mobile Documents/iCloud~is~workflow~my~workflows/Documents/MyHealth/`
 
 ### Recommended workflow
 
-1. **Backfill** your historical data with a Shortcuts export: `uv run python main.py import --source shortcuts`
-2. **Set up Auto Export** automations (30-min schedule, Week + Day)
+1. **Backfill** historical data using Shortcuts actions: `uv run python main.py import --source shortcuts`
+2. **Set up Auto Export** automations (Week + Day aggregation, see setup above)
 3. **Run the daemon** — it watches the Auto Export iCloud folder and imports new data automatically
 4. Never think about exporting again (until Apple changes something)
 
