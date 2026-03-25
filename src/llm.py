@@ -483,11 +483,14 @@ def build_llm_data(
         "sleep_rem_h",
         "sleep_awake_h",
     }
+    today_iso = date.today().isoformat()
     for day in days:
         if isinstance(day, dict) and all(day.get(k) is None for k in _SLEEP_KEYS):
             for k in _SLEEP_KEYS:
                 day.pop(k, None)
-            day["sleep"] = "not_tracked"
+            # Today's sleep is always null because the night hasn't ended yet;
+            # past days with null sleep genuinely weren't tracked (watch off).
+            day["sleep"] = "pending" if day.get("date") == today_iso else "not_tracked"
 
     return {
         "current_week": {

@@ -47,9 +47,10 @@ headers or bullet points. Just plain conversational text.
 
 ### Sleep tracking gaps
 
-Days with `"sleep": "not_tracked"` mean the watch wasn't worn — this is
-normal and not worth mentioning on its own. Only flag a tracking gap if
-sleep has been missing for 3+ consecutive days.
+Days with `"sleep": "pending"` mean today's night hasn't ended yet — never
+flag this as missing data. Days with `"sleep": "not_tracked"` mean the watch
+wasn't worn — this is normal and not worth mentioning on its own. Only flag
+a tracking gap if sleep has been `not_tracked` for 3+ consecutive past days.
 
 ### System-initiated triggers (the user didn't do anything — be concise)
 

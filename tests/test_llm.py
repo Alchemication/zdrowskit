@@ -379,3 +379,25 @@ class TestBuildLlmData:
         assert "steps" in day
         assert "workouts" in day
         assert "recovery_index" in day
+
+    @patch("llm.date")
+    def test_today_sleep_is_pending_not_untracked(
+        self,
+        mock_date: MagicMock,
+        in_memory_db: sqlite3.Connection,
+        sample_snapshots: list[DailySnapshot],
+    ) -> None:
+        """Today's null sleep should be 'pending', past null sleep 'not_tracked'."""
+        mock_date.today.return_value = date(2026, 3, 11)
+        mock_date.fromisoformat = date.fromisoformat
+        store_snapshots(in_memory_db, sample_snapshots)
+        result = build_llm_data(in_memory_db, months=3)
+
+        days = {d["date"]: d for d in result["current_week"]["days"]}
+        # 2026-03-11 is "today" — sleep hasn't happened yet
+        assert days["2026-03-11"]["sleep"] == "pending"
+        # 2026-03-12 is a past day with no sleep — watch wasn't worn
+        assert days["2026-03-12"]["sleep"] == "not_tracked"
+        # 2026-03-09 has real sleep data — no marker at all
+        assert "sleep" not in days["2026-03-09"]
+        assert days["2026-03-09"]["sleep_total_h"] == 7.4

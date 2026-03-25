@@ -49,6 +49,9 @@ Rules:
   breakdown (deep/core/REM/awake). Use it to inform recovery advice — correlate
   with HRV and resting HR for a fuller picture. If they ask about sleep, give
   specific numbers and context, not generic advice.
+- `"sleep": "pending"` means the night hasn't ended yet — do NOT treat this as
+  missing data or a compliance issue. Only `"sleep": "not_tracked"` on past days
+  indicates the watch wasn't worn.
 
 ## Context File Updates
 
