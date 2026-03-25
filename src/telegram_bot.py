@@ -20,6 +20,7 @@ import threading
 import urllib.error
 import urllib.request
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 
 from config import MAX_CONVERSATION_MESSAGES
 from notify import chunk_text
@@ -309,6 +310,9 @@ class TelegramPoller:
         ``on_message(message_dict)``. For inline keyboard callbacks,
         calls ``on_callback(callback_query_dict)`` if provided.
 
+        Handlers are dispatched to a thread pool so that long-running
+        callbacks (e.g. LLM calls) never block the polling loop.
+
         Args:
             on_message: Callback receiving a Telegram message dict.
             stop_event: Event that signals the loop to stop.
@@ -317,49 +321,52 @@ class TelegramPoller:
         offset = 0
         logger.info("Telegram poller started (chat_id=%s)", self._chat_id)
 
-        while not stop_event.is_set():
-            updates = self.get_updates(offset)
-            if not updates and stop_event.is_set():
-                break
+        with ThreadPoolExecutor(max_workers=2, thread_name_prefix="tg-handler") as pool:
+            while not stop_event.is_set():
+                updates = self.get_updates(offset)
+                if not updates and stop_event.is_set():
+                    break
 
-            for update in updates:
-                offset = update["update_id"] + 1
+                for update in updates:
+                    offset = update["update_id"] + 1
 
-                # Handle inline keyboard callbacks.
-                cb = update.get("callback_query")
-                if cb and on_callback:
-                    cb_chat_id = str(
-                        cb.get("message", {}).get("chat", {}).get("id", "")
-                    )
-                    if cb_chat_id == self._chat_id:
-                        try:
-                            on_callback(cb)
-                        except Exception:
-                            logger.error("Error handling callback query", exc_info=True)
-                    continue
+                    # Handle inline keyboard callbacks.
+                    cb = update.get("callback_query")
+                    if cb and on_callback:
+                        cb_chat_id = str(
+                            cb.get("message", {}).get("chat", {}).get("id", "")
+                        )
+                        if cb_chat_id == self._chat_id:
+                            pool.submit(self._safe_call, on_callback, cb)
+                        continue
 
-                msg = update.get("message")
-                if not msg:
-                    continue
+                    msg = update.get("message")
+                    if not msg:
+                        continue
 
-                # Security: only process messages from the configured chat.
-                msg_chat_id = str(msg.get("chat", {}).get("id", ""))
-                if msg_chat_id != self._chat_id:
-                    logger.debug(
-                        "Ignoring message from chat %s (expected %s)",
-                        msg_chat_id,
-                        self._chat_id,
-                    )
-                    continue
+                    # Security: only process messages from the configured chat.
+                    msg_chat_id = str(msg.get("chat", {}).get("id", ""))
+                    if msg_chat_id != self._chat_id:
+                        logger.debug(
+                            "Ignoring message from chat %s (expected %s)",
+                            msg_chat_id,
+                            self._chat_id,
+                        )
+                        continue
 
-                if not msg.get("text"):
-                    continue
+                    if not msg.get("text"):
+                        continue
 
-                try:
-                    on_message(msg)
-                except Exception:
-                    logger.error("Error handling Telegram message", exc_info=True)
+                    pool.submit(self._safe_call, on_message, msg)
 
-            # On error (empty updates not from timeout), brief pause.
-            if not updates and not stop_event.is_set():
-                stop_event.wait(_POLL_ERROR_RETRY_S)
+                # On error (empty updates not from timeout), brief pause.
+                if not updates and not stop_event.is_set():
+                    stop_event.wait(_POLL_ERROR_RETRY_S)
+
+    @staticmethod
+    def _safe_call(fn: callable, *args: object) -> None:
+        """Call *fn* and log any exception instead of crashing the pool."""
+        try:
+            fn(*args)
+        except Exception:
+            logger.error("Error in Telegram handler", exc_info=True)
