@@ -468,10 +468,31 @@ def build_llm_data(
     iso = ws.isocalendar()
     week_label = f"{iso.year}-W{iso.week:02d}"
 
+    days = [to_dict(s) for s in current_snaps]
+
+    # Replace null sleep columns with a single "sleep": "not_tracked" marker.
+    # Today's sleep is *always* null (the night hasn't ended); past days may
+    # be null if the watch wasn't worn.  Collapsing 7 null fields into one
+    # marker reduces noise and gives the LLM a clear signal.
+    _SLEEP_KEYS = {
+        "sleep_total_h",
+        "sleep_in_bed_h",
+        "sleep_efficiency_pct",
+        "sleep_deep_h",
+        "sleep_core_h",
+        "sleep_rem_h",
+        "sleep_awake_h",
+    }
+    for day in days:
+        if isinstance(day, dict) and all(day.get(k) is None for k in _SLEEP_KEYS):
+            for k in _SLEEP_KEYS:
+                day.pop(k, None)
+            day["sleep"] = "not_tracked"
+
     return {
         "current_week": {
             "summary": to_dict(summarise(current_snaps)) if current_snaps else None,
-            "days": [to_dict(s) for s in current_snaps],
+            "days": days,
         },
         "history": [{"summary": to_dict(summarise(w))} for w in history_weeks],
         "week_complete": today > date.fromisoformat(week_end),
