@@ -23,7 +23,7 @@ from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 
 from config import MAX_CONVERSATION_MESSAGES
-from notify import chunk_text
+from notify import chunk_text, md_to_telegram_html
 
 logger = logging.getLogger(__name__)
 
@@ -178,21 +178,25 @@ class TelegramPoller:
         return None
 
     def edit_message(self, message_id: int, text: str) -> None:
-        """Edit an existing message's text.
+        """Edit an existing message's text with HTML formatting.
 
         If the text is too long for a single message, edits the first
         chunk into the placeholder and sends the rest as new messages.
+        Falls back to plain text if Telegram rejects the HTML.
 
         Args:
             message_id: ID of the message to edit.
-            text: New text content.
+            text: New text content (markdown).
         """
-        chunks = chunk_text(text)
+        html_text = md_to_telegram_html(text)
+        html_chunks = chunk_text(html_text)
+        plain_chunks = chunk_text(text)
         url = f"{self._base_url}/editMessageText"
         payload: dict = {
             "chat_id": self._chat_id,
             "message_id": message_id,
-            "text": chunks[0],
+            "text": html_chunks[0],
+            "parse_mode": "HTML",
             "disable_web_page_preview": True,
         }
         data = json.dumps(payload).encode("utf-8")
@@ -201,26 +205,60 @@ class TelegramPoller:
         )
         try:
             urllib.request.urlopen(req)  # noqa: S310
+        except urllib.error.HTTPError:
+            logger.warning(
+                "HTML edit failed for message %d, retrying plain text", message_id
+            )
+            payload["text"] = plain_chunks[0]
+            del payload["parse_mode"]
+            data = json.dumps(payload).encode("utf-8")
+            req = urllib.request.Request(
+                url, data=data, headers={"Content-Type": "application/json"}
+            )
+            try:
+                urllib.request.urlopen(req)  # noqa: S310
+            except Exception:
+                logger.warning("Failed to edit message %d", message_id, exc_info=True)
+                return
         except Exception:
             logger.warning("Failed to edit message %d", message_id, exc_info=True)
             return
 
-        # Send remaining chunks as new messages.
-        for chunk in chunks[1:]:
-            self.send_reply(chunk)
+        # Send remaining chunks as new messages (already HTML-converted).
+        for chunk in html_chunks[1:]:
+            self.send_reply(chunk, _pre_converted=True)
 
-    def send_reply(self, text: str, reply_to_message_id: int | None = None) -> None:
-        """Send a text message, chunking if necessary.
+    def send_reply(
+        self,
+        text: str,
+        reply_to_message_id: int | None = None,
+        *,
+        _pre_converted: bool = False,
+    ) -> None:
+        """Send a text message with HTML formatting, chunking if necessary.
+
+        Falls back to plain text if Telegram rejects the HTML.
 
         Args:
-            text: Message text to send.
+            text: Message text to send (markdown, or HTML if *_pre_converted*).
             reply_to_message_id: Optional message ID to reply to.
+            _pre_converted: If True, *text* is already Telegram HTML — skip
+                conversion.  Used internally by :meth:`edit_message`.
         """
+        if _pre_converted:
+            html_text = text
+        else:
+            html_text = md_to_telegram_html(text)
         url = f"{self._base_url}/sendMessage"
-        for i, chunk in enumerate(chunk_text(text)):
+        html_chunks = chunk_text(html_text)
+        plain_chunks = chunk_text(text)
+
+        for i, html_chunk in enumerate(html_chunks):
+            plain_chunk = plain_chunks[i] if i < len(plain_chunks) else html_chunk
             payload: dict = {
                 "chat_id": self._chat_id,
-                "text": chunk,
+                "text": html_chunk,
+                "parse_mode": "HTML",
                 "disable_web_page_preview": True,
             }
             # Only set reply on the first chunk.
@@ -233,6 +271,23 @@ class TelegramPoller:
             )
             try:
                 urllib.request.urlopen(req)  # noqa: S310
+            except urllib.error.HTTPError:
+                logger.warning("HTML reply failed (chunk %d), retrying plain", i + 1)
+                payload["text"] = plain_chunk
+                del payload["parse_mode"]
+                data = json.dumps(payload).encode("utf-8")
+                req = urllib.request.Request(
+                    url, data=data, headers={"Content-Type": "application/json"}
+                )
+                try:
+                    urllib.request.urlopen(req)  # noqa: S310
+                except Exception:
+                    logger.error(
+                        "Failed to send Telegram reply (chunk %d)",
+                        i + 1,
+                        exc_info=True,
+                    )
+                    return
             except Exception:
                 logger.error(
                     "Failed to send Telegram reply (chunk %d)", i + 1, exc_info=True
@@ -245,10 +300,12 @@ class TelegramPoller:
         buttons: list[list[dict[str, str]]],
         reply_to_message_id: int | None = None,
     ) -> int | None:
-        """Send a message with an inline keyboard.
+        """Send a message with an inline keyboard and HTML formatting.
+
+        Falls back to plain text if Telegram rejects the HTML.
 
         Args:
-            text: Message text.
+            text: Message text (markdown).
             buttons: Rows of inline keyboard buttons. Each button is a dict
                 with ``"text"`` and ``"callback_data"`` keys.
             reply_to_message_id: Optional message ID to reply to.
@@ -256,10 +313,12 @@ class TelegramPoller:
         Returns:
             The message_id of the sent message, or None on failure.
         """
+        html_text = md_to_telegram_html(text)
         url = f"{self._base_url}/sendMessage"
         payload: dict = {
             "chat_id": self._chat_id,
-            "text": text,
+            "text": html_text,
+            "parse_mode": "HTML",
             "disable_web_page_preview": True,
             "reply_markup": {"inline_keyboard": buttons},
         }
@@ -274,6 +333,21 @@ class TelegramPoller:
                 body = json.loads(resp.read().decode("utf-8"))
             if body.get("ok"):
                 return body["result"]["message_id"]
+        except urllib.error.HTTPError:
+            logger.warning("HTML keyboard message failed, retrying plain text")
+            payload["text"] = text
+            del payload["parse_mode"]
+            data = json.dumps(payload).encode("utf-8")
+            req = urllib.request.Request(
+                url, data=data, headers={"Content-Type": "application/json"}
+            )
+            try:
+                with urllib.request.urlopen(req) as resp:  # noqa: S310
+                    body = json.loads(resp.read().decode("utf-8"))
+                if body.get("ok"):
+                    return body["result"]["message_id"]
+            except Exception:
+                logger.warning("Failed to send message with keyboard", exc_info=True)
         except Exception:
             logger.warning("Failed to send message with keyboard", exc_info=True)
         return None

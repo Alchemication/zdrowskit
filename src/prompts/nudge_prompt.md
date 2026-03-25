@@ -42,8 +42,8 @@ SKIP
 
 on its own line, nothing else. A SKIP is always better than a redundant message.
 
-If you do write, produce a single short message — maximum 80 words. No markdown
-headers or bullet points. Just plain conversational text.
+If you do write, produce a single short message — maximum 80 words. Use **bold**
+for key numbers or actions. No headers. Keep it conversational.
 
 ### Sleep tracking gaps
 
