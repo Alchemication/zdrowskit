@@ -200,13 +200,12 @@ def _save_report(report: str, week: str) -> Path:
     """
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
-    now = datetime.now()
     target_date = date.today()
     if week == "last":
         target_date = target_date - timedelta(days=7)
     iso_week = f"{target_date.isocalendar().year}-W{target_date.isocalendar().week:02d}"
-    timestamp = now.strftime("%Y-%m-%d_%H%M")
-    filename = f"{iso_week}_{timestamp}.md"
+    suffix = "midweek" if week == "current" else "weekly"
+    filename = f"{iso_week}-{suffix}.md"
 
     path = REPORTS_DIR / filename
     path.write_text(report, encoding="utf-8")
@@ -431,7 +430,7 @@ def cmd_insights(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     baselines = None
-    if not args.no_update_baselines:
+    if not args.no_update_baselines and args.week != "current":
         baselines = compute_baselines(conn)
         _save_baselines(CONTEXT_DIR, baselines)
 
