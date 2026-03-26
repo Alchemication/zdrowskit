@@ -59,6 +59,26 @@ def compute_baselines(conn: sqlite3.Connection) -> str:
         fmt_90 = f"{vals['90d']:.{decimals}f}" if vals["90d"] is not None else "—"
         lines.append(f"| {label} | {fmt_30} | {fmt_90} | {unit} |")
 
+    # Sleep tracking compliance — percentage of nights with sleep data
+    compliance_vals: dict[str, str] = {}
+    for period, days in [("30d", 30), ("90d", 90)]:
+        row = conn.execute(
+            "SELECT "
+            "  COUNT(CASE WHEN sleep_total_h IS NOT NULL THEN 1 END),"
+            "  COUNT(*) "
+            "FROM daily "
+            f"WHERE date >= date('now', '-{days} days') "
+            "AND date < date('now')",
+        ).fetchone()
+        tracked, total = (row[0], row[1]) if row else (0, 0)
+        pct = (tracked / total * 100) if total > 0 else 0
+        compliance_vals[period] = f"{tracked}/{total} ({pct:.0f}%)"
+    lines.append(
+        f"\n**Sleep tracking compliance:** "
+        f"{compliance_vals['30d']} last 30d, "
+        f"{compliance_vals['90d']} last 90d"
+    )
+
     # Weekly training volume — averages over last 4 and 12 weeks
     lines.append("")
     lines.append("| Training Volume | Last 4 weeks avg | Last 12 weeks avg |")

@@ -40,10 +40,13 @@ and their own notes. Produce a report with these sections:
    and specifics from the data to explain what happened. For mid-week
    progress checks, only evaluate days that have elapsed — do not penalize
    for sessions scheduled later in the week.
-3. **Key Metrics** — highlight meaningful changes in HR, HRV, recovery index,
-   VO2max, pace, and sleep. Compare to baselines and reference multi-week trends
-   where meaningful, not just 30d averages. For sleep: note total duration vs
-   target, efficiency, and deep/REM balance. Flag anything that warrants attention.
+3. **Key Metrics** — pick the 3-4 metrics that actually moved or matter this
+   week. Do not list every metric — only what changed meaningfully, broke a
+   trend, or needs attention. Compare to baselines and reference multi-week
+   trends where meaningful. For sleep: note total duration vs target,
+   efficiency, and deep/REM balance — but only if sleep is a story this week.
+   Include sleep tracking compliance (nights tracked / total nights) from
+   baselines when it's below 80%.
 4. **Recovery Status** — based on HRV trend, resting HR, recovery index, and
    sleep quality. Simple verdict: ready to push / maintain / back off. Explain
    *why* — connect the specific metrics to the conclusion. Poor sleep (low
@@ -55,7 +58,8 @@ and their own notes. Produce a report with these sections:
    behind each suggestion.
 
 Keep the report under 600 words. Be specific with numbers. Do not repeat
-raw data — interpret it.
+raw data — interpret it. Always express pace in mm:ss/km format (e.g. 5:37/km),
+never as decimal minutes.
 
 After your report, include a `<memory>` block with 2-3 bullet points that you
 want to remember for next week's report. These will be appended to your
