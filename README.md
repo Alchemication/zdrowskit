@@ -1,12 +1,15 @@
 # zdrowskit
 
-> Your 24/7 ultra-personal trainer. Powered by your Apple Health data.
+> An AI coach that actually knows you. Powered by your Apple Health data.
 
-Apple sends you a nudge when you close your rings. zdrowskit reads your actual data — runs, lifts, heart rate variability, recovery — and tells you something worth knowing.
+Your watch collects thousands of data points a week. Apple shows you rings. zdrowskit gives you a coach.
 
-Had a rough Monday and skipped your workout? No panic. zdrowskit knows your plan, your goals, and your week so far. It tells you what matters — not what a streak counter thinks matters.
+- **Personalised weekly reports** — not generic summaries, but analysis that knows your goals, your plan, your injuries, and what you wrote in your journal last Tuesday
+- **Reactive nudges** — skipped a session? New data synced? The coach notices and says something useful (or stays quiet if there's nothing to say)
+- **Ask anything about your data** — "What's my fastest 1km pace?", "How's my HRV trending since January?", "Do I sleep worse after evening runs?" — if the data exists, it'll find the answer and chart it
+- **Two-way conversation** — reply to a report, update your goals mid-chat, get a chart on demand. It's a Telegram conversation, not a dashboard
 
-Want to talk back? Send a message to your Telegram bot — ask about your data, get trend charts, reply to a nudge, or tell it to update your training log. It's a two-way coaching conversation with full access to your history, not a dashboard.
+All local. Your data stays in a SQLite database on your machine. The only external calls are the LLM API and Telegram.
 
 Built by Adam Napora (adamsky). *Zdrowie* is Polish for health. *Kit* is the tool.
 
@@ -291,12 +294,20 @@ uv run pytest tests/test_parsers_metrics.py      # single file
 
 Tests live in `tests/` with fixture data in `tests/fixtures/`. The suite covers parsers (metrics, workouts, GPX), aggregation logic, the SQLite store round-trip, report formatting, LLM utility functions, and the `run_sql` tool (SQL validation, read-only safety, row limits, query execution). Shared fixtures (sample snapshots, in-memory DB) are in `tests/conftest.py`.
 
+## Requirements
+
+- **Apple Watch + iPhone** — zdrowskit reads Apple Health data. That's the only supported source right now. You need the [Auto Export](https://apps.apple.com/app/myhealth-export-to-icloud/id6737380982) iOS app to get data out of HealthKit into iCloud Drive as JSON.
+- **Mac** — the daemon watches your iCloud Drive folder, so it needs to run on a Mac where iCloud syncs. The rest of the stack (Python, SQLite) runs anywhere, but the data pipeline assumes macOS paths.
+- **A capable LLM** — this isn't a simple summariser. The coach writes personalised reports, decides when to stay quiet, generates SQL queries against your data, and produces chart code. That requires real intelligence. **Recommended: Claude Opus 4.6** (or equivalent). **Minimum: Claude Sonnet 4.6** — anything below that and the reports get generic, the queries get unreliable, and the charts break. Any model provider works — zdrowskit uses [litellm](https://github.com/BerriAI/litellm) so you can swap in OpenAI, Google, or any compatible API.
+- **Python 3.11+** and [uv](https://github.com/astral-sh/uv)
+- **Telegram bot** (for notifications and chat) and/or **Resend** account (for email delivery)
+
 ## Stack
 
 - Python + [uv](https://github.com/astral-sh/uv)
 - SQLite (local, no cloud)
-- Apple Health export format ([Auto Export](https://apps.apple.com/app/myhealth-export-to-icloud/id6737380982) iOS app)
-- [litellm](https://github.com/BerriAI/litellm) for LLM calls (Claude Opus by default)
+- [litellm](https://github.com/BerriAI/litellm) for LLM calls (provider-agnostic)
+- [Plotly](https://plotly.com/python/) for chart rendering (PNG via Kaleido)
 - [watchdog](https://github.com/gorakhargosh/watchdog) for filesystem monitoring
 - [Resend](https://resend.com) for email delivery (optional)
-- Telegram Bot API for mobile notifications (default)
+- Telegram Bot API for notifications and interactive chat
