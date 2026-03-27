@@ -69,6 +69,9 @@ class LLMResult:
     latency_s: float
     cost: float | None = None
     tool_calls: list | None = None
+    raw_message: dict | None = None
+    """The assistant message dict suitable for appending back to the messages
+    list in a tool-calling loop (includes ``tool_calls`` when present)."""
 
 
 DEFAULT_SOUL = (
@@ -395,6 +398,21 @@ def call_llm(
     message = response.choices[0].message
     raw_tool_calls = getattr(message, "tool_calls", None)
 
+    # Build a raw message dict for tool-calling loops.
+    raw_msg: dict = {"role": "assistant", "content": message.content or ""}
+    if raw_tool_calls:
+        raw_msg["tool_calls"] = [
+            {
+                "id": tc.id,
+                "type": "function",
+                "function": {
+                    "name": tc.function.name,
+                    "arguments": tc.function.arguments,
+                },
+            }
+            for tc in raw_tool_calls
+        ]
+
     result = LLMResult(
         text=message.content or "",
         model=model,
@@ -404,6 +422,7 @@ def call_llm(
         latency_s=latency,
         cost=cost,
         tool_calls=raw_tool_calls if raw_tool_calls else None,
+        raw_message=raw_msg,
     )
 
     if conn and request_type:

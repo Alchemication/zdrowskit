@@ -551,7 +551,7 @@ class ZdrowskitDaemon:
 
             conn = open_db(self.db)
             try:
-                result = self._chat_reply(conn)
+                result, deferred_edits, query_rows = self._chat_reply(conn)
             finally:
                 conn.close()
         except Exception:
@@ -569,21 +569,33 @@ class ZdrowskitDaemon:
 
         reply = result.text
 
+        # Extract and render any <chart> blocks from the response.
+        from charts import extract_charts, render_chart, strip_charts
+
+        chart_blocks = extract_charts(reply)
+        if chart_blocks:
+            extra_ns = {"rows": query_rows} if query_rows else None
+            for block in chart_blocks:
+                try:
+                    img = render_chart(block.code, {}, extra_namespace=extra_ns)
+                    if img:
+                        self._poller.send_photo(img, caption=block.title)
+                except Exception:
+                    logger.warning(
+                        "Chart render failed: %s", block.title, exc_info=True
+                    )
+            reply = strip_charts(reply)
+
         self._conversation.add("assistant", reply)
         if placeholder_id:
             self._poller.edit_message(placeholder_id, reply)
         else:
             self._poller.send_reply(reply, reply_to_message_id=message_id)
 
-        # Extract context edit from tool calls (if the LLM invoked update_context).
-        if result.tool_calls:
-            from context_edit import context_edit_from_tool_call
-
-            for tc in result.tool_calls:
-                edit = context_edit_from_tool_call(tc)
-                if edit:
-                    self._propose_context_edit(edit)
-                    break  # At most one context update per response
+        # Propose any deferred context edits from the tool-calling loop.
+        for edit in deferred_edits:
+            self._propose_context_edit(edit)
+            break  # At most one context update per response
 
     def _handle_command(self, text: str, message_id: int) -> None:
         """Handle a Telegram bot /command.
@@ -810,23 +822,31 @@ class ZdrowskitDaemon:
                 summary = edit.summary if edit else "unknown"
                 self._poller.edit_message(msg_id, f"\u274c Discarded: {summary}")
 
-    def _chat_reply(self, conn: sqlite3.Connection) -> "LLMResult":
-        """Build context, call the LLM, and return the full result.
+    def _chat_reply(
+        self, conn: sqlite3.Connection
+    ) -> tuple["LLMResult", list, list[dict]]:
+        """Build context, call the LLM with a tool-calling loop, and return.
+
+        The LLM may call ``run_sql`` to query the database.  Each tool call
+        is executed and the result fed back until the LLM produces a final
+        text response or the iteration cap is reached.
 
         Args:
             conn: Open SQLite database connection.
 
         Returns:
-            The LLMResult including text and any tool_calls.
+            A tuple of (final LLMResult, deferred context edits, accumulated
+            query rows for chart rendering).
         """
         from baselines import compute_baselines
+        from config import MAX_TOOL_ITERATIONS
         from llm import (
             build_llm_data,
             build_messages,
             call_llm,
-            context_update_tool,
             load_context,
         )
+        from tools import all_chat_tools, execute_tool
 
         ctx = load_context(self.context_dir, prompt_file="chat_prompt")
 
@@ -862,14 +882,80 @@ class ZdrowskitDaemon:
         if conv_msgs:
             messages = messages[:2] + conv_msgs
 
-        return call_llm(
-            messages,
-            model=self.model,
-            tools=context_update_tool(),
-            conn=conn,
-            request_type="chat",
-            max_tokens=1024,
-        )
+        tools = all_chat_tools()
+        query_rows: list[dict] = []
+        deferred_edits: list = []
+
+        for _iteration in range(MAX_TOOL_ITERATIONS):
+            result = call_llm(
+                messages,
+                model=self.model,
+                tools=tools,
+                conn=conn,
+                request_type="chat",
+                max_tokens=1024,
+                metadata={"iteration": _iteration},
+            )
+
+            if not result.tool_calls:
+                return result, deferred_edits, query_rows
+
+            # Append the assistant message with tool calls so the LLM sees
+            # its own calls in the next iteration.
+            messages.append(result.raw_message)
+
+            logger.info(
+                "Tool loop iteration %d: %d tool call(s)",
+                _iteration,
+                len(result.tool_calls),
+            )
+
+            for tc in result.tool_calls:
+                fn_name = tc.function.name
+                raw_args = tc.function.arguments
+                try:
+                    args = (
+                        _json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+                    )
+                except (ValueError, _json.JSONDecodeError):
+                    args = {}
+
+                if fn_name == "run_sql":
+                    logger.info("Tool call: run_sql → %s", args.get("query", "")[:200])
+                else:
+                    logger.info("Tool call: %s", fn_name)
+
+                if fn_name == "update_context":
+                    from context_edit import context_edit_from_tool_call
+
+                    edit = context_edit_from_tool_call(tc)
+                    if edit:
+                        deferred_edits.append(edit)
+                    tool_result = "Proposed. User will be asked to confirm."
+                else:
+                    tool_result = execute_tool(fn_name, args, self.db)
+                    # Accumulate query rows for chart rendering.
+                    if fn_name == "run_sql":
+                        try:
+                            parsed = _json.loads(tool_result)
+                            if isinstance(parsed, list):
+                                query_rows.extend(parsed)
+                                logger.info("run_sql returned %d rows", len(parsed))
+                            elif isinstance(parsed, dict) and "error" in parsed:
+                                logger.warning("run_sql error: %s", parsed["error"])
+                        except (ValueError, _json.JSONDecodeError):
+                            pass
+
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": tool_result,
+                    }
+                )
+
+        # If we exhausted iterations, return the last result.
+        return result, deferred_edits, query_rows
 
     # ------------------------------------------------------------------
     # Scheduled checks

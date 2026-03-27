@@ -96,26 +96,21 @@ fig.update_layout(template="{chart_theme}", title="HRV This Week",
     xaxis_title="", yaxis_title="ms", margin=dict(l=50, r=30, t=50, b=40))
 </chart>
 
-Rules:
+Chart rules:
 - Only include a chart when it genuinely adds insight. Zero charts is fine.
-- Keep code simple: extract data from `data`, build figure, done. No file I/O.
-- Use `plotly.graph_objects` (as `go`) or `plotly.express` (as `px`).
-  The `{chart_theme}` template is recommended.
+- Code must produce a `fig` variable (a plotly Figure). No file I/O.
+- Use `go` (plotly.graph_objects) or `px` (plotly.express).
 - `data` has `data["current_week"]["days"]` (list of daily dicts) and
   `data["history"]` (list of weekly summary dicts). Each daily dict has
   fields like `date`, `hrv_ms`, `resting_hr`, `steps`, `sleep`, `workouts`.
-
-Make charts self-explanatory — someone should understand the insight from
-the chart alone:
-- Use `fig.add_annotation(arrowhead=2)` to point at key data points with
-  short callout text explaining *why* that point matters.
-- Use `fig.add_hline(line_dash="dash")` for baselines, targets, or averages.
-- Use `fig.add_hrect(fillcolor="green", opacity=0.1)` for target zones.
+- Use `{chart_theme}` template, tight margins, minimal gridlines.
 - Color-code markers: red (#e74c3c) for concerning, green (#2ecc71) for good,
   blue (#3498db) for neutral.
-- Keep it clean: `{chart_theme}` template, minimal gridlines, tight margins.
-- X-axis date format: use `"Mon 23"` (short weekday + day) for daily data,
-  `"W10"` for weekly history. Keep labels short so they don't overlap.
+- Use `fig.add_annotation(arrowhead=2)` to call out key data points with
+  short text explaining *why* that point matters.
+- Use `fig.add_hline(line_dash="dash")` for baselines, targets, or averages.
+- Use `fig.add_hrect(fillcolor="green", opacity=0.1)` for target zones.
+- X-axis: `"Mon 23"` for daily, `"W10"` for weekly. Keep labels short.
 
 After your report, include a `<memory>` block with 2-3 bullet points that you
 want to remember for next week's report. These will be appended to your

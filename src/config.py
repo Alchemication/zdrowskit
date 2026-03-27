@@ -62,6 +62,9 @@ AUTO_ACCEPT_CONTEXT_EDITS: bool = (
 CHART_THEME: str = os.environ.get("ZDROWSKIT_CHART_THEME", "plotly_dark")
 """Plotly template for chart rendering (e.g. 'plotly_dark', 'plotly_white')."""
 
+MAX_TOOL_ITERATIONS: int = 5
+"""Maximum tool-call loop iterations in a single chat turn."""
+
 
 def resolve_data_dir(arg: str | None, source: str = "autoexport") -> Path:
     """Resolve the data directory from CLI arg, env var, or source default.

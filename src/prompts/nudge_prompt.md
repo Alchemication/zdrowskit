@@ -86,23 +86,31 @@ mm:ss/km format (e.g. 5:37/km), never as decimal minutes.
 
 ### Chart (optional, 0-1)
 
-If one chart would make your point clearer than words alone:
+Most nudges need no chart. Only include one when it genuinely helps make your
+point clearer than words alone. The `data` dict has the same structure as the
+JSON above.
 
-<chart title="Title">
+<chart title="HRV This Week">
 import plotly.graph_objects as go
 from datetime import datetime
 days = data["current_week"]["days"]
 dates = [datetime.strptime(d["date"], "%Y-%m-%d").strftime("%a %d") for d in days if d.get("hrv_ms")]
 hrv = [d.get("hrv_ms") for d in days if d.get("hrv_ms")]
+colors = ["#e74c3c" if v and v < 40 else "#2ecc71" if v and v > 55 else "#3498db" for v in hrv]
 fig = go.Figure(go.Scatter(x=dates, y=hrv, mode="lines+markers",
-    marker=dict(size=10, color="#3498db"), line=dict(width=2)))
-fig.add_annotation(x=len(hrv)-1, y=hrv[-1], text="Today",
+    marker=dict(size=10, color=colors), line=dict(color="#3498db", width=2)))
+fig.add_annotation(x=dates[-1], y=hrv[-1], text="Today",
     arrowhead=2, ax=0, ay=-30)
-fig.update_layout(template="{chart_theme}", margin=dict(l=50, r=30, t=30, b=40))
+fig.update_layout(template="{chart_theme}", title="HRV This Week",
+    xaxis_title="", yaxis_title="ms", margin=dict(l=50, r=30, t=50, b=40))
 </chart>
 
-Most nudges need no chart. Only include one when it genuinely helps.
-Use `go` (plotly.graph_objects) or `px` (plotly.express). Add annotations
-with arrows to highlight the key point. Color-code: red for bad, green for
-good. X-axis: `"Mon 23"` for daily, `"W10"` for weekly.
-The `data` dict has the same structure as the JSON above.
+Chart rules:
+- Use `go` (plotly.graph_objects) or `px` (plotly.express).
+- Code must produce a `fig` variable (a plotly Figure).
+- Use `{chart_theme}` template, tight margins, minimal gridlines.
+- Color-code markers: red (#e74c3c) for concerning, green (#2ecc71) for good,
+  blue (#3498db) for neutral.
+- Use `fig.add_hline(line_dash="dash")` for baselines or targets.
+- Use `fig.add_annotation(arrowhead=2)` to call out key data points.
+- X-axis: `"Mon 23"` for daily, `"W10"` for weekly. Keep labels short.

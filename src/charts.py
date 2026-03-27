@@ -15,7 +15,7 @@ from dataclasses import dataclass
 logger = logging.getLogger(__name__)
 
 _CHART_PATTERN = re.compile(
-    r'<chart\s+title="([^"]+)"(?:\s+section="([^"]*)")?\s*>'
+    r'<chart(?:\s+title="([^"]+)")?(?:\s+section="([^"]*)")?\s*>'
     r"(.*?)"
     r"</chart>",
     re.DOTALL,
@@ -54,7 +54,7 @@ def extract_charts(response: str) -> list[ChartBlock]:
     """
     blocks: list[ChartBlock] = []
     for match in _CHART_PATTERN.finditer(response):
-        title = match.group(1).strip()
+        title = (match.group(1) or "").strip()
         section = (match.group(2) or "").strip()
         code = match.group(3).strip()
         if code:
@@ -76,7 +76,11 @@ def strip_charts(response: str) -> str:
     ).strip()
 
 
-def render_chart(code: str, health_data: dict) -> bytes | None:
+def render_chart(
+    code: str,
+    health_data: dict,
+    extra_namespace: dict | None = None,
+) -> bytes | None:
     """Execute plotly code and return PNG bytes.
 
     The code is executed in a restricted namespace with ``go``
@@ -87,6 +91,8 @@ def render_chart(code: str, health_data: dict) -> bytes | None:
     Args:
         code: Python source code that builds a plotly figure.
         health_data: The health-data dict (same structure the LLM sees).
+        extra_namespace: Additional variables to inject into the execution
+            namespace (e.g. ``{"rows": [...]}`` from query tool results).
 
     Returns:
         PNG image bytes, or ``None`` if rendering fails for any reason.
@@ -109,6 +115,8 @@ def render_chart(code: str, health_data: dict) -> bytes | None:
         "px": px,
         "np": np,
     }
+    if extra_namespace:
+        namespace.update(extra_namespace)
 
     result_holder: list[bytes | None] = [None]
     error_holder: list[Exception | None] = [None]
