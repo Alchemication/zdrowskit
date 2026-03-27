@@ -32,13 +32,17 @@ from pathlib import Path
 import litellm
 
 from aggregator import summarise
-from config import MAX_HISTORY_ENTRIES, MAX_LOG_ENTRIES, PROMPTS_DIR
+from config import CHART_THEME, MAX_HISTORY_ENTRIES, MAX_LOG_ENTRIES, PROMPTS_DIR
 from report import group_by_week, to_dict
 from store import load_date_range, load_snapshots, log_llm_call
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "anthropic/claude-opus-4-6"
+FALLBACK_MODEL = "anthropic/claude-sonnet-4-6"
+
+# Exponential backoff delays (seconds) between retries on overloaded errors.
+_RETRY_DELAYS = [10, 30, 90]
 
 CONTEXT_FILES = ["me", "goals", "plan", "log", "history"]
 
@@ -203,6 +207,7 @@ def build_messages(
             "today": today.isoformat(),
             "weekday": today.strftime("%A"),
             "week_status": week_status,
+            "chart_theme": CHART_THEME,
         }
     )
     # Forward any extra keys (e.g. recent_nudges) from context into placeholders.
@@ -262,6 +267,75 @@ def context_update_tool() -> list[dict]:
     ]
 
 
+def _is_overloaded(exc: Exception) -> bool:
+    """Return True if *exc* is an Anthropic overloaded error."""
+    return "overloaded_error" in str(exc) or "Overloaded" in str(exc)
+
+
+def _call_with_retry(
+    kwargs: dict,
+    model: str,
+) -> tuple:
+    """Call litellm.completion with retries and model fallback.
+
+    Retries on overloaded errors using exponential backoff.  After exhausting
+    retries on the primary model, switches to FALLBACK_MODEL and retries once
+    more.  Re-raises the last exception if all attempts fail.
+
+    Args:
+        kwargs: litellm.completion keyword arguments (may be mutated for fallback).
+        model: Primary model string.
+
+    Returns:
+        A (response, effective_model) tuple.
+    """
+    for attempt, delay in enumerate(_RETRY_DELAYS + [None]):
+        try:
+            response = litellm.completion(**{**kwargs, "model": model})
+            return response, model
+        except Exception as exc:
+            if not _is_overloaded(exc):
+                raise
+            if delay is not None:
+                logger.warning(
+                    "Anthropic overloaded (attempt %d/%d), retrying in %ds ...",
+                    attempt + 1,
+                    len(_RETRY_DELAYS),
+                    delay,
+                )
+                time.sleep(delay)
+            else:
+                logger.warning(
+                    "All retries exhausted on %s, switching to fallback %s",
+                    model,
+                    FALLBACK_MODEL,
+                )
+
+    # Fallback model — same retry schedule.
+    model = FALLBACK_MODEL
+    last_exc: Exception | None = None
+    for attempt, delay in enumerate(_RETRY_DELAYS + [None]):
+        try:
+            response = litellm.completion(**{**kwargs, "model": model})
+            logger.info("Fallback model %s succeeded", model)
+            return response, model
+        except Exception as exc:
+            if not _is_overloaded(exc):
+                raise
+            last_exc = exc
+            if delay is not None:
+                logger.warning(
+                    "Fallback %s also overloaded (attempt %d/%d), retrying in %ds ...",
+                    model,
+                    attempt + 1,
+                    len(_RETRY_DELAYS),
+                    delay,
+                )
+                time.sleep(delay)
+
+    raise last_exc  # type: ignore[misc]
+
+
 def call_llm(
     messages: list[dict[str, str]],
     model: str = DEFAULT_MODEL,
@@ -309,7 +383,7 @@ def call_llm(
         kwargs["tools"] = tools
 
     t0 = time.perf_counter()
-    response = litellm.completion(**kwargs)
+    response, model = _call_with_retry(kwargs, model)
     latency = time.perf_counter() - t0
     usage = response.usage
 

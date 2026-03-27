@@ -40,7 +40,8 @@ from llm import (
     extract_memory,
     load_context,
 )
-from notify import send_email, send_telegram
+from charts import ChartResult, extract_charts, render_chart, strip_charts
+from notify import send_email, send_telegram, send_telegram_photo, send_telegram_report
 from report import (
     current_week_bounds,
     group_by_week,
@@ -468,11 +469,24 @@ def cmd_insights(args: argparse.Namespace) -> None:
             logger.error("LLM call failed: %s: %s", err_name, e)
         sys.exit(1)
 
-    memory = extract_memory(result.text)
-    visible_report = result.text
+    # Extract and render charts before stripping them from the response.
+    chart_blocks = extract_charts(result.text)
+    chart_results: list[ChartResult] = []
+    for block in chart_blocks:
+        png = render_chart(block.code, health_data)
+        if png:
+            chart_results.append(
+                ChartResult(title=block.title, section=block.section, image_bytes=png)
+            )
+        else:
+            logger.warning("Chart '%s' failed to render, skipping", block.title)
+
+    # Strip chart and memory blocks from the visible text.
+    visible_report = strip_charts(result.text)
+    memory = extract_memory(visible_report)
     if memory:
         visible_report = re.sub(
-            r"\s*<memory>.*?</memory>\s*", "", result.text, flags=re.DOTALL
+            r"\s*<memory>.*?</memory>\s*", "", visible_report, flags=re.DOTALL
         ).strip()
 
     # Append model signature
@@ -499,7 +513,7 @@ def cmd_insights(args: argparse.Namespace) -> None:
     if args.email:
         send_email(visible_report, notify_subject)
     if args.telegram:
-        send_telegram(visible_report, notify_subject)
+        send_telegram_report(visible_report, notify_subject, charts=chart_results)
 
 
 def cmd_nudge(
@@ -573,11 +587,25 @@ def cmd_nudge(
             logger.error("LLM call failed: %s: %s", err_name, e)
         sys.exit(1)
 
-    nudge_text = result.text.strip()
+    raw_text = result.text.strip()
 
-    if nudge_text.upper() == "SKIP":
+    if raw_text.upper() == "SKIP":
         logger.info("Nudge skipped by LLM — nothing new to say (trigger: %s)", _trigger)
         return None
+
+    # Extract and render optional chart(s).
+    chart_blocks = extract_charts(raw_text)
+    nudge_charts: list[ChartResult] = []
+    for block in chart_blocks:
+        png = render_chart(block.code, health_data)
+        if png:
+            nudge_charts.append(
+                ChartResult(title=block.title, section=block.section, image_bytes=png)
+            )
+        else:
+            logger.warning("Nudge chart '%s' failed to render, skipping", block.title)
+
+    nudge_text = strip_charts(raw_text)
 
     # Trigger-specific emoji header for visual distinction in Telegram.
     _TRIGGER_HEADERS: dict[str, str] = {
@@ -605,6 +633,9 @@ def cmd_nudge(
     if use_email:
         send_email(nudge_text, subject)
     if use_telegram:
+        # Send chart photos before the text nudge.
+        for chart in nudge_charts:
+            send_telegram_photo(chart.image_bytes, caption=f"**{chart.title}**")
         send_telegram(nudge_text, subject)
 
     return nudge_text

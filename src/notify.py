@@ -5,6 +5,9 @@ Public API:
     md_to_telegram_html     — convert markdown to Telegram-compatible HTML.
     send_email              — send HTML report via Resend API.
     send_telegram           — send formatted report via Telegram Bot API.
+    send_telegram_photo     — send a photo via Telegram Bot API.
+    send_telegram_report    — send a sectioned report with interleaved charts.
+    split_report_sections   — split a markdown report on ## headers.
     chunk_text              — split text into chunks respecting line boundaries.
 
 Example:
@@ -18,6 +21,7 @@ import json
 import logging
 import os
 import re
+import time
 from html import escape as html_escape
 
 logger = logging.getLogger(__name__)
@@ -340,3 +344,154 @@ def send_telegram(report: str, week_label: str) -> None:
             return
 
     logger.info("Telegram message sent to chat %s", chat_id)
+
+
+def _get_telegram_creds() -> tuple[str, str] | None:
+    """Return (bot_token, chat_id) or None with logged errors."""
+    bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    if not bot_token:
+        logger.error("TELEGRAM_BOT_TOKEN not set. Add it to your .env file.")
+        return None
+    if not chat_id:
+        logger.error("TELEGRAM_CHAT_ID not set. Add it to your .env file.")
+        return None
+    return bot_token, chat_id
+
+
+def send_telegram_photo(
+    image_bytes: bytes,
+    caption: str = "",
+    *,
+    bot_token: str | None = None,
+    chat_id: str | None = None,
+) -> bool:
+    """Send a photo via Telegram Bot API ``sendPhoto``.
+
+    Uses multipart/form-data encoding. Caption is sent as HTML (max 1024
+    chars) with a plain-text fallback.
+
+    Args:
+        image_bytes: PNG image data.
+        caption: Optional caption text (markdown — will be converted to HTML).
+        bot_token: Override bot token (defaults to env var).
+        chat_id: Override chat ID (defaults to env var).
+
+    Returns:
+        True if sent successfully, False otherwise.
+    """
+    import urllib.request
+
+    if bot_token is None or chat_id is None:
+        creds = _get_telegram_creds()
+        if creds is None:
+            return False
+        bot_token, chat_id = creds
+
+    url = f"https://api.telegram.org/bot{bot_token}/sendPhoto"
+    boundary = "----zdrowskitBoundary"
+
+    # Build multipart body.
+    body = b""
+    body += f"--{boundary}\r\n".encode()
+    body += b'Content-Disposition: form-data; name="chat_id"\r\n\r\n'
+    body += f"{chat_id}\r\n".encode()
+
+    if caption:
+        html_caption = md_to_telegram_html(caption)[:1024]
+        body += f"--{boundary}\r\n".encode()
+        body += b'Content-Disposition: form-data; name="caption"\r\n\r\n'
+        body += f"{html_caption}\r\n".encode()
+        body += f"--{boundary}\r\n".encode()
+        body += b'Content-Disposition: form-data; name="parse_mode"\r\n\r\n'
+        body += b"HTML\r\n"
+
+    body += f"--{boundary}\r\n".encode()
+    body += b'Content-Disposition: form-data; name="photo"; filename="chart.png"\r\n'
+    body += b"Content-Type: image/png\r\n\r\n"
+    body += image_bytes
+    body += f"\r\n--{boundary}--\r\n".encode()
+
+    req = urllib.request.Request(
+        url,
+        data=body,
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+    )
+
+    try:
+        urllib.request.urlopen(req)  # noqa: S310
+        logger.info("Telegram photo sent")
+        return True
+    except Exception as e:
+        logger.error("Failed to send Telegram photo: %s", e)
+        return False
+
+
+def split_report_sections(report_md: str) -> list[str]:
+    """Split a markdown report on ``## `` headers into separate sections.
+
+    Content before the first ``## `` header (e.g. the ``# `` title) becomes
+    the first section.  Each section includes its ``## `` header.  Sections
+    exceeding the Telegram 4096-char limit are further split via
+    :func:`chunk_text`.
+
+    Args:
+        report_md: Markdown report text.
+
+    Returns:
+        A flat list of text chunks, each suitable for one Telegram message.
+    """
+    parts = re.split(r"\n(?=## )", report_md)
+    chunks: list[str] = []
+    for part in parts:
+        stripped = part.strip()
+        if stripped:
+            chunks.extend(chunk_text(stripped))
+    return chunks
+
+
+def send_telegram_report(
+    report: str,
+    week_label: str,
+    charts: list | None = None,
+) -> None:
+    """Send a report with optional chart photos followed by the full text.
+
+    Chart photos are sent first (one ``sendPhoto`` per chart), then the
+    full report text as a single message (chunked only if it exceeds the
+    Telegram 4096-char limit).
+
+    Args:
+        report: The markdown report text (chart blocks already stripped).
+        week_label: Human-readable week label.
+        charts: Optional list of :class:`~charts.ChartResult` instances.
+    """
+    creds = _get_telegram_creds()
+    if creds is None:
+        return
+
+    bot_token, chat_id = creds
+
+    # Send chart photos first.
+    for chart in charts or []:
+        send_telegram_photo(
+            chart.image_bytes,
+            caption=f"**{chart.title}**",
+            bot_token=bot_token,
+            chat_id=chat_id,
+        )
+        time.sleep(0.3)
+
+    # Send the full report as a single text message (chunked if needed).
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    html_report = md_to_telegram_html(report)
+    plain_chunks = chunk_text(report)
+    html_chunks = chunk_text(html_report)
+
+    for i, html in enumerate(html_chunks):
+        plain = plain_chunks[i] if i < len(plain_chunks) else html
+        if not _send_telegram_chunk(url, chat_id, plain, html):
+            logger.error("Aborting Telegram report send at chunk %d", i + 1)
+            return
+
+    logger.info("Telegram report sent to chat %s", chat_id)

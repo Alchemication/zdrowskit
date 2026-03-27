@@ -5,8 +5,11 @@ description = "What Apple Health notifications should be."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "kaleido==0.2.1",
     "litellm",
     "markdown",
+    "numpy",
+    "plotly",
     "python-dotenv",
     "resend",
     "rich",

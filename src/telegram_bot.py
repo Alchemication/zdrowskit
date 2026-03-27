@@ -23,7 +23,7 @@ from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 
 from config import MAX_CONVERSATION_MESSAGES
-from notify import chunk_text, md_to_telegram_html
+from notify import chunk_text, md_to_telegram_html, send_telegram_photo
 
 logger = logging.getLogger(__name__)
 
@@ -293,6 +293,26 @@ class TelegramPoller:
                     "Failed to send Telegram reply (chunk %d)", i + 1, exc_info=True
                 )
                 return
+
+    def send_photo(self, image_bytes: bytes, caption: str = "") -> bool:
+        """Send a photo to the configured chat.
+
+        Delegates to :func:`notify.send_telegram_photo` using this poller's
+        credentials.
+
+        Args:
+            image_bytes: PNG image data.
+            caption: Optional markdown caption.
+
+        Returns:
+            True if sent successfully, False otherwise.
+        """
+        return send_telegram_photo(
+            image_bytes,
+            caption,
+            bot_token=self._token,
+            chat_id=self._chat_id,
+        )
 
     def send_message_with_keyboard(
         self,

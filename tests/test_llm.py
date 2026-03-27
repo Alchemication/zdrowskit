@@ -10,7 +10,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from llm import (
+    FALLBACK_MODEL,
     LLMResult,
+    _call_with_retry,
+    _is_overloaded,
     _recent_history,
     append_history,
     build_llm_data,
@@ -245,6 +248,88 @@ class TestCallLlm:
 
         result = call_llm([{"role": "user", "content": "test"}])
         assert result.text == "Report text"
+
+
+class TestIsOverloaded:
+    def test_overloaded_error_string(self) -> None:
+        assert _is_overloaded(Exception("overloaded_error occurred"))
+
+    def test_overloaded_string(self) -> None:
+        assert _is_overloaded(Exception("Overloaded. See docs"))
+
+    def test_other_error(self) -> None:
+        assert not _is_overloaded(Exception("authentication failed"))
+
+    def test_rate_limit_not_overloaded(self) -> None:
+        assert not _is_overloaded(Exception("rate_limit_error"))
+
+
+class TestCallWithRetry:
+    def _mock_response(self, text: str = "ok") -> MagicMock:
+        resp = MagicMock()
+        resp.choices = [MagicMock()]
+        resp.choices[0].message.content = text
+        resp.usage.prompt_tokens = 10
+        resp.usage.completion_tokens = 5
+        resp.usage.total_tokens = 15
+        return resp
+
+    def _overloaded_error(self) -> Exception:
+        return Exception("overloaded_error: service is Overloaded")
+
+    @patch("llm.time.sleep")
+    @patch("llm.litellm")
+    def test_succeeds_on_first_attempt(self, mock_litellm, mock_sleep) -> None:
+        mock_litellm.completion.return_value = self._mock_response()
+        resp, model = _call_with_retry({"model": "m"}, "m")
+        assert model == "m"
+        mock_sleep.assert_not_called()
+
+    @patch("llm.time.sleep")
+    @patch("llm.litellm")
+    def test_retries_then_succeeds(self, mock_litellm, mock_sleep) -> None:
+        mock_litellm.completion.side_effect = [
+            self._overloaded_error(),
+            self._mock_response("after retry"),
+        ]
+        resp, model = _call_with_retry({"model": "m"}, "m")
+        assert model == "m"
+        assert mock_litellm.completion.call_count == 2
+        mock_sleep.assert_called_once_with(10)  # first delay
+
+    @patch("llm.time.sleep")
+    @patch("llm.litellm")
+    def test_falls_back_to_sonnet_after_all_retries(
+        self, mock_litellm, mock_sleep
+    ) -> None:
+        # Primary model always overloaded; fallback succeeds.
+        mock_litellm.completion.side_effect = [
+            self._overloaded_error(),  # primary attempt 1
+            self._overloaded_error(),  # primary attempt 2
+            self._overloaded_error(),  # primary attempt 3
+            self._overloaded_error(),  # primary attempt 4 (no delay after)
+            self._mock_response("fallback ok"),  # fallback succeeds
+        ]
+        resp, model = _call_with_retry({"model": "primary"}, "primary")
+        assert model == FALLBACK_MODEL
+        # 3 delays for primary retries.
+        assert mock_sleep.call_count == 3
+
+    @patch("llm.time.sleep")
+    @patch("llm.litellm")
+    def test_raises_on_non_overloaded_error(self, mock_litellm, mock_sleep) -> None:
+        mock_litellm.completion.side_effect = Exception("authentication failed")
+        with pytest.raises(Exception, match="authentication failed"):
+            _call_with_retry({"model": "m"}, "m")
+        mock_sleep.assert_not_called()
+
+    @patch("llm.time.sleep")
+    @patch("llm.litellm")
+    def test_raises_if_fallback_exhausted(self, mock_litellm, mock_sleep) -> None:
+        # All calls overloaded — should eventually raise.
+        mock_litellm.completion.side_effect = self._overloaded_error()
+        with pytest.raises(Exception, match="overloaded_error"):
+            _call_with_retry({"model": "m"}, "m")
 
 
 class TestAppendHistory:

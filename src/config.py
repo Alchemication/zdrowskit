@@ -59,6 +59,9 @@ AUTO_ACCEPT_CONTEXT_EDITS: bool = (
 )
 """When True, apply context edits without confirmation."""
 
+CHART_THEME: str = os.environ.get("ZDROWSKIT_CHART_THEME", "plotly_dark")
+"""Plotly template for chart rendering (e.g. 'plotly_dark', 'plotly_white')."""
+
 
 def resolve_data_dir(arg: str | None, source: str = "autoexport") -> Path:
     """Resolve the data directory from CLI arg, env var, or source default.
