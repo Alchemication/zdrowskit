@@ -2,7 +2,7 @@
 
 ## What is zdrowskit
 
-Your 24/7 ultra-personal trainer. Parses Apple Health exports (metrics, workouts, GPX routes, sleep), stores them in SQLite, and uses an LLM to generate personalised weekly reports and short nudges via Telegram/email. A daemon watches for new data, fires nudges automatically, and listens for incoming Telegram messages for interactive two-way coaching chat.
+Your 24/7 ultra-personal trainer. Parses Apple Health exports (metrics, workouts, GPX routes, sleep), stores them in SQLite, and uses an LLM to generate personalised weekly reports and short nudges via Telegram/email. A daemon watches for new data, fires nudges automatically, and listens for incoming Telegram messages for interactive two-way coaching chat — including ad-hoc data queries and on-demand charts.
 
 ## Commands
 
@@ -116,7 +116,29 @@ The daemon runs a Telegram long-polling listener (`src/telegram_bot.py`) for two
 
 - `src/telegram_bot.py` — `TelegramPoller` (long polling) + `ConversationBuffer` (thread-safe, 20-message in-memory buffer)
 - `src/context_edit.py` — auto-update context files from chat (extract `update_context` tool call from LLM response, confirm via inline keyboard, write file)
-- `src/prompts/chat_prompt.md` — conversational chat prompt template
+- `src/tools.py` — `run_sql` tool for ad-hoc database queries from chat (read-only, SELECT-only, row-limited, timeout-protected)
+- `src/prompts/chat_prompt.md` — conversational chat prompt template (includes DB schema reference for query tool)
 - Bot commands: `/clear` (reset buffer), `/status` (buffer size, nudge count), `/context` (list files or `/context <name>` for full content), `/help` (command reference)
 - Reply-to context: replying to a nudge/report injects the original text so the LLM knows what you're responding to
 - Context auto-updates: the LLM can propose edits to me/goals/plan/log.md; user confirms via Accept/Reject buttons (or auto-accept via `ZDROWSKIT_AUTO_ACCEPT_EDITS=1`)
+
+### Interactive Data Queries
+
+The chat supports a tool-calling loop (`_chat_reply` in `src/daemon.py`) that lets the LLM query the database and generate charts on demand. The loop runs up to `MAX_TOOL_ITERATIONS` (5) rounds:
+
+1. LLM decides it needs data → calls `run_sql` with a SELECT query
+2. Tool executes against a read-only SQLite connection → returns JSON rows
+3. LLM sees results → may query again, or produce a final response
+4. If the response includes `<chart>` blocks, they are rendered as Plotly PNGs and sent as Telegram photos
+
+Available tools in chat: `run_sql` (database queries) + `update_context` (context file edits).
+
+Example questions: "What's my avg run pace by week?", "Show me my HRV trend since January", "When did I start collecting data?", "Compare my sleep this month vs last month".
+
+### Charts
+
+All three prompt types (weekly report, nudge, chat) can produce Plotly charts via `<chart title="...">` blocks. Chart code runs in a sandboxed namespace (`src/charts.py`) with a 10-second timeout.
+
+- **Reports/nudges:** chart code uses the `data` dict (pre-loaded health data JSON)
+- **Chat:** chart code uses the `rows` variable (accumulated query results from `run_sql` calls in that turn)
+- Consistent style across all prompts: `{chart_theme}` template, color-coded markers (red/green/blue), annotations with arrows, baseline hlines, tight margins

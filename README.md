@@ -6,7 +6,7 @@ Apple sends you a nudge when you close your rings. zdrowskit reads your actual d
 
 Had a rough Monday and skipped your workout? No panic. zdrowskit knows your plan, your goals, and your week so far. It tells you what matters — not what a streak counter thinks matters.
 
-Want to talk back? Send a message to your Telegram bot — ask about your data, reply to a nudge, or tell it to update your training log. It's a two-way coaching conversation, not a dashboard.
+Want to talk back? Send a message to your Telegram bot — ask about your data, get trend charts, reply to a nudge, or tell it to update your training log. It's a two-way coaching conversation with full access to your history, not a dashboard.
 
 Built by Adam Napora (adamsky). *Zdrowie* is Polish for health. *Kit* is the tool.
 
@@ -33,6 +33,8 @@ Auto Export iOS app (iCloud Drive, on a schedule)
         zdrowskit daemon          → watches for new data and context changes,
                                     triggers reports and nudges automatically
                                     + listens for Telegram messages (interactive chat)
+                                    + answers data questions via SQL tool-calling loop
+                                    + generates on-demand Plotly charts
 ```
 
 zdrowskit is a local pipeline. Your data stays on your machine in a SQLite database. The only external calls are the LLM API and your chosen notification channel.
@@ -231,6 +233,8 @@ The daemon also runs a Telegram long-polling listener. Send a message to your bo
 
 **What you can do:**
 - Send any message — ask about your data, how your week is going, or what to do next
+- **Ask analytical questions** — "What's my avg run pace by week?", "When did I start collecting data?", "Compare my sleep this month vs last month". The LLM queries your database directly with SQL and can run multiple queries in a single turn
+- **Get charts on demand** — trend questions automatically generate Plotly charts sent as photos. Ask for "show me my HRV trend since January" and get a visual
 - Reply to a nudge or weekly report — the bot knows which message you're responding to
 - Share updates naturally ("my weight is 76kg now", "dropping strength to 1x/week") — the LLM proposes edits to your context files with Accept/Reject buttons
 - `/clear` — reset the conversation buffer
@@ -238,6 +242,8 @@ The daemon also runs a Telegram long-polling listener. Send a message to your bo
 - `/context` — list all context files with line counts
 - `/context <name>` — show full content of a file (e.g. `/context me`)
 - `/help` — list all available commands
+
+The chat uses a tool-calling loop: the LLM can call `run_sql` (read-only SQL against your database) up to 5 times per turn, see the results, and compose an answer — optionally with an embedded chart. Query results are accumulated and available to chart code for visualisation.
 
 The chat listener starts automatically when you run the daemon (see [above](#the-daemon--always-on-trainer-mode)). The conversation buffer holds the last 20 messages in memory. It resets when the daemon restarts, but the LLM still has your context files and history for continuity.
 
@@ -283,7 +289,7 @@ uv run pytest --cov=src --cov-report=term-missing # with coverage
 uv run pytest tests/test_parsers_metrics.py      # single file
 ```
 
-Tests live in `tests/` with fixture data in `tests/fixtures/`. The suite covers parsers (metrics, workouts, GPX), aggregation logic, the SQLite store round-trip, report formatting, and LLM utility functions. Shared fixtures (sample snapshots, in-memory DB) are in `tests/conftest.py`.
+Tests live in `tests/` with fixture data in `tests/fixtures/`. The suite covers parsers (metrics, workouts, GPX), aggregation logic, the SQLite store round-trip, report formatting, LLM utility functions, and the `run_sql` tool (SQL validation, read-only safety, row limits, query execution). Shared fixtures (sample snapshots, in-memory DB) are in `tests/conftest.py`.
 
 ## Stack
 
