@@ -43,21 +43,6 @@ Challenge my ideas early. If an approach is over-engineered, fragile, or there's
 - `rich` (import lazily) for structured terminal display (tables, panels).
 - Error messages should tell the user what to do, not just what went wrong.
 
-## Evals
-
-AI feature evals live in `evals/`. They use pinned blueprint data (committed snapshots in `evals/data/blueprints/`) for reproducibility and assert on LLM response structure.
-
-```bash
-uv run python -m evals.run                          # all evals, default model
-uv run python -m evals.run report                   # one eval
-uv run python -m evals.run --model anthropic/claude-sonnet-4-6,anthropic/claude-haiku-4-5-20251001  # compare models
-uv run python -m evals.run --scenario baseline      # one scenario across all evals
-uv run python -m evals.run --reasoning-effort low   # forward reasoning effort hint
-uv run python -m evals.data.extract                 # refresh blueprints from live data
-```
-
-Evals: `report` (structure + charts), `nudge` (content), `nudge_skip` (SKIP logic), `chat_sql` (SQL tool usage). Scenarios: `baseline`, `rest_day`, `no_runs_week`. Framework in `evals/framework.py`, cases in `evals/cases/`.
-
 ## Testing
 
 Run with `uv run pytest`. Fixtures in `tests/fixtures/` and `tests/conftest.py`.
@@ -70,92 +55,15 @@ Run with `uv run pytest`. Fixtures in `tests/fixtures/` and `tests/conftest.py`.
 - Test edge cases that would silently break (None, missing fields, empty inputs).
 - Run `uv run ruff check tests/ && uv run ruff format tests/` before committing.
 
-## Architecture
+## Key Modules
 
-Two data sources, same pipeline output:
+- `src/models.py` — schema (start here when changing fields)
+- `src/commands.py` — all subcommand handlers; `main.py` is just dispatch
+- `src/daemon.py` — file watcher, scheduled reports, Telegram chat loop
+- `src/llm.py` — `load_context()`, `build_messages()`, `call_llm()`
+- `src/prompts/` — prompt templates (soul, report, nudge, chat)
+- `src/charts.py` — Plotly chart rendering from `<chart>` blocks
+- `src/tools.py` — LLM tools (`run_sql`, `update_context`)
+- `evals/` — AI eval harness (pinned blueprints, scenario perturbations, structural assertions)
 
-```
-autoexport (default, ongoing — Auto Export app iCloud Drive automation):
-  Metrics/HealthAutoExport-*.json  ─┐
-  Workouts/HealthAutoExport-*.json ─┤─→ src/parsers/ → src/assembler.py → list[DailySnapshot]
-  (sleep + routes embedded)        ─┘                                            │
-
-shortcuts (historical backfill — iOS Shortcuts export):                          │
-  Metrics/{activity,heart,mobility}.json ─┐                                      │
-  Workouts/workouts.json                 ─┤─→ same parsers + sleep/gpx ──────────┤
-  Sleep/sleep.json                       ─┤                                      │
-  Routes/*.xml                           ─┘                                      │
-                                                                                 ▼
-                                                                      src/aggregator.py
-                                                                                 │
-                                                                                 ▼
-                                                                          WeeklySummary
-```
-
-Schema lives in `src/models.py` — start there when changing fields. `src/commands.py` has all subcommand handlers; `main.py` is just dispatch.
-
-Data source paths are in `src/config.py` (`AUTOEXPORT_DATA_DIR`, `SHORTCUTS_DATA_DIR`). The `--source` flag on the import command selects which parser path to use.
-
-## Context Files
-
-LLM context files live in `~/Documents/zdrowskit/ContextFiles/`:
-
-| File | Ownership | Purpose |
-|------|-----------|---------|
-| `me.md` | user | Physical profile — age, weight, injuries, pace zones |
-| `goals.md` | user | Fitness goals with timelines |
-| `plan.md` | user | Weekly training schedule, diet, sleep targets |
-| `log.md` | user | Weekly journal — what happened and why (trimmed to last 5 entries in prompts) |
-| `baselines.md` | auto | Rolling averages from DB (written by `insights`) |
-| `history.md` | auto | LLM memory (appended after each weekly report; same-day runs replace, not duplicate) |
-
-Prompt templates live in `src/prompts/` (version-controlled, single source of truth):
-
-| File | Purpose |
-|------|---------|
-| `soul.md` | AI coach persona (static — not auto-updated via chat) |
-| `prompt.md` | Weekly report prompt template |
-| `nudge_prompt.md` | Nudge prompt template |
-| `chat_prompt.md` | Conversational chat prompt template |
-
-## Daemon Scheduled Reports
-
-The daemon (`src/daemon.py`) runs a background thread that fires reports on a schedule:
-
-- **Monday 8–9am** — full week review (`--week last`, previous Mon–Sun)
-- **Thursday 9–10am** — mid-week progress check (`--week current`, current Mon–Thu)
-
-Both triggers import fresh data before generating the report. Rate-limited to once per day per report type via `~/.daemon_state.json`.
-
-## Telegram Interactive Chat
-
-The daemon runs a Telegram long-polling listener (`src/telegram_bot.py`) for two-way coaching conversations. Key modules:
-
-- `src/telegram_bot.py` — `TelegramPoller` (long polling) + `ConversationBuffer` (thread-safe, 20-message in-memory buffer)
-- `src/context_edit.py` — auto-update context files from chat (extract `update_context` tool call from LLM response, confirm via inline keyboard, write file)
-- `src/tools.py` — `run_sql` tool for ad-hoc database queries from chat (read-only, SELECT-only, row-limited, timeout-protected)
-- `src/prompts/chat_prompt.md` — conversational chat prompt template (includes DB schema reference for query tool)
-- Bot commands: `/clear` (reset buffer), `/status` (buffer size, nudge count), `/context` (list files or `/context <name>` for full content), `/help` (command reference)
-- Reply-to context: replying to a nudge/report injects the original text so the LLM knows what you're responding to
-- Context auto-updates: the LLM can propose edits to me/goals/plan/log.md; user confirms via Accept/Reject buttons (or auto-accept via `ZDROWSKIT_AUTO_ACCEPT_EDITS=1`)
-
-### Interactive Data Queries
-
-The chat supports a tool-calling loop (`_chat_reply` in `src/daemon.py`) that lets the LLM query the database and generate charts on demand. The loop runs up to `MAX_TOOL_ITERATIONS` (5) rounds:
-
-1. LLM decides it needs data → calls `run_sql` with a SELECT query
-2. Tool executes against a read-only SQLite connection → returns JSON rows
-3. LLM sees results → may query again, or produce a final response
-4. If the response includes `<chart>` blocks, they are rendered as Plotly PNGs and sent as Telegram photos
-
-Available tools in chat: `run_sql` (database queries) + `update_context` (context file edits).
-
-Example questions: "What's my avg run pace by week?", "Show me my HRV trend since January", "When did I start collecting data?", "Compare my sleep this month vs last month".
-
-### Charts
-
-All three prompt types (weekly report, nudge, chat) can produce Plotly charts via `<chart title="...">` blocks. Chart code runs in a sandboxed namespace (`src/charts.py`) with a 10-second timeout.
-
-- **Reports/nudges:** chart code uses the `data` dict (pre-loaded health data JSON)
-- **Chat:** chart code uses the `rows` variable (accumulated query results from `run_sql` calls in that turn)
-- Consistent style across all prompts: `{chart_theme}` template, color-coded markers (red/green/blue), annotations with arrows, baseline hlines, tight margins
+User context files: `~/Documents/zdrowskit/ContextFiles/` (`me.md`, `goals.md`, `plan.md`, `log.md` — user-edited; `baselines.md`, `history.md` — auto-generated).
