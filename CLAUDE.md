@@ -20,6 +20,8 @@ uv run python main.py llm-log         # query LLM call history (add --stats, --i
 uv run python main.py daemon-restart  # restart the background launchd daemon
 uv run python main.py daemon-stop     # stop and unload the background daemon
 uv run python src/daemon.py --foreground  # run filesystem watcher + chat in foreground
+uv run python -m evals.run               # run all AI evals (add --model, --scenario, --reasoning-effort)
+uv run python -m evals.data.extract      # refresh eval blueprints from live data
 ```
 
 ## Collaboration Style
@@ -40,6 +42,21 @@ Challenge my ideas early. If an approach is over-engineered, fragile, or there's
 - `logger` (stdlib `logging`) for diagnostics, progress, errors → stderr.
 - `rich` (import lazily) for structured terminal display (tables, panels).
 - Error messages should tell the user what to do, not just what went wrong.
+
+## Evals
+
+AI feature evals live in `evals/`. They use pinned blueprint data (committed snapshots in `evals/data/blueprints/`) for reproducibility and assert on LLM response structure.
+
+```bash
+uv run python -m evals.run                          # all evals, default model
+uv run python -m evals.run report                   # one eval
+uv run python -m evals.run --model anthropic/claude-sonnet-4-6,anthropic/claude-haiku-4-5-20251001  # compare models
+uv run python -m evals.run --scenario baseline      # one scenario across all evals
+uv run python -m evals.run --reasoning-effort low   # forward reasoning effort hint
+uv run python -m evals.data.extract                 # refresh blueprints from live data
+```
+
+Evals: `report` (structure + charts), `nudge` (content), `nudge_skip` (SKIP logic), `chat_sql` (SQL tool usage). Scenarios: `baseline`, `rest_day`, `no_runs_week`. Framework in `evals/framework.py`, cases in `evals/cases/`.
 
 ## Testing
 

@@ -294,6 +294,37 @@ uv run pytest tests/test_parsers_metrics.py      # single file
 
 Tests live in `tests/` with fixture data in `tests/fixtures/`. The suite covers parsers (metrics, workouts, GPX), aggregation logic, the SQLite store round-trip, report formatting, LLM utility functions, and the `run_sql` tool (SQL validation, read-only safety, row limits, query execution). Shared fixtures (sample snapshots, in-memory DB) are in `tests/conftest.py`.
 
+## Evals
+
+AI feature evals test structural correctness of LLM outputs across models. They use pinned blueprint data (committed snapshots of real context files and health data) for reproducibility, apply named scenario perturbations, and assert on the response.
+
+```bash
+uv run python -m evals.run                                          # all evals, default model (opus)
+uv run python -m evals.run report                                   # one eval
+uv run python -m evals.run nudge nudge_skip                         # multiple evals
+uv run python -m evals.run --model anthropic/claude-sonnet-4-6      # specific model
+uv run python -m evals.run --model anthropic/claude-sonnet-4-6,anthropic/claude-haiku-4-5-20251001  # compare
+uv run python -m evals.run --scenario baseline                      # one scenario across all evals
+uv run python -m evals.run --reasoning-effort low                   # pass reasoning effort hint
+uv run python -m evals.data.extract                                 # refresh pinned blueprints from live data
+```
+
+**Evals:**
+
+| Eval | Scenarios | What it tests |
+|------|-----------|---------------|
+| `report` | `baseline`, `no_runs_week` | Weekly report structure: 5 required sections, word count, pace format, memory block, no markdown tables, chart rendering |
+| `nudge` | `baseline` | Nudge content: not SKIP, under 80 words |
+| `nudge_skip` | `rest_day` | SKIP logic: rest day with missed_session trigger produces SKIP |
+| `chat_sql` | `baseline` | Chat SQL tool usage: produces run_sql call, valid SELECT, known column names |
+
+**Scenarios** perturb the blueprint data to test edge cases:
+- `baseline` — unmodified real data (control case)
+- `rest_day` — last day has no workouts (tests SKIP logic)
+- `no_runs_week` — all run workouts removed, only lifts (tests missing pace data handling)
+
+Results include a rich comparison table and ASCII bar charts for pass rate, latency, cost, and token usage across models.
+
 ## Requirements
 
 - **Apple Watch + iPhone** — zdrowskit reads Apple Health data. That's the only supported source right now. You need the [Auto Export](https://apps.apple.com/app/myhealth-export-to-icloud/id6737380982) iOS app to get data out of HealthKit into iCloud Drive as JSON.
