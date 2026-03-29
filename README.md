@@ -296,34 +296,38 @@ Tests live in `tests/` with fixture data in `tests/fixtures/`. The suite covers 
 
 ## Evals
 
-AI feature evals test structural correctness of LLM outputs across models. They use pinned blueprint data (committed snapshots of real context files and health data) for reproducibility, apply named scenario perturbations, and assert on the response.
+Data-driven eval harness that tests LLM behaviour across 21 cases and 14 scenarios. Uses pinned blueprint data (committed snapshots of real context files and health data) for reproducibility. Each case applies a named scenario perturbation and asserts on the response using pattern matching, tool-call validation, or SQL execution.
 
 ```bash
-uv run python -m evals.run                                          # all evals, default model (opus)
-uv run python -m evals.run report                                   # one eval
-uv run python -m evals.run nudge nudge_skip                         # multiple evals
+uv run python -m evals.run                                          # all 21 cases, default model (opus)
+uv run python -m evals.run sleep_last_night_chat                    # single case by ID
+uv run python -m evals.run --category sleep_markers                 # all cases in a category
 uv run python -m evals.run --model anthropic/claude-sonnet-4-6      # specific model
 uv run python -m evals.run --model anthropic/claude-sonnet-4-6,anthropic/claude-haiku-4-5-20251001  # compare
-uv run python -m evals.run --scenario baseline                      # one scenario across all evals
 uv run python -m evals.run --reasoning-effort low                   # pass reasoning effort hint
 uv run python -m evals.data.extract                                 # refresh pinned blueprints from live data
 ```
 
-**Evals:**
+**Categories (21 cases):**
 
-| Eval | Scenarios | What it tests |
-|------|-----------|---------------|
-| `report` | `baseline`, `no_runs_week` | Weekly report structure: 5 required sections, word count, pace format, memory block, no markdown tables, chart rendering |
-| `nudge` | `baseline` | Nudge content: not SKIP, under 80 words |
-| `nudge_skip` | `rest_day` | SKIP logic: rest day with missed_session trigger produces SKIP |
-| `chat_sql` | `baseline` | Chat SQL tool usage: produces run_sql call, valid SELECT, known column names |
+| Category | Cases | What it tests |
+|----------|-------|---------------|
+| `nudge_skip_fire` | 5 | Nudge fires on missed sessions and log updates; SKIPs on rest days, boring data, and redundant observations |
+| `sleep_markers` | 5 | Sleep date convention ("last night" resolves to yesterday's row), sync_pending not flagged, not_tracked threshold (1 day OK, 3 consecutive flagged) |
+| `midweek_awareness` | 2 | Mid-week reports don't penalise incomplete training volume |
+| `recovery_verdict` | 3 | Correct coaching signal for crashed / green / mixed recovery markers |
+| `chat_sql` | 3 | SQL tool calls return correct values (run count, avg HR, longest run) |
+| `context_update` | 3 | Context file updates on injury/goal change, no update on casual questions |
 
-**Scenarios** perturb the blueprint data to test edge cases:
-- `baseline` — unmodified real data (control case)
-- `rest_day` — last day has no workouts (tests SKIP logic)
-- `no_runs_week` — all run workouts removed, only lifts (tests missing pace data handling)
+**Scenarios** perturb the blueprint data to test edge cases. Key examples:
+- `baseline` — unmodified real data (control)
+- `rest_day` / `training_day_missed` / `boring_new_data` — nudge skip/fire logic
+- `sleep_last_night_query` — yesterday has sleep data, today has none (tests date resolution)
+- `sleep_not_tracked_3_consecutive` — 3-day gap triggers a flag
+- `recovery_crashed` / `recovery_green` / `recovery_mixed` — coaching verdict accuracy
+- `midweek_wednesday` — truncated week tests premature judgment
 
-Results include a rich comparison table and ASCII bar charts for pass rate, latency, cost, and token usage across models.
+Results include a rich comparison table and bar charts for pass rate, latency, cost, and token usage across models.
 
 ## Requirements
 
