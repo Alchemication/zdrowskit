@@ -1,31 +1,23 @@
 """Run zdrowskit AI evals against one or more models.
 
-Each eval builds prompts from pinned blueprint data (committed snapshots of
-real context files and health data), applies named scenario perturbations,
-sends to the LLM, and asserts on the response structure.
+Each eval case is defined in ``evals/data/cases.json`` — a human-labelled
+dataset of scenarios with expected behaviors.  The runner loads each case,
+applies its scenario perturbation, calls the LLM, and checks assertions.
 
 Usage:
-    uv run python -m evals.run                          # all evals, default model (opus)
-    uv run python -m evals.run report                   # one eval, all its scenarios
-    uv run python -m evals.run nudge nudge_skip         # multiple evals
+    uv run python -m evals.run                          # all cases, default model
+    uv run python -m evals.run nudge_rest_day_skip      # one case by ID
+    uv run python -m evals.run --category sleep_markers  # all cases in a category
 
-Model selection (full litellm model string, comma-separated for comparison):
+Model selection (full litellm string, comma-separated for comparison):
     uv run python -m evals.run --model anthropic/claude-sonnet-4-6
     uv run python -m evals.run --model anthropic/claude-sonnet-4-6,anthropic/claude-haiku-4-5-20251001
-    uv run python -m evals.run --model openai/gpt-4o
-
-Scenario filtering:
-    uv run python -m evals.run --scenario baseline      # one scenario across all evals
-    uv run python -m evals.run report --scenario no_runs_week
 
 Reasoning effort (forwarded to call_llm):
     uv run python -m evals.run --reasoning-effort low
 
-Combined:
-    uv run python -m evals.run report --scenario baseline --model anthropic/claude-sonnet-4-6
-
 Other tools:
-    uv run python -m evals.data.extract                 # refresh pinned blueprints from live data
+    uv run python -m evals.data.extract                 # refresh pinned blueprints
 """
 
 from __future__ import annotations
@@ -39,17 +31,13 @@ _SRC_DIR = Path(__file__).resolve().parent.parent / "src"
 if str(_SRC_DIR) not in sys.path:
     sys.path.insert(0, str(_SRC_DIR))
 
-from evals.cases.chat_sql import ChatSqlEval  # noqa: E402
-from evals.cases.nudge import NudgeEval, NudgeSkipEval  # noqa: E402
-from evals.cases.report import ReportEval  # noqa: E402
-from evals.framework import DEFAULT_MODEL, EvalResult, print_results  # noqa: E402
-
-ALL_EVALS = [
-    ReportEval(),
-    NudgeEval(),
-    NudgeSkipEval(),
-    ChatSqlEval(),
-]
+from evals.framework import (  # noqa: E402
+    DEFAULT_MODEL,
+    EvalResult,
+    load_cases,
+    print_results,
+    run_case,
+)
 
 
 def main() -> None:
@@ -58,9 +46,14 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
-        "evals",
+        "cases",
         nargs="*",
-        help="Eval names to run (default: all).",
+        help="Case IDs to run (default: all).",
+    )
+    parser.add_argument(
+        "--category",
+        default=None,
+        help="Run only cases in this category.",
     )
     parser.add_argument(
         "--model",
@@ -71,38 +64,37 @@ def main() -> None:
         ),
     )
     parser.add_argument(
-        "--scenario",
-        default=None,
-        help="Run only this scenario across selected evals.",
-    )
-    parser.add_argument(
         "--reasoning-effort",
         default=None,
         help="Reasoning effort hint forwarded to the LLM.",
     )
     args = parser.parse_args()
 
-    # Filter evals.
-    if args.evals:
-        names = set(args.evals)
-        selected = [e for e in ALL_EVALS if e.name in names]
-        unknown = names - {e.name for e in selected}
+    all_cases = load_cases()
+
+    # Filter cases.
+    if args.cases:
+        ids = set(args.cases)
+        selected = [c for c in all_cases if c["id"] in ids]
+        unknown = ids - {c["id"] for c in selected}
         if unknown:
-            all_names = [e.name for e in ALL_EVALS]
+            all_ids = [c["id"] for c in all_cases]
+            print(f"Unknown case(s): {unknown}. Available: {all_ids}", file=sys.stderr)
+            sys.exit(1)
+    elif args.category:
+        selected = [c for c in all_cases if c["category"] == args.category]
+        if not selected:
+            categories = sorted({c["category"] for c in all_cases})
             print(
-                f"Unknown eval(s): {unknown}. Available: {all_names}",
+                f"No cases in category '{args.category}'. Available: {categories}",
                 file=sys.stderr,
             )
             sys.exit(1)
     else:
-        selected = ALL_EVALS
+        selected = all_cases
 
     models = [m.strip() for m in args.model.split(",")]
-    results: list[EvalResult] = []
-
-    total_scenarios = sum(ev.scenario_count(args.scenario) for ev in selected) * len(
-        models
-    )
+    total = len(selected) * len(models)
 
     from rich.progress import (
         BarColumn,
@@ -112,6 +104,8 @@ def main() -> None:
         TimeElapsedColumn,
     )
 
+    results: list[EvalResult] = []
+
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
@@ -119,18 +113,18 @@ def main() -> None:
         TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
         TimeElapsedColumn(),
     ) as progress:
-        task_id = progress.add_task("Starting...", total=total_scenarios)
+        task_id = progress.add_task("Starting...", total=total)
 
         for model in models:
-            for ev in selected:
-                ev_results = ev.run(
+            for case in selected:
+                result = run_case(
+                    case=case,
                     model=model,
                     reasoning_effort=args.reasoning_effort,
-                    scenario_filter=args.scenario,
                     progress=progress,
                     task_id=task_id,
                 )
-                results.extend(ev_results)
+                results.append(result)
 
     print()
     print_results(results)

@@ -587,11 +587,12 @@ def build_llm_data(
         if isinstance(day, dict) and all(day.get(k) is None for k in _SLEEP_KEYS):
             for k in _SLEEP_KEYS:
                 day.pop(k, None)
-            # Today's sleep is always null because the night hasn't ended yet.
+            # Today's sleep is always null (tonight hasn't happened) — omit
+            # entirely so the LLM doesn't confuse it with "last night."
             # Before 10am, yesterday's null sleep likely means data hasn't
             # synced from the watch yet — not that it wasn't tracked.
             if day.get("date") == today_iso:
-                day["sleep"] = "pending"
+                pass  # no sleep marker — tonight hasn't happened
             elif day.get("date") == yesterday_iso and before_sync_cutoff:
                 day["sleep"] = "sync_pending"
             else:

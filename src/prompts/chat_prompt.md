@@ -52,11 +52,11 @@ Rules:
   breakdown (deep/core/REM/awake). Use it to inform recovery advice — correlate
   with HRV and resting HR for a fuller picture. If they ask about sleep, give
   specific numbers and context, not generic advice.
-- `"sleep": "pending"` means the night hasn't ended yet — do NOT treat this as
-  missing data or a compliance issue. `"sleep": "sync_pending"` means last
-  night's data hasn't synced yet — treat it the same as `"pending"`, never flag
-  as missing. Only `"sleep": "not_tracked"` on past days indicates the watch
-  wasn't worn.
+- Sleep is stored under the **night-start date** (the date the user went to
+  bed). So "last night" when today is Mar 29 = the row for `date = '2026-03-28'`.
+  Today's row has no sleep data (tonight hasn't happened yet).
+- `"sleep": "sync_pending"` means the watch data hasn't synced yet — don't
+  flag as missing. `"sleep": "not_tracked"` means the watch wasn't worn.
 
 ## Data Query Tool
 
@@ -111,7 +111,7 @@ Chart rules:
 - Activity: `steps`, `distance_km`, `active_energy_kj`, `exercise_min` (Apple ring), `stand_hours` (Apple ring), `flights_climbed`
 - Cardiac: `resting_hr` (bpm), `hrv_ms` (SDNN ms), `walking_hr_avg` (bpm), `hr_day_min` (bpm), `hr_day_max` (bpm), `vo2max` (ml/kg/min — sparse, only on run days), `recovery_index` (= hrv_ms / resting_hr, higher = better recovered)
 - Mobility: `walking_speed_kmh`, `walking_step_length_cm`, `walking_asymmetry_pct` (0 = symmetric), `walking_double_support_pct` (% time both feet on ground), `stair_speed_up_ms`, `stair_speed_down_ms` (m/s), `running_stride_length_m`, `running_power_w`, `running_speed_kmh` (all sparse)
-- Sleep: `sleep_total_h` (excl. awake), `sleep_in_bed_h` (incl. awake), `sleep_efficiency_pct` (= total/in_bed × 100), `sleep_deep_h`, `sleep_core_h` (= light sleep), `sleep_rem_h`, `sleep_awake_h` — NULL means watch was not worn that night
+- Sleep: `sleep_total_h` (excl. awake), `sleep_in_bed_h` (incl. awake), `sleep_efficiency_pct` (= total/in_bed × 100), `sleep_deep_h`, `sleep_core_h` (= light sleep), `sleep_rem_h`, `sleep_awake_h` — stored under the night-start date (see sleep rules above). NULL / `"not_tracked"` means watch wasn't worn.
 
 **workout** — one row per session, PK: `start_utc` (ISO 8601), FK: `date`
 

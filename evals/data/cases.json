@@ -1,0 +1,331 @@
+[
+  {
+    "id": "nudge_rest_day_skip",
+    "category": "nudge_skip_fire",
+    "scenario_fn": "rest_day",
+    "config": {
+      "prompt_file": "nudge_prompt",
+      "trigger_type": "missed_session",
+      "max_tokens": 512
+    },
+    "expected_action": "skip",
+    "must_contain": [],
+    "must_not_contain": [],
+    "notes": "Rest day + missed_session trigger = SKIP (not actually missed)"
+  },
+  {
+    "id": "nudge_training_day_missed",
+    "category": "nudge_skip_fire",
+    "scenario_fn": "training_day_missed",
+    "config": {
+      "prompt_file": "nudge_prompt",
+      "trigger_type": "missed_session",
+      "max_tokens": 512
+    },
+    "expected_action": "fire",
+    "must_contain": [],
+    "must_not_contain": [],
+    "notes": "Training day with no workout + missed_session = should fire"
+  },
+  {
+    "id": "nudge_boring_new_data",
+    "category": "nudge_skip_fire",
+    "scenario_fn": "boring_new_data",
+    "config": {
+      "prompt_file": "nudge_prompt",
+      "trigger_type": "new_data",
+      "max_tokens": 512
+    },
+    "expected_action": "skip",
+    "must_contain": [],
+    "must_not_contain": [],
+    "notes": "Unremarkable data, nothing new to say = SKIP"
+  },
+  {
+    "id": "nudge_redundant",
+    "category": "nudge_skip_fire",
+    "scenario_fn": "redundant_nudge",
+    "config": {
+      "prompt_file": "nudge_prompt",
+      "trigger_type": "new_data",
+      "recent_nudges": "(2026-03-28 08:15) new_data: HRV bounced back nicely to **65ms** after dipping to 33 on Wednesday. Recovery index hit **1.35** — your best this week. Good sign after that hilly run. **Easy day today** — a walk or light mobility is plenty. Save the legs for Monday's run.",
+      "max_tokens": 512
+    },
+    "expected_action": "skip",
+    "must_contain": [],
+    "must_not_contain": [],
+    "notes": "The notable observation (HRV bounce, good recovery) was already covered in recent nudge"
+  },
+  {
+    "id": "nudge_log_update",
+    "category": "nudge_skip_fire",
+    "scenario_fn": "log_update_meaningful",
+    "config": {
+      "prompt_file": "nudge_prompt",
+      "trigger_type": "log_update",
+      "max_tokens": 512
+    },
+    "expected_action": "fire",
+    "must_contain": ["re:(?i)(back|stiff|sore|deadlift|recover|ease|rest|careful)"],
+    "must_not_contain": [],
+    "notes": "User logged 'back stiff after deadlifts' — nudge should respond to it"
+  },
+  {
+    "id": "sleep_last_night_chat",
+    "category": "sleep_markers",
+    "scenario_fn": "sleep_last_night_query",
+    "config": {
+      "prompt_file": "chat_prompt",
+      "max_tokens": 1024,
+      "tools": true
+    },
+    "question": "How was my sleep last night?",
+    "expected_action": "any",
+    "must_contain": ["re:(?i)(7\\.6|7 hours|91\\.?9|efficiency)"],
+    "must_not_contain": [
+      "re:(?i)(null|no\\s+sleep\\s+data|hasn'?t\\s+synced|not\\s+synced|pending|no\\s+data|not\\s+available|can'?t\\s+see)"
+    ],
+    "notes": "Last night = yesterday's row (date convention). Sleep data (7.63h, 91.9% eff) is right there — must not say null/pending/not synced."
+  },
+  {
+    "id": "sleep_pending_today",
+    "category": "sleep_markers",
+    "scenario_fn": "baseline",
+    "config": {
+      "prompt_file": "prompt",
+      "week_complete": false
+    },
+    "expected_action": "no_alarm",
+    "must_contain": [],
+    "must_not_contain": [
+      "re:(?i)missing\\s+sleep",
+      "re:(?i)no\\s+sleep\\s+data",
+      "re:(?i)didn'?t\\s+(track|log|record)\\s+sleep",
+      "re:(?i)sleep\\s+(data\\s+)?(is\\s+)?missing",
+      "re:(?i)(wear|wore)\\s+(your\\s+)?watch",
+      "re:(?i)sleep\\s+tracking\\s+(issue|gap|problem)",
+      "re:(?i)no\\s+sleep\\s+(recorded|logged|tracked)"
+    ],
+    "notes": "Blueprint already has today (Sat) as 'pending' — must not flag it. Uses baseline scenario since the data already has the right markers."
+  },
+  {
+    "id": "sleep_sync_pending_yesterday",
+    "category": "sleep_markers",
+    "scenario_fn": "sleep_sync_pending_yesterday",
+    "config": {
+      "prompt_file": "prompt",
+      "week_complete": false
+    },
+    "expected_action": "no_alarm",
+    "must_contain": [],
+    "must_not_contain": [
+      "re:(?i)missing\\s+sleep",
+      "re:(?i)no\\s+sleep\\s+data",
+      "re:(?i)didn'?t\\s+(track|log|record)\\s+sleep",
+      "re:(?i)sleep\\s+(data\\s+)?(is\\s+)?missing",
+      "re:(?i)(wear|wore)\\s+(your\\s+)?watch",
+      "re:(?i)sleep\\s+tracking\\s+(issue|gap|problem)",
+      "re:(?i)no\\s+sleep\\s+(recorded|logged|tracked)"
+    ],
+    "notes": "Yesterday set to 'sync_pending' — watch data hasn't synced yet, not a real gap"
+  },
+  {
+    "id": "sleep_not_tracked_single",
+    "category": "sleep_markers",
+    "scenario_fn": "sleep_not_tracked_single",
+    "config": {
+      "prompt_file": "prompt",
+      "week_complete": false
+    },
+    "expected_action": "no_alarm",
+    "must_contain": [],
+    "must_not_contain": [
+      "re:(?i)missing\\s+sleep",
+      "re:(?i)no\\s+sleep\\s+data",
+      "re:(?i)didn'?t\\s+(track|log|record)\\s+sleep",
+      "re:(?i)sleep\\s+(data\\s+)?(is\\s+)?missing",
+      "re:(?i)(wear|wore)\\s+(your\\s+)?watch",
+      "re:(?i)sleep\\s+tracking\\s+(issue|gap|problem)",
+      "re:(?i)no\\s+sleep\\s+(recorded|logged|tracked)"
+    ],
+    "notes": "Only 1 day not_tracked — below the 3-consecutive threshold, should not flag"
+  },
+  {
+    "id": "sleep_not_tracked_3_consecutive",
+    "category": "sleep_markers",
+    "scenario_fn": "sleep_not_tracked_3_consecutive",
+    "config": {
+      "prompt_file": "prompt",
+      "week_complete": false
+    },
+    "expected_action": "flag",
+    "must_contain": ["re:(?i)(sleep.{0,30}track|track.{0,30}sleep|watch.{0,20}(worn|wear)|not\\s+track)"],
+    "must_not_contain": [],
+    "notes": "3 consecutive days not_tracked — this IS worth mentioning"
+  },
+  {
+    "id": "midweek_no_premature_judgment",
+    "category": "midweek_awareness",
+    "scenario_fn": "midweek_wednesday",
+    "config": {
+      "prompt_file": "prompt",
+      "week_complete": false
+    },
+    "expected_action": "no_judgment",
+    "must_contain": [],
+    "must_not_contain": [
+      "re:(?i)only\\s+(ran|run|did|completed|logged)\\s+(once|one|twice|two|\\d)",
+      "re:(?i)missed\\s+\\d+\\s+(session|workout|run|lift)",
+      "re:(?i)fell\\s+short",
+      "re:(?i)behind\\s+(on\\s+)?(your|the)\\s+(plan|schedule|target)",
+      "re:(?i)need\\s+to\\s+(catch|make)\\s+up",
+      "re:(?i)should\\s+have\\s+(done|completed|run|trained)"
+    ],
+    "notes": "Mid-week (Mon-Wed), only 1 run so far but week isn't over — must not penalize"
+  },
+  {
+    "id": "midweek_full_week_control",
+    "category": "midweek_awareness",
+    "scenario_fn": "midweek_wednesday",
+    "config": {
+      "prompt_file": "prompt",
+      "week_complete": true
+    },
+    "expected_action": "any",
+    "must_contain": [],
+    "must_not_contain": [],
+    "notes": "Control case: same truncated data but week_complete=true. Just verify it produces output."
+  },
+  {
+    "id": "recovery_crashed",
+    "category": "recovery_verdict",
+    "scenario_fn": "recovery_crashed",
+    "config": {
+      "prompt_file": "prompt",
+      "week_complete": false
+    },
+    "expected_action": "back_off",
+    "must_contain": ["re:(?i)(back\\s*off|ease\\s*(off|up)|recover|rest|dial\\s*(it\\s+)?back|take\\s+it\\s+easy|lighter|reduce|scale\\s+back|deload)"],
+    "must_not_contain": ["re:(?i)(push\\s*(harder|forward|through)|ramp\\s+up|increase\\s+(volume|intensity|load))"],
+    "notes": "HRV crashed 30%+, sleep efficiency < 75%, resting HR elevated — clear back off signal"
+  },
+  {
+    "id": "recovery_green",
+    "category": "recovery_verdict",
+    "scenario_fn": "recovery_green",
+    "config": {
+      "prompt_file": "prompt",
+      "week_complete": false
+    },
+    "expected_action": "push",
+    "must_contain": ["re:(?i)(push|progress|increase|ramp|ready\\s+to|green\\s+light|step\\s+up|add|harder|more\\s+(volume|intensity))"],
+    "must_not_contain": ["re:(?i)(back\\s*off|ease\\s*(off|up)|deload|scale\\s+back|reduce)"],
+    "notes": "HRV stable/improving, good sleep, normal resting HR — green light to push"
+  },
+  {
+    "id": "recovery_mixed",
+    "category": "recovery_verdict",
+    "scenario_fn": "recovery_mixed",
+    "config": {
+      "prompt_file": "prompt",
+      "week_complete": false
+    },
+    "expected_action": "maintain",
+    "must_contain": ["re:(?i)(maintain|steady|status\\s+quo|keep\\s+(current|things|doing)|hold|moderate|same\\s+(level|intensity|volume)|don'?t\\s+(push|increase))"],
+    "must_not_contain": [],
+    "notes": "HRV slightly down but sleep good, resting HR normal — maintain current load"
+  },
+  {
+    "id": "sql_run_count",
+    "category": "chat_sql",
+    "scenario_fn": "baseline",
+    "config": {
+      "prompt_file": "chat_prompt",
+      "max_tokens": 1024,
+      "tools": true
+    },
+    "question": "How many runs did I do this week?",
+    "expected_value": 3,
+    "tolerance": 0,
+    "notes": "3 runs in blueprint data (Mon, Wed, Fri)"
+  },
+  {
+    "id": "sql_avg_resting_hr",
+    "category": "chat_sql",
+    "scenario_fn": "baseline",
+    "config": {
+      "prompt_file": "chat_prompt",
+      "max_tokens": 1024,
+      "tools": true
+    },
+    "question": "What's my average resting heart rate this week?",
+    "expected_value": 52.7,
+    "tolerance": 1.0,
+    "notes": "Avg of 53,55,52,53,55,48 = 52.67, summary says 52.7"
+  },
+  {
+    "id": "sql_longest_run",
+    "category": "chat_sql",
+    "scenario_fn": "baseline",
+    "config": {
+      "prompt_file": "chat_prompt",
+      "max_tokens": 1024,
+      "tools": true
+    },
+    "question": "What was my longest run this week by distance?",
+    "expected_value": 5.276,
+    "tolerance": 0.5,
+    "notes": "Longest run is 5.276 km on Fri Mar 27"
+  },
+  {
+    "id": "context_update_injury",
+    "category": "context_update",
+    "scenario_fn": "baseline",
+    "config": {
+      "prompt_file": "chat_prompt",
+      "max_tokens": 1024,
+      "tools": true
+    },
+    "question": "I tweaked my right knee on that Wednesday run. It's a bit sore on the outside, especially going downstairs. Probably just IT band irritation.",
+    "expected_tool": "update_context",
+    "expected_tool_args": {
+      "file": ["me", "log"]
+    },
+    "must_contain": ["re:(?i)(knee|IT\\s*band|injur|sore|careful|ease|rest|avoid|modify)"],
+    "must_not_contain": [],
+    "notes": "User reports injury — should update context (me or log) AND give injury-aware advice"
+  },
+  {
+    "id": "context_update_casual_question",
+    "category": "context_update",
+    "scenario_fn": "baseline",
+    "config": {
+      "prompt_file": "chat_prompt",
+      "max_tokens": 1024,
+      "tools": true
+    },
+    "question": "What was my HRV like on Monday?",
+    "expected_tool": null,
+    "must_contain": [],
+    "must_not_contain": [],
+    "notes": "Casual data question — should NOT call update_context"
+  },
+  {
+    "id": "context_update_goal_change",
+    "category": "context_update",
+    "scenario_fn": "baseline",
+    "config": {
+      "prompt_file": "chat_prompt",
+      "max_tokens": 1024,
+      "tools": true
+    },
+    "question": "I want to drop the 5K time goal for now and focus purely on consistency — 3 runs and 2 lifts per week, no pace pressure.",
+    "expected_tool": "update_context",
+    "expected_tool_args": {
+      "file": ["goals"]
+    },
+    "must_contain": ["re:(?i)(goal|consistency|updated|noted|adjust)"],
+    "must_not_contain": [],
+    "notes": "User explicitly changes a goal — should update goals context file"
+  }
+]
