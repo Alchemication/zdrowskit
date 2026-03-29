@@ -6,6 +6,8 @@ applies its scenario perturbation, calls the LLM, and checks assertions.
 
 Usage:
     uv run python -m evals.run                          # all cases, default model
+    uv run python -m evals.run --suite core             # only product-gating cases
+    uv run python -m evals.run --no-cache               # bypass eval cache
     uv run python -m evals.run nudge_rest_day_skip      # one case by ID
     uv run python -m evals.run --category sleep_markers  # all cases in a category
 
@@ -56,6 +58,12 @@ def main() -> None:
         help="Run only cases in this category.",
     )
     parser.add_argument(
+        "--suite",
+        default=None,
+        choices=["core", "benchmark"],
+        help="Run only cases in this suite.",
+    )
+    parser.add_argument(
         "--model",
         default=DEFAULT_MODEL,
         help=(
@@ -67,6 +75,17 @@ def main() -> None:
         "--reasoning-effort",
         default=None,
         help="Reasoning effort hint forwarded to the LLM.",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Run at most N cases (useful for quick harness sanity checks).",
+    )
+    parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="Bypass the shared eval cache for this run.",
     )
     args = parser.parse_args()
 
@@ -92,6 +111,18 @@ def main() -> None:
             sys.exit(1)
     else:
         selected = all_cases
+
+    if args.suite:
+        selected = [c for c in selected if c["suite"] == args.suite]
+        if not selected:
+            print(
+                f"No cases in suite '{args.suite}'.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+    if args.limit is not None:
+        selected = selected[: args.limit]
 
     models = [m.strip() for m in args.model.split(",")]
     total = len(selected) * len(models)
@@ -123,6 +154,7 @@ def main() -> None:
                     reasoning_effort=args.reasoning_effort,
                     progress=progress,
                     task_id=task_id,
+                    use_cache=not args.no_cache,
                 )
                 results.append(result)
 
