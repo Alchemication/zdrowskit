@@ -26,7 +26,7 @@ import sqlite3
 import time
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import litellm
@@ -45,6 +45,10 @@ FALLBACK_MODEL = "anthropic/claude-sonnet-4-6"
 _RETRY_DELAYS = [10, 30, 90]
 
 CONTEXT_FILES = ["me", "goals", "plan", "log", "history"]
+
+# Before this hour, yesterday's null sleep is marked "sync_pending" instead of
+# "not_tracked" — the data likely hasn't synced from the watch yet.
+SLEEP_SYNC_CUTOFF_HOUR = 10
 
 
 @dataclass
@@ -577,13 +581,21 @@ def build_llm_data(
         "sleep_awake_h",
     }
     today_iso = date.today().isoformat()
+    yesterday_iso = (date.today() - timedelta(days=1)).isoformat()
+    before_sync_cutoff = datetime.now().hour < SLEEP_SYNC_CUTOFF_HOUR
     for day in days:
         if isinstance(day, dict) and all(day.get(k) is None for k in _SLEEP_KEYS):
             for k in _SLEEP_KEYS:
                 day.pop(k, None)
-            # Today's sleep is always null because the night hasn't ended yet;
-            # past days with null sleep genuinely weren't tracked (watch off).
-            day["sleep"] = "pending" if day.get("date") == today_iso else "not_tracked"
+            # Today's sleep is always null because the night hasn't ended yet.
+            # Before 10am, yesterday's null sleep likely means data hasn't
+            # synced from the watch yet — not that it wasn't tracked.
+            if day.get("date") == today_iso:
+                day["sleep"] = "pending"
+            elif day.get("date") == yesterday_iso and before_sync_cutoff:
+                day["sleep"] = "sync_pending"
+            else:
+                day["sleep"] = "not_tracked"
 
     return {
         "current_week": {

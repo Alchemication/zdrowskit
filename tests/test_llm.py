@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -465,16 +465,20 @@ class TestBuildLlmData:
         assert "workouts" in day
         assert "recovery_index" in day
 
+    @patch("llm.datetime")
     @patch("llm.date")
     def test_today_sleep_is_pending_not_untracked(
         self,
         mock_date: MagicMock,
+        mock_datetime: MagicMock,
         in_memory_db: sqlite3.Connection,
         sample_snapshots: list[DailySnapshot],
     ) -> None:
         """Today's null sleep should be 'pending', past null sleep 'not_tracked'."""
         mock_date.today.return_value = date(2026, 3, 11)
         mock_date.fromisoformat = date.fromisoformat
+        # After sync cutoff — yesterday's null sleep is genuinely not tracked
+        mock_datetime.now.return_value = datetime(2026, 3, 11, 14, 0)
         store_snapshots(in_memory_db, sample_snapshots)
         result = build_llm_data(in_memory_db, months=3)
 
@@ -486,3 +490,23 @@ class TestBuildLlmData:
         # 2026-03-09 has real sleep data — no marker at all
         assert "sleep" not in days["2026-03-09"]
         assert days["2026-03-09"]["sleep_total_h"] == 7.4
+
+    @patch("llm.datetime")
+    @patch("llm.date")
+    def test_yesterday_sleep_sync_pending_before_cutoff(
+        self,
+        mock_date: MagicMock,
+        mock_datetime: MagicMock,
+        in_memory_db: sqlite3.Connection,
+        sample_snapshots: list[DailySnapshot],
+    ) -> None:
+        """Before 10am, yesterday's null sleep should be 'sync_pending'."""
+        mock_date.today.return_value = date(2026, 3, 13)
+        mock_date.fromisoformat = date.fromisoformat
+        mock_datetime.now.return_value = datetime(2026, 3, 13, 7, 30)
+        store_snapshots(in_memory_db, sample_snapshots)
+        result = build_llm_data(in_memory_db, months=3)
+
+        days = {d["date"]: d for d in result["current_week"]["days"]}
+        # 2026-03-12 is yesterday with no sleep and it's before 10am
+        assert days["2026-03-12"]["sleep"] == "sync_pending"

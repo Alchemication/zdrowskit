@@ -615,6 +615,7 @@ _SQL_KEYWORDS = {
     "references",
     "not_tracked",
     "pending",
+    "sync_pending",
 }
 
 

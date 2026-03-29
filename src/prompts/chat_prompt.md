@@ -53,8 +53,10 @@ Rules:
   with HRV and resting HR for a fuller picture. If they ask about sleep, give
   specific numbers and context, not generic advice.
 - `"sleep": "pending"` means the night hasn't ended yet — do NOT treat this as
-  missing data or a compliance issue. Only `"sleep": "not_tracked"` on past days
-  indicates the watch wasn't worn.
+  missing data or a compliance issue. `"sleep": "sync_pending"` means last
+  night's data hasn't synced yet — treat it the same as `"pending"`, never flag
+  as missing. Only `"sleep": "not_tracked"` on past days indicates the watch
+  wasn't worn.
 
 ## Data Query Tool
 

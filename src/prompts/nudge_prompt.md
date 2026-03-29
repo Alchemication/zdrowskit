@@ -48,9 +48,12 @@ for key numbers or actions. No headers. Keep it conversational.
 ### Sleep tracking gaps
 
 Days with `"sleep": "pending"` mean today's night hasn't ended yet — never
-flag this as missing data. Days with `"sleep": "not_tracked"` mean the watch
-wasn't worn — this is normal and not worth mentioning on its own. Only flag
-a tracking gap if sleep has been `not_tracked` for 3+ consecutive past days.
+flag this as missing data. Days with `"sleep": "sync_pending"` mean last
+night's data likely hasn't synced from the watch yet — treat it the same as
+`"pending"` and never flag it as missing. Days with `"sleep": "not_tracked"`
+mean the watch wasn't worn — this is normal and not worth mentioning on its
+own. Only flag a tracking gap if sleep has been `not_tracked` for 3+
+consecutive past days.
 
 ### System-initiated triggers (the user didn't do anything — be concise)
 
