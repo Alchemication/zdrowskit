@@ -169,6 +169,7 @@ def build_messages(
     health_data_json: str,
     baselines: str | None = None,
     week_complete: bool = True,
+    today: date | None = None,
 ) -> list[dict[str, str]]:
     """Assemble system and user messages for the LLM call.
 
@@ -181,6 +182,8 @@ def build_messages(
         health_data_json: JSON string of current week + history data.
         baselines: Auto-computed baselines markdown, or None to skip.
         week_complete: Whether the reported week has fully elapsed.
+        today: Override for the current date (defaults to today).
+            Useful for evals with pinned dates.
 
     Returns:
         A list of message dicts ready for litellm.completion().
@@ -189,7 +192,8 @@ def build_messages(
     if system_content == "(not provided)":
         system_content = DEFAULT_SOUL
 
-    today = date.today()
+    if today is None:
+        today = date.today()
     if week_complete:
         week_status = "This is a full week review (Mon–Sun complete)."
     else:
@@ -202,21 +206,19 @@ def build_messages(
 
     template = context["prompt"]
     placeholders: dict[str, str] = defaultdict(lambda: "(not provided)")
-    placeholders.update(
-        {
-            "me": context.get("me", "(not provided)"),
-            "goals": context.get("goals", "(not provided)"),
-            "plan": context.get("plan", "(not provided)"),
-            "log": context.get("log", "(not provided)"),
-            "history": context.get("history", "(not provided)"),
-            "health_data": health_data_json,
-            "baselines": baselines or "(not computed)",
-            "today": today.isoformat(),
-            "weekday": today.strftime("%A"),
-            "week_status": week_status,
-            "chart_theme": CHART_THEME,
-        }
-    )
+    placeholders.update({
+        "me": context.get("me", "(not provided)"),
+        "goals": context.get("goals", "(not provided)"),
+        "plan": context.get("plan", "(not provided)"),
+        "log": context.get("log", "(not provided)"),
+        "history": context.get("history", "(not provided)"),
+        "health_data": health_data_json,
+        "baselines": baselines or "(not computed)",
+        "today": today.isoformat(),
+        "weekday": today.strftime("%A"),
+        "week_status": week_status,
+        "chart_theme": CHART_THEME,
+    })
     # Forward any extra keys (e.g. recent_nudges) from context into placeholders.
     for key, value in context.items():
         if key not in placeholders and key not in ("soul", "prompt"):
@@ -567,10 +569,10 @@ def build_llm_data(
 
     days = [to_dict(s) for s in current_snaps]
 
-    # Replace null sleep columns with a single "sleep": "not_tracked" marker.
-    # Today's sleep is *always* null (the night hasn't ended); past days may
-    # be null if the watch wasn't worn.  Collapsing 7 null fields into one
-    # marker reduces noise and gives the LLM a clear signal.
+    # Replace null sleep columns with a single status marker. Today's sleep is
+    # pending because the night has not finished yet; past days may be null if
+    # the watch was not worn or sync is still in flight. Collapsing 7 null
+    # fields into one marker reduces noise and gives the LLM a clear signal.
     _SLEEP_KEYS = {
         "sleep_total_h",
         "sleep_in_bed_h",
@@ -587,12 +589,12 @@ def build_llm_data(
         if isinstance(day, dict) and all(day.get(k) is None for k in _SLEEP_KEYS):
             for k in _SLEEP_KEYS:
                 day.pop(k, None)
-            # Today's sleep is always null (tonight hasn't happened) — omit
-            # entirely so the LLM doesn't confuse it with "last night."
-            # Before 10am, yesterday's null sleep likely means data hasn't
-            # synced from the watch yet — not that it wasn't tracked.
+            # Today's sleep is always null because the night is still in
+            # progress, so mark it explicitly as pending. Before 10am,
+            # yesterday's null sleep likely means data hasn't synced from the
+            # watch yet rather than it not being tracked.
             if day.get("date") == today_iso:
-                pass  # no sleep marker — tonight hasn't happened
+                day["sleep"] = "pending"
             elif day.get("date") == yesterday_iso and before_sync_cutoff:
                 day["sleep"] = "sync_pending"
             else:

@@ -1,0 +1,118 @@
+{
+  "current_week": {
+    "summary": {
+      "week_label": "2026-W15 (2026-04-06 – 2026-04-10)",
+      "run_count": 1,
+      "lift_count": 0,
+      "walk_count": 0,
+      "total_run_km": 4.8,
+      "avg_run_km": 4.8,
+      "best_pace_min_per_km": 6.33,
+      "avg_run_hr": 152.0,
+      "peak_run_hr": 166,
+      "avg_steps": 4820,
+      "avg_resting_hr": 56.2,
+      "avg_hrv_ms": 41.5,
+      "avg_recovery_index": 0.739,
+      "hrv_trend": "declining",
+      "avg_sleep_total_h": 6.15,
+      "avg_sleep_efficiency_pct": 88.6,
+      "run_consistency_pct": 33.3,
+      "lift_consistency_pct": 0.0
+    },
+    "days": [
+      {
+        "date": "2026-04-06",
+        "steps": 6100,
+        "resting_hr": 55,
+        "hrv_ms": 45.0,
+        "sleep_total_h": 6.7,
+        "sleep_efficiency_pct": 91.0,
+        "workouts": [
+          {
+            "type": "Outdoor Run",
+            "category": "run",
+            "start_utc": "2026-04-06T07:12:00Z",
+            "duration_min": 30.4,
+            "hr_avg": 152.0,
+            "gpx_distance_km": 4.8
+          }
+        ],
+        "recovery_index": 0.818
+      },
+      {
+        "date": "2026-04-07",
+        "steps": 4200,
+        "resting_hr": 56,
+        "hrv_ms": 41.0,
+        "sleep_total_h": 6.1,
+        "sleep_efficiency_pct": 88.0,
+        "workouts": [],
+        "recovery_index": 0.732
+      },
+      {
+        "date": "2026-04-08",
+        "steps": 5100,
+        "resting_hr": 57,
+        "hrv_ms": 40.0,
+        "sleep_total_h": 5.8,
+        "sleep_efficiency_pct": 86.0,
+        "workouts": [],
+        "recovery_index": 0.702
+      },
+      {
+        "date": "2026-04-09",
+        "steps": 3880,
+        "resting_hr": 57,
+        "hrv_ms": 40.0,
+        "sleep_total_h": 6.0,
+        "sleep_efficiency_pct": 89.0,
+        "workouts": [],
+        "recovery_index": 0.702
+      },
+      {
+        "date": "2026-04-10",
+        "steps": 4820,
+        "resting_hr": 56,
+        "hrv_ms": 41.5,
+        "sleep": "pending",
+        "workouts": [],
+        "recovery_index": 0.741
+      }
+    ]
+  },
+  "history": [
+    {
+      "summary": {
+        "week_label": "2026-W12",
+        "run_count": 2,
+        "lift_count": 1,
+        "avg_resting_hr": 55.4,
+        "avg_hrv_ms": 48.7,
+        "hrv_trend": "steady"
+      }
+    },
+    {
+      "summary": {
+        "week_label": "2026-W13",
+        "run_count": 3,
+        "lift_count": 2,
+        "avg_resting_hr": 53.1,
+        "avg_hrv_ms": 50.4,
+        "hrv_trend": "improving"
+      }
+    },
+    {
+      "summary": {
+        "week_label": "2026-W14",
+        "run_count": 1,
+        "lift_count": 1,
+        "avg_resting_hr": 56.8,
+        "avg_hrv_ms": 43.2,
+        "hrv_trend": "declining"
+      }
+    }
+  ],
+  "week_complete": false,
+  "week_label": "2026-W15"
+}

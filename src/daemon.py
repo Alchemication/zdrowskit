@@ -946,13 +946,11 @@ class ZdrowskitDaemon:
                         except (ValueError, _json.JSONDecodeError):
                             pass
 
-                messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": tool_result,
-                    }
-                )
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "content": tool_result,
+                })
 
         # If we exhausted iterations, return the last result.
         return result, deferred_edits, query_rows

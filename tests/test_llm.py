@@ -146,6 +146,20 @@ class TestBuildMessages:
         msgs = build_messages(ctx, health_data_json="{}", baselines=None)
         assert "(not computed)" in msgs[1]["content"]
 
+    def test_explicit_today_override_is_used(self) -> None:
+        ctx = {
+            "prompt": "Today: {today}; Weekday: {weekday}; Status: {week_status}",
+        }
+        msgs = build_messages(
+            ctx,
+            health_data_json="{}",
+            week_complete=False,
+            today=date(2026, 3, 25),
+        )
+        assert "Today: 2026-03-25" in msgs[1]["content"]
+        assert "Weekday: Wednesday" in msgs[1]["content"]
+        assert "Mon–Wednesday" in msgs[1]["content"]
+
 
 class TestCallLlm:
     def _mock_response(

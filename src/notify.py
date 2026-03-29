@@ -208,14 +208,12 @@ def send_email(report: str, week_label: str) -> None:
     resend.api_key = api_key
     html = md_to_html(report)
     try:
-        resend.Emails.send(
-            {
-                "from": email_from,
-                "to": [email_to],
-                "subject": f"zdrowskit — {week_label}",
-                "html": html,
-            }
-        )
+        resend.Emails.send({
+            "from": email_from,
+            "to": [email_to],
+            "subject": f"zdrowskit — {week_label}",
+            "html": html,
+        })
         logger.info("Email sent to %s", email_to)
     except Exception as e:
         logger.error("Failed to send email: %s", e)

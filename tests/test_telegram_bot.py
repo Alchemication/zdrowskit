@@ -118,21 +118,19 @@ class TestConversationBuffer:
 class TestTelegramPollerGetUpdates:
     def test_parses_successful_response(self) -> None:
         poller = TelegramPoller("fake-token", "12345")
-        fake_response = json.dumps(
-            {
-                "ok": True,
-                "result": [
-                    {
-                        "update_id": 1,
-                        "message": {
-                            "message_id": 10,
-                            "chat": {"id": 12345},
-                            "text": "hello",
-                        },
-                    }
-                ],
-            }
-        ).encode()
+        fake_response = json.dumps({
+            "ok": True,
+            "result": [
+                {
+                    "update_id": 1,
+                    "message": {
+                        "message_id": 10,
+                        "chat": {"id": 12345},
+                        "text": "hello",
+                    },
+                }
+            ],
+        }).encode()
 
         mock_resp = MagicMock()
         mock_resp.read.return_value = fake_response

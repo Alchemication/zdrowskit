@@ -6,10 +6,12 @@ deliberately when you want to refresh the baseline data.
 
 Usage:
     uv run python -m evals.data.extract
+    uv run python -m evals.data.extract --name sparse_week
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import shutil
 import sys
@@ -24,7 +26,6 @@ from llm import build_llm_data  # noqa: E402
 from store import default_db_path, open_db  # noqa: E402
 
 _BLUEPRINTS_DIR = Path(__file__).resolve().parent / "blueprints"
-_CONTEXT_OUT = _BLUEPRINTS_DIR / "context"
 
 _CONTEXT_FILES = [
     "me.md",
@@ -37,12 +38,24 @@ _CONTEXT_FILES = [
 
 
 def main() -> None:
-    _CONTEXT_OUT.mkdir(parents=True, exist_ok=True)
+    parser = argparse.ArgumentParser(description="Snapshot eval blueprint data.")
+    parser.add_argument(
+        "--name",
+        default="baseline",
+        help="Blueprint name. 'baseline' writes to evals/data/blueprints/.",
+    )
+    args = parser.parse_args()
+
+    out_dir = (
+        _BLUEPRINTS_DIR if args.name == "baseline" else _BLUEPRINTS_DIR / args.name
+    )
+    context_out = out_dir / "context"
+    context_out.mkdir(parents=True, exist_ok=True)
 
     # 1. Copy context files.
     for name in _CONTEXT_FILES:
         src = CONTEXT_DIR / name
-        dst = _CONTEXT_OUT / name
+        dst = context_out / name
         if src.exists():
             shutil.copy2(src, dst)
             print(f"  context/{name}")
@@ -59,7 +72,7 @@ def main() -> None:
     health_data = build_llm_data(conn, months=6, week="current")
     conn.close()
 
-    hd_path = _BLUEPRINTS_DIR / "health_data.json"
+    hd_path = out_dir / "health_data.json"
     hd_path.write_text(
         json.dumps(health_data, indent=2, default=str) + "\n",
         encoding="utf-8",
@@ -75,11 +88,11 @@ def main() -> None:
         "week_label": week_label,
         "week_complete": health_data.get("week_complete", False),
     }
-    meta_path = _BLUEPRINTS_DIR / "metadata.json"
+    meta_path = out_dir / "metadata.json"
     meta_path.write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
     print(f"  metadata.json (date={today}, week={week_label})")
 
-    print("Done. Commit blueprints/ to pin this baseline.")
+    print(f"Done. Commit blueprints/ to pin blueprint '{args.name}'.")
 
 
 if __name__ == "__main__":
