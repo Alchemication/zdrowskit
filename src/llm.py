@@ -569,10 +569,15 @@ def build_llm_data(
 
     days = [to_dict(s) for s in current_snaps]
 
-    # Replace null sleep columns with a single status marker. Today's sleep is
-    # pending because the night has not finished yet; past days may be null if
-    # the watch was not worn or sync is still in flight. Collapsing 7 null
-    # fields into one marker reduces noise and gives the LLM a clear signal.
+    # Clean up null sleep columns.  Sleep is stored under the night-start date
+    # (the date the user went to bed), so Sunday night's sleep informs Monday
+    # — it belongs to next week, not this one.
+    #
+    # For "last" week reports: strip sleep from the final day (Sunday) because
+    # that night conceptually belongs to the following week.
+    # For "current" week / chat / nudge: strip sleep from today (tonight hasn't
+    # happened) and from yesterday before the sync cutoff (watch hasn't synced).
+    # Remaining days with all-null sleep are marked "not_tracked" (watch off).
     _SLEEP_KEYS = {
         "sleep_total_h",
         "sleep_in_bed_h",
@@ -585,18 +590,19 @@ def build_llm_data(
     today_iso = date.today().isoformat()
     yesterday_iso = (date.today() - timedelta(days=1)).isoformat()
     before_sync_cutoff = datetime.now().hour < SLEEP_SYNC_CUTOFF_HOUR
+    last_day_iso = week_end if week == "last" else None
     for day in days:
         if isinstance(day, dict) and all(day.get(k) is None for k in _SLEEP_KEYS):
             for k in _SLEEP_KEYS:
                 day.pop(k, None)
-            # Today's sleep is always null because the night is still in
-            # progress, so mark it explicitly as pending. Before 10am,
-            # yesterday's null sleep likely means data hasn't synced from the
-            # watch yet rather than it not being tracked.
-            if day.get("date") == today_iso:
-                day["sleep"] = "pending"
-            elif day.get("date") == yesterday_iso and before_sync_cutoff:
-                day["sleep"] = "sync_pending"
+
+            day_date = day.get("date")
+            if day_date == last_day_iso:
+                pass  # Sunday night belongs to next week — omit
+            elif day_date == today_iso:
+                pass  # tonight hasn't happened
+            elif day_date == yesterday_iso and before_sync_cutoff:
+                pass  # watch data likely hasn't synced yet
             else:
                 day["sleep"] = "not_tracked"
 

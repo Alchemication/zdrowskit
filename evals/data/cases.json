@@ -209,7 +209,7 @@
         ]
       }
     ],
-    "notes": "sync_pending means the watch likely hasn't synced yet."
+    "notes": "Yesterday's sleep is absent (watch hasn't synced yet) — should not be flagged."
   },
   {
     "id": "sleep_not_tracked_single",

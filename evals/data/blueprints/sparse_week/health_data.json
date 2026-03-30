@@ -75,7 +75,6 @@
         "steps": 4820,
         "resting_hr": 56,
         "hrv_ms": 41.5,
-        "sleep": "pending",
         "workouts": [],
         "recovery_index": 0.741
       }

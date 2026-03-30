@@ -54,9 +54,10 @@ Rules:
   specific numbers and context, not generic advice.
 - Sleep is stored under the **night-start date** (the date the user went to
   bed). So "last night" when today is Mar 29 = the row for `date = '2026-03-28'`.
-  Today's row has no sleep data (tonight hasn't happened yet).
-- `"sleep": "sync_pending"` means the watch data hasn't synced yet — don't
-  flag as missing. `"sleep": "not_tracked"` means the watch wasn't worn.
+  Today's row has no sleep data (tonight hasn't happened yet), and yesterday's
+  may also be absent if the watch hasn't synced yet — don't flag either as
+  missing. Only `"sleep": "not_tracked"` on past days means the watch wasn't
+  worn.
 
 ## Data Query Tool
 

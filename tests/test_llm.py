@@ -488,7 +488,7 @@ class TestBuildLlmData:
         in_memory_db: sqlite3.Connection,
         sample_snapshots: list[DailySnapshot],
     ) -> None:
-        """Today's null sleep should be 'pending', past null sleep 'not_tracked'."""
+        """Today's null sleep should be omitted, past null sleep 'not_tracked'."""
         mock_date.today.return_value = date(2026, 3, 11)
         mock_date.fromisoformat = date.fromisoformat
         # After sync cutoff — yesterday's null sleep is genuinely not tracked
@@ -497,8 +497,8 @@ class TestBuildLlmData:
         result = build_llm_data(in_memory_db, months=3)
 
         days = {d["date"]: d for d in result["current_week"]["days"]}
-        # 2026-03-11 is "today" — sleep hasn't happened yet
-        assert days["2026-03-11"]["sleep"] == "pending"
+        # 2026-03-11 is "today" — sleep omitted entirely (tonight hasn't happened)
+        assert "sleep" not in days["2026-03-11"]
         # 2026-03-12 is a past day with no sleep — watch wasn't worn
         assert days["2026-03-12"]["sleep"] == "not_tracked"
         # 2026-03-09 has real sleep data — no marker at all
@@ -507,14 +507,14 @@ class TestBuildLlmData:
 
     @patch("llm.datetime")
     @patch("llm.date")
-    def test_yesterday_sleep_sync_pending_before_cutoff(
+    def test_yesterday_sleep_omitted_before_cutoff(
         self,
         mock_date: MagicMock,
         mock_datetime: MagicMock,
         in_memory_db: sqlite3.Connection,
         sample_snapshots: list[DailySnapshot],
     ) -> None:
-        """Before 10am, yesterday's null sleep should be 'sync_pending'."""
+        """Before 10am, yesterday's null sleep should be omitted (not synced yet)."""
         mock_date.today.return_value = date(2026, 3, 13)
         mock_date.fromisoformat = date.fromisoformat
         mock_datetime.now.return_value = datetime(2026, 3, 13, 7, 30)
@@ -522,5 +522,28 @@ class TestBuildLlmData:
         result = build_llm_data(in_memory_db, months=3)
 
         days = {d["date"]: d for d in result["current_week"]["days"]}
-        # 2026-03-12 is yesterday with no sleep and it's before 10am
-        assert days["2026-03-12"]["sleep"] == "sync_pending"
+        # 2026-03-12 is yesterday with no sleep and it's before 10am — omitted
+        assert "sleep" not in days["2026-03-12"]
+
+    @patch("llm.datetime")
+    @patch("llm.date")
+    def test_last_week_sunday_sleep_omitted(
+        self,
+        mock_date: MagicMock,
+        mock_datetime: MagicMock,
+        in_memory_db: sqlite3.Connection,
+        sample_snapshots: list[DailySnapshot],
+    ) -> None:
+        """In --week last, Sunday's sleep is omitted (belongs to next week)."""
+        mock_date.today.return_value = date(2026, 3, 16)  # Monday
+        mock_date.fromisoformat = date.fromisoformat
+        mock_datetime.now.return_value = datetime(2026, 3, 16, 9, 30)
+        store_snapshots(in_memory_db, sample_snapshots)
+        result = build_llm_data(in_memory_db, months=3, week="last")
+
+        days = {d["date"]: d for d in result["current_week"]["days"]}
+        # Sunday (last day of reported week) — sleep omitted, not "not_tracked"
+        assert "sleep" not in days["2026-03-15"]
+        # Mid-week days with no sleep are genuinely not tracked
+        assert days["2026-03-11"]["sleep"] == "not_tracked"
+        assert days["2026-03-12"]["sleep"] == "not_tracked"

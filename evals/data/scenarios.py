@@ -150,10 +150,13 @@ def sleep_last_night_query(
 def sleep_sync_pending_yesterday(
     context: dict[str, str], health_data: dict
 ) -> tuple[dict[str, str], dict]:
-    """Yesterday's sleep set to 'sync_pending'."""
+    """Yesterday's sleep omitted (watch hasn't synced yet)."""
     days = health_data.get("current_week", {}).get("days", [])
     if len(days) >= 2:
-        _set_sleep_marker(days[-2], "sync_pending")
+        yesterday = days[-2]
+        for field in _SLEEP_FIELDS:
+            yesterday.pop(field, None)
+        yesterday.pop("sleep", None)
     return context, health_data
 
 
@@ -250,7 +253,7 @@ def recovery_crashed(
         day["recovery_index"] = 0.45
 
         # Bad sleep on days that have sleep data.
-        if day.get("sleep") not in ("pending", "sync_pending", "not_tracked"):
+        if day.get("sleep_total_h") is not None:
             day["sleep_total_h"] = 4.8
             day["sleep_efficiency_pct"] = 68.0
             day["sleep_deep_h"] = 0.2
@@ -284,7 +287,7 @@ def recovery_green(
         day["resting_hr"] = 48
         day["recovery_index"] = 1.29
 
-        if day.get("sleep") not in ("pending", "sync_pending", "not_tracked"):
+        if day.get("sleep_total_h") is not None:
             day["sleep_total_h"] = 7.8
             day["sleep_efficiency_pct"] = 97.0
             day["sleep_deep_h"] = 1.1
@@ -318,7 +321,7 @@ def recovery_mixed(
         day["resting_hr"] = 54
         day["recovery_index"] = 0.78
 
-        if day.get("sleep") not in ("pending", "sync_pending", "not_tracked"):
+        if day.get("sleep_total_h") is not None:
             day["sleep_total_h"] = 7.2
             day["sleep_efficiency_pct"] = 95.0
             day["sleep_deep_h"] = 0.8

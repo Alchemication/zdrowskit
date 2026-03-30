@@ -417,8 +417,6 @@ _SQL_KEYWORDS = {
     "autoincrement",
     "references",
     "not_tracked",
-    "pending",
-    "sync_pending",
 }
 
 

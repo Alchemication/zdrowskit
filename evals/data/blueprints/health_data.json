@@ -310,8 +310,7 @@
         "running_power_w": null,
         "running_speed_kmh": null,
         "workouts": [],
-        "recovery_index": 1.348,
-        "sleep": "pending"
+        "recovery_index": 1.348
       }
     ]
   },
