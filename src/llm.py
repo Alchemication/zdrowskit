@@ -556,6 +556,17 @@ def build_llm_data(
 
     current_snaps = load_snapshots(conn, start=week_start, end=week_end)
 
+    # For current-week reports, fetch the preceding Sunday's sleep — it's the
+    # night before Monday and belongs to this week's sleep story.
+    prev_sunday_snap = None
+    if week == "current":
+        prev_sunday = date.fromisoformat(week_start) - timedelta(days=1)
+        prev_sunday_snaps = load_snapshots(
+            conn, start=prev_sunday.isoformat(), end=prev_sunday.isoformat()
+        )
+        if prev_sunday_snaps:
+            prev_sunday_snap = prev_sunday_snaps[0]
+
     history_end = (date.fromisoformat(week_start) - timedelta(days=1)).isoformat()
     history_start = (
         date.fromisoformat(week_start) - timedelta(days=30 * months)
@@ -569,12 +580,22 @@ def build_llm_data(
 
     days = [to_dict(s) for s in current_snaps]
 
-    # Clean up null sleep columns.  Sleep is stored under the night-start date
-    # (the date the user went to bed), so Sunday night's sleep informs Monday
-    # — it belongs to next week, not this one.
+    # Inject the preceding Sunday's sleep into Monday's row.  Sleep is stored
+    # under the night-start date, so Sunday night's data lives on Sunday's row
+    # but it's the sleep that affected Monday's recovery.
+    if prev_sunday_snap and days:
+        sunday = to_dict(prev_sunday_snap)
+        monday = days[0]
+        for k in ("sleep_total_h", "sleep_in_bed_h", "sleep_efficiency_pct",
+                   "sleep_deep_h", "sleep_core_h", "sleep_rem_h", "sleep_awake_h"):
+            val = sunday.get(k)
+            if val is not None and monday.get(k) is None:
+                monday[k] = val
+
+    # Clean up null sleep columns.
     #
     # For "last" week reports: strip sleep from the final day (Sunday) because
-    # that night conceptually belongs to the following week.
+    # Sunday night belongs to the following week.
     # For "current" week / chat / nudge: strip sleep from today (tonight hasn't
     # happened) and from yesterday before the sync cutoff (watch hasn't synced).
     # Remaining days with all-null sleep are marked "not_tracked" (watch off).

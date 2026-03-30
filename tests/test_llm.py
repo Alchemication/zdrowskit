@@ -547,3 +547,57 @@ class TestBuildLlmData:
         # Mid-week days with no sleep are genuinely not tracked
         assert days["2026-03-11"]["sleep"] == "not_tracked"
         assert days["2026-03-12"]["sleep"] == "not_tracked"
+
+    @patch("llm.datetime")
+    @patch("llm.date")
+    def test_current_week_inherits_sunday_sleep(
+        self,
+        mock_date: MagicMock,
+        mock_datetime: MagicMock,
+        in_memory_db: sqlite3.Connection,
+        sample_snapshots: list[DailySnapshot],
+    ) -> None:
+        """In --week current, Monday inherits sleep from the preceding Sunday."""
+        # sample_snapshots: Mar 9 (Sun) has sleep, Mar 10 (Mon) has sleep.
+        # We'll use week starting Mar 16 (Mon) with a Sunday (Mar 15) that
+        # has no sleep in sample data, plus inject a Sunday snapshot with sleep.
+        mock_date.today.return_value = date(2026, 3, 19)  # Wednesday
+        mock_date.fromisoformat = date.fromisoformat
+        mock_datetime.now.return_value = datetime(2026, 3, 19, 10, 0)
+
+        # Store original data (covers Mar 9-15)
+        store_snapshots(in_memory_db, sample_snapshots)
+        # Add a Sunday (Mar 15) with sleep and Mon-Wed (Mar 16-18) without
+        store_snapshots(in_memory_db, [
+            DailySnapshot(
+                date="2026-03-15",
+                steps=5000, distance_km=3.0, active_energy_kj=1000.0,
+                exercise_min=10, stand_hours=8, resting_hr=52, hrv_ms=55.0,
+                sleep_total_h=7.5, sleep_in_bed_h=8.0,
+                sleep_efficiency_pct=93.8,
+                sleep_deep_h=0.9, sleep_core_h=4.5,
+                sleep_rem_h=2.1, sleep_awake_h=0.5,
+                recovery_index=55.0 / 52,
+            ),
+            DailySnapshot(
+                date="2026-03-16",
+                steps=9000, distance_km=6.0, active_energy_kj=1700.0,
+                exercise_min=30, stand_hours=10, resting_hr=53, hrv_ms=50.0,
+                recovery_index=50.0 / 53,
+            ),
+            DailySnapshot(
+                date="2026-03-17",
+                steps=8000, distance_km=5.5, active_energy_kj=1500.0,
+                exercise_min=20, stand_hours=9, resting_hr=51, hrv_ms=58.0,
+                recovery_index=58.0 / 51,
+            ),
+        ])
+
+        result = build_llm_data(in_memory_db, months=3, week="current")
+        days = {d["date"]: d for d in result["current_week"]["days"]}
+
+        # Monday should have Sunday night's sleep injected
+        assert days["2026-03-16"]["sleep_total_h"] == 7.5
+        assert days["2026-03-16"]["sleep_efficiency_pct"] == 93.8
+        # Monday's own metrics are still there
+        assert days["2026-03-16"]["steps"] == 9000
