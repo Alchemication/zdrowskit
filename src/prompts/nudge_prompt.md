@@ -47,11 +47,11 @@ for key numbers or actions. No headers. Keep it conversational.
 
 ### Sleep tracking gaps
 
-Today's row has no sleep data (tonight hasn't happened yet), and yesterday's
-may also be absent if the watch hasn't synced yet — don't flag either as
-missing. Only `"sleep": "not_tracked"` on past days means the watch wasn't
-worn — normal and not worth mentioning on its own. Only flag a tracking gap
-if sleep has been `not_tracked` for 3+ consecutive past days.
+Sleep on each day's row is **the night before** that day. Today's sleep may
+be absent if the watch hasn't synced yet — don't flag as missing. Only
+`"sleep": "not_tracked"` means the watch wasn't worn — normal and not worth
+mentioning on its own. Only flag a tracking gap if sleep has been
+`not_tracked` for 3+ consecutive past days.
 
 ### System-initiated triggers (the user didn't do anything — be concise)
 

@@ -554,18 +554,9 @@ def build_llm_data(
         dr[1],
     )
 
-    current_snaps = load_snapshots(conn, start=week_start, end=week_end)
-
-    # For current-week reports, fetch the preceding Sunday's sleep — it's the
-    # night before Monday and belongs to this week's sleep story.
-    prev_sunday_snap = None
-    if week == "current":
-        prev_sunday = date.fromisoformat(week_start) - timedelta(days=1)
-        prev_sunday_snaps = load_snapshots(
-            conn, start=prev_sunday.isoformat(), end=prev_sunday.isoformat()
-        )
-        if prev_sunday_snaps:
-            prev_sunday_snap = prev_sunday_snaps[0]
+    # Fetch one extra day before the week so we can shift sleep forward.
+    sleep_start = (date.fromisoformat(week_start) - timedelta(days=1)).isoformat()
+    current_snaps = load_snapshots(conn, start=sleep_start, end=week_end)
 
     history_end = (date.fromisoformat(week_start) - timedelta(days=1)).isoformat()
     history_start = (
@@ -578,27 +569,12 @@ def build_llm_data(
     iso = ws.isocalendar()
     week_label = f"{iso.year}-W{iso.week:02d}"
 
-    days = [to_dict(s) for s in current_snaps]
+    all_days = [to_dict(s) for s in current_snaps]
 
-    # Inject the preceding Sunday's sleep into Monday's row.  Sleep is stored
-    # under the night-start date, so Sunday night's data lives on Sunday's row
-    # but it's the sleep that affected Monday's recovery.
-    if prev_sunday_snap and days:
-        sunday = to_dict(prev_sunday_snap)
-        monday = days[0]
-        for k in ("sleep_total_h", "sleep_in_bed_h", "sleep_efficiency_pct",
-                   "sleep_deep_h", "sleep_core_h", "sleep_rem_h", "sleep_awake_h"):
-            val = sunday.get(k)
-            if val is not None and monday.get(k) is None:
-                monday[k] = val
-
-    # Clean up null sleep columns.
-    #
-    # For "last" week reports: strip sleep from the final day (Sunday) because
-    # Sunday night belongs to the following week.
-    # For "current" week / chat / nudge: strip sleep from today (tonight hasn't
-    # happened) and from yesterday before the sync cutoff (watch hasn't synced).
-    # Remaining days with all-null sleep are marked "not_tracked" (watch off).
+    # Shift sleep forward by one day.  Apple Health stores sleep under the
+    # night-start date, but for the LLM each day's sleep should be "the night
+    # before this day" — the sleep that affected this day's recovery.  We
+    # fetched one extra day before the week to supply Monday's sleep.
     _SLEEP_KEYS = {
         "sleep_total_h",
         "sleep_in_bed_h",
@@ -608,28 +584,45 @@ def build_llm_data(
         "sleep_rem_h",
         "sleep_awake_h",
     }
+    for i in range(len(all_days) - 1, 0, -1):
+        prev_day, cur_day = all_days[i - 1], all_days[i]
+        # Move previous day's sleep into current day.
+        for k in _SLEEP_KEYS:
+            cur_day[k] = prev_day.get(k)
+            prev_day.pop(k, None)
+    # First day in all_days is the extra pre-week day — strip its remaining
+    # sleep (already moved forward) and then drop it from the output.
+    if all_days and all_days[0].get("date", "") < week_start:
+        for k in _SLEEP_KEYS:
+            all_days[0].pop(k, None)
+        all_days = all_days[1:]
+    days = all_days
+
+    # Mark days with no sleep data.  After the shift, null sleep means the
+    # watch wasn't worn the night before — except for today (last night may
+    # not have synced yet) and yesterday before the sync cutoff.
     today_iso = date.today().isoformat()
     yesterday_iso = (date.today() - timedelta(days=1)).isoformat()
     before_sync_cutoff = datetime.now().hour < SLEEP_SYNC_CUTOFF_HOUR
-    last_day_iso = week_end if week == "last" else None
     for day in days:
         if isinstance(day, dict) and all(day.get(k) is None for k in _SLEEP_KEYS):
             for k in _SLEEP_KEYS:
                 day.pop(k, None)
 
             day_date = day.get("date")
-            if day_date == last_day_iso:
-                pass  # Sunday night belongs to next week — omit
-            elif day_date == today_iso:
-                pass  # tonight hasn't happened
+            if day_date == today_iso:
+                pass  # last night may not have synced yet
             elif day_date == yesterday_iso and before_sync_cutoff:
                 pass  # watch data likely hasn't synced yet
             else:
                 day["sleep"] = "not_tracked"
 
+    # Exclude the extra pre-week day from the summary.
+    week_snaps = [s for s in current_snaps if s.date >= week_start]
+
     return {
         "current_week": {
-            "summary": to_dict(summarise(current_snaps)) if current_snaps else None,
+            "summary": to_dict(summarise(week_snaps)) if week_snaps else None,
             "days": days,
         },
         "history": [{"summary": to_dict(summarise(w))} for w in history_weeks],

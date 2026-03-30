@@ -481,93 +481,58 @@ class TestBuildLlmData:
 
     @patch("llm.datetime")
     @patch("llm.date")
-    def test_today_sleep_is_pending_not_untracked(
+    def test_sleep_shifted_forward_by_one_day(
         self,
         mock_date: MagicMock,
         mock_datetime: MagicMock,
         in_memory_db: sqlite3.Connection,
         sample_snapshots: list[DailySnapshot],
     ) -> None:
-        """Today's null sleep should be omitted, past null sleep 'not_tracked'."""
+        """Each day's sleep should be the previous day's sleep (night before).
+
+        Fixture: Mon Mar 9 has sleep (7.4h), Tue Mar 10 has sleep (7.0h),
+        Wed Mar 11 onward has no sleep.  After the shift:
+        - Mon Mar 9: no sleep (no pre-week Sunday data)
+        - Tue Mar 10: Mon's sleep (7.4h)
+        - Wed Mar 11: Tue's sleep (7.0h)
+        - Thu Mar 12 onward: not_tracked
+        """
+        # Today = Wed Mar 11, week = Mon Mar 9 – Sun Mar 15.
         mock_date.today.return_value = date(2026, 3, 11)
         mock_date.fromisoformat = date.fromisoformat
-        # After sync cutoff — yesterday's null sleep is genuinely not tracked
         mock_datetime.now.return_value = datetime(2026, 3, 11, 14, 0)
         store_snapshots(in_memory_db, sample_snapshots)
         result = build_llm_data(in_memory_db, months=3)
 
         days = {d["date"]: d for d in result["current_week"]["days"]}
-        # 2026-03-11 is "today" — sleep omitted entirely (tonight hasn't happened)
-        assert "sleep" not in days["2026-03-11"]
-        # 2026-03-12 is a past day with no sleep — watch wasn't worn
+        # Mon: no pre-week data to shift in, today's sync heuristic doesn't
+        # apply (it's Wed) — but no sleep was shifted in, so not_tracked
+        assert days["2026-03-09"]["sleep"] == "not_tracked"
+        # Tue: gets Mon night's sleep (7.4h)
+        assert days["2026-03-10"]["sleep_total_h"] == 7.4
+        # Wed (today): gets Tue night's sleep (7.0h)
+        assert days["2026-03-11"]["sleep_total_h"] == 7.0
+        # Thu: no sleep shifted in — not_tracked
         assert days["2026-03-12"]["sleep"] == "not_tracked"
-        # 2026-03-09 has real sleep data — no marker at all
-        assert "sleep" not in days["2026-03-09"]
-        assert days["2026-03-09"]["sleep_total_h"] == 7.4
+        # Metrics unchanged
+        assert days["2026-03-09"]["steps"] == 9500
+        assert days["2026-03-10"]["steps"] == 12000
 
     @patch("llm.datetime")
     @patch("llm.date")
-    def test_yesterday_sleep_omitted_before_cutoff(
+    def test_sleep_shift_with_pre_week_day(
         self,
         mock_date: MagicMock,
         mock_datetime: MagicMock,
         in_memory_db: sqlite3.Connection,
         sample_snapshots: list[DailySnapshot],
     ) -> None:
-        """Before 10am, yesterday's null sleep should be omitted (not synced yet)."""
-        mock_date.today.return_value = date(2026, 3, 13)
-        mock_date.fromisoformat = date.fromisoformat
-        mock_datetime.now.return_value = datetime(2026, 3, 13, 7, 30)
-        store_snapshots(in_memory_db, sample_snapshots)
-        result = build_llm_data(in_memory_db, months=3)
-
-        days = {d["date"]: d for d in result["current_week"]["days"]}
-        # 2026-03-12 is yesterday with no sleep and it's before 10am — omitted
-        assert "sleep" not in days["2026-03-12"]
-
-    @patch("llm.datetime")
-    @patch("llm.date")
-    def test_last_week_sunday_sleep_omitted(
-        self,
-        mock_date: MagicMock,
-        mock_datetime: MagicMock,
-        in_memory_db: sqlite3.Connection,
-        sample_snapshots: list[DailySnapshot],
-    ) -> None:
-        """In --week last, Sunday's sleep is omitted (belongs to next week)."""
-        mock_date.today.return_value = date(2026, 3, 16)  # Monday
-        mock_date.fromisoformat = date.fromisoformat
-        mock_datetime.now.return_value = datetime(2026, 3, 16, 9, 30)
-        store_snapshots(in_memory_db, sample_snapshots)
-        result = build_llm_data(in_memory_db, months=3, week="last")
-
-        days = {d["date"]: d for d in result["current_week"]["days"]}
-        # Sunday (last day of reported week) — sleep omitted, not "not_tracked"
-        assert "sleep" not in days["2026-03-15"]
-        # Mid-week days with no sleep are genuinely not tracked
-        assert days["2026-03-11"]["sleep"] == "not_tracked"
-        assert days["2026-03-12"]["sleep"] == "not_tracked"
-
-    @patch("llm.datetime")
-    @patch("llm.date")
-    def test_current_week_inherits_sunday_sleep(
-        self,
-        mock_date: MagicMock,
-        mock_datetime: MagicMock,
-        in_memory_db: sqlite3.Connection,
-        sample_snapshots: list[DailySnapshot],
-    ) -> None:
-        """In --week current, Monday inherits sleep from the preceding Sunday."""
-        # sample_snapshots: Mar 9 (Sun) has sleep, Mar 10 (Mon) has sleep.
-        # We'll use week starting Mar 16 (Mon) with a Sunday (Mar 15) that
-        # has no sleep in sample data, plus inject a Sunday snapshot with sleep.
+        """Monday gets Sunday's sleep when pre-week Sunday has data."""
         mock_date.today.return_value = date(2026, 3, 19)  # Wednesday
         mock_date.fromisoformat = date.fromisoformat
         mock_datetime.now.return_value = datetime(2026, 3, 19, 10, 0)
 
-        # Store original data (covers Mar 9-15)
         store_snapshots(in_memory_db, sample_snapshots)
-        # Add a Sunday (Mar 15) with sleep and Mon-Wed (Mar 16-18) without
         store_snapshots(in_memory_db, [
             DailySnapshot(
                 date="2026-03-15",
@@ -596,8 +561,57 @@ class TestBuildLlmData:
         result = build_llm_data(in_memory_db, months=3, week="current")
         days = {d["date"]: d for d in result["current_week"]["days"]}
 
-        # Monday should have Sunday night's sleep injected
+        # Monday gets Sunday night's sleep (shifted from Mar 15)
         assert days["2026-03-16"]["sleep_total_h"] == 7.5
         assert days["2026-03-16"]["sleep_efficiency_pct"] == 93.8
+        # Sunday (Mar 15) is NOT in the output — it's the pre-week day
+        assert "2026-03-15" not in days
         # Monday's own metrics are still there
         assert days["2026-03-16"]["steps"] == 9000
+
+    @patch("llm.datetime")
+    @patch("llm.date")
+    def test_today_unsynced_sleep_not_flagged(
+        self,
+        mock_date: MagicMock,
+        mock_datetime: MagicMock,
+        in_memory_db: sqlite3.Connection,
+        sample_snapshots: list[DailySnapshot],
+    ) -> None:
+        """Today's null sleep (after shift) is omitted, not marked not_tracked."""
+        # Today = Thu Mar 12 before sync cutoff.  After shift, Thu would get
+        # Wed's sleep — but Wed (Mar 11) has no sleep, so Thu has nothing.
+        # Since it's today, it should be omitted (not synced yet), not flagged.
+        mock_date.today.return_value = date(2026, 3, 12)
+        mock_date.fromisoformat = date.fromisoformat
+        mock_datetime.now.return_value = datetime(2026, 3, 12, 7, 30)
+        store_snapshots(in_memory_db, sample_snapshots)
+        result = build_llm_data(in_memory_db, months=3)
+
+        days = {d["date"]: d for d in result["current_week"]["days"]}
+        # Today — sleep absent, not "not_tracked"
+        assert "sleep" not in days["2026-03-12"]
+
+    @patch("llm.datetime")
+    @patch("llm.date")
+    def test_last_week_sunday_sleep_shifted_off(
+        self,
+        mock_date: MagicMock,
+        mock_datetime: MagicMock,
+        in_memory_db: sqlite3.Connection,
+        sample_snapshots: list[DailySnapshot],
+    ) -> None:
+        """In --week last, Sunday's original sleep shifts to next week (dropped)."""
+        mock_date.today.return_value = date(2026, 3, 16)  # Monday
+        mock_date.fromisoformat = date.fromisoformat
+        # After sync cutoff — yesterday heuristic doesn't apply
+        mock_datetime.now.return_value = datetime(2026, 3, 16, 12, 0)
+        store_snapshots(in_memory_db, sample_snapshots)
+        result = build_llm_data(in_memory_db, months=3, week="last")
+
+        days = {d["date"]: d for d in result["current_week"]["days"]}
+        # Sunday (Mar 15) — its sleep was shifted forward (off the end),
+        # no sleep remains → not_tracked
+        assert days["2026-03-15"]["sleep"] == "not_tracked"
+        # The week still has 7 days
+        assert len(result["current_week"]["days"]) == 7
