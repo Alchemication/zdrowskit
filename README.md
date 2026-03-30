@@ -155,6 +155,7 @@ uv run python main.py llm-log --stats                   # usage summary by type 
 uv run python main.py llm-log --id 42                   # full detail for a specific call
 uv run python main.py llm-log --json                    # output as JSON
 
+uv run python main.py telegram-setup                    # register bot /commands for autocomplete + menu
 uv run python main.py daemon-stop                       # stop the background daemon
 uv run python main.py daemon-restart                    # restart (or re-load) the daemon
 ```
