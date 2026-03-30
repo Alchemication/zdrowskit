@@ -392,6 +392,32 @@ class TelegramPoller:
         except Exception:
             logger.debug("Failed to answer callback query", exc_info=True)
 
+    def set_my_commands(self, commands: list[dict[str, str]]) -> bool:
+        """Register bot commands for Telegram's autocomplete menu.
+
+        Calls the ``setMyCommands`` API so users see command suggestions
+        when typing ``/`` and via the menu button next to the text field.
+
+        Args:
+            commands: List of ``{"command": "...", "description": "..."}`` dicts.
+
+        Returns:
+            True if the API call succeeded, False otherwise.
+        """
+        url = f"{self._base_url}/setMyCommands"
+        payload = {"commands": commands}
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            url, data=data, headers={"Content-Type": "application/json"}
+        )
+        try:
+            with urllib.request.urlopen(req) as resp:  # noqa: S310
+                body = json.loads(resp.read().decode("utf-8"))
+            return body.get("ok", False)
+        except Exception:
+            logger.error("Failed to set bot commands", exc_info=True)
+            return False
+
     def poll_loop(
         self,
         on_message: callable,

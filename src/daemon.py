@@ -627,6 +627,7 @@ class ZdrowskitDaemon:
             file_arg = parts[1] if len(parts) > 1 else None
             self._send_context_overview(message_id, file_arg)
         elif cmd == "/help":
+            from commands import TELEGRAM_BOT_COMMANDS
             from config import CONTEXT_DIR, PROMPTS_DIR
 
             ctx_names = sorted(
@@ -636,14 +637,11 @@ class ZdrowskitDaemon:
                 if f.stat().st_size > 0
             )
             ctx_opts = ", ".join(ctx_names) if ctx_names else "none found"
-            help_text = (
-                "/clear — Reset conversation buffer\n"
-                "/status — Nudge count, buffer size, last nudge time\n"
-                "/context — List all context files\n"
-                f"/context <name> — Show full file ({ctx_opts})\n"
-                "/help — This message"
-            )
-            self._poller.send_reply(help_text, reply_to_message_id=message_id)
+            lines = [
+                f"/{c['command']} — {c['description']}" for c in TELEGRAM_BOT_COMMANDS
+            ]
+            lines.append(f"\n/context <name> — Show full file ({ctx_opts})")
+            self._poller.send_reply("\n".join(lines), reply_to_message_id=message_id)
         else:
             self._poller.send_reply(
                 "Unknown command. Try /help",
@@ -946,11 +944,13 @@ class ZdrowskitDaemon:
                         except (ValueError, _json.JSONDecodeError):
                             pass
 
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tc.id,
-                    "content": tool_result,
-                })
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": tool_result,
+                    }
+                )
 
         # If we exhausted iterations, return the last result.
         return result, deferred_edits, query_rows

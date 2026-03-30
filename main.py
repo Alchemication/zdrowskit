@@ -6,6 +6,7 @@ Subcommands:
     status    Show the date range and row counts in the database.
     context   Show context files used by insights and their status.
     insights  Generate a personalized LLM-driven health report.
+    telegram-setup  Register bot /commands for Telegram autocomplete and menu.
 
 Examples:
     uv run python main.py import --data-dir MyHealth/
@@ -102,6 +103,7 @@ from commands import (
     cmd_nudge,
     cmd_report,
     cmd_status,
+    cmd_telegram_setup,
 )
 from llm import DEFAULT_MODEL
 from log import setup_logging
@@ -251,6 +253,12 @@ def main() -> None:
     sub.add_parser("daemon-restart", help="Restart the background daemon service")
     sub.add_parser("daemon-stop", help="Stop the background daemon service")
 
+    # telegram
+    sub.add_parser(
+        "telegram-setup",
+        help="Register bot commands for Telegram autocomplete and menu button",
+    )
+
     # nudge
     p_nudge = sub.add_parser(
         "nudge", help="Send a short context-aware notification (default: Telegram)"
@@ -329,6 +337,7 @@ def main() -> None:
         "llm-log": cmd_llm_log,
         "daemon-restart": cmd_daemon_restart,
         "daemon-stop": cmd_daemon_stop,
+        "telegram-setup": cmd_telegram_setup,
     }
     dispatch[args.cmd](args)
 

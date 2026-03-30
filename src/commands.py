@@ -10,6 +10,7 @@ Public API:
     cmd_llm_log  — query LLM call history from the database.
     cmd_daemon_restart — restart the launchd daemon service.
     cmd_daemon_stop    — stop the launchd daemon service.
+    cmd_telegram_setup — register bot commands for Telegram autocomplete.
 
 Example:
     from commands import cmd_import
@@ -923,4 +924,43 @@ def cmd_daemon_stop(args: argparse.Namespace) -> None:  # noqa: ARG001
         print("Run 'uv run python main.py daemon-restart' to start it again.")
     else:
         print(f"Failed to stop daemon: {result.stderr.strip()}")
+        sys.exit(1)
+
+
+# Bot commands registered with Telegram for / autocomplete and menu button.
+TELEGRAM_BOT_COMMANDS: list[dict[str, str]] = [
+    {"command": "clear", "description": "Reset conversation buffer"},
+    {"command": "status", "description": "Nudge count, buffer size, last nudge time"},
+    {"command": "context", "description": "List context files (add name to view one)"},
+    {"command": "help", "description": "Show available commands"},
+]
+
+
+def cmd_telegram_setup(args: argparse.Namespace) -> None:  # noqa: ARG001
+    """Register bot commands with Telegram for autocomplete and menu button.
+
+    Calls the ``setMyCommands`` API so the bot's commands appear when the
+    user types ``/`` or taps the menu button next to the text field.
+
+    Args:
+        args: Parsed CLI arguments (unused).
+    """
+    import os
+
+    from telegram_bot import TelegramPoller
+
+    bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    if not bot_token or not chat_id:
+        print("Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env first.")
+        sys.exit(1)
+
+    poller = TelegramPoller(bot_token=bot_token, chat_id=chat_id)
+    if poller.set_my_commands(TELEGRAM_BOT_COMMANDS):
+        print("Telegram bot commands registered:")
+        for cmd in TELEGRAM_BOT_COMMANDS:
+            print(f"  /{cmd['command']} — {cmd['description']}")
+        print("\nType / in the chat or tap the menu button to see them.")
+    else:
+        print("Failed to register commands. Check your bot token.")
         sys.exit(1)
