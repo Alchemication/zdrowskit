@@ -9,7 +9,9 @@ from context_edit import (
     ContextEdit,
     PendingEdits,
     apply_edit,
+    extract_all_context_updates,
     extract_context_update,
+    strip_all_context_updates,
     strip_context_update,
 )
 
@@ -262,3 +264,105 @@ class TestPendingEdits:
         id1 = pe.store(edit)
         id2 = pe.store(edit)
         assert id1 != id2
+
+
+# ---------------------------------------------------------------------------
+# extract_all_context_updates
+# ---------------------------------------------------------------------------
+
+
+class TestExtractAllContextUpdates:
+    def test_no_blocks(self) -> None:
+        assert extract_all_context_updates("Just a normal reply.") == []
+
+    def test_single_block(self) -> None:
+        response = (
+            "Some reasoning.\n"
+            "<context_update>"
+            '{"file": "plan", "action": "append", '
+            '"content": "New rule.", "summary": "Added rule"}'
+            "</context_update>"
+        )
+        edits = extract_all_context_updates(response)
+        assert len(edits) == 1
+        assert edits[0].file == "plan"
+        assert edits[0].summary == "Added rule"
+
+    def test_two_blocks(self) -> None:
+        response = (
+            "Reasoning for plan change.\n"
+            "<context_update>"
+            '{"file": "plan", "action": "replace_section", '
+            '"section": "## Sleep", '
+            '"content": "## Sleep\\n\\nTarget: 7 hours.\\n", '
+            '"summary": "Increased sleep target to 7h"}'
+            "</context_update>\n"
+            "Reasoning for goal change.\n"
+            "<context_update>"
+            '{"file": "goals", "action": "replace_section", '
+            '"section": "## Goals", '
+            '"content": "## Goals\\n\\n1. Sub-26 5K\\n", '
+            '"summary": "Adjusted 5K target to sub-26"}'
+            "</context_update>"
+        )
+        edits = extract_all_context_updates(response)
+        assert len(edits) == 2
+        assert edits[0].file == "plan"
+        assert edits[1].file == "goals"
+
+    def test_mixed_valid_and_invalid(self) -> None:
+        response = (
+            "<context_update>"
+            '{"file": "plan", "action": "append", '
+            '"content": "Valid.", "summary": "Good edit"}'
+            "</context_update>\n"
+            "<context_update>not valid json</context_update>\n"
+            "<context_update>"
+            '{"file": "goals", "action": "append", '
+            '"content": "Also valid.", "summary": "Another edit"}'
+            "</context_update>"
+        )
+        edits = extract_all_context_updates(response)
+        assert len(edits) == 2
+        assert edits[0].summary == "Good edit"
+        assert edits[1].summary == "Another edit"
+
+    def test_disallowed_file_skipped(self) -> None:
+        response = (
+            "<context_update>"
+            '{"file": "soul", "action": "append", '
+            '"content": "Nope.", "summary": "Bad"}'
+            "</context_update>\n"
+            "<context_update>"
+            '{"file": "plan", "action": "append", '
+            '"content": "Yes.", "summary": "Good"}'
+            "</context_update>"
+        )
+        edits = extract_all_context_updates(response)
+        assert len(edits) == 1
+        assert edits[0].file == "plan"
+
+
+# ---------------------------------------------------------------------------
+# strip_all_context_updates
+# ---------------------------------------------------------------------------
+
+
+class TestStripAllContextUpdates:
+    def test_strips_multiple_blocks(self) -> None:
+        response = (
+            "Before.\n"
+            '<context_update>{"a":"b"}</context_update>\n'
+            "Middle.\n"
+            '<context_update>{"c":"d"}</context_update>\n'
+            "After."
+        )
+        result = strip_all_context_updates(response)
+        assert "<context_update>" not in result
+        assert "Before." in result
+        assert "Middle." in result
+        assert "After." in result
+
+    def test_no_blocks(self) -> None:
+        text = "Just text."
+        assert strip_all_context_updates(text) == text

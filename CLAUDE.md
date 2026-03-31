@@ -13,6 +13,7 @@ uv run python main.py import                      # import from Auto Export (def
 uv run python main.py import --source shortcuts    # import from iOS Shortcuts export
 uv run python main.py insights        # LLM weekly report (add --week last|current, --telegram, --email, --explain)
 uv run python main.py nudge           # short LLM nudge (add --trigger TYPE)
+uv run python main.py coach           # coaching review with plan/goal proposals (add --week, --telegram, --email)
 uv run python main.py report          # terminal summary (add --llm, --history, --json)
 uv run python main.py status          # DB row counts + date range
 uv run python main.py context         # show context files and their status
@@ -62,7 +63,7 @@ Run with `uv run pytest`. Fixtures in `tests/fixtures/` and `tests/conftest.py`.
 - `src/commands.py` — all subcommand handlers; `main.py` is just dispatch
 - `src/daemon.py` — file watcher, scheduled reports, Telegram chat loop
 - `src/llm.py` — `load_context()`, `build_messages()`, `call_llm()`
-- `src/prompts/` — prompt templates (soul, report, nudge, chat)
+- `src/prompts/` — prompt templates (soul, report, nudge, chat, coach)
 - `src/charts.py` — Plotly chart rendering from `<chart>` blocks
 - `src/tools.py` — LLM tools (`run_sql`, `update_context`)
 - `evals/` — AI eval harness (pinned blueprints, scenario perturbations, structural assertions)

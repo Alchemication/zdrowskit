@@ -70,6 +70,10 @@ MORNING_REPORT_HOUR_END = 9
 MIDWEEK_REPORT_HOUR_START = 9
 MIDWEEK_REPORT_HOUR_END = 10
 
+COACH_DAY = 6  # Sunday
+COACH_HOUR_START = 19
+COACH_HOUR_END = 20
+
 
 # ---------------------------------------------------------------------------
 # State management
@@ -467,6 +471,42 @@ class ZdrowskitDaemon:
                 self._record_nudge(result_text, trigger)
         except SystemExit:
             logger.error("Nudge failed (trigger: %s)", trigger)
+
+    def _run_coach(self) -> None:
+        """Run a coaching review and send proposals via Telegram.
+
+        Proposes concrete edits to plan.md / goals.md based on the
+        week's data. Each proposal is sent as an inline Approve/Reject
+        button. If the LLM proposes no changes, only the reasoning text
+        is sent.
+        """
+        last_coach = self._state.get("last_coach_date", "")
+        today_str = date.today().isoformat()
+        if last_coach == today_str:
+            logger.debug("Coach already ran today, skipping")
+            return
+
+        self._run_import()
+
+        from commands import cmd_coach
+
+        args = types.SimpleNamespace(
+            db=str(self.db),
+            model=self.model,
+            email=False,
+            telegram=True,
+            week="current",
+            months=3,
+        )
+        try:
+            logger.info("Running coaching review")
+            _text, edits = cmd_coach(args)
+            for edit in edits:
+                self._propose_context_edit(edit)
+            self._state["last_coach_date"] = today_str
+            _save_state(self._state)
+        except SystemExit:
+            logger.error("Coaching review failed")
 
     # ------------------------------------------------------------------
     # Telegram interactive chat
@@ -978,6 +1018,13 @@ class ZdrowskitDaemon:
                 and MIDWEEK_REPORT_HOUR_START <= now.hour < MIDWEEK_REPORT_HOUR_END
             ):
                 self._run_midweek_report()
+
+            # Sunday evening: coaching review — propose plan/goal updates
+            if (
+                now.weekday() == COACH_DAY
+                and COACH_HOUR_START <= now.hour < COACH_HOUR_END
+            ):
+                self._run_coach()
 
             # Evening: check for missed sessions on training days
             if EVENING_HOUR_START <= now.hour < EVENING_HOUR_END:

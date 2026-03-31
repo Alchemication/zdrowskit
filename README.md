@@ -5,6 +5,7 @@
 Your watch collects thousands of data points a week. Apple shows you rings. zdrowskit gives you a coach.
 
 - **Personalised weekly reports** — not generic summaries, but analysis that knows your goals, your plan, your injuries, and what you wrote in your journal last Tuesday
+- **Coaching proposals** — every Sunday evening, the coach reviews your week and proposes concrete changes to your training plan or goals, with Approve/Reject buttons in Telegram
 - **Reactive nudges** — skipped a session? New data synced? The coach notices and says something useful (or stays quiet if there's nothing to say)
 - **Ask anything about your data** — "What's my fastest 1km pace?", "How's my HRV trending since January?", "Do I sleep worse after evening runs?" — if the data exists, it'll find the answer and chart it
 - **Two-way conversation** — reply to a report, update your goals mid-chat, get a chart on demand. It's a Telegram conversation, not a dashboard
@@ -28,6 +29,7 @@ Auto Export iOS app (iCloud Drive, on a schedule)
         zdrowskit report --llm    → structured JSON for LLM consumption
             ↓
         zdrowskit insights        → personalised weekly report (~600 words)
+        zdrowskit coach           → plan/goal proposals with Approve/Reject
         zdrowskit nudge           → short reactive notification (≤80 words)
             + context files: your profile, goals, plan, journal
             ↓
@@ -150,6 +152,10 @@ uv run python main.py nudge --trigger missed_session    # missed training day re
 uv run python main.py nudge --trigger goal_updated      # acknowledge a goals change
 uv run python main.py nudge --email                     # send nudge via email instead
 
+uv run python main.py coach                              # coaching review: propose plan/goal updates
+uv run python main.py coach --week last                  # review previous week instead of current
+uv run python main.py coach --telegram                   # send proposals with Approve/Reject buttons
+
 uv run python main.py llm-log                           # last 10 LLM calls
 uv run python main.py llm-log --stats                   # usage summary by type and model
 uv run python main.py llm-log --id 42                   # full detail for a specific call
@@ -179,6 +185,7 @@ launchctl load ~/Library/LaunchAgents/com.zdrowskit.daemon.plist
 
 | Event | Delay | Action |
 |---|---|---|
+| Sunday 7–8 PM | scheduled | Coaching review — proposes plan/goal updates with Approve/Reject buttons |
 | Monday 8–9 AM | scheduled | Full weekly report (previous week) |
 | New health data synced | 3 min | Short nudge |
 | `me.md` updated | 60 sec | Nudge noting the profile change |
@@ -241,6 +248,7 @@ The daemon also runs a Telegram long-polling listener. Send a message to your bo
 - **Get charts on demand** — trend questions automatically generate Plotly charts sent as photos. Ask for "show me my HRV trend since January" and get a visual
 - Reply to a nudge or weekly report — the bot knows which message you're responding to
 - Share updates naturally ("my weight is 76kg now", "dropping strength to 1x/week") — the LLM proposes edits to your context files with Accept/Reject buttons
+- `/coach` — run a coaching review and get plan/goal proposals with Approve/Reject buttons
 - `/clear` — reset the conversation buffer
 - `/status` — see buffer size and nudge count
 - `/context` — list all context files with line counts

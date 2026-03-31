@@ -94,6 +94,7 @@ from dotenv import load_dotenv
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 from commands import (
+    cmd_coach,
     cmd_context,
     cmd_daemon_restart,
     cmd_daemon_stop,
@@ -300,6 +301,41 @@ def main() -> None:
     )
     _add_db(p_nudge)
 
+    # coach
+    p_coach = sub.add_parser(
+        "coach", help="Generate coaching proposals for plan/goal updates"
+    )
+    p_coach.add_argument(
+        "--week",
+        choices=["current", "last"],
+        default="current",
+        help="Which week to review (default: current)",
+    )
+    p_coach.add_argument(
+        "--months",
+        type=int,
+        default=3,
+        metavar="N",
+        help="History depth in months (default: 3)",
+    )
+    p_coach.add_argument(
+        "--model",
+        default=DEFAULT_MODEL,
+        metavar="MODEL",
+        help=f"litellm model string (default: {DEFAULT_MODEL})",
+    )
+    p_coach.add_argument(
+        "--email",
+        action="store_true",
+        help="Send coaching review via email",
+    )
+    p_coach.add_argument(
+        "--telegram",
+        action="store_true",
+        help="Send coaching review via Telegram",
+    )
+    _add_db(p_coach)
+
     # llm-log
     p_llm_log = sub.add_parser(
         "llm-log", help="Query LLM call history from the database"
@@ -334,6 +370,7 @@ def main() -> None:
         "context": cmd_context,
         "insights": cmd_insights,
         "nudge": cmd_nudge,
+        "coach": cmd_coach,
         "llm-log": cmd_llm_log,
         "daemon-restart": cmd_daemon_restart,
         "daemon-stop": cmd_daemon_stop,

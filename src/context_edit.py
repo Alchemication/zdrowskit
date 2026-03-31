@@ -48,20 +48,15 @@ class ContextEdit:
     section: str | None = None
 
 
-def extract_context_update(response: str) -> ContextEdit | None:
-    """Extract a <context_update> block from the LLM response.
+def _parse_context_update_block(raw: str) -> ContextEdit | None:
+    """Parse a single raw JSON string into a ContextEdit.
 
     Args:
-        response: Full LLM response text.
+        raw: The JSON content from inside a ``<context_update>`` tag.
 
     Returns:
-        A ContextEdit if a valid block was found, or None.
+        A validated ContextEdit, or None if invalid.
     """
-    match = _CONTEXT_UPDATE_RE.search(response)
-    if not match:
-        return None
-
-    raw = match.group(1).strip()
     try:
         data = json.loads(raw)
     except (json.JSONDecodeError, ValueError):
@@ -96,6 +91,38 @@ def extract_context_update(response: str) -> ContextEdit | None:
         summary=summary,
         section=section,
     )
+
+
+def extract_context_update(response: str) -> ContextEdit | None:
+    """Extract a <context_update> block from the LLM response.
+
+    Args:
+        response: Full LLM response text.
+
+    Returns:
+        A ContextEdit if a valid block was found, or None.
+    """
+    match = _CONTEXT_UPDATE_RE.search(response)
+    if not match:
+        return None
+    return _parse_context_update_block(match.group(1).strip())
+
+
+def extract_all_context_updates(response: str) -> list[ContextEdit]:
+    """Extract all <context_update> blocks from the LLM response.
+
+    Args:
+        response: Full LLM response text.
+
+    Returns:
+        A list of validated ContextEdits (may be empty).
+    """
+    edits: list[ContextEdit] = []
+    for match in _CONTEXT_UPDATE_RE.finditer(response):
+        edit = _parse_context_update_block(match.group(1).strip())
+        if edit is not None:
+            edits.append(edit)
+    return edits
 
 
 def context_edit_from_tool_call(tool_call: object) -> ContextEdit | None:
@@ -160,6 +187,18 @@ def strip_context_update(response: str) -> str:
 
     Returns:
         The response with the block removed and whitespace cleaned up.
+    """
+    return _CONTEXT_UPDATE_RE.sub("", response).strip()
+
+
+def strip_all_context_updates(response: str) -> str:
+    """Remove all <context_update> blocks from the visible reply.
+
+    Args:
+        response: Full LLM response text.
+
+    Returns:
+        The response with all blocks removed and whitespace cleaned up.
     """
     return _CONTEXT_UPDATE_RE.sub("", response).strip()
 
