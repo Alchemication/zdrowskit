@@ -228,6 +228,52 @@ class TelegramPoller:
         for chunk in html_chunks[1:]:
             self.send_reply(chunk, _pre_converted=True)
 
+    def edit_message_with_keyboard(
+        self,
+        message_id: int,
+        text: str,
+        buttons: list[list[dict[str, str]]],
+    ) -> None:
+        """Edit an existing message's text and inline keyboard.
+
+        Args:
+            message_id: ID of the message to edit.
+            text: New text content (markdown).
+            buttons: Rows of inline keyboard buttons.
+        """
+        html_text = md_to_telegram_html(text)
+        url = f"{self._base_url}/editMessageText"
+        payload: dict = {
+            "chat_id": self._chat_id,
+            "message_id": message_id,
+            "text": html_text,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True,
+            "reply_markup": {"inline_keyboard": buttons},
+        }
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            url, data=data, headers={"Content-Type": "application/json"}
+        )
+        try:
+            urllib.request.urlopen(req)  # noqa: S310
+        except urllib.error.HTTPError:
+            logger.warning(
+                "HTML edit failed for message %d, retrying plain text", message_id
+            )
+            payload["text"] = text
+            del payload["parse_mode"]
+            data = json.dumps(payload).encode("utf-8")
+            req = urllib.request.Request(
+                url, data=data, headers={"Content-Type": "application/json"}
+            )
+            try:
+                urllib.request.urlopen(req)  # noqa: S310
+            except Exception:
+                logger.warning("Failed to edit message %d", message_id, exc_info=True)
+        except Exception:
+            logger.warning("Failed to edit message %d", message_id, exc_info=True)
+
     def send_reply(
         self,
         text: str,

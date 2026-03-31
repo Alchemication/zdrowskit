@@ -265,6 +265,27 @@ def build_edit_preview(
     return diff_text
 
 
+def build_content_preview(
+    edit: ContextEdit,
+    *,
+    max_lines: int = 40,
+    max_chars: int = 2400,
+) -> str:
+    """Build a compact preview of the proposed content for a context edit.
+
+    Unlike :func:`build_edit_preview` which shows a unified diff, this returns
+    the raw content that would be written — easier to scan at a glance.
+    """
+    text = edit.content.rstrip("\n")
+    lines = text.splitlines()
+    if len(lines) > max_lines:
+        lines = lines[:max_lines] + ["... truncated ..."]
+    result = "\n".join(lines)
+    if len(result) > max_chars:
+        result = result[: max_chars - 20].rstrip() + "\n... truncated ..."
+    return result
+
+
 def apply_edit(context_dir: Path, edit: ContextEdit, *, strict: bool = False) -> None:
     """Write the edit to the target context file.
 
@@ -453,6 +474,22 @@ class PendingEdits:
             pending = PendingContextEdit(edit=edit, source=source, preview=preview)
             self._edits[edit_id] = (pending, time.monotonic())
             return edit_id
+
+    def peek(self, edit_id: str) -> PendingContextEdit | None:
+        """Return an edit without removing it, or None if expired/missing.
+
+        Args:
+            edit_id: The callback ID returned by :meth:`store`.
+
+        Returns:
+            The pending edit metadata, or None if not found or expired.
+        """
+        with self._lock:
+            self._cleanup()
+            entry = self._edits.get(edit_id)
+            if entry is None:
+                return None
+            return entry[0]
 
     def pop(self, edit_id: str) -> PendingContextEdit | None:
         """Remove and return an edit, or None if expired/missing.

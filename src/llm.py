@@ -372,24 +372,31 @@ def build_review_facts(
     return "\n".join(lines)
 
 
-def context_update_tool() -> list[dict]:
-    """Tool definition for context file updates, used in chat calls.
+def context_update_tool(
+    allowed_files: list[str] | None = None,
+) -> list[dict]:
+    """Tool definition for context file updates.
+
+    Args:
+        allowed_files: Restrict which files the LLM can target.
+            Defaults to all editable files.
 
     Returns:
         A list with a single tool definition dict for litellm.
     """
+    files = allowed_files or ["me", "goals", "plan", "log"]
     return [
         {
             "type": "function",
             "function": {
                 "name": "update_context",
-                "description": "Update a user context file (me, goals, plan, or log).",
+                "description": "Update a user context file.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "file": {
                             "type": "string",
-                            "enum": ["me", "goals", "plan", "log"],
+                            "enum": files,
                             "description": "Which context file to update.",
                         },
                         "action": {

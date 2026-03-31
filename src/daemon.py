@@ -471,7 +471,11 @@ class ZdrowskitDaemon:
             logger.error("Nudge failed (trigger: %s)", trigger)
 
     def _run_coach(
-        self, *, week: str = "last", skip_import: bool = False, force: bool = False,
+        self,
+        *,
+        week: str = "last",
+        skip_import: bool = False,
+        force: bool = False,
     ) -> None:
         """Run a coaching review and send proposals via Telegram.
 
@@ -847,6 +851,7 @@ class ZdrowskitDaemon:
             EditPreviewError,
             PendingContextEdit,
             apply_edit,
+            build_content_preview,
             build_edit_preview,
         )
 
@@ -872,18 +877,18 @@ class ZdrowskitDaemon:
             return
 
         edit_id = self._pending_edits.store(edit, source=source, preview=preview)
-        action_label = (
-            "append to" if edit.action == "append" else f"replace {edit.section} in"
-        )
+        content_preview = build_content_preview(edit)
         text = (
-            f"📝 {action_label} {edit.file}.md\n"
+            f"\U0001f4cb Suggestion — {edit.file}.md\n"
             f"{edit.summary}\n\n"
-            f"```diff\n{preview}\n```"
+            f"Proposed content:\n"
+            f"```\n{content_preview}\n```"
         )
         buttons = [
             [
                 {"text": "\u2705 Accept", "callback_data": f"ctx_accept:{edit_id}"},
                 {"text": "\u274c Reject", "callback_data": f"ctx_reject:{edit_id}"},
+                {"text": "\U0001f50d Diff", "callback_data": f"ctx_diff:{edit_id}"},
             ]
         ]
         self._poller.send_message_with_keyboard(text, buttons)
@@ -917,6 +922,35 @@ class ZdrowskitDaemon:
                 except Exception:
                     logger.error("Failed to apply context edit", exc_info=True)
                     self._poller.answer_callback_query(cb_id, "Error applying edit.")
+            else:
+                self._poller.answer_callback_query(cb_id, "Expired or already handled.")
+                if msg_id:
+                    self._poller.edit_message(msg_id, "This edit has expired.")
+
+        elif data.startswith("ctx_diff:"):
+            edit_id = data.split(":", 1)[1]
+            pending = self._pending_edits.peek(edit_id)
+            if pending:
+                self._poller.answer_callback_query(cb_id)
+                text = (
+                    f"\U0001f4cb Suggestion — {pending.edit.file}.md\n"
+                    f"{pending.edit.summary}\n\n"
+                    f"```diff\n{pending.preview}\n```"
+                )
+                buttons = [
+                    [
+                        {
+                            "text": "\u2705 Accept",
+                            "callback_data": f"ctx_accept:{edit_id}",
+                        },
+                        {
+                            "text": "\u274c Reject",
+                            "callback_data": f"ctx_reject:{edit_id}",
+                        },
+                    ]
+                ]
+                if msg_id:
+                    self._poller.edit_message_with_keyboard(msg_id, text, buttons)
             else:
                 self._poller.answer_callback_query(cb_id, "Expired or already handled.")
                 if msg_id:

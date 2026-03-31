@@ -64,20 +64,48 @@ class TestCmdCoach:
         assert seen["week_complete"] is False
         assert "Shared Review Facts" in str(seen["review_facts"])
 
-    def test_strips_context_updates_and_returns_edits(
-        self, in_memory_db, capsys
-    ) -> None:
+    def test_extracts_edits_from_tool_calls(self, in_memory_db, capsys) -> None:
         args = SimpleNamespace(
             db="ignored.db", model="test-model", week="last", months=3
         )
-        llm_text = (
-            "Reduce run volume for one week.\n"
-            "<context_update>"
-            '{"file": "plan", "action": "replace_section", '
-            '"section": "## Weekly Structure", '
-            '"content": "## Weekly Structure\\n\\nOne lighter week.\\n", '
-            '"summary": "Lighten next week"}'
-            "</context_update>"
+
+        # First call: LLM returns a tool call (no visible text yet).
+        tool_call = SimpleNamespace(
+            id="call_1",
+            function=SimpleNamespace(
+                name="update_context",
+                arguments=(
+                    '{"file": "plan", "action": "replace_section", '
+                    '"section": "## Weekly Structure", '
+                    '"content": "## Weekly Structure\\n\\nOne lighter week.\\n", '
+                    '"summary": "Lighten next week"}'
+                ),
+            ),
+        )
+        first_result = LLMResult(
+            text="",
+            model="test-model",
+            input_tokens=1,
+            output_tokens=1,
+            total_tokens=2,
+            latency_s=0.1,
+            tool_calls=[tool_call],
+            raw_message={
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"id": "call_1", "function": {"name": "update_context"}},
+                ],
+            },
+        )
+        # Second call: LLM returns text, no more tool calls.
+        second_result = LLMResult(
+            text="Reduce run volume for one week.",
+            model="test-model",
+            input_tokens=1,
+            output_tokens=1,
+            total_tokens=2,
+            latency_s=0.1,
         )
 
         with (
@@ -103,20 +131,14 @@ class TestCmdCoach:
             ),
             patch(
                 "commands.call_llm",
-                return_value=LLMResult(
-                    text=llm_text,
-                    model="test-model",
-                    input_tokens=1,
-                    output_tokens=1,
-                    total_tokens=2,
-                    latency_s=0.1,
-                ),
+                side_effect=[first_result, second_result],
             ),
         ):
             visible_text, edits = cmd_coach(args)
 
         captured = capsys.readouterr()
-        assert "<context_update>" not in visible_text
-        assert "<context_update>" not in captured.out
+        assert "Reduce run volume" in captured.out
         assert len(edits) == 1
         assert edits[0].summary == "Lighten next week"
+        assert edits[0].file == "plan"
+        assert edits[0].section == "## Weekly Structure"
