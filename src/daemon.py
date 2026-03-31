@@ -470,7 +470,9 @@ class ZdrowskitDaemon:
         except SystemExit:
             logger.error("Nudge failed (trigger: %s)", trigger)
 
-    def _run_coach(self, *, week: str = "last", skip_import: bool = False) -> None:
+    def _run_coach(
+        self, *, week: str = "last", skip_import: bool = False, force: bool = False,
+    ) -> None:
         """Run a coaching review and send proposals via Telegram.
 
         Proposes concrete edits to plan.md / goals.md based on the
@@ -480,7 +482,7 @@ class ZdrowskitDaemon:
         """
         last_coach = self._state.get("last_coach_date", "")
         today_str = date.today().isoformat()
-        if last_coach == today_str:
+        if not force and last_coach == today_str:
             logger.debug("Coach already ran today, skipping")
             return
 
@@ -672,6 +674,11 @@ class ZdrowskitDaemon:
             parts = text.split()
             file_arg = parts[1] if len(parts) > 1 else None
             self._send_context_overview(message_id, file_arg)
+        elif cmd == "/coach":
+            self._poller.send_reply(
+                "Running coaching review…", reply_to_message_id=message_id
+            )
+            self._run_coach(week="last", skip_import=False, force=True)
         elif cmd == "/help":
             from commands import TELEGRAM_BOT_COMMANDS
             from config import CONTEXT_DIR, PROMPTS_DIR
