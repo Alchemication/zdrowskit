@@ -616,7 +616,9 @@ def cmd_nudge(
 
     raw_text = result.text.strip()
 
-    if raw_text.upper() == "SKIP":
+    # Check for SKIP as the entire response OR as a standalone line.
+    # LLMs sometimes reason before/after the SKIP directive.
+    if raw_text.upper() == "SKIP" or "\nSKIP\n" in f"\n{raw_text}\n":
         logger.info("Nudge skipped by LLM — nothing new to say (trigger: %s)", _trigger)
         return None
 
