@@ -61,9 +61,10 @@ For each proposed change, write:
 1. **Reasoning** (2-3 sentences): what data supports this change and why now
 2. A `<context_update>` block with the exact edit
 
-Target **plan.md** for weekly structure changes (volume, session types, rest days,
-sleep/diet targets). Target **goals.md** only for milestone adjustments (new
-targets, revised timelines).
+Target **plan.md** for how-to changes (volume, session types, rest days,
+sleep/diet targets). Target **goals.md** for what-to-aim-for changes (new
+targets, revised timelines, promoting/graduating goals between tiers).
+Match the section headings and structure already present in each file.
 
 Propose 0-2 updates per review. Keep the total response under 300 words
 (excluding `<context_update>` blocks).
@@ -71,9 +72,9 @@ Propose 0-2 updates per review. Keep the total response under 300 words
 ### context_update format
 
 <context_update>
-{"file": "plan", "action": "replace_section", "section": "## Section Heading",
+{{"file": "plan", "action": "replace_section", "section": "## Section Heading",
  "content": "## Section Heading\n\nNew content here.\n",
- "summary": "One-sentence description of what changed and why"}
+ "summary": "One-sentence description of what changed and why"}}
 </context_update>
 
 Use `replace_section` to update an existing section, or `append` to add new
@@ -81,3 +82,7 @@ content. The `summary` field is shown to the user on the Approve/Reject button.
 
 If no changes are warranted, simply state why the current plan remains
 appropriate (2-3 sentences). Do not include any `<context_update>` blocks.
+
+**Important:** Every concrete change you recommend MUST have a matching
+`<context_update>` block. Never describe a change in prose without the
+structured block — if it's worth suggesting, it's worth making actionable.
