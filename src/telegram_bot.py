@@ -234,7 +234,8 @@ class TelegramPoller:
         reply_to_message_id: int | None = None,
         *,
         _pre_converted: bool = False,
-    ) -> None:
+        force_reply: bool = False,
+    ) -> int | None:
         """Send a text message with HTML formatting, chunking if necessary.
 
         Falls back to plain text if Telegram rejects the HTML.
@@ -244,6 +245,10 @@ class TelegramPoller:
             reply_to_message_id: Optional message ID to reply to.
             _pre_converted: If True, *text* is already Telegram HTML — skip
                 conversion.  Used internally by :meth:`edit_message`.
+            force_reply: When True, attach Telegram's ForceReply markup.
+
+        Returns:
+            The message_id of the first sent chunk, or None on failure.
         """
         if _pre_converted:
             html_text = text
@@ -252,6 +257,7 @@ class TelegramPoller:
         url = f"{self._base_url}/sendMessage"
         html_chunks = chunk_text(html_text)
         plain_chunks = chunk_text(text)
+        first_message_id: int | None = None
 
         for i, html_chunk in enumerate(html_chunks):
             plain_chunk = plain_chunks[i] if i < len(plain_chunks) else html_chunk
@@ -264,13 +270,18 @@ class TelegramPoller:
             # Only set reply on the first chunk.
             if i == 0 and reply_to_message_id is not None:
                 payload["reply_to_message_id"] = reply_to_message_id
+            if i == 0 and force_reply:
+                payload["reply_markup"] = {"force_reply": True, "selective": True}
 
             data = json.dumps(payload).encode("utf-8")
             req = urllib.request.Request(
                 url, data=data, headers={"Content-Type": "application/json"}
             )
             try:
-                urllib.request.urlopen(req)  # noqa: S310
+                with urllib.request.urlopen(req) as resp:  # noqa: S310
+                    body = json.loads(resp.read().decode("utf-8"))
+                if body.get("ok") and first_message_id is None:
+                    first_message_id = body["result"]["message_id"]
             except urllib.error.HTTPError:
                 logger.warning("HTML reply failed (chunk %d), retrying plain", i + 1)
                 payload["text"] = plain_chunk
@@ -280,19 +291,24 @@ class TelegramPoller:
                     url, data=data, headers={"Content-Type": "application/json"}
                 )
                 try:
-                    urllib.request.urlopen(req)  # noqa: S310
+                    with urllib.request.urlopen(req) as resp:  # noqa: S310
+                        body = json.loads(resp.read().decode("utf-8"))
+                    if body.get("ok") and first_message_id is None:
+                        first_message_id = body["result"]["message_id"]
                 except Exception:
                     logger.error(
                         "Failed to send Telegram reply (chunk %d)",
                         i + 1,
                         exc_info=True,
                     )
-                    return
+                    return None
             except Exception:
                 logger.error(
                     "Failed to send Telegram reply (chunk %d)", i + 1, exc_info=True
                 )
-                return
+                return None
+
+        return first_message_id
 
     def send_photo(self, image_bytes: bytes, caption: str = "") -> bool:
         """Send a photo to the configured chat.

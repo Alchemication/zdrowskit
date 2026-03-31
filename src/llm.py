@@ -32,7 +32,13 @@ from pathlib import Path
 import litellm
 
 from aggregator import summarise
-from config import CHART_THEME, MAX_HISTORY_ENTRIES, MAX_LOG_ENTRIES, PROMPTS_DIR
+from config import (
+    CHART_THEME,
+    MAX_COACH_FEEDBACK_ENTRIES,
+    MAX_HISTORY_ENTRIES,
+    MAX_LOG_ENTRIES,
+    PROMPTS_DIR,
+)
 from report import group_by_week, to_dict
 from store import load_date_range, load_snapshots, log_llm_call
 
@@ -44,7 +50,7 @@ FALLBACK_MODEL = "anthropic/claude-sonnet-4-6"
 # Exponential backoff delays (seconds) between retries on overloaded errors.
 _RETRY_DELAYS = [10, 30, 90]
 
-CONTEXT_FILES = ["me", "goals", "plan", "log", "history"]
+CONTEXT_FILES = ["me", "goals", "plan", "log", "history", "coach_feedback"]
 
 # Before this hour, yesterday's null sleep is marked "sync_pending" instead of
 # "not_tracked" — the data likely hasn't synced from the watch yet.
@@ -153,6 +159,8 @@ def load_context(
             content = path.read_text(encoding="utf-8")
             if name == "history":
                 content = _recent_history(content, MAX_HISTORY_ENTRIES)
+            elif name == "coach_feedback":
+                content = _recent_history(content, MAX_COACH_FEEDBACK_ENTRIES)
             elif name == "log":
                 content = _recent_history(content, MAX_LOG_ENTRIES)
             result[name] = content
@@ -206,19 +214,23 @@ def build_messages(
 
     template = context["prompt"]
     placeholders: dict[str, str] = defaultdict(lambda: "(not provided)")
-    placeholders.update({
-        "me": context.get("me", "(not provided)"),
-        "goals": context.get("goals", "(not provided)"),
-        "plan": context.get("plan", "(not provided)"),
-        "log": context.get("log", "(not provided)"),
-        "history": context.get("history", "(not provided)"),
-        "health_data": health_data_json,
-        "baselines": baselines or "(not computed)",
-        "today": today.isoformat(),
-        "weekday": today.strftime("%A"),
-        "week_status": week_status,
-        "chart_theme": CHART_THEME,
-    })
+    placeholders.update(
+        {
+            "me": context.get("me", "(not provided)"),
+            "goals": context.get("goals", "(not provided)"),
+            "plan": context.get("plan", "(not provided)"),
+            "log": context.get("log", "(not provided)"),
+            "history": context.get("history", "(not provided)"),
+            "coach_feedback": context.get("coach_feedback", "(not provided)"),
+            "health_data": health_data_json,
+            "baselines": baselines or "(not computed)",
+            "review_facts": context.get("review_facts", "(not provided)"),
+            "today": today.isoformat(),
+            "weekday": today.strftime("%A"),
+            "week_status": week_status,
+            "chart_theme": CHART_THEME,
+        }
+    )
     # Forward any extra keys (e.g. recent_nudges) from context into placeholders.
     for key, value in context.items():
         if key not in placeholders and key not in ("soul", "prompt"):
@@ -229,6 +241,135 @@ def build_messages(
         {"role": "system", "content": system_content},
         {"role": "user", "content": user_content},
     ]
+
+
+def _fmt_review_value(value: float | int | None, decimals: int = 1) -> str:
+    """Format a numeric review value or em dash when unavailable."""
+    if value is None:
+        return "—"
+    if isinstance(value, int):
+        return str(value)
+    return f"{value:.{decimals}f}"
+
+
+def _fmt_review_delta(current: float | int | None, previous: float | int | None) -> str:
+    """Format a signed delta between two numeric values."""
+    if current is None or previous is None:
+        return "n/a"
+    delta = float(current) - float(previous)
+    return f"{delta:+.1f}"
+
+
+def _recovery_verdict(summary: dict, previous_summary: dict | None) -> str:
+    """Derive a compact recovery verdict from weekly summary fields."""
+    recovery = summary.get("avg_recovery_index")
+    sleep_h = summary.get("avg_sleep_total_h")
+    sleep_eff = summary.get("avg_sleep_efficiency_pct")
+    hrv_trend = summary.get("hrv_trend")
+    resting_hr = summary.get("avg_resting_hr")
+    prev_resting_hr = (
+        previous_summary.get("avg_resting_hr") if previous_summary else None
+    )
+
+    if (
+        (recovery is not None and recovery < 0.95)
+        or hrv_trend == "declining"
+        or (sleep_h is not None and sleep_h < 6.5)
+        or (sleep_eff is not None and sleep_eff < 85)
+        or (
+            resting_hr is not None
+            and prev_resting_hr is not None
+            and resting_hr - prev_resting_hr >= 3
+        )
+    ):
+        return "back off"
+
+    if (
+        (recovery is not None and recovery >= 1.15)
+        and hrv_trend in {"improving", "stable", None}
+        and (sleep_h is None or sleep_h >= 7.0)
+        and (sleep_eff is None or sleep_eff >= 88)
+    ):
+        return "ready to push"
+
+    return "maintain"
+
+
+def build_review_facts(
+    health_data: dict,
+    context: dict[str, str] | None = None,
+    *,
+    week_complete: bool,
+) -> str:
+    """Build a compact shared summary for insights and coach prompts."""
+    summary = health_data.get("current_week", {}).get("summary") or {}
+    history = health_data.get("history", [])
+    previous_summary = history[-1].get("summary") if history else None
+    week_label = summary.get("week_label") or health_data.get("week_label") or "unknown"
+
+    verdict = _recovery_verdict(summary, previous_summary)
+    run_count = summary.get("run_count")
+    lift_count = summary.get("lift_count")
+    run_consistency = summary.get("run_consistency_pct")
+    lift_consistency = summary.get("lift_consistency_pct")
+    total_run_km = summary.get("total_run_km")
+    avg_hrv = summary.get("avg_hrv_ms")
+    avg_resting_hr = summary.get("avg_resting_hr")
+    avg_sleep = summary.get("avg_sleep_total_h")
+    avg_sleep_eff = summary.get("avg_sleep_efficiency_pct")
+    hrv_trend = summary.get("hrv_trend") or "n/a"
+    prev_run_km = previous_summary.get("total_run_km") if previous_summary else None
+    prev_hrv = previous_summary.get("avg_hrv_ms") if previous_summary else None
+    prev_resting = previous_summary.get("avg_resting_hr") if previous_summary else None
+    notes_present = (
+        bool(context) and context.get("log", "(not provided)") != "(not provided)"
+    )
+    feedback_present = (
+        bool(context)
+        and context.get("coach_feedback", "(not provided)") != "(not provided)"
+    )
+
+    lines = [
+        "## Shared Review Facts",
+        (
+            f"- Reviewed week: **{week_label}**. "
+            f"Status: {'complete' if week_complete else 'in progress'}."
+        ),
+        (
+            "- Training adherence: "
+            f"**{run_count or 0}** runs ({_fmt_review_value(run_consistency)}%), "
+            f"**{lift_count or 0}** lifts ({_fmt_review_value(lift_consistency)}%), "
+            f"**{_fmt_review_value(total_run_km)} km** run volume."
+        ),
+        (
+            "- Recovery verdict: "
+            f"**{verdict}**. HRV {_fmt_review_value(avg_hrv)} ms "
+            f"({hrv_trend}), resting HR {_fmt_review_value(avg_resting_hr)} bpm, "
+            f"sleep {_fmt_review_value(avg_sleep)} h at "
+            f"{_fmt_review_value(avg_sleep_eff)}% efficiency."
+        ),
+    ]
+
+    if previous_summary:
+        lines.append(
+            "- vs previous week: "
+            f"run volume {_fmt_review_delta(total_run_km, prev_run_km)} km, "
+            f"HRV {_fmt_review_delta(avg_hrv, prev_hrv)} ms, "
+            f"resting HR {_fmt_review_delta(avg_resting_hr, prev_resting)} bpm."
+        )
+    else:
+        lines.append("- vs previous week: no prior weekly summary available.")
+
+    if notes_present:
+        lines.append(
+            "- User notes are available in `log.md`; treat them as ground truth for constraints."
+        )
+    if feedback_present:
+        lines.append(
+            "- Recent accept/reject history is available in `coach_feedback.md`; avoid repeating recently rejected edits."
+        )
+
+    return "\n".join(lines)
 
 
 def context_update_tool() -> list[dict]:

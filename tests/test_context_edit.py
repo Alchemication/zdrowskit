@@ -6,13 +6,18 @@ import json
 from pathlib import Path
 
 from context_edit import (
+    EditPreviewError,
     ContextEdit,
     PendingEdits,
     apply_edit,
+    build_edit_preview,
+    append_coach_feedback,
     extract_all_context_updates,
     extract_context_update,
+    new_feedback_entry,
     strip_all_context_updates,
     strip_context_update,
+    update_coach_feedback_reason,
 )
 
 
@@ -213,6 +218,23 @@ class TestApplyEdit:
         assert "## Mobility" in result
         assert "Daily stretching" in result
 
+    def test_replace_section_not_found_strict_raises(self, tmp_path: Path) -> None:
+        md = tmp_path / "goals.md"
+        md.write_text("# Goals\n\n## Running\n\nSub-50 10K\n")
+        edit = ContextEdit(
+            file="goals",
+            action="replace_section",
+            section="## Mobility",
+            content="## Mobility\n\nDaily stretching\n",
+            summary="Added mobility goal",
+        )
+        try:
+            apply_edit(tmp_path, edit, strict=True)
+        except EditPreviewError as exc:
+            assert "Section not found" in str(exc)
+        else:
+            raise AssertionError("Expected EditPreviewError")
+
     def test_atomic_write(self, tmp_path: Path) -> None:
         """Verify no .tmp file remains after a successful write."""
         md = tmp_path / "log.md"
@@ -221,6 +243,42 @@ class TestApplyEdit:
         apply_edit(tmp_path, edit)
         assert not (tmp_path / "log.md.tmp").exists()
         assert md.exists()
+
+
+class TestBuildEditPreview:
+    def test_append_preview_contains_unified_diff(self, tmp_path: Path) -> None:
+        (tmp_path / "log.md").write_text(
+            "## 2026-03-20\n\nOld note\n", encoding="utf-8"
+        )
+        edit = ContextEdit(
+            file="log",
+            action="append",
+            content="## 2026-03-21\n\nNew note\n",
+            summary="Add next log entry",
+        )
+
+        preview = build_edit_preview(tmp_path, edit)
+
+        assert "--- log.md" in preview
+        assert "+++ log.md (proposed)" in preview
+        assert "+## 2026-03-21" in preview
+
+    def test_strict_preview_rejects_missing_section(self, tmp_path: Path) -> None:
+        (tmp_path / "plan.md").write_text("## Weekly Structure\n\nEasy week\n")
+        edit = ContextEdit(
+            file="plan",
+            action="replace_section",
+            section="## Sleep",
+            content="## Sleep\n\n8 hours\n",
+            summary="Raise sleep target",
+        )
+
+        try:
+            build_edit_preview(tmp_path, edit, strict=True)
+        except EditPreviewError as exc:
+            assert "Section not found" in str(exc)
+        else:
+            raise AssertionError("Expected EditPreviewError")
 
 
 # ---------------------------------------------------------------------------
@@ -232,10 +290,13 @@ class TestPendingEdits:
     def test_store_and_pop(self) -> None:
         pe = PendingEdits()
         edit = ContextEdit(file="log", action="append", content="x", summary="y")
-        edit_id = pe.store(edit)
+        edit_id = pe.store(edit, source="chat", preview="preview")
         assert edit_id.startswith("ce_")
         result = pe.pop(edit_id)
-        assert result is edit
+        assert result is not None
+        assert result.edit is edit
+        assert result.source == "chat"
+        assert result.preview == "preview"
 
     def test_pop_unknown_returns_none(self) -> None:
         pe = PendingEdits()
@@ -244,25 +305,25 @@ class TestPendingEdits:
     def test_pop_twice_returns_none(self) -> None:
         pe = PendingEdits()
         edit = ContextEdit(file="log", action="append", content="x", summary="y")
-        edit_id = pe.store(edit)
+        edit_id = pe.store(edit, source="chat", preview="preview")
         pe.pop(edit_id)
         assert pe.pop(edit_id) is None
 
     def test_expiry(self) -> None:
         pe = PendingEdits()
         edit = ContextEdit(file="log", action="append", content="x", summary="y")
-        edit_id = pe.store(edit)
+        edit_id = pe.store(edit, source="chat", preview="preview")
         # Manually expire the entry.
         with pe._lock:
             ts = pe._edits[edit_id][1]
-            pe._edits[edit_id] = (edit, ts - 700)
+            pe._edits[edit_id] = (pe._edits[edit_id][0], ts - 700)
         assert pe.pop(edit_id) is None
 
     def test_sequential_ids(self) -> None:
         pe = PendingEdits()
         edit = ContextEdit(file="log", action="append", content="x", summary="y")
-        id1 = pe.store(edit)
-        id2 = pe.store(edit)
+        id1 = pe.store(edit, source="chat", preview="preview")
+        id2 = pe.store(edit, source="coach", preview="preview2")
         assert id1 != id2
 
 
@@ -366,3 +427,34 @@ class TestStripAllContextUpdates:
     def test_no_blocks(self) -> None:
         text = "Just text."
         assert strip_all_context_updates(text) == text
+
+
+class TestCoachFeedbackEntries:
+    def test_append_and_update_reason(self, tmp_path: Path) -> None:
+        pending = PendingEdits().pop("missing")
+        assert pending is None
+
+        edit = ContextEdit(
+            file="plan",
+            action="replace_section",
+            section="## Weekly Structure",
+            content="## Weekly Structure\n\nLighter week\n",
+            summary="Reduce run volume next week",
+        )
+        from context_edit import PendingContextEdit
+
+        pending_edit = PendingContextEdit(edit=edit, source="coach", preview="diff")
+        entry = new_feedback_entry(pending_edit, "rejected")
+
+        append_coach_feedback(tmp_path, entry)
+        content = (tmp_path / "coach_feedback.md").read_text(encoding="utf-8")
+        assert entry.feedback_id in content
+        assert "Decision: rejected" in content
+
+        assert update_coach_feedback_reason(
+            tmp_path,
+            entry.feedback_id,
+            "Too aggressive after travel week",
+        )
+        updated = (tmp_path / "coach_feedback.md").read_text(encoding="utf-8")
+        assert "Reason: Too aggressive after travel week" in updated

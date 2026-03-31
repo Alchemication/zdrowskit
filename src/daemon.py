@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from context_edit import ContextEdit
+    from context_edit import PendingContextEdit
     from llm import LLMResult
 
 logger = logging.getLogger(__name__)
@@ -69,11 +70,6 @@ MORNING_REPORT_HOUR_END = 9
 
 MIDWEEK_REPORT_HOUR_START = 9
 MIDWEEK_REPORT_HOUR_END = 10
-
-COACH_DAY = 6  # Sunday
-COACH_HOUR_START = 19
-COACH_HOUR_END = 20
-
 
 # ---------------------------------------------------------------------------
 # State management
@@ -209,6 +205,7 @@ class ZdrowskitDaemon:
         self._health_timer: threading.Timer | None = None
         self._context_timers: dict[str, threading.Timer] = {}
         self._context_fire_times: dict[str, float] = {}
+        self._pending_rejection_reasons: dict[int, str] = {}
 
     # ------------------------------------------------------------------
     # Scheduling / debounce
@@ -410,6 +407,7 @@ class ZdrowskitDaemon:
             logger.info("Running weekly review report")
             cmd_insights(args)
             self._record_report("review")
+            self._run_coach(week="last", skip_import=True)
         except SystemExit:
             logger.error("Weekly review report failed")
 
@@ -472,7 +470,7 @@ class ZdrowskitDaemon:
         except SystemExit:
             logger.error("Nudge failed (trigger: %s)", trigger)
 
-    def _run_coach(self) -> None:
+    def _run_coach(self, *, week: str = "last", skip_import: bool = False) -> None:
         """Run a coaching review and send proposals via Telegram.
 
         Proposes concrete edits to plan.md / goals.md based on the
@@ -486,7 +484,8 @@ class ZdrowskitDaemon:
             logger.debug("Coach already ran today, skipping")
             return
 
-        self._run_import()
+        if not skip_import:
+            self._run_import()
 
         from commands import cmd_coach
 
@@ -495,14 +494,14 @@ class ZdrowskitDaemon:
             model=self.model,
             email=False,
             telegram=True,
-            week="current",
+            week=week,
             months=3,
         )
         try:
             logger.info("Running coaching review")
             _text, edits = cmd_coach(args)
             for edit in edits:
-                self._propose_context_edit(edit)
+                self._propose_context_edit(edit, source="coach")
             self._state["last_coach_date"] = today_str
             _save_state(self._state)
         except SystemExit:
@@ -561,6 +560,14 @@ class ZdrowskitDaemon:
         if not text:
             return
 
+        reply_to = message.get("reply_to_message")
+        if reply_to and self._consume_rejection_reason(reply_to, text):
+            self._poller.send_reply(
+                "Saved the rejection reason.",
+                reply_to_message_id=message["message_id"],
+            )
+            return
+
         message_id = message["message_id"]
 
         # Handle bot commands before the LLM.
@@ -570,7 +577,6 @@ class ZdrowskitDaemon:
 
         # If the user replied to a specific bot message, inject its text
         # so the LLM has the context of what they're responding to.
-        reply_to = message.get("reply_to_message")
         if reply_to and reply_to.get("text"):
             quoted = reply_to["text"]
             # Truncate very long originals (e.g. full weekly reports)
@@ -634,7 +640,7 @@ class ZdrowskitDaemon:
 
         # Propose any deferred context edits from the tool-calling loop.
         for edit in deferred_edits:
-            self._propose_context_edit(edit)
+            self._propose_context_edit(edit, source="chat")
             break  # At most one context update per response
 
     def _handle_command(self, text: str, message_id: int) -> None:
@@ -788,30 +794,85 @@ class ZdrowskitDaemon:
                 text = chunk
             self._poller.send_reply(text, reply_to_message_id=message_id)
 
-    def _propose_context_edit(self, edit: "ContextEdit") -> None:
+    def _record_context_feedback(
+        self,
+        pending: "PendingContextEdit",
+        decision: str,
+        *,
+        reason: str | None = None,
+    ) -> str:
+        """Persist an accept/reject decision and return its feedback ID."""
+        from context_edit import append_coach_feedback, new_feedback_entry
+
+        entry = new_feedback_entry(pending, decision, reason=reason)
+        append_coach_feedback(self.context_dir, entry)
+        return entry.feedback_id
+
+    def _consume_rejection_reason(self, reply_to: dict, text: str) -> bool:
+        """Handle an optional rejection-reason reply if it matches a pending prompt."""
+        from context_edit import update_coach_feedback_reason
+
+        prompt_id = reply_to.get("message_id")
+        if prompt_id is None:
+            return False
+
+        with self._lock:
+            feedback_id = self._pending_rejection_reasons.pop(prompt_id, None)
+        if feedback_id is None:
+            return False
+
+        updated = update_coach_feedback_reason(self.context_dir, feedback_id, text)
+        if not updated:
+            logger.warning(
+                "No matching coach feedback entry for reason %s", feedback_id
+            )
+        return True
+
+    def _propose_context_edit(self, edit: "ContextEdit", *, source: str) -> None:
         """Send a context edit proposal or auto-apply it.
 
         Args:
             edit: The validated context edit extracted from the LLM response.
+            source: Origin of the proposal, e.g. ``"coach"`` or ``"chat"``.
         """
         from config import AUTO_ACCEPT_CONTEXT_EDITS
-        from context_edit import apply_edit
+        from context_edit import (
+            EditPreviewError,
+            PendingContextEdit,
+            apply_edit,
+            build_edit_preview,
+        )
+
+        try:
+            preview = build_edit_preview(self.context_dir, edit, strict=True)
+        except EditPreviewError as exc:
+            logger.warning("Rejected invalid %s proposal: %s", source, exc)
+            self._poller.send_reply(
+                f"Skipped invalid {source} suggestion for {edit.file}.md: {exc}"
+            )
+            return
 
         if AUTO_ACCEPT_CONTEXT_EDITS:
             try:
-                apply_edit(self.context_dir, edit)
+                apply_edit(self.context_dir, edit, strict=True)
+                pending = PendingContextEdit(edit=edit, source=source, preview=preview)
+                self._record_context_feedback(pending, "accepted")
                 self._poller.send_reply(
-                    f"\u2705 Updated {edit.file}.md: {edit.summary}"
+                    f"\u2705 Updated {edit.file}.md\n{edit.summary}\n\n```diff\n{preview}\n```"
                 )
             except Exception:
                 logger.error("Failed to auto-apply context edit", exc_info=True)
             return
 
-        edit_id = self._pending_edits.store(edit)
+        edit_id = self._pending_edits.store(edit, source=source, preview=preview)
         action_label = (
             "append to" if edit.action == "append" else f"replace {edit.section} in"
         )
-        text = f"📝 {action_label} {edit.file}.md\n{edit.summary}"
+        text = (
+            f"📝 {action_label} {edit.file}.md\n"
+            f"{edit.summary}\n\n"
+            f"```diff\n{preview}\n```"
+        )
         buttons = [
             [
                 {"text": "\u2705 Accept", "callback_data": f"ctx_accept:{edit_id}"},
@@ -835,14 +896,16 @@ class ZdrowskitDaemon:
 
         if data.startswith("ctx_accept:"):
             edit_id = data.split(":", 1)[1]
-            edit = self._pending_edits.pop(edit_id)
-            if edit:
+            pending = self._pending_edits.pop(edit_id)
+            if pending:
                 try:
-                    apply_edit(self.context_dir, edit)
+                    apply_edit(self.context_dir, pending.edit, strict=True)
+                    self._record_context_feedback(pending, "accepted")
                     self._poller.answer_callback_query(cb_id, "Applied!")
                     if msg_id:
                         self._poller.edit_message(
-                            msg_id, f"\u2705 Applied: {edit.summary}"
+                            msg_id,
+                            f"\u2705 Applied: {pending.edit.summary}",
                         )
                 except Exception:
                     logger.error("Failed to apply context edit", exc_info=True)
@@ -854,11 +917,21 @@ class ZdrowskitDaemon:
 
         elif data.startswith("ctx_reject:"):
             edit_id = data.split(":", 1)[1]
-            edit = self._pending_edits.pop(edit_id)
+            pending = self._pending_edits.pop(edit_id)
             self._poller.answer_callback_query(cb_id, "Discarded.")
             if msg_id:
-                summary = edit.summary if edit else "unknown"
+                summary = pending.edit.summary if pending else "unknown"
                 self._poller.edit_message(msg_id, f"\u274c Discarded: {summary}")
+            if pending:
+                feedback_id = self._record_context_feedback(pending, "rejected")
+                prompt_id = self._poller.send_reply(
+                    "Optional: reply with why you rejected this suggestion.",
+                    reply_to_message_id=msg_id,
+                    force_reply=True,
+                )
+                if prompt_id is not None:
+                    with self._lock:
+                        self._pending_rejection_reasons[prompt_id] = feedback_id
 
     def _chat_reply(
         self, conn: sqlite3.Connection
@@ -1018,13 +1091,6 @@ class ZdrowskitDaemon:
                 and MIDWEEK_REPORT_HOUR_START <= now.hour < MIDWEEK_REPORT_HOUR_END
             ):
                 self._run_midweek_report()
-
-            # Sunday evening: coaching review — propose plan/goal updates
-            if (
-                now.weekday() == COACH_DAY
-                and COACH_HOUR_START <= now.hour < COACH_HOUR_END
-            ):
-                self._run_coach()
 
             # Evening: check for missed sessions on training days
             if EVENING_HOUR_START <= now.hour < EVENING_HOUR_END:

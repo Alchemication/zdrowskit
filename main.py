@@ -308,8 +308,8 @@ def main() -> None:
     p_coach.add_argument(
         "--week",
         choices=["current", "last"],
-        default="current",
-        help="Which week to review (default: current)",
+        default="last",
+        help="Which week to review (default: last)",
     )
     p_coach.add_argument(
         "--months",

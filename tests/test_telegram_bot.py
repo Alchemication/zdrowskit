@@ -118,19 +118,21 @@ class TestConversationBuffer:
 class TestTelegramPollerGetUpdates:
     def test_parses_successful_response(self) -> None:
         poller = TelegramPoller("fake-token", "12345")
-        fake_response = json.dumps({
-            "ok": True,
-            "result": [
-                {
-                    "update_id": 1,
-                    "message": {
-                        "message_id": 10,
-                        "chat": {"id": 12345},
-                        "text": "hello",
-                    },
-                }
-            ],
-        }).encode()
+        fake_response = json.dumps(
+            {
+                "ok": True,
+                "result": [
+                    {
+                        "update_id": 1,
+                        "message": {
+                            "message_id": 10,
+                            "chat": {"id": 12345},
+                            "text": "hello",
+                        },
+                    }
+                ],
+            }
+        ).encode()
 
         mock_resp = MagicMock()
         mock_resp.read.return_value = fake_response
@@ -157,8 +159,19 @@ class TestTelegramPollerGetUpdates:
 class TestTelegramPollerSendReply:
     def test_sends_single_chunk(self) -> None:
         poller = TelegramPoller("fake-token", "12345")
-        with patch("telegram_bot.urllib.request.urlopen") as mock_urlopen:
-            poller.send_reply("short message", reply_to_message_id=42)
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = json.dumps(
+            {
+                "ok": True,
+                "result": {"message_id": 99},
+            }
+        ).encode()
+        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        with patch(
+            "telegram_bot.urllib.request.urlopen", return_value=mock_resp
+        ) as mock_urlopen:
+            result = poller.send_reply("short message", reply_to_message_id=42)
 
         mock_urlopen.assert_called_once()
         req = mock_urlopen.call_args[0][0]
@@ -166,13 +179,25 @@ class TestTelegramPollerSendReply:
         assert payload["text"] == "short message"
         assert payload["chat_id"] == "12345"
         assert payload["reply_to_message_id"] == 42
+        assert result == 99
 
     def test_chunks_long_message(self) -> None:
         poller = TelegramPoller("fake-token", "12345")
         # Create a message that will be split into multiple chunks
         long_text = "\n".join(["x" * 500 for _ in range(10)])
-        with patch("telegram_bot.urllib.request.urlopen") as mock_urlopen:
-            poller.send_reply(long_text, reply_to_message_id=1)
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = json.dumps(
+            {
+                "ok": True,
+                "result": {"message_id": 77},
+            }
+        ).encode()
+        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        with patch(
+            "telegram_bot.urllib.request.urlopen", return_value=mock_resp
+        ) as mock_urlopen:
+            result = poller.send_reply(long_text, reply_to_message_id=1)
 
         assert mock_urlopen.call_count > 1
         # Only first chunk should have reply_to_message_id
@@ -180,6 +205,27 @@ class TestTelegramPollerSendReply:
         assert "reply_to_message_id" in first_payload
         second_payload = json.loads(mock_urlopen.call_args_list[1][0][0].data)
         assert "reply_to_message_id" not in second_payload
+        assert result == 77
+
+    def test_force_reply_adds_reply_markup(self) -> None:
+        poller = TelegramPoller("fake-token", "12345")
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = json.dumps(
+            {
+                "ok": True,
+                "result": {"message_id": 55},
+            }
+        ).encode()
+        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+        mock_resp.__exit__ = MagicMock(return_value=False)
+
+        with patch(
+            "telegram_bot.urllib.request.urlopen", return_value=mock_resp
+        ) as mock_urlopen:
+            poller.send_reply("Why rejected?", force_reply=True)
+
+        payload = json.loads(mock_urlopen.call_args[0][0].data)
+        assert payload["reply_markup"] == {"force_reply": True, "selective": True}
 
 
 class TestTelegramPollerPollLoop:

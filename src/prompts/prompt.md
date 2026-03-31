@@ -16,6 +16,9 @@ Title the report with the ISO week number, user's name, and date — e.g.
 ## Their Baselines (auto-computed from DB)
 {baselines}
 
+## Shared Review Facts
+{review_facts}
+
 ## Their Notes This Week
 {log}
 

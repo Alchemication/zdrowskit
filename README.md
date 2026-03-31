@@ -5,7 +5,7 @@
 Your watch collects thousands of data points a week. Apple shows you rings. zdrowskit gives you a coach.
 
 - **Personalised weekly reports** — not generic summaries, but analysis that knows your goals, your plan, your injuries, and what you wrote in your journal last Tuesday
-- **Coaching proposals** — every Sunday evening, the coach reviews your week and proposes concrete changes to your training plan or goals, with Approve/Reject buttons in Telegram
+- **Coaching proposals** — every Monday after the weekly report, the coach reviews the completed week and proposes concrete changes to your training plan or goals, with diff-first Approve/Reject buttons in Telegram
 - **Reactive nudges** — skipped a session? New data synced? The coach notices and says something useful (or stays quiet if there's nothing to say)
 - **Ask anything about your data** — "What's my fastest 1km pace?", "How's my HRV trending since January?", "Do I sleep worse after evening runs?" — if the data exists, it'll find the answer and chart it
 - **Two-way conversation** — reply to a report, update your goals mid-chat, get a chart on demand. It's a Telegram conversation, not a dashboard
@@ -152,8 +152,8 @@ uv run python main.py nudge --trigger missed_session    # missed training day re
 uv run python main.py nudge --trigger goal_updated      # acknowledge a goals change
 uv run python main.py nudge --email                     # send nudge via email instead
 
-uv run python main.py coach                              # coaching review: propose plan/goal updates
-uv run python main.py coach --week last                  # review previous week instead of current
+uv run python main.py coach                              # coaching review: propose plan/goal updates for last week
+uv run python main.py coach --week current               # provisional review of the current week so far
 uv run python main.py coach --telegram                   # send proposals with Approve/Reject buttons
 
 uv run python main.py llm-log                           # last 10 LLM calls
@@ -185,8 +185,8 @@ launchctl load ~/Library/LaunchAgents/com.zdrowskit.daemon.plist
 
 | Event | Delay | Action |
 |---|---|---|
-| Sunday 7–8 PM | scheduled | Coaching review — proposes plan/goal updates with Approve/Reject buttons |
 | Monday 8–9 AM | scheduled | Full weekly report (previous week) |
+| Monday 8–9 AM, after report | scheduled | Coaching review — proposes plan/goal updates with diff-first Approve/Reject buttons |
 | New health data synced | 3 min | Short nudge |
 | `me.md` updated | 60 sec | Nudge noting the profile change |
 | `log.md` updated | 60 sec | Nudge responding to your note |
@@ -247,7 +247,7 @@ The daemon also runs a Telegram long-polling listener. Send a message to your bo
 - **Ask analytical questions** — "What's my avg run pace by week?", "When did I start collecting data?", "Compare my sleep this month vs last month". The LLM queries your database directly with SQL and can run multiple queries in a single turn
 - **Get charts on demand** — trend questions automatically generate Plotly charts sent as photos. Ask for "show me my HRV trend since January" and get a visual
 - Reply to a nudge or weekly report — the bot knows which message you're responding to
-- Share updates naturally ("my weight is 76kg now", "dropping strength to 1x/week") — the LLM proposes edits to your context files with Accept/Reject buttons
+- Share updates naturally ("my weight is 76kg now", "dropping strength to 1x/week") — the LLM proposes diff-backed edits to your context files with Accept/Reject buttons
 - `/coach` — run a coaching review and get plan/goal proposals with Approve/Reject buttons
 - `/clear` — reset the conversation buffer
 - `/status` — see buffer size and nudge count
@@ -261,7 +261,7 @@ The chat listener starts automatically when you run the daemon (see [above](#the
 
 ## Context files
 
-The `insights`, `nudge`, and `chat` commands use markdown files from `~/Documents/zdrowskit/ContextFiles/` to give the LLM real context about *you* — not just your numbers:
+The `insights`, `coach`, `nudge`, and `chat` commands use markdown files from `~/Documents/zdrowskit/ContextFiles/` to give the LLM real context about *you* — not just your numbers:
 
 | File | Who edits | Purpose |
 |------|-----------|---------|
@@ -271,6 +271,7 @@ The `insights`, `nudge`, and `chat` commands use markdown files from `~/Document
 | `log.md` | you (or chat) | Freeform weekly journal — *why* things happened (travel, illness, life) |
 | `baselines.md` | auto | Rolling averages computed from DB (updated on each `insights` run) |
 | `history.md` | auto | LLM's own memory — appended after each weekly report |
+| `coach_feedback.md` | auto | Accept/reject history for coach and chat suggestions, including optional rejection reasons |
 
 Example user context files are in `examples/context/`.
 

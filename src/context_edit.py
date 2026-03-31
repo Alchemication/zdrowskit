@@ -19,12 +19,14 @@ Example:
 
 from __future__ import annotations
 
+import difflib
 import json
 import logging
 import re
 import threading
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from config import EDITABLE_CONTEXT_FILES
@@ -46,6 +48,34 @@ class ContextEdit:
     content: str
     summary: str
     section: str | None = None
+
+
+@dataclass
+class PendingContextEdit:
+    """A proposed edit plus approval metadata."""
+
+    edit: ContextEdit
+    source: str
+    preview: str
+
+
+@dataclass
+class CoachFeedbackEntry:
+    """A persisted accept/reject decision for a context edit."""
+
+    feedback_id: str
+    created_at: str
+    source: str
+    file: str
+    action: str
+    summary: str
+    decision: str
+    section: str | None = None
+    reason: str | None = None
+
+
+class EditPreviewError(ValueError):
+    """Raised when a proposed edit cannot be previewed or applied safely."""
 
 
 def _parse_context_update_block(raw: str) -> ContextEdit | None:
@@ -203,34 +233,112 @@ def strip_all_context_updates(response: str) -> str:
     return _CONTEXT_UPDATE_RE.sub("", response).strip()
 
 
-def apply_edit(context_dir: Path, edit: ContextEdit) -> None:
+def build_edit_preview(
+    context_dir: Path,
+    edit: ContextEdit,
+    *,
+    strict: bool = False,
+    max_lines: int = 60,
+    max_chars: int = 3200,
+) -> str:
+    """Build a compact unified diff preview for a proposed edit."""
+    path = context_dir / f"{edit.file}.md"
+    existing = path.read_text(encoding="utf-8") if path.exists() else ""
+    new_content = _render_edit(existing, edit, strict=strict)
+    diff_lines = list(
+        difflib.unified_diff(
+            existing.splitlines(),
+            new_content.splitlines(),
+            fromfile=path.name,
+            tofile=f"{path.name} (proposed)",
+            lineterm="",
+        )
+    )
+    if not diff_lines:
+        diff_lines = ["(no textual change)"]
+    if len(diff_lines) > max_lines:
+        diff_lines = diff_lines[:max_lines] + ["... diff truncated ..."]
+
+    diff_text = "\n".join(diff_lines)
+    if len(diff_text) > max_chars:
+        diff_text = diff_text[: max_chars - 20].rstrip() + "\n... truncated ..."
+    return diff_text
+
+
+def apply_edit(context_dir: Path, edit: ContextEdit, *, strict: bool = False) -> None:
     """Write the edit to the target context file.
 
     Args:
         context_dir: Directory containing the .md context files.
         edit: The validated ContextEdit to apply.
+        strict: When True, reject unsafe fallback behavior such as silently
+            appending a missing replace_section target.
     """
     path = context_dir / f"{edit.file}.md"
-
-    if path.exists():
-        content = path.read_text(encoding="utf-8")
-    else:
-        content = ""
-
-    if edit.action == "append":
-        new_content = _apply_append(content, edit.content)
-    elif edit.action == "replace_section":
-        assert edit.section is not None
-        new_content = _apply_replace_section(content, edit.section, edit.content)
-    else:
-        logger.error("Unhandled action %r — skipping", edit.action)
-        return
+    existing = path.read_text(encoding="utf-8") if path.exists() else ""
+    new_content = _render_edit(existing, edit, strict=strict)
 
     # Atomic write: write to temp file, then rename.
     tmp_path = path.with_suffix(".md.tmp")
     tmp_path.write_text(new_content, encoding="utf-8")
     tmp_path.rename(path)
     logger.info("Applied context edit to %s: %s", path.name, edit.summary)
+
+
+def append_coach_feedback(context_dir: Path, entry: CoachFeedbackEntry) -> None:
+    """Append or replace a coach feedback entry in coach_feedback.md."""
+    feedback_path = context_dir / "coach_feedback.md"
+    new_entry = _format_feedback_entry(entry)
+    entries = _load_feedback_entries(feedback_path)
+    replaced = False
+    for i, existing in enumerate(entries):
+        if f"Feedback ID: {entry.feedback_id}" in existing:
+            entries[i] = new_entry
+            replaced = True
+            break
+    if not replaced:
+        entries.append(new_entry)
+
+    feedback_path.write_text("\n\n".join(entries) + "\n", encoding="utf-8")
+    logger.info(
+        "Coach feedback %s entry %s (%s)",
+        "updated" if replaced else "appended",
+        entry.feedback_id,
+        entry.decision,
+    )
+
+
+def update_coach_feedback_reason(
+    context_dir: Path,
+    feedback_id: str,
+    reason: str,
+) -> bool:
+    """Update an existing coach feedback entry with a rejection reason."""
+    feedback_path = context_dir / "coach_feedback.md"
+    entries = _load_feedback_entries(feedback_path)
+    updated = False
+    for i, raw in enumerate(entries):
+        if f"Feedback ID: {feedback_id}" not in raw:
+            continue
+        lines = raw.splitlines()
+        reason_line = f"Reason: {reason}"
+        for j, line in enumerate(lines):
+            if line.startswith("Reason: "):
+                lines[j] = reason_line
+                updated = True
+                break
+        if not updated:
+            lines.append(reason_line)
+            updated = True
+        entries[i] = "\n".join(lines)
+        break
+
+    if not updated:
+        return False
+
+    feedback_path.write_text("\n\n".join(entries) + "\n", encoding="utf-8")
+    logger.info("Updated coach feedback reason for %s", feedback_id)
+    return True
 
 
 def _apply_append(existing: str, new_text: str) -> str:
@@ -242,7 +350,30 @@ def _apply_append(existing: str, new_text: str) -> str:
     return existing + new_text.rstrip("\n") + "\n"
 
 
-def _apply_replace_section(existing: str, heading: str, new_text: str) -> str:
+def _render_edit(existing: str, edit: ContextEdit, *, strict: bool) -> str:
+    """Return the file content that would result from applying an edit."""
+    if edit.action == "append":
+        return _apply_append(existing, edit.content)
+    if edit.action == "replace_section":
+        assert edit.section is not None
+        return _apply_replace_section(
+            existing,
+            edit.section,
+            edit.content,
+            strict=strict,
+        )
+    msg = f"Unhandled action {edit.action!r}"
+    logger.error("%s — skipping", msg)
+    raise EditPreviewError(msg)
+
+
+def _apply_replace_section(
+    existing: str,
+    heading: str,
+    new_text: str,
+    *,
+    strict: bool = False,
+) -> str:
     """Replace a ## heading section in the file.
 
     Matches from the heading line to just before the next ## heading or EOF.
@@ -259,8 +390,41 @@ def _apply_replace_section(existing: str, heading: str, new_text: str) -> str:
             + existing[match.end() :].lstrip("\n")
         )
     # Section not found — append.
+    if strict:
+        raise EditPreviewError(f"Section not found in file: {heading}")
     logger.warning("Section %r not found in file, appending instead", heading)
     return _apply_append(existing, new_text)
+
+
+def _load_feedback_entries(path: Path) -> list[str]:
+    """Load feedback entries split on heading boundaries."""
+    if not path.exists():
+        return []
+    content = path.read_text(encoding="utf-8")
+    parts = re.split(r"(?m)(?=^## )", content)
+    return [p.strip() for p in parts if p.strip() and p.strip().startswith("## ")]
+
+
+def _format_feedback_entry(entry: CoachFeedbackEntry) -> str:
+    """Render a coach feedback entry as markdown."""
+    lines = [
+        f"## {entry.created_at}",
+        f"Feedback ID: {entry.feedback_id}",
+        f"Source: {entry.source}",
+        f"Target: {entry.file}.md",
+        f"Action: {entry.action}",
+    ]
+    if entry.section:
+        lines.append(f"Section: {entry.section}")
+    lines.extend(
+        [
+            f"Decision: {entry.decision}",
+            f"Summary: {entry.summary}",
+        ]
+    )
+    if entry.reason:
+        lines.append(f"Reason: {entry.reason}")
+    return "\n".join(lines)
 
 
 class PendingEdits:
@@ -268,14 +432,16 @@ class PendingEdits:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._edits: dict[str, tuple[ContextEdit, float]] = {}
+        self._edits: dict[str, tuple[PendingContextEdit, float]] = {}
         self._counter = 0
 
-    def store(self, edit: ContextEdit) -> str:
+    def store(self, edit: ContextEdit, *, source: str, preview: str) -> str:
         """Store an edit and return its callback ID.
 
         Args:
             edit: The proposed context edit.
+            source: Origin of the proposal, e.g. ``"coach"`` or ``"chat"``.
+            preview: Compact diff preview shown to the user.
 
         Returns:
             A short ID string like ``"ce_1"``.
@@ -284,17 +450,18 @@ class PendingEdits:
             self._cleanup()
             self._counter += 1
             edit_id = f"ce_{self._counter}"
-            self._edits[edit_id] = (edit, time.monotonic())
+            pending = PendingContextEdit(edit=edit, source=source, preview=preview)
+            self._edits[edit_id] = (pending, time.monotonic())
             return edit_id
 
-    def pop(self, edit_id: str) -> ContextEdit | None:
+    def pop(self, edit_id: str) -> PendingContextEdit | None:
         """Remove and return an edit, or None if expired/missing.
 
         Args:
             edit_id: The callback ID returned by :meth:`store`.
 
         Returns:
-            The ContextEdit, or None if not found or expired.
+            The pending edit metadata, or None if not found or expired.
         """
         with self._lock:
             self._cleanup()
@@ -311,3 +478,25 @@ class PendingEdits:
         ]
         for k in expired:
             del self._edits[k]
+
+
+def new_feedback_entry(
+    pending: PendingContextEdit,
+    decision: str,
+    *,
+    reason: str | None = None,
+) -> CoachFeedbackEntry:
+    """Build a new feedback entry for an accepted or rejected proposal."""
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+    feedback_id = f"cf_{int(time.time() * 1000)}"
+    return CoachFeedbackEntry(
+        feedback_id=feedback_id,
+        created_at=ts,
+        source=pending.source,
+        file=pending.edit.file,
+        action=pending.edit.action,
+        summary=pending.edit.summary,
+        decision=decision,
+        section=pending.edit.section,
+        reason=reason,
+    )

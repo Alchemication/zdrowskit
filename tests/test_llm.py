@@ -18,6 +18,7 @@ from llm import (
     append_history,
     build_llm_data,
     build_messages,
+    build_review_facts,
     call_llm,
     extract_memory,
     load_context,
@@ -104,6 +105,18 @@ class TestLoadContext:
         assert "## 2026-03-07" in ctx["log"]
         assert "## 2026-03-06" not in ctx["log"]
 
+    def test_coach_feedback_trimmed(self, tmp_path: Path) -> None:
+        (tmp_path / "prompt.md").write_text("template")
+        entries = "\n\n".join(
+            f"## 2026-03-{i:02d}\n\nFeedback ID: cf_{i}\nDecision: rejected"
+            for i in range(1, 12)
+        )
+        (tmp_path / "coach_feedback.md").write_text(entries)
+        ctx = load_context(tmp_path, prompts_dir=tmp_path)
+        assert "Feedback ID: cf_11" in ctx["coach_feedback"]
+        assert "Feedback ID: cf_4" in ctx["coach_feedback"]
+        assert "Feedback ID: cf_3" not in ctx["coach_feedback"]
+
 
 class TestBuildMessages:
     def test_basic_structure(self) -> None:
@@ -159,6 +172,58 @@ class TestBuildMessages:
         assert "Today: 2026-03-25" in msgs[1]["content"]
         assert "Weekday: Wednesday" in msgs[1]["content"]
         assert "Mon–Wednesday" in msgs[1]["content"]
+
+    def test_review_facts_placeholder_is_injected(self) -> None:
+        ctx = {"prompt": "Facts: {review_facts}"}
+        msgs = build_messages(
+            ctx,
+            health_data_json="{}",
+        )
+        assert "Facts: (not provided)" in msgs[1]["content"]
+
+
+class TestBuildReviewFacts:
+    def test_includes_shared_signals_and_feedback_hint(self) -> None:
+        health_data = {
+            "week_label": "2026-W12",
+            "current_week": {
+                "summary": {
+                    "week_label": "2026-W12",
+                    "run_count": 2,
+                    "lift_count": 1,
+                    "run_consistency_pct": 100.0,
+                    "lift_consistency_pct": 50.0,
+                    "total_run_km": 18.4,
+                    "avg_hrv_ms": 54.2,
+                    "avg_resting_hr": 51.1,
+                    "avg_sleep_total_h": 7.2,
+                    "avg_sleep_efficiency_pct": 91.5,
+                    "avg_recovery_index": 1.06,
+                    "hrv_trend": "stable",
+                }
+            },
+            "history": [
+                {
+                    "summary": {
+                        "total_run_km": 15.0,
+                        "avg_hrv_ms": 50.0,
+                        "avg_resting_hr": 53.0,
+                    }
+                }
+            ],
+        }
+        context = {
+            "log": "## 2026-03-24\n\nTravel week",
+            "coach_feedback": "## 2026-03-24\n\nFeedback ID: cf_1",
+        }
+
+        result = build_review_facts(health_data, context, week_complete=True)
+
+        assert "Shared Review Facts" in result
+        assert "2026-W12" in result
+        assert "Training adherence" in result
+        assert "Recovery verdict" in result
+        assert "coach_feedback.md" in result
 
 
 class TestCallLlm:
@@ -533,30 +598,51 @@ class TestBuildLlmData:
         mock_datetime.now.return_value = datetime(2026, 3, 19, 10, 0)
 
         store_snapshots(in_memory_db, sample_snapshots)
-        store_snapshots(in_memory_db, [
-            DailySnapshot(
-                date="2026-03-15",
-                steps=5000, distance_km=3.0, active_energy_kj=1000.0,
-                exercise_min=10, stand_hours=8, resting_hr=52, hrv_ms=55.0,
-                sleep_total_h=7.5, sleep_in_bed_h=8.0,
-                sleep_efficiency_pct=93.8,
-                sleep_deep_h=0.9, sleep_core_h=4.5,
-                sleep_rem_h=2.1, sleep_awake_h=0.5,
-                recovery_index=55.0 / 52,
-            ),
-            DailySnapshot(
-                date="2026-03-16",
-                steps=9000, distance_km=6.0, active_energy_kj=1700.0,
-                exercise_min=30, stand_hours=10, resting_hr=53, hrv_ms=50.0,
-                recovery_index=50.0 / 53,
-            ),
-            DailySnapshot(
-                date="2026-03-17",
-                steps=8000, distance_km=5.5, active_energy_kj=1500.0,
-                exercise_min=20, stand_hours=9, resting_hr=51, hrv_ms=58.0,
-                recovery_index=58.0 / 51,
-            ),
-        ])
+        store_snapshots(
+            in_memory_db,
+            [
+                DailySnapshot(
+                    date="2026-03-15",
+                    steps=5000,
+                    distance_km=3.0,
+                    active_energy_kj=1000.0,
+                    exercise_min=10,
+                    stand_hours=8,
+                    resting_hr=52,
+                    hrv_ms=55.0,
+                    sleep_total_h=7.5,
+                    sleep_in_bed_h=8.0,
+                    sleep_efficiency_pct=93.8,
+                    sleep_deep_h=0.9,
+                    sleep_core_h=4.5,
+                    sleep_rem_h=2.1,
+                    sleep_awake_h=0.5,
+                    recovery_index=55.0 / 52,
+                ),
+                DailySnapshot(
+                    date="2026-03-16",
+                    steps=9000,
+                    distance_km=6.0,
+                    active_energy_kj=1700.0,
+                    exercise_min=30,
+                    stand_hours=10,
+                    resting_hr=53,
+                    hrv_ms=50.0,
+                    recovery_index=50.0 / 53,
+                ),
+                DailySnapshot(
+                    date="2026-03-17",
+                    steps=8000,
+                    distance_km=5.5,
+                    active_energy_kj=1500.0,
+                    exercise_min=20,
+                    stand_hours=9,
+                    resting_hr=51,
+                    hrv_ms=58.0,
+                    recovery_index=58.0 / 51,
+                ),
+            ],
+        )
 
         result = build_llm_data(in_memory_db, months=3, week="current")
         days = {d["date"]: d for d in result["current_week"]["days"]}

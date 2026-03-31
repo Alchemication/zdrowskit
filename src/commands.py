@@ -38,6 +38,7 @@ from llm import (
     append_history,
     build_llm_data,
     build_messages,
+    build_review_facts,
     call_llm,
     extract_memory,
     load_context,
@@ -98,7 +99,16 @@ def _print_explain(
     stderr = Console(stderr=True)
 
     # Context files
-    all_names = ["soul", "me", "goals", "plan", "log", "history", "prompt"]
+    all_names = [
+        "soul",
+        "me",
+        "goals",
+        "plan",
+        "log",
+        "history",
+        "coach_feedback",
+        "prompt",
+    ]
     ctx_table = Table(title="Context Files", show_lines=False)
     ctx_table.add_column("File", style="cyan")
     ctx_table.add_column("Status", style="green")
@@ -375,6 +385,11 @@ def cmd_context(args: argparse.Namespace) -> None:
         ("log.md", "you", "Weekly journal — why things happened"),
         ("baselines.md", "auto", "Auto-computed rolling averages from DB"),
         ("history.md", "auto", "LLM memory — appended after each insights run"),
+        (
+            "coach_feedback.md",
+            "auto",
+            "Accept/reject history for coach and chat context edit proposals",
+        ),
     ]
 
     owner_styles = {
@@ -444,6 +459,11 @@ def cmd_insights(args: argparse.Namespace) -> None:
 
     week_complete = health_data.pop("week_complete", False)
     week_label = health_data.pop("week_label", None)
+    context["review_facts"] = build_review_facts(
+        {**health_data, "week_label": week_label},
+        context,
+        week_complete=week_complete,
+    )
     health_data_json = json.dumps(health_data, indent=2)
 
     try:
@@ -679,13 +699,21 @@ def cmd_coach(args: argparse.Namespace) -> tuple[str, list[ContextEdit]]:
     baselines = compute_baselines(conn)
     _save_baselines(CONTEXT_DIR, baselines)
 
-    health_data.pop("week_complete", None)
-    health_data.pop("week_label", None)
+    week_complete = health_data.pop("week_complete", False)
+    week_label = health_data.pop("week_label", None)
+    context["review_facts"] = build_review_facts(
+        {**health_data, "week_label": week_label},
+        context,
+        week_complete=week_complete,
+    )
     health_data_json = json.dumps(health_data, indent=2)
 
     try:
         messages = build_messages(
-            context, health_data_json, baselines=baselines, week_complete=True
+            context,
+            health_data_json,
+            baselines=baselines,
+            week_complete=week_complete,
         )
     except (KeyError, ValueError) as e:
         logger.error("Failed to render coach_prompt.md template: %s", e)
