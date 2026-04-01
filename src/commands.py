@@ -691,6 +691,7 @@ def cmd_coach(args: argparse.Namespace) -> tuple[str, list[ContextEdit]]:
     """
     from context_edit import context_edit_from_tool_call
     from llm import context_update_tool
+    from tools import execute_run_sql, run_sql_tool
 
     try:
         context = load_context(CONTEXT_DIR, prompt_file="coach_prompt")
@@ -740,7 +741,7 @@ def cmd_coach(args: argparse.Namespace) -> tuple[str, list[ContextEdit]]:
         sys.exit(1)
 
     model = getattr(args, "model", DEFAULT_MODEL)
-    tools = context_update_tool(allowed_files=["plan", "goals"])
+    tools = run_sql_tool() + context_update_tool(allowed_files=["plan", "goals"])
     edits: list[ContextEdit] = []
     max_iterations = 3
 
@@ -770,14 +771,31 @@ def cmd_coach(args: argparse.Namespace) -> tuple[str, list[ContextEdit]]:
 
         messages.append(result.raw_message)
         for tc in result.tool_calls:
-            edit = context_edit_from_tool_call(tc)
-            if edit:
-                edits.append(edit)
+            fn_name = tc.function.name
+            raw_args = tc.function.arguments
+            try:
+                args_dict = (
+                    json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+                )
+            except (ValueError, json.JSONDecodeError):
+                args_dict = {}
+
+            if fn_name == "update_context":
+                edit = context_edit_from_tool_call(tc)
+                if edit:
+                    edits.append(edit)
+                tool_result = "Proposed. User will be asked to confirm."
+            elif fn_name == "run_sql":
+                logger.info("Coach SQL: %s", args_dict.get("query", "")[:200])
+                tool_result = execute_run_sql(Path(args.db), args_dict)
+            else:
+                tool_result = json.dumps({"error": f"Unknown tool: {fn_name}"})
+
             messages.append(
                 {
                     "role": "tool",
                     "tool_call_id": tc.id,
-                    "content": "Proposed. User will be asked to confirm.",
+                    "content": tool_result,
                 }
             )
 
