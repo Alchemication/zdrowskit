@@ -181,20 +181,7 @@ cp launchd/com.zdrowskit.daemon.plist ~/Library/LaunchAgents/
 launchctl load ~/Library/LaunchAgents/com.zdrowskit.daemon.plist
 ```
 
-**What triggers a notification:**
-
-| Event | Delay | Action |
-|---|---|---|
-| Monday 8–9 AM | scheduled | Full weekly report (previous week) |
-| Monday 8–9 AM, after report | scheduled | Coaching review — proposes plan/goal updates with diff-first Approve/Reject buttons |
-| New health data synced | 3 min | Short nudge |
-| `me.md` updated | 60 sec | Nudge noting the profile change |
-| `log.md` updated | 60 sec | Nudge responding to your note |
-| `goals.md` updated | 60 sec | Nudge acknowledging the change |
-| `plan.md` updated | 60 sec | Nudge reviewing the new plan |
-| 8–9 PM, no session logged | — | Missed-session reminder |
-
-**Suppression:** Nudges have multiple layers of rate limiting, quiet hours, and LLM-driven SKIP logic — see [Suppression and rate limiting](#suppression-and-rate-limiting) in the Notifications section for full details.
+What it watches and when it acts is covered in the [Notifications](#notifications) section — triggers, suppression rules, and cross-channel awareness.
 
 **State file:** `~/Documents/zdrowskit/.daemon_state.json` tracks rate limits, recent nudge history, coach summaries, and the quiet-hours queue. Delete or reset it to force a notification.
 
@@ -238,27 +225,6 @@ cp launchd/com.zdrowskit.daemon.plist ~/Library/LaunchAgents/
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.zdrowskit.daemon.plist
 ```
 
-## Interactive chat — talk to your coach
-
-The daemon also runs a Telegram long-polling listener. Send a message to your bot from Telegram and get a coaching response backed by your full health context.
-
-**What you can do:**
-- Send any message — ask about your data, how your week is going, or what to do next
-- **Ask analytical questions** — "What's my avg run pace by week?", "When did I start collecting data?", "Compare my sleep this month vs last month". The LLM queries your database directly with SQL and can run multiple queries in a single turn
-- **Get charts on demand** — trend questions automatically generate Plotly charts sent as photos. Ask for "show me my HRV trend since January" and get a visual
-- Reply to a nudge or weekly report — the bot knows which message you're responding to
-- Share updates naturally ("my weight is 76kg now", "dropping strength to 1x/week") — the LLM proposes diff-backed edits to your context files with Accept/Reject buttons
-- `/coach` — run a coaching review and get plan/goal proposals with Approve/Reject buttons
-- `/clear` — reset the conversation buffer
-- `/status` — see buffer size and nudge count
-- `/context` — list all context files with line counts
-- `/context <name>` — show full content of a file (e.g. `/context me`)
-- `/help` — list all available commands
-
-The chat uses a tool-calling loop: the LLM can call `run_sql` (read-only SQL against your database) up to 5 times per turn, see the results, and compose an answer — optionally with an embedded chart. Query results are accumulated and available to chart code for visualisation.
-
-The chat listener starts automatically when you run the daemon (see [above](#the-daemon--always-on-trainer-mode)). The conversation buffer holds the last 20 messages in memory. It resets when the daemon restarts, but the LLM still has your context files and history for continuity.
-
 ## Context files
 
 The `insights`, `coach`, `nudge`, and `chat` commands use markdown files from `~/Documents/zdrowskit/ContextFiles/` to give the LLM real context about *you* — not just your numbers:
@@ -279,104 +245,51 @@ The journal (`log.md`) is what makes this different from a dashboard. Numbers sa
 
 ## Notifications
 
-Reports, nudges, coaching proposals, and chat responses are delivered via Telegram and/or email. Each notification type is a distinct LLM call with its own prompt, context window, tools, and purpose. They're designed to complement each other — not repeat each other.
+Each notification type is a distinct LLM call with its own prompt, context, tools, and purpose. They complement each other — not repeat each other.
 
-### Channels at a glance
+| Channel | Purpose | Trigger | Frequency | Length | Tools | Special output |
+|---------|---------|---------|-----------|--------|-------|----------------|
+| **Insights** | Full weekly report | Scheduled (Mon 8am) or manual | 1×/week | ~600 words | None | `<chart>` (0+), `<memory>` (always 1, appended to `history.md`) |
+| **Coach** | Plan/goal proposals with Approve/Reject buttons | After insights or manual `/coach` | 1×/week | ~300 words | `update_context` (plan, goals only) | `update_context` tool calls (0–2) |
+| **Nudge** | Short reactive notification — one observation, one action | Data sync, file edit, missed session | Up to 3/day | 80 words | None | `SKIP` if nothing new; `<chart>` (0–1) |
+| **Chat** | Interactive conversation — ask anything, get charts | Your Telegram message | On demand | 150 words | `run_sql` (up to 5/turn), `update_context` (any file) | `<chart>` (optional), `update_context` (at most 1) |
 
-| Channel | Purpose | Trigger | Frequency | Max length | Tools |
-|---------|---------|---------|-----------|------------|-------|
-| **Insights** | Full weekly report — data-driven analysis of the completed (or current) week | Scheduled (Mon 8am) or manual | 1×/week | ~600 words | None |
-| **Coach** | Strategic review — proposes concrete edits to `plan.md` / `goals.md` | Scheduled (Mon 8am, after insights) or manual `/coach` | 1×/week | ~300 words | `update_context` (plan, goals) |
-| **Nudge** | Short reactive notification — one observation, one action | Event-driven (data sync, file edit, missed session) | Up to 3/day | 80 words | None |
-| **Chat** | Interactive conversation — ask anything, get charts, update context | User message via Telegram | On demand | 150 words (unless asked for more) | `run_sql`, `update_context` |
+### What triggers nudges
 
-### Insights (weekly report)
+| Event | Debounce | What it does |
+|-------|----------|-------------|
+| Health data synced via iCloud | 3 min | One data observation + suggestion for today/tomorrow |
+| `log.md` / `goals.md` / `plan.md` / `me.md` edited | 60 sec | Responds to the change — acknowledges, flags tension, or confirms |
+| 8–9 PM, no workout on a training day | — | Factual note + one suggestion (skip, shift, lighter alternative) |
+| Monday 8–9 AM | scheduled | Full weekly report, then coaching review |
+| Thursday 9–10 AM | scheduled | Mid-week progress report |
 
-The big-picture report. Runs once a week (Monday morning, covering the previous Mon–Sun) or on demand.
+### Interactive chat
 
-- **Prompt:** `src/prompts/insights_prompt.md`
-- **Context:** user profile (`me.md`), goals, plan, journal (`log.md`), baselines (auto-computed rolling averages), LLM's own history (`history.md`), pre-computed review facts, 3 months of health data (JSON)
-- **Tools:** None — pure text generation
-- **Special output:**
-  - `<chart>` blocks (optional, 0+) — Plotly code rendered to PNG and sent as photos. Included when a visual genuinely clarifies a trend or comparison
-  - `<memory>` block (always, 1) — 2–3 bullet points the LLM wants to remember for next week, appended to `history.md`
-- **Output:** ~600-word report covering training consistency, recovery signals, performance trends, and actionable suggestions
-- **Delivery:** Telegram and/or email
+The daemon runs a Telegram long-polling listener alongside the file watcher. Send a message and get a coaching response backed by your full health context.
 
-### Coach (plan/goal proposals)
-
-The strategic advisor. Reviews the week's data against your current plan and goals, and proposes changes — only when the data supports it.
-
-- **Prompt:** `src/prompts/coach_prompt.md`
-- **Context:** same as insights, plus coaching feedback history (`coach_feedback.md`), recent nudges sent (cross-awareness)
-- **Tools:** `update_context` — can propose edits to `plan.md` and `goals.md` only. Each proposal becomes an Approve/Reject button in Telegram
-- **Special output:** `update_context` tool calls (0–2) — each contains the exact file, section, action (append/replace), and new content. No other special blocks
-- **Output:** 0–2 concrete proposals with 2–3 sentences of data-backed reasoning each. If the plan is working, it says so and proposes nothing
-- **Delivery:** Telegram (with inline buttons) and/or email
-- **Awareness:** sees recent nudges so it doesn't repeat what a nudge already flagged
-
-### Nudge (reactive notification)
-
-The quick tap on the shoulder. Fires when something happens — new data syncs, you edit a context file, you miss a session. Designed to say one useful thing or stay quiet.
-
-- **Prompt:** `src/prompts/nudge_prompt.md`
-- **Context:** trigger type, last 3 nudges sent, last coach review summary (cross-awareness), user profile, goals, plan, journal, history, 1 month of health data (JSON)
-- **Tools:** None
-- **Special output:**
-  - `SKIP` (optional) — if there's nothing new to say, the LLM responds with exactly `SKIP` on its own line and nothing is sent. A SKIP is always better than a redundant message
-  - `<chart>` block (optional, 0–1) — only when a visual genuinely helps make the point clearer than words alone
-- **Output:** Max 80 words. One observation + one action
-- **Delivery:** Telegram and/or email
-- **Awareness:** sees its own recent history (last 3) + last coach summary. Will `SKIP` if the coach already covered the same ground
-
-**Trigger types:**
-
-| Trigger | Source | What it does |
-|---------|--------|-------------|
-| `new_data` | Health data file synced via iCloud | One data observation + suggestion for today/tomorrow |
-| `log_update` | You edited `log.md` | Responds to what you wrote |
-| `goal_updated` | You edited `goals.md` | Acknowledges change, flags if unrealistic |
-| `plan_updated` | You edited `plan.md` | Flags tension with data or confirms it's solid |
-| `profile_updated` | You edited `me.md` | Notes the profile change |
-| `missed_session` | 8–9 PM, no workout logged on a training day | Factual note + one suggestion (skip, shift, lighter alternative) |
-
-### Chat (interactive conversation)
-
-The two-way coaching channel. Send a message to your Telegram bot and get a response backed by your full health context. Can query your database, generate charts, and propose context file updates.
-
-- **Prompt:** `src/prompts/chat_prompt.md`
-- **Context:** user profile, goals, plan, baselines, journal, LLM history, recent nudges, last coach review summary (cross-awareness), 3 months of health data (JSON), conversation buffer (last 20 messages)
-- **Tools:** `run_sql` (read-only SQL against your database, up to 5 calls per turn) + `update_context` (propose edits to any context file with Accept/Reject buttons)
-- **Special output:**
-  - `<chart>` blocks (optional) — generated when the answer involves a trend (3+ data points) or comparison. Uses `rows` from SQL queries for data
-  - `update_context` tool calls (optional, at most 1 per response) — proposes durable context file edits when the user shares lasting info (weight change, schedule update, new goal)
-- **Output:** Under 150 words unless you ask for detail
-- **Delivery:** Telegram (inline in conversation)
-- **Awareness:** sees recent nudges + last coach summary, so it won't contradict what the coach just proposed
+- Ask analytical questions — the LLM queries your database with SQL and charts the results
+- Reply to a nudge or report — the bot knows which message you're responding to
+- Share updates naturally ("my weight is 76kg now") — the LLM proposes context file edits with Accept/Reject buttons
+- Commands: `/coach`, `/clear`, `/status`, `/context [name]`, `/help`
+- Conversation buffer: last 20 messages in memory, resets on daemon restart
 
 ### Cross-message awareness
 
-Each channel knows what the others recently said, so the LLM avoids redundancy:
+Each channel sees what the others recently said so the LLM avoids redundancy:
 
-| Channel | Sees recent nudges | Sees last coach review |
-|---------|-------------------|----------------------|
-| Insights | No | No |
-| Coach | Yes | No (has its own history) |
-| Nudge | Yes (last 3) | Yes |
-| Chat | Yes (last 3) | Yes |
+- **Coach** sees recent nudges sent
+- **Nudge** sees last 3 nudges + last coach review summary
+- **Chat** sees last 3 nudges + last coach review summary
+- **Insights** is independent (has its own `history.md` memory)
 
 ### Suppression and rate limiting
 
-Notifications are aggressive about staying quiet when there's nothing useful to say:
-
-- **Daily limit:** max 3 nudges per calendar day
-- **Interval:** min 90 minutes between nudges
-- **LLM SKIP:** the nudge prompt instructs the LLM to respond with `SKIP` if there's nothing new — this is checked after every nudge call
-- **Morning quiet hours:** event-driven nudges are suppressed before 9 AM (sleep data usually hasn't synced yet, making early nudges unreliable). Triggers are queued and drained as one consolidated nudge when the window opens
-- **Report suppression:** nudges are suppressed ±1 hour around scheduled reports (Monday weekly, Thursday midweek) to avoid pile-ups — the report already covers the big picture
-- **Coach once-per-day:** the coaching review runs at most once per calendar day
-
-All state (nudge count, timestamps, queue, coach summary) persists in `~/Documents/zdrowskit/.daemon_state.json` and survives daemon restarts.
+- **Quiet hours:** nudges suppressed before 9 AM (sleep data hasn't synced yet). Triggers queue and drain as one consolidated nudge when the window opens
+- **Report suppression:** nudges suppressed ±1 hour around scheduled reports — the report already covers the big picture
+- **Rate limits:** max 3 nudges/day, min 90 minutes apart
+- **LLM SKIP:** the nudge LLM can respond `SKIP` if there's nothing genuinely new to say
+- **Coach:** runs at most once per calendar day
 
 ### Delivery configuration
 
@@ -405,51 +318,16 @@ Tests live in `tests/` with fixture data in `tests/fixtures/`. The suite covers 
 
 ## Evals
 
-Data-driven eval harness that tests LLM behaviour across 21 cases and 14 scenarios. Uses pinned blueprint data (committed snapshots of real context files and health data) for reproducibility. Each case applies a named scenario perturbation and asserts on the response using pattern matching, tool-call validation, or SQL execution.
+Data-driven eval harness (25 cases, 14 scenarios) that tests LLM behaviour using pinned blueprint data. Two suites: `core` (product-gating, must stay green) and `benchmark` (regression review, model comparison). See [`evals/README.md`](evals/README.md) for categories, scenarios, and architecture.
 
 ```bash
-uv run python -m evals.run                                          # all cases, default model (opus)
-uv run python -m evals.run --suite core                             # product-gating core only
-uv run python -m evals.run --no-cache                               # bypass eval cache for a fresh run
-uv run python -m evals.run sleep_last_night_chat                    # single case by ID
-uv run python -m evals.run --category sleep_markers                 # all cases in a category
+uv run python -m evals.run                                          # all cases, default model
+uv run python -m evals.run --suite core                             # product-gating only
+uv run python -m evals.run --no-cache                               # bypass eval cache
 uv run python -m evals.run --model anthropic/claude-sonnet-4-6      # specific model
-uv run python -m evals.run --model anthropic/claude-sonnet-4-6,anthropic/claude-haiku-4-5-20251001  # compare
-uv run python -m evals.run --reasoning-effort low                   # pass reasoning effort hint
-uv run python -m evals.data.extract                                 # refresh baseline blueprint from live data
-uv run python -m evals.data.extract --name sparse_week              # snapshot a named blueprint
+uv run python -m evals.run --category sleep_markers                 # single category
+uv run python -m evals.data.extract                                 # refresh blueprints from live data
 ```
-
-The evals are split into two suites:
-- `core` — smaller product-gating cases that should stay green before prompt/model changes ship
-- `benchmark` — broader comparison cases for regression review and model selection
-
-They currently use 3 pinned blueprints (`baseline`, `sparse_week`, `completed_week`) and 25 cases total.
-Eval responses are cached by default in `evals/.cache.sqlite` using a strong key
-built from the rendered messages, tool schema, model, case identity, and key
-runtime settings. Use `--no-cache` when you explicitly want a fresh run.
-
-**Categories (25 cases):**
-
-| Category | Cases | What it tests |
-|----------|-------|---------------|
-| `nudge_contract` | 5 | Nudge `SKIP` vs fire behavior, short-message limits, and trigger-specific usefulness |
-| `sleep_markers` | 5 | Sleep date convention ("last night" resolves to yesterday's row), sync_pending not flagged, not_tracked threshold (1 day OK, 3 consecutive flagged) |
-| `weekly_report` | 2 | Mid-week progress checks avoid premature judgment; full weekly reviews include required sections and `<memory>` |
-| `recovery_verdict` | 3 | Correct coaching signal for crashed / green / mixed recovery markers |
-| `chat_data` | 4 | Current-week answers avoid unnecessary SQL; historical and unknown-data questions use tools honestly |
-| `context_update` | 4 | Context file updates on durable changes, with at least one case checking `action` + `section`, and no update on casual questions |
-| `chart_generation` | 2 | Trend questions produce renderable charts; single-value questions do not |
-
-**Scenarios** perturb the blueprint data to test edge cases. Key examples:
-- `baseline` — unmodified real data (control)
-- `rest_day` / `training_day_missed` / `boring_new_data` — nudge skip/fire logic
-- `sleep_last_night_query` — yesterday has sleep data, today has none (tests date resolution)
-- `sleep_not_tracked_3_consecutive` — 3-day gap triggers a flag
-- `recovery_crashed` / `recovery_green` / `recovery_mixed` — coaching verdict accuracy
-- `midweek_wednesday` — truncated week tests premature judgment
-
-The chat eval path mirrors the daemon's tool loop, so multi-turn chat cases can use `run_sql`, accumulate rows for chart rendering, and then return a final answer for assertion checks. Results include a rich comparison table, separate suite labeling, and bar charts for pass rate, latency, cost, and token usage across models.
 
 ## Requirements
 
