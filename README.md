@@ -194,9 +194,9 @@ launchctl load ~/Library/LaunchAgents/com.zdrowskit.daemon.plist
 | `plan.md` updated | 60 sec | Nudge reviewing the new plan |
 | 8–9 PM, no session logged | — | Missed-session reminder |
 
-**Smart suppression:** Before sending, the LLM sees the last 3 notifications and can choose to `SKIP` if there's nothing genuinely new to say. Nudges are also rate-limited to 3 per day with a 90-minute minimum gap.
+**Suppression:** Nudges have multiple layers of rate limiting, quiet hours, and LLM-driven SKIP logic — see [Suppression and rate limiting](#suppression-and-rate-limiting) in the Notifications section for full details.
 
-**State file:** `~/Documents/zdrowskit/.daemon_state.json` tracks rate limits and recent nudge history. Delete or reset it to force a notification.
+**State file:** `~/Documents/zdrowskit/.daemon_state.json` tracks rate limits, recent nudge history, coach summaries, and the quiet-hours queue. Delete or reset it to force a notification.
 
 **Logs:** `~/Library/Logs/zdrowskit.daemon.log` (rotating, 7 days).
 
@@ -279,9 +279,108 @@ The journal (`log.md`) is what makes this different from a dashboard. Numbers sa
 
 ## Notifications
 
-Reports and nudges can be delivered to your phone or inbox.
+Reports, nudges, coaching proposals, and chat responses are delivered via Telegram and/or email. Each notification type is a distinct LLM call with its own prompt, context window, tools, and purpose. They're designed to complement each other — not repeat each other.
 
-**Telegram** (default for nudges and daemon-triggered reports):
+### Channels at a glance
+
+| Channel | Purpose | Trigger | Frequency | Max length | Tools |
+|---------|---------|---------|-----------|------------|-------|
+| **Insights** | Full weekly report — data-driven analysis of the completed (or current) week | Scheduled (Mon 8am) or manual | 1×/week | ~600 words | None |
+| **Coach** | Strategic review — proposes concrete edits to `plan.md` / `goals.md` | Scheduled (Mon 8am, after insights) or manual `/coach` | 1×/week | ~300 words | `update_context` (plan, goals) |
+| **Nudge** | Short reactive notification — one observation, one action | Event-driven (data sync, file edit, missed session) | Up to 3/day | 80 words | None |
+| **Chat** | Interactive conversation — ask anything, get charts, update context | User message via Telegram | On demand | 150 words (unless asked for more) | `run_sql`, `update_context` |
+
+### Insights (weekly report)
+
+The big-picture report. Runs once a week (Monday morning, covering the previous Mon–Sun) or on demand.
+
+- **Prompt:** `src/prompts/insights_prompt.md`
+- **Context:** user profile (`me.md`), goals, plan, journal (`log.md`), baselines (auto-computed rolling averages), LLM's own history (`history.md`), pre-computed review facts, 3 months of health data (JSON)
+- **Tools:** None — pure text generation
+- **Special output:**
+  - `<chart>` blocks (optional, 0+) — Plotly code rendered to PNG and sent as photos. Included when a visual genuinely clarifies a trend or comparison
+  - `<memory>` block (always, 1) — 2–3 bullet points the LLM wants to remember for next week, appended to `history.md`
+- **Output:** ~600-word report covering training consistency, recovery signals, performance trends, and actionable suggestions
+- **Delivery:** Telegram and/or email
+
+### Coach (plan/goal proposals)
+
+The strategic advisor. Reviews the week's data against your current plan and goals, and proposes changes — only when the data supports it.
+
+- **Prompt:** `src/prompts/coach_prompt.md`
+- **Context:** same as insights, plus coaching feedback history (`coach_feedback.md`), recent nudges sent (cross-awareness)
+- **Tools:** `update_context` — can propose edits to `plan.md` and `goals.md` only. Each proposal becomes an Approve/Reject button in Telegram
+- **Special output:** `update_context` tool calls (0–2) — each contains the exact file, section, action (append/replace), and new content. No other special blocks
+- **Output:** 0–2 concrete proposals with 2–3 sentences of data-backed reasoning each. If the plan is working, it says so and proposes nothing
+- **Delivery:** Telegram (with inline buttons) and/or email
+- **Awareness:** sees recent nudges so it doesn't repeat what a nudge already flagged
+
+### Nudge (reactive notification)
+
+The quick tap on the shoulder. Fires when something happens — new data syncs, you edit a context file, you miss a session. Designed to say one useful thing or stay quiet.
+
+- **Prompt:** `src/prompts/nudge_prompt.md`
+- **Context:** trigger type, last 3 nudges sent, last coach review summary (cross-awareness), user profile, goals, plan, journal, history, 1 month of health data (JSON)
+- **Tools:** None
+- **Special output:**
+  - `SKIP` (optional) — if there's nothing new to say, the LLM responds with exactly `SKIP` on its own line and nothing is sent. A SKIP is always better than a redundant message
+  - `<chart>` block (optional, 0–1) — only when a visual genuinely helps make the point clearer than words alone
+- **Output:** Max 80 words. One observation + one action
+- **Delivery:** Telegram and/or email
+- **Awareness:** sees its own recent history (last 3) + last coach summary. Will `SKIP` if the coach already covered the same ground
+
+**Trigger types:**
+
+| Trigger | Source | What it does |
+|---------|--------|-------------|
+| `new_data` | Health data file synced via iCloud | One data observation + suggestion for today/tomorrow |
+| `log_update` | You edited `log.md` | Responds to what you wrote |
+| `goal_updated` | You edited `goals.md` | Acknowledges change, flags if unrealistic |
+| `plan_updated` | You edited `plan.md` | Flags tension with data or confirms it's solid |
+| `profile_updated` | You edited `me.md` | Notes the profile change |
+| `missed_session` | 8–9 PM, no workout logged on a training day | Factual note + one suggestion (skip, shift, lighter alternative) |
+
+### Chat (interactive conversation)
+
+The two-way coaching channel. Send a message to your Telegram bot and get a response backed by your full health context. Can query your database, generate charts, and propose context file updates.
+
+- **Prompt:** `src/prompts/chat_prompt.md`
+- **Context:** user profile, goals, plan, baselines, journal, LLM history, recent nudges, last coach review summary (cross-awareness), 3 months of health data (JSON), conversation buffer (last 20 messages)
+- **Tools:** `run_sql` (read-only SQL against your database, up to 5 calls per turn) + `update_context` (propose edits to any context file with Accept/Reject buttons)
+- **Special output:**
+  - `<chart>` blocks (optional) — generated when the answer involves a trend (3+ data points) or comparison. Uses `rows` from SQL queries for data
+  - `update_context` tool calls (optional, at most 1 per response) — proposes durable context file edits when the user shares lasting info (weight change, schedule update, new goal)
+- **Output:** Under 150 words unless you ask for detail
+- **Delivery:** Telegram (inline in conversation)
+- **Awareness:** sees recent nudges + last coach summary, so it won't contradict what the coach just proposed
+
+### Cross-message awareness
+
+Each channel knows what the others recently said, so the LLM avoids redundancy:
+
+| Channel | Sees recent nudges | Sees last coach review |
+|---------|-------------------|----------------------|
+| Insights | No | No |
+| Coach | Yes | No (has its own history) |
+| Nudge | Yes (last 3) | Yes |
+| Chat | Yes (last 3) | Yes |
+
+### Suppression and rate limiting
+
+Notifications are aggressive about staying quiet when there's nothing useful to say:
+
+- **Daily limit:** max 3 nudges per calendar day
+- **Interval:** min 90 minutes between nudges
+- **LLM SKIP:** the nudge prompt instructs the LLM to respond with `SKIP` if there's nothing new — this is checked after every nudge call
+- **Morning quiet hours:** event-driven nudges are suppressed before 9 AM (sleep data usually hasn't synced yet, making early nudges unreliable). Triggers are queued and drained as one consolidated nudge when the window opens
+- **Report suppression:** nudges are suppressed ±1 hour around scheduled reports (Monday weekly, Thursday midweek) to avoid pile-ups — the report already covers the big picture
+- **Coach once-per-day:** the coaching review runs at most once per calendar day
+
+All state (nudge count, timestamps, queue, coach summary) persists in `~/Documents/zdrowskit/.daemon_state.json` and survives daemon restarts.
+
+### Delivery configuration
+
+**Telegram** (default for nudges, chat, and daemon-triggered reports):
 ```env
 TELEGRAM_BOT_TOKEN=123456789:ABCdefGHI...
 TELEGRAM_CHAT_ID=123456789
