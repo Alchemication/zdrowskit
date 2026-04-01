@@ -30,6 +30,9 @@ provisional review and do not penalize sessions that have not happened yet.
 ## Recent Coaching Feedback
 {coach_feedback}
 
+## Recent Nudges Sent
+{recent_nudges}
+
 ## Health Data (JSON)
 ```json
 {health_data}

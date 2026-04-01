@@ -71,6 +71,9 @@ MORNING_REPORT_HOUR_END = 9
 MIDWEEK_REPORT_HOUR_START = 9
 MIDWEEK_REPORT_HOUR_END = 10
 
+QUIET_HOUR_END = 9  # Suppress event-driven nudges before this hour (local time)
+COACH_SUPPRESSION_S = 3600  # ±1 hour: suppress nudges around scheduled reports
+
 # ---------------------------------------------------------------------------
 # State management
 # ---------------------------------------------------------------------------
@@ -285,12 +288,54 @@ class ZdrowskitDaemon:
     # Rate limiting
     # ------------------------------------------------------------------
 
+    def _is_report_imminent(self) -> bool:
+        """Check if a scheduled report will fire within COACH_SUPPRESSION_S."""
+        now = datetime.now()
+
+        # Monday weekly report window
+        if now.weekday() == 0:
+            report_time = now.replace(
+                hour=MORNING_REPORT_HOUR_START, minute=0, second=0, microsecond=0
+            )
+            delta = (report_time - now).total_seconds()
+            if 0 < delta < COACH_SUPPRESSION_S:
+                return True
+
+        # Thursday midweek report window
+        if now.weekday() == 3:
+            report_time = now.replace(
+                hour=MIDWEEK_REPORT_HOUR_START, minute=0, second=0, microsecond=0
+            )
+            delta = (report_time - now).total_seconds()
+            if 0 < delta < COACH_SUPPRESSION_S:
+                return True
+
+        return False
+
     def _can_send_nudge(self) -> bool:
         """Check whether a nudge is allowed under the rate limits.
 
         Returns:
             True if a nudge may be sent; False if suppressed.
         """
+        # Suppress near scheduled reports (±1 hour)
+        last_report_ts = self._state.get("last_report_ts")
+        if last_report_ts:
+            elapsed = abs(
+                (
+                    datetime.now() - datetime.fromisoformat(last_report_ts)
+                ).total_seconds()
+            )
+            if elapsed < COACH_SUPPRESSION_S:
+                logger.info(
+                    "Nudge suppressed: within %.0f min of scheduled report",
+                    elapsed / 60,
+                )
+                return False
+        if self._is_report_imminent():
+            logger.info("Nudge suppressed: scheduled report imminent")
+            return False
+
         today_str = date.today().isoformat()
 
         if self._state.get("nudge_date") != today_str:
@@ -407,6 +452,8 @@ class ZdrowskitDaemon:
             logger.info("Running weekly review report")
             cmd_insights(args)
             self._record_report("review")
+            self._state["last_report_ts"] = datetime.now().isoformat()
+            _save_state(self._state)
             self._run_coach(week="last", skip_import=True)
         except SystemExit:
             logger.error("Weekly review report failed")
@@ -436,10 +483,12 @@ class ZdrowskitDaemon:
             logger.info("Running mid-week progress report")
             cmd_insights(args)
             self._record_report("progress")
+            self._state["last_report_ts"] = datetime.now().isoformat()
+            _save_state(self._state)
         except SystemExit:
             logger.error("Mid-week progress report failed")
 
-    def _run_nudge(self, trigger: str) -> None:
+    def _run_nudge(self, trigger: str, *, _from_drain: bool = False) -> None:
         """Run a nudge and send via Telegram.
 
         Passes recent nudge history so the LLM can decide whether there is
@@ -447,7 +496,22 @@ class ZdrowskitDaemon:
 
         Args:
             trigger: Trigger type string passed to cmd_nudge.
+            _from_drain: Internal flag — True when called from queue drain
+                to bypass the quiet-hours check.
         """
+        # Quiet hours: queue the trigger instead of sending
+        if not _from_drain and datetime.now().hour < QUIET_HOUR_END:
+            queue: list[dict] = self._state.get("quiet_queue", [])
+            queue.append({"trigger": trigger, "ts": datetime.now().isoformat()})
+            self._state["quiet_queue"] = queue[-10:]  # cap at 10
+            _save_state(self._state)
+            logger.info(
+                "Nudge queued during quiet hours (trigger: %s, queue size: %d)",
+                trigger,
+                len(self._state["quiet_queue"]),
+            )
+            return
+
         if not self._can_send_nudge():
             return
 
@@ -461,6 +525,8 @@ class ZdrowskitDaemon:
             trigger=trigger,
             months=1,
             recent_nudges=self._state.get("recent_nudges", []),
+            last_coach_summary=self._state.get("last_coach_summary", ""),
+            last_coach_summary_date=self._state.get("last_coach_summary_date", ""),
         )
         try:
             logger.info("Running nudge (trigger: %s)", trigger)
@@ -469,6 +535,33 @@ class ZdrowskitDaemon:
                 self._record_nudge(result_text, trigger)
         except SystemExit:
             logger.error("Nudge failed (trigger: %s)", trigger)
+
+    def _drain_quiet_queue(self) -> None:
+        """Process queued triggers from quiet hours as a single consolidated nudge."""
+        queue: list[dict] = self._state.get("quiet_queue", [])
+        if not queue:
+            return
+
+        # Clear the queue before sending to avoid re-processing on failure
+        self._state["quiet_queue"] = []
+        _save_state(self._state)
+
+        # Pick the most "interesting" trigger (user-initiated > system)
+        priority = {
+            "goal_updated": 4,
+            "plan_updated": 3,
+            "log_update": 2,
+            "profile_updated": 1,
+            "new_data": 0,
+        }
+        best = max(queue, key=lambda e: priority.get(e["trigger"], 0))
+
+        logger.info(
+            "Draining quiet queue: %d triggers, sending consolidated nudge (trigger: %s)",
+            len(queue),
+            best["trigger"],
+        )
+        self._run_nudge(best["trigger"], _from_drain=True)
 
     def _run_coach(
         self,
@@ -502,6 +595,7 @@ class ZdrowskitDaemon:
             telegram=True,
             week=week,
             months=3,
+            recent_nudges=self._state.get("recent_nudges", []),
         )
         try:
             logger.info("Running coaching review")
@@ -509,6 +603,9 @@ class ZdrowskitDaemon:
             for edit in edits:
                 self._propose_context_edit(edit, source="coach")
             self._state["last_coach_date"] = today_str
+            if _text:
+                self._state["last_coach_summary"] = _text[:500]
+                self._state["last_coach_summary_date"] = today_str
             _save_state(self._state)
         except SystemExit:
             logger.error("Coaching review failed")
@@ -1010,6 +1107,14 @@ class ZdrowskitDaemon:
                 for i, e in enumerate(recent)
             )
 
+        # Inject last coach review for cross-message awareness.
+        coach_summary = self._state.get("last_coach_summary", "")
+        coach_date = self._state.get("last_coach_summary_date", "")
+        if coach_summary:
+            ctx["last_coach_summary"] = f"[{coach_date}] {coach_summary}"
+        else:
+            ctx["last_coach_summary"] = "(no recent coach review)"
+
         health_data = build_llm_data(conn, months=3)
 
         try:
@@ -1118,6 +1223,10 @@ class ZdrowskitDaemon:
         while True:
             time.sleep(SCHEDULED_CHECK_INTERVAL_S)
             now = datetime.now()
+
+            # Drain quiet-hours queue once the window opens
+            if now.hour >= QUIET_HOUR_END and self._state.get("quiet_queue"):
+                self._drain_quiet_queue()
 
             # Monday morning: full week review (previous Mon–Sun)
             if (

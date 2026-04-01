@@ -7,6 +7,9 @@ weekly report.
 ## Recent Notifications Sent
 {recent_nudges}
 
+## Last Coach Review
+{last_coach_summary}
+
 ## About the User
 {me}
 
@@ -33,6 +36,10 @@ weekly report.
 
 Before writing anything, decide: is there something genuinely new or actionable
 to say that hasn't already been covered in the recent notifications above?
+
+Also check the Last Coach Review above — if the coach already covered this
+topic within the last few days, respond with SKIP unless there is genuinely
+new data since then.
 
 Also check trigger-specific skip rules below. If there is nothing worth saying —
 the data hasn't changed meaningfully, the situation was already addressed, or

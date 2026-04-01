@@ -588,6 +588,14 @@ def cmd_nudge(
         context["recent_nudges"] = "(none yet)"
     context["trigger_type"] = _trigger
 
+    # Cross-message awareness: inject last coach review
+    coach_summary = getattr(args, "last_coach_summary", "")
+    coach_date = getattr(args, "last_coach_summary_date", "")
+    if coach_summary:
+        context["last_coach_summary"] = f"[{coach_date}] {coach_summary}"
+    else:
+        context["last_coach_summary"] = "(no recent coach review)"
+
     messages = build_messages(context, health_data_json)
 
     model = getattr(args, "model", DEFAULT_MODEL)
@@ -707,6 +715,17 @@ def cmd_coach(args: argparse.Namespace) -> tuple[str, list[ContextEdit]]:
         context,
         week_complete=week_complete,
     )
+
+    # Cross-message awareness: inject recent nudges
+    recent_nudge_entries: list[dict] = getattr(args, "recent_nudges", [])
+    if recent_nudge_entries:
+        context["recent_nudges"] = "\n".join(
+            f"- [{e['ts'][:16]} / {e['trigger']}] {e['text']}"
+            for e in recent_nudge_entries
+        )
+    else:
+        context["recent_nudges"] = "(none)"
+
     health_data_json = json.dumps(health_data, indent=2)
 
     try:

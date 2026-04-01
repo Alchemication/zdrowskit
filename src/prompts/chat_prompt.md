@@ -22,6 +22,9 @@ via Telegram. This is an interactive conversation, not a report.
 ## Recent Nudges You Sent
 {recent_nudges}
 
+## Last Coach Review
+{last_coach_summary}
+
 ## Recent Health Data (JSON)
 ```json
 {health_data}
