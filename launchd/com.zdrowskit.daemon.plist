@@ -11,11 +11,11 @@
         <string>/Users/adamsky/.local/bin/uv</string>
         <string>run</string>
         <string>python</string>
-        <string>/Users/adamsky/Projects/adamskit/src/daemon.py</string>
+        <string>/Users/adamsky/Projects/zdrowskit/src/daemon.py</string>
     </array>
 
     <key>WorkingDirectory</key>
-    <string>/Users/adamsky/Projects/adamskit</string>
+    <string>/Users/adamsky/Projects/zdrowskit</string>
 
     <!-- Keep the daemon running; launchd will restart it if it exits -->
     <key>KeepAlive</key>
