@@ -10,12 +10,17 @@ import pytest
 from models import DailySnapshot, WorkoutSnapshot
 from store import (
     _migrate,
+    delete_feedback,
     default_db_path,
     load_date_range,
+    load_feedback_entries,
+    load_feedback_for_call,
     load_snapshots,
+    log_feedback,
     log_llm_call,
     open_db,
     store_snapshots,
+    update_feedback_reason,
 )
 
 
@@ -259,6 +264,41 @@ class TestLogLlmCall:
         assert row["request_type"] == "insights"
         assert row["model"] == "test-model"
         assert row["cost"] == 0.01
+
+
+class TestLlmFeedback:
+    def test_round_trip_feedback_lifecycle(
+        self,
+        in_memory_db: sqlite3.Connection,
+    ) -> None:
+        call_id = log_llm_call(
+            in_memory_db,
+            request_type="chat",
+            model="test-model",
+            messages=[{"role": "user", "content": "test"}],
+            response_text="response",
+        )
+
+        feedback_id = log_feedback(
+            in_memory_db,
+            llm_call_id=call_id,
+            category="inaccurate",
+            message_type="chat",
+        )
+        update_feedback_reason(in_memory_db, feedback_id, "Wrong workout distance.")
+
+        per_call = load_feedback_for_call(in_memory_db, call_id)
+        assert len(per_call) == 1
+        assert per_call[0]["id"] == feedback_id
+        assert per_call[0]["reason"] == "Wrong workout distance."
+
+        joined = load_feedback_entries(in_memory_db, limit=5)
+        assert len(joined) == 1
+        assert joined[0]["feedback_id"] == feedback_id
+        assert joined[0]["request_type"] == "chat"
+
+        assert delete_feedback(in_memory_db, feedback_id) is True
+        assert load_feedback_for_call(in_memory_db, call_id) == []
 
 
 class TestMigrate:

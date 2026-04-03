@@ -209,7 +209,73 @@ class ZdrowskitDaemon:
         self._health_timer: threading.Timer | None = None
         self._context_timers: dict[str, threading.Timer] = {}
         self._context_fire_times: dict[str, float] = {}
-        self._pending_rejection_reasons: dict[int, str] = {}
+        self._pending_rejection_reasons = self._restore_pending_reason_map(
+            self._state.get("pending_rejection_reasons"),
+            value_type="str",
+        )
+        self._pending_feedback_reasons = self._restore_pending_reason_map(
+            self._state.get("pending_feedback_reasons"),
+            value_type="int",
+        )
+
+    @staticmethod
+    def _restore_pending_reason_map(
+        raw: object,
+        *,
+        value_type: str,
+    ) -> dict[int, int] | dict[int, str]:
+        """Restore a prompt-id mapping from JSON state."""
+        if not isinstance(raw, dict):
+            return {}
+
+        restored: dict[int, int] | dict[int, str] = {}
+        for key, value in raw.items():
+            try:
+                prompt_id = int(key)
+            except (TypeError, ValueError):
+                continue
+            if value_type == "int":
+                try:
+                    restored[prompt_id] = int(value)
+                except (TypeError, ValueError):
+                    continue
+            else:
+                if isinstance(value, str):
+                    restored[prompt_id] = value
+        return restored
+
+    def _save_pending_reason_state(self) -> None:
+        """Persist pending reason prompts to the daemon state file."""
+        self._state["pending_feedback_reasons"] = {
+            str(prompt_id): feedback_id
+            for prompt_id, feedback_id in self._pending_feedback_reasons.items()
+        }
+        self._state["pending_rejection_reasons"] = {
+            str(prompt_id): feedback_id
+            for prompt_id, feedback_id in self._pending_rejection_reasons.items()
+        }
+        _save_state(self._state)
+
+    def _drop_feedback_reason_prompts(self, feedback_id: int) -> None:
+        """Remove any pending reason prompts tied to a deleted feedback row."""
+        stale = [
+            prompt_id
+            for prompt_id, pending_id in self._pending_feedback_reasons.items()
+            if pending_id == feedback_id
+        ]
+        if not stale:
+            return
+        for prompt_id in stale:
+            del self._pending_feedback_reasons[prompt_id]
+        self._save_pending_reason_state()
+
+    @staticmethod
+    def _strip_feedback_label(text: str, label: str) -> str:
+        """Remove a trailing thumbs-down label from message text."""
+        suffix = f"\n\n👎 {label}"
+        if text.endswith(suffix):
+            return text[: -len(suffix)]
+        return text
 
     # ------------------------------------------------------------------
     # Scheduling / debounce
@@ -644,11 +710,6 @@ class ZdrowskitDaemon:
 
         self._pending_edits = PendingEdits()
 
-        # Feedback state: map telegram message_id → (llm_call_id, message_type)
-        self._feedback_map: dict[int, tuple[int, str]] = {}
-        # After a category is picked: prompt message_id → feedback row id
-        self._pending_feedback_reasons: dict[int, int] = {}
-
         thread = threading.Thread(
             target=self._poller.poll_loop,
             args=(self._handle_telegram_message, self._stop_event),
@@ -658,26 +719,6 @@ class ZdrowskitDaemon:
         )
         thread.start()
         logger.info("Telegram chat listener started")
-
-    def _register_feedback(
-        self,
-        telegram_message_id: int | None,
-        llm_call_id: int | None,
-        message_type: str,
-    ) -> None:
-        """Register a sent message for potential feedback.
-
-        Args:
-            telegram_message_id: The Telegram message id.
-            llm_call_id: The llm_call row id.
-            message_type: The LLM output type (insights, nudge, coach, chat).
-        """
-        if telegram_message_id is not None and llm_call_id is not None:
-            with self._lock:
-                self._feedback_map[telegram_message_id] = (
-                    llm_call_id,
-                    message_type,
-                )
 
     def _attach_feedback_button(
         self,
@@ -697,9 +738,15 @@ class ZdrowskitDaemon:
         if msg_id is None or call_id is None:
             return
 
-        kb = feedback_keyboard(call_id)
+        kb = feedback_keyboard(call_id, message_type)
+        if message_type == "insights":
+            self._poller.send_message_with_keyboard(
+                "_Report feedback_: tap 👎 if something was off.",
+                kb,
+                reply_to_message_id=msg_id,
+            )
+            return
         self._poller.edit_message_reply_markup(msg_id, kb)
-        self._register_feedback(msg_id, call_id, message_type)
 
     def _handle_telegram_message(self, message: dict) -> None:
         """Process an incoming Telegram message and reply via LLM.
@@ -800,22 +847,18 @@ class ZdrowskitDaemon:
         # Send/edit the reply, attaching a feedback 👎 button if possible.
         from telegram_bot import feedback_keyboard
 
-        sent_msg_id: int | None = None
         if result.llm_call_id is not None:
-            kb = feedback_keyboard(result.llm_call_id)
+            kb = feedback_keyboard(result.llm_call_id, "chat")
             if placeholder_id:
                 self._poller.edit_message_with_keyboard(placeholder_id, reply, kb)
-                sent_msg_id = placeholder_id
             else:
-                sent_msg_id = self._poller.send_message_with_keyboard(
+                self._poller.send_message_with_keyboard(
                     reply, kb, reply_to_message_id=message_id
                 )
         elif placeholder_id:
             self._poller.edit_message(placeholder_id, reply)
         else:
             self._poller.send_reply(reply, reply_to_message_id=message_id)
-
-        self._register_feedback(sent_msg_id, result.llm_call_id, "chat")
 
         # Propose any deferred context edits from the tool-calling loop.
         for edit in deferred_edits:
@@ -1004,6 +1047,7 @@ class ZdrowskitDaemon:
             feedback_id = self._pending_rejection_reasons.pop(prompt_id, None)
         if feedback_id is None:
             return False
+        self._save_pending_reason_state()
 
         updated = update_coach_feedback_reason(self.context_dir, feedback_id, text)
         if not updated:
@@ -1024,6 +1068,7 @@ class ZdrowskitDaemon:
             feedback_id = self._pending_feedback_reasons.pop(prompt_id, None)
         if feedback_id is None:
             return False
+        self._save_pending_reason_state()
 
         conn = open_db(self.db)
         update_feedback_reason(conn, feedback_id, text)
@@ -1158,54 +1203,101 @@ class ZdrowskitDaemon:
                 prompt_id = self._poller.send_reply(
                     "Optional: reply with why you rejected this suggestion.",
                     reply_to_message_id=msg_id,
+                    force_reply=True,
                 )
                 if prompt_id is not None:
                     with self._lock:
                         self._pending_rejection_reasons[prompt_id] = feedback_id
+                    self._save_pending_reason_state()
 
         elif data.startswith("fb_neg:"):
             # User tapped 👎 — swap to category picker (text untouched).
-            llm_call_id_str = data.split(":", 1)[1]
+            parts = data.split(":")
+            if len(parts) < 2:
+                self._poller.answer_callback_query(cb_id, "Invalid feedback action.")
+                return
+            llm_call_id_str = parts[1]
+            message_type = parts[2] if len(parts) >= 3 else "unknown"
             self._poller.answer_callback_query(cb_id)
             if msg_id:
                 from telegram_bot import feedback_category_keyboard
 
-                cats = feedback_category_keyboard(int(llm_call_id_str))
+                cats = feedback_category_keyboard(int(llm_call_id_str), message_type)
                 self._poller.edit_message_reply_markup(msg_id, cats)
 
         elif data.startswith("fb_cat:"):
             # User picked a feedback category.
-            parts = data.split(":", 2)
+            parts = data.split(":")
+            if len(parts) < 3:
+                self._poller.answer_callback_query(cb_id, "Invalid feedback category.")
+                return
             llm_call_id = int(parts[1])
-            category = parts[2]
+            if len(parts) >= 4:
+                message_type = parts[2]
+                category = parts[3]
+            else:
+                message_type = "unknown"
+                category = parts[2]
             self._poller.answer_callback_query(cb_id)
 
             from store import log_feedback, open_db
-            from telegram_bot import FEEDBACK_CATEGORIES
-
-            # Look up message type from feedback map.
-            with self._lock:
-                entry = self._feedback_map.pop(msg_id, None)
-            message_type = entry[1] if entry else "unknown"
+            from telegram_bot import FEEDBACK_CATEGORIES, feedback_undo_keyboard
 
             conn = open_db(self.db)
             fb_id = log_feedback(conn, llm_call_id, category, message_type)
 
-            # Append label to the message text (use Telegram's copy, not the
-            # full report, to stay within the 4096-char chunk limit).
             label = FEEDBACK_CATEGORIES.get(category, category)
             if msg_id:
                 chunk_text = msg.get("text", "")
-                self._poller.edit_message(msg_id, f"{chunk_text}\n\n\U0001f44e {label}")
+                buttons = feedback_undo_keyboard(
+                    fb_id,
+                    llm_call_id,
+                    message_type,
+                    category,
+                )
+                self._poller.edit_message_with_keyboard(
+                    msg_id,
+                    f"{chunk_text}\n\n\U0001f44e {label}",
+                    buttons,
+                )
 
             # Send optional reason prompt.
             prompt_id = self._poller.send_reply(
                 "Reply to explain more (optional).",
                 reply_to_message_id=msg_id,
+                force_reply=True,
             )
             if prompt_id is not None:
                 with self._lock:
                     self._pending_feedback_reasons[prompt_id] = fb_id
+                self._save_pending_reason_state()
+
+        elif data.startswith("fb_undo:"):
+            parts = data.split(":")
+            if len(parts) < 5:
+                self._poller.answer_callback_query(cb_id, "Invalid undo action.")
+                return
+            feedback_id = int(parts[1])
+            llm_call_id = int(parts[2])
+            message_type = parts[3]
+            category = parts[4]
+
+            from store import delete_feedback, open_db
+            from telegram_bot import FEEDBACK_CATEGORIES, feedback_keyboard
+
+            conn = open_db(self.db)
+            deleted = delete_feedback(conn, feedback_id)
+            self._drop_feedback_reason_prompts(feedback_id)
+            if not deleted:
+                self._poller.answer_callback_query(cb_id, "Feedback already removed.")
+                return
+
+            self._poller.answer_callback_query(cb_id, "Feedback removed.")
+            if msg_id:
+                label = FEEDBACK_CATEGORIES.get(category, category)
+                restored = self._strip_feedback_label(msg.get("text", ""), label)
+                buttons = feedback_keyboard(llm_call_id, message_type)
+                self._poller.edit_message_with_keyboard(msg_id, restored, buttons)
 
     def _chat_reply(
         self, conn: sqlite3.Connection

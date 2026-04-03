@@ -86,23 +86,67 @@ FEEDBACK_CATEGORIES: dict[str, str] = {
 }
 
 
-def feedback_keyboard(llm_call_id: int) -> list[list[dict[str, str]]]:
+def feedback_keyboard(
+    llm_call_id: int,
+    message_type: str,
+) -> list[list[dict[str, str]]]:
     """Single 👎 button for an LLM response message."""
-    return [[{"text": "\U0001f44e", "callback_data": f"fb_neg:{llm_call_id}"}]]
+    return [
+        [
+            {
+                "text": "\U0001f44e",
+                "callback_data": f"fb_neg:{llm_call_id}:{message_type}",
+            }
+        ]
+    ]
 
 
-def feedback_category_keyboard(llm_call_id: int) -> list[list[dict[str, str]]]:
+def feedback_category_keyboard(
+    llm_call_id: int,
+    message_type: str,
+) -> list[list[dict[str, str]]]:
     """2×2 category picker shown after the user taps 👎."""
     cats = list(FEEDBACK_CATEGORIES.items())
     return [
         [
-            {"text": cats[0][1], "callback_data": f"fb_cat:{llm_call_id}:{cats[0][0]}"},
-            {"text": cats[1][1], "callback_data": f"fb_cat:{llm_call_id}:{cats[1][0]}"},
+            {
+                "text": cats[0][1],
+                "callback_data": f"fb_cat:{llm_call_id}:{message_type}:{cats[0][0]}",
+            },
+            {
+                "text": cats[1][1],
+                "callback_data": f"fb_cat:{llm_call_id}:{message_type}:{cats[1][0]}",
+            },
         ],
         [
-            {"text": cats[2][1], "callback_data": f"fb_cat:{llm_call_id}:{cats[2][0]}"},
-            {"text": cats[3][1], "callback_data": f"fb_cat:{llm_call_id}:{cats[3][0]}"},
+            {
+                "text": cats[2][1],
+                "callback_data": f"fb_cat:{llm_call_id}:{message_type}:{cats[2][0]}",
+            },
+            {
+                "text": cats[3][1],
+                "callback_data": f"fb_cat:{llm_call_id}:{message_type}:{cats[3][0]}",
+            },
         ],
+    ]
+
+
+def feedback_undo_keyboard(
+    feedback_id: int,
+    llm_call_id: int,
+    message_type: str,
+    category: str,
+) -> list[list[dict[str, str]]]:
+    """Single Undo button shown after feedback is recorded."""
+    return [
+        [
+            {
+                "text": "Undo",
+                "callback_data": (
+                    f"fb_undo:{feedback_id}:{llm_call_id}:{message_type}:{category}"
+                ),
+            }
+        ]
     ]
 
 

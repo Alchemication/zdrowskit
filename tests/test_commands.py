@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from commands import cmd_coach
+from commands import cmd_coach, cmd_llm_log
 from llm import LLMResult
+from store import log_feedback, log_llm_call
 
 
 class TestCmdCoach:
@@ -142,3 +144,62 @@ class TestCmdCoach:
         assert edits[0].summary == "Lighten next week"
         assert edits[0].file == "plan"
         assert edits[0].section == "## Weekly Structure"
+
+
+class TestCmdLlmLog:
+    def test_feedback_json_view(self, in_memory_db, capsys) -> None:
+        call_id = log_llm_call(
+            in_memory_db,
+            request_type="insights",
+            model="test-model",
+            messages=[{"role": "user", "content": "test"}],
+            response_text="response",
+        )
+        log_feedback(
+            in_memory_db,
+            llm_call_id=call_id,
+            category="wrong_tone",
+            message_type="insights",
+            reason="Too harsh for a weekly review.",
+        )
+        args = SimpleNamespace(
+            db="ignored.db",
+            last=10,
+            stats=False,
+            id=None,
+            feedback=True,
+            json=True,
+        )
+
+        with patch("commands.open_db", return_value=in_memory_db):
+            cmd_llm_log(args)
+
+        payload = json.loads(capsys.readouterr().out)
+        assert len(payload) == 1
+        assert payload[0]["category"] == "wrong_tone"
+        assert payload[0]["request_type"] == "insights"
+        assert payload[0]["reason"] == "Too harsh for a weekly review."
+
+    def test_detail_json_still_returns_call_row(self, in_memory_db, capsys) -> None:
+        call_id = log_llm_call(
+            in_memory_db,
+            request_type="chat",
+            model="test-model",
+            messages=[{"role": "user", "content": "hello"}],
+            response_text="response",
+        )
+        args = SimpleNamespace(
+            db="ignored.db",
+            last=10,
+            stats=False,
+            id=call_id,
+            feedback=False,
+            json=True,
+        )
+
+        with patch("commands.open_db", return_value=in_memory_db):
+            cmd_llm_log(args)
+
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["id"] == call_id
+        assert payload["request_type"] == "chat"

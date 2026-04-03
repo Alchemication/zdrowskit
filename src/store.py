@@ -562,3 +562,80 @@ def update_feedback_reason(
     )
     conn.commit()
     logger.debug("Updated feedback id=%d with reason", feedback_id)
+
+
+def delete_feedback(conn: sqlite3.Connection, feedback_id: int) -> bool:
+    """Delete a feedback record by id.
+
+    Args:
+        conn: Open database connection.
+        feedback_id: The llm_feedback row to delete.
+
+    Returns:
+        True if a row was deleted, False otherwise.
+    """
+    cursor = conn.execute("DELETE FROM llm_feedback WHERE id = ?", (feedback_id,))
+    conn.commit()
+    deleted = cursor.rowcount > 0
+    logger.debug("Deleted feedback id=%d deleted=%s", feedback_id, deleted)
+    return deleted
+
+
+def load_feedback_for_call(
+    conn: sqlite3.Connection,
+    llm_call_id: int,
+) -> list[sqlite3.Row]:
+    """Return feedback rows associated with a specific LLM call.
+
+    Args:
+        conn: Open database connection.
+        llm_call_id: The llm_call row id.
+
+    Returns:
+        Feedback rows ordered newest-first.
+    """
+    return conn.execute(
+        """
+        SELECT id, llm_call_id, category, reason, created_at, message_type
+        FROM llm_feedback
+        WHERE llm_call_id = ?
+        ORDER BY created_at DESC, id DESC
+        """,
+        (llm_call_id,),
+    ).fetchall()
+
+
+def load_feedback_entries(
+    conn: sqlite3.Connection,
+    limit: int = 10,
+) -> list[sqlite3.Row]:
+    """Return recent feedback entries joined to their originating LLM call.
+
+    Args:
+        conn: Open database connection.
+        limit: Maximum number of entries to return.
+
+    Returns:
+        Joined feedback + llm_call rows ordered newest-first.
+    """
+    return conn.execute(
+        """
+        SELECT
+            f.id AS feedback_id,
+            f.llm_call_id,
+            f.category,
+            f.reason,
+            f.created_at,
+            f.message_type,
+            c.timestamp,
+            c.request_type,
+            c.model,
+            c.metadata_json
+        FROM llm_feedback AS f
+        JOIN llm_call AS c
+          ON c.id = f.llm_call_id
+        ORDER BY f.created_at DESC, f.id DESC
+        LIMIT ?
+        """,
+        (limit,),
+    ).fetchall()

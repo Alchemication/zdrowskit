@@ -57,6 +57,8 @@ from report import (
 )
 from store import (
     load_date_range,
+    load_feedback_entries,
+    load_feedback_for_call,
     load_snapshots,
     open_db,
     store_snapshots,
@@ -953,9 +955,11 @@ def cmd_llm_log(args: argparse.Namespace) -> None:
       default   — list recent calls with summary info (last N, default 10).
       --stats   — aggregate usage summary by request type and model.
       --id N    — show full detail for a specific call.
+      --feedback — list recent thumbs-down feedback joined to LLM calls.
 
     Args:
-        args: Parsed CLI arguments with db, last, stats, id, and json attributes.
+        args: Parsed CLI arguments with db, last, stats, id, feedback,
+            and json attributes.
     """
     conn = open_db(Path(args.db))
 
@@ -997,6 +1001,24 @@ def cmd_llm_log(args: argparse.Namespace) -> None:
         if row["metadata_json"]:
             meta_table.add_row("Metadata", row["metadata_json"])
         console.print(meta_table)
+
+        feedback_rows = load_feedback_for_call(conn, args.id)
+        if feedback_rows:
+            feedback_table = Table(title="Feedback", show_lines=False)
+            feedback_table.add_column("ID", justify="right", style="dim")
+            feedback_table.add_column("When")
+            feedback_table.add_column("Category", style="cyan")
+            feedback_table.add_column("Message", style="dim")
+            feedback_table.add_column("Reason")
+            for feedback in feedback_rows:
+                feedback_table.add_row(
+                    str(feedback["id"]),
+                    feedback["created_at"][:16],
+                    feedback["category"],
+                    feedback["message_type"],
+                    feedback["reason"] or "—",
+                )
+            console.print(feedback_table)
 
         messages = json.loads(row["messages_json"])
         for msg in messages:
@@ -1085,14 +1107,73 @@ def cmd_llm_log(args: argparse.Namespace) -> None:
         console.print(f"\n[bold]Total:[/bold] {grand_calls} calls, ${grand_cost:.4f}")
         return
 
+    # --- Feedback mode ---
+    if getattr(args, "feedback", False):
+        rows = load_feedback_entries(conn, limit=args.last)
+        if not rows:
+            print("No feedback logged yet.")
+            return
+
+        if args.json:
+            output = [{k: row[k] for k in row.keys()} for row in rows]
+            print(json.dumps(output, indent=2))
+            return
+
+        from rich.console import Console
+        from rich.table import Table
+
+        console = Console()
+        table = Table(title=f"Recent Feedback (last {args.last})", show_lines=False)
+        table.add_column("Feedback", justify="right", style="dim")
+        table.add_column("When")
+        table.add_column("Category", style="cyan")
+        table.add_column("Message", style="dim")
+        table.add_column("Call", justify="right")
+        table.add_column("Type")
+        table.add_column("Model", style="dim")
+        table.add_column("Reason")
+
+        for row in rows:
+            reason = row["reason"] or "—"
+            if len(reason) > 80:
+                reason = reason[:77] + "..."
+            table.add_row(
+                str(row["feedback_id"]),
+                row["created_at"][:16],
+                row["category"],
+                row["message_type"],
+                str(row["llm_call_id"]),
+                row["request_type"],
+                row["model"].split("/")[-1],
+                reason,
+            )
+
+        console.print(table)
+        return
+
     # --- List mode (default) ---
     rows = conn.execute(
         """
-        SELECT id, timestamp, request_type, model,
-               input_tokens, output_tokens, total_tokens, latency_s,
-               cost, metadata_json
-        FROM llm_call
-        ORDER BY id DESC
+        SELECT
+            c.id,
+            c.timestamp,
+            c.request_type,
+            c.model,
+            c.input_tokens,
+            c.output_tokens,
+            c.total_tokens,
+            c.latency_s,
+            c.cost,
+            c.metadata_json,
+            COUNT(f.id) AS feedback_count
+        FROM llm_call AS c
+        LEFT JOIN llm_feedback AS f
+          ON f.llm_call_id = c.id
+        GROUP BY
+            c.id, c.timestamp, c.request_type, c.model,
+            c.input_tokens, c.output_tokens, c.total_tokens,
+            c.latency_s, c.cost, c.metadata_json
+        ORDER BY c.id DESC
         LIMIT ?
         """,
         (args.last,),
@@ -1120,6 +1201,7 @@ def cmd_llm_log(args: argparse.Namespace) -> None:
     table.add_column("Out tok", justify="right")
     table.add_column("Latency", justify="right")
     table.add_column("Cost", justify="right", style="green")
+    table.add_column("Feedback", justify="right")
     table.add_column("Metadata", style="dim")
 
     for r in rows:
@@ -1133,6 +1215,7 @@ def cmd_llm_log(args: argparse.Namespace) -> None:
             f"{r['output_tokens']:,}",
             f"{r['latency_s']:.1f}s",
             f"${r['cost']:.4f}" if r["cost"] is not None else "—",
+            str(r["feedback_count"] or 0),
             meta,
         )
 

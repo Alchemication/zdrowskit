@@ -159,6 +159,7 @@ uv run python main.py coach --telegram                   # send proposals with A
 uv run python main.py llm-log                           # last 10 LLM calls
 uv run python main.py llm-log --stats                   # usage summary by type and model
 uv run python main.py llm-log --id 42                   # full detail for a specific call
+uv run python main.py llm-log --feedback                # recent thumbs-down feedback
 uv run python main.py llm-log --json                    # output as JSON
 
 uv run python main.py telegram-setup                    # register bot /commands for autocomplete + menu
@@ -183,7 +184,7 @@ launchctl load ~/Library/LaunchAgents/com.zdrowskit.daemon.plist
 
 What it watches and when it acts is covered in the [Notifications](#notifications) section — triggers, suppression rules, and cross-channel awareness.
 
-**State file:** `~/Documents/zdrowskit/.daemon_state.json` tracks rate limits, recent nudge history, coach summaries, and the quiet-hours queue. Delete or reset it to force a notification.
+**State file:** `~/Documents/zdrowskit/.daemon_state.json` tracks rate limits, recent nudge history, coach summaries, the quiet-hours queue, and pending Telegram reason prompts for feedback / proposal rejection. Delete or reset it to force a notification.
 
 **Logs:** `~/Library/Logs/zdrowskit.daemon.log` (rotating, 7 days).
 
@@ -271,6 +272,7 @@ The daemon runs a Telegram long-polling listener alongside the file watcher. Sen
 - Ask analytical questions — the LLM queries your database with SQL and charts the results
 - Reply to a nudge or report — the bot knows which message you're responding to
 - Share updates naturally ("my weight is 76kg now") — the LLM proposes context file edits with Accept/Reject buttons
+- Thumbs down a bad output, pick a category, optionally reply with more detail, and undo it if you tapped it during testing or a demo
 - Commands: `/coach`, `/clear`, `/status`, `/context [name]`, `/help`
 - Conversation buffer: last 20 messages in memory, resets on daemon restart
 

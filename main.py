@@ -358,6 +358,11 @@ def main() -> None:
         action="store_true",
         help="Show aggregate usage summary by request type and model",
     )
+    p_llm_log.add_argument(
+        "--feedback",
+        action="store_true",
+        help="Show recent thumbs-down feedback joined to LLM calls",
+    )
     p_llm_log.add_argument("--json", action="store_true", help="Output JSON")
     _add_db(p_llm_log)
 
