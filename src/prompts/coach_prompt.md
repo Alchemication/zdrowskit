@@ -34,6 +34,12 @@ provisional review and do not penalize sessions that have not happened yet.
 {recent_nudges}
 
 ## Health Data (JSON)
+
+The JSON below contains **weekly summaries only** — no per-day breakdown.
+Use `run_sql` to query daily details, workout specifics, or historical data
+when the summary is insufficient. Use `sleep_nights_tracked` /
+`sleep_nights_total` for compliance.
+
 ```json
 {health_data}
 ```

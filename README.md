@@ -249,9 +249,9 @@ Each notification type is a distinct LLM call with its own prompt, context, tool
 
 | Channel | Purpose | Trigger | Frequency | Length | Tools | Special output |
 |---------|---------|---------|-----------|--------|-------|----------------|
-| **Insights** | Full weekly report | Scheduled (Mon 8am) or manual | 1×/week | ~600 words | None | `<chart>` (0+), `<memory>` (always 1, appended to `history.md`) |
+| **Insights** | Full weekly report | Scheduled (Mon 8am) or manual | 1×/week | ~600 words | `run_sql` | `<chart>` (0+), `<memory>` (always 1, appended to `history.md`) |
 | **Coach** | Plan/goal proposals with Approve/Reject buttons | After insights or manual `/coach` | 1×/week | ~300 words | `run_sql`, `update_context` (plan, goals only) | `update_context` tool calls (0–2) |
-| **Nudge** | Short reactive notification — one observation, one action | Data sync, file edit, missed session | Up to 3/day | 80 words | None | `SKIP` if nothing new; `<chart>` (0–1) |
+| **Nudge** | Short reactive notification — one observation, one action | Data sync, file edit, missed session | Up to 3/day | 80 words | `run_sql` | `SKIP` if nothing new; `<chart>` (0–1) |
 | **Chat** | Interactive conversation — ask anything, get charts | Your Telegram message | On demand | 150 words | `run_sql` (up to 5/turn), `update_context` (any file) | `<chart>` (optional), `update_context` (at most 1) |
 
 ### What triggers nudges

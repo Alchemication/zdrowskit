@@ -26,13 +26,40 @@ Title the report with the ISO week number, user's name, and date — e.g.
 {history}
 
 ## Health Data (JSON)
+
+The JSON below contains **weekly summaries only** — no per-day breakdown.
+Use `run_sql` to query daily details, workout specifics, or historical data
+when the summary is insufficient for your analysis.
+
 ```json
 {health_data}
 ```
 
+### Database schema (for run_sql)
+
+**daily** — one row per calendar day, PK: `date` (YYYY-MM-DD)
+
+- Activity: `steps`, `distance_km`, `active_energy_kj`, `exercise_min`, `stand_hours`, `flights_climbed`
+- Cardiac: `resting_hr` (bpm), `hrv_ms` (SDNN ms), `walking_hr_avg` (bpm), `hr_day_min`, `hr_day_max`, `vo2max` (ml/kg/min, sparse), `recovery_index` (= hrv_ms / resting_hr)
+- Sleep: `sleep_total_h`, `sleep_in_bed_h`, `sleep_efficiency_pct`, `sleep_deep_h`, `sleep_core_h` (= light), `sleep_rem_h`, `sleep_awake_h` — stored under **night-start date** (Mon row = Mon night's sleep, which affected Tue's recovery). NULL = not tracked.
+- Mobility: `walking_speed_kmh`, `walking_step_length_cm`, `walking_asymmetry_pct`, `walking_double_support_pct`, `running_stride_length_m`, `running_power_w`, `running_speed_kmh` (all sparse)
+
+**workout** — one row per session, PK: `start_utc`, FK: `date`
+
+- `type`, `category` (run/lift/walk/cycle/other), `duration_min`
+- `hr_min`/`hr_avg`/`hr_max`, `active_energy_kj`, `intensity_kcal_per_hr_kg`
+- `temperature_c`, `humidity_pct`
+- `gpx_distance_km`, `gpx_elevation_gain_m`, `gpx_avg_speed_ms`, `gpx_max_speed_p95_ms`
+- Pace: `duration_min / gpx_distance_km` = min/km (only when `gpx_distance_km IS NOT NULL`)
+- Speed: `gpx_avg_speed_ms * 3.6` = km/h
+
 ---
 
 ## Instructions
+
+Use `run_sql` to pull per-day details needed for the Training Review section
+and to verify metric trends. The summary JSON gives you the high-level picture;
+SQL gives you the detail.
 
 Analyze the health data above in context of the user's profile, goals, plan,
 and their own notes. Produce a report with these sections:
@@ -59,8 +86,8 @@ and their own notes. Produce a report with these sections:
    trend, or needs attention. Compare to baselines and reference multi-week
    trends where meaningful. For sleep: note total duration vs target,
    efficiency, and deep/REM balance — but only if sleep is a story this week.
-   Include sleep tracking compliance (nights tracked / total nights) from
-   baselines when it's below 80%.
+   Use `sleep_nights_tracked` / `sleep_nights_total` from the summary for
+   compliance. Flag when below 80%.
 4. **Recovery Status** — based on HRV trend, resting HR, recovery index, and
    sleep quality. Simple verdict: ready to push / maintain / back off. Explain
    *why* — connect the specific metrics to the conclusion. Poor sleep (low
@@ -78,8 +105,9 @@ never as decimal minutes.
 ### Charts (optional, 0-3)
 
 If a visual would genuinely clarify a trend, pattern, or comparison better
-than words, include a chart block. The health data is available as a `data`
-dict with the same structure as the JSON above.
+than words, include a chart block. The `data` dict in chart code includes
+per-day data at `data["current_week"]["days"]` (richer than the summary JSON
+above).
 
 <chart title="Descriptive Title">
 import plotly.graph_objects as go
@@ -103,9 +131,9 @@ Chart rules:
 - Only include a chart when it genuinely adds insight. Zero charts is fine.
 - Code must produce a `fig` variable (a plotly Figure). No file I/O.
 - Use `go` (plotly.graph_objects) or `px` (plotly.express).
-- `data` has `data["current_week"]["days"]` (list of daily dicts) and
-  `data["history"]` (list of weekly summary dicts). Each daily dict has
-  fields like `date`, `hrv_ms`, `resting_hr`, `steps`, `sleep`, `workouts`.
+- `data` has `data["current_week"]["days"]` (per-day dicts with fields like
+  `date`, `hrv_ms`, `resting_hr`, `steps`, `sleep_status`, `workouts`) and
+  `data["history"]` (list of weekly summary dicts).
 - Use `{chart_theme}` template, tight margins, minimal gridlines.
 - Color-code markers: red (#e74c3c) for concerning, green (#2ecc71) for good,
   blue (#3498db) for neutral.

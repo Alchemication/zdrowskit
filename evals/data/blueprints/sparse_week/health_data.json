@@ -1,7 +1,7 @@
 {
   "current_week": {
     "summary": {
-      "week_label": "2026-W15 (2026-04-06 – 2026-04-10)",
+      "week_label": "2026-W15 (2026-04-06 \u2013 2026-04-10)",
       "run_count": 1,
       "lift_count": 0,
       "walk_count": 0,
@@ -18,7 +18,21 @@
       "avg_sleep_total_h": 6.15,
       "avg_sleep_efficiency_pct": 88.6,
       "run_consistency_pct": 33.3,
-      "lift_consistency_pct": 0.0
+      "lift_consistency_pct": 0.0,
+      "sleep_nights_tracked": 4,
+      "sleep_nights_total": 4,
+      "sleep_not_tracked_dates": [],
+      "run_target": 2,
+      "lift_target": 2,
+      "today": {
+        "date": "2026-04-10",
+        "hrv_ms": 41.5,
+        "resting_hr": 56,
+        "recovery_index": 0.741,
+        "steps": 4820,
+        "exercise_min": null,
+        "sleep_status": "pending"
+      }
     },
     "days": [
       {
@@ -38,7 +52,8 @@
             "gpx_distance_km": 4.8
           }
         ],
-        "recovery_index": 0.818
+        "recovery_index": 0.818,
+        "sleep_status": "tracked"
       },
       {
         "date": "2026-04-07",
@@ -48,7 +63,8 @@
         "sleep_total_h": 6.1,
         "sleep_efficiency_pct": 88.0,
         "workouts": [],
-        "recovery_index": 0.732
+        "recovery_index": 0.732,
+        "sleep_status": "tracked"
       },
       {
         "date": "2026-04-08",
@@ -58,7 +74,8 @@
         "sleep_total_h": 5.8,
         "sleep_efficiency_pct": 86.0,
         "workouts": [],
-        "recovery_index": 0.702
+        "recovery_index": 0.702,
+        "sleep_status": "tracked"
       },
       {
         "date": "2026-04-09",
@@ -68,7 +85,8 @@
         "sleep_total_h": 6.0,
         "sleep_efficiency_pct": 89.0,
         "workouts": [],
-        "recovery_index": 0.702
+        "recovery_index": 0.702,
+        "sleep_status": "tracked"
       },
       {
         "date": "2026-04-10",
@@ -76,7 +94,8 @@
         "resting_hr": 56,
         "hrv_ms": 41.5,
         "workouts": [],
-        "recovery_index": 0.741
+        "recovery_index": 0.741,
+        "sleep_status": "pending"
       }
     ]
   },

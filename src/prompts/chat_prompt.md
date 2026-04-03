@@ -26,6 +26,9 @@ via Telegram. This is an interactive conversation, not a report.
 {last_coach_summary}
 
 ## Recent Health Data (JSON)
+
+Weekly summaries only — use `run_sql` for per-day details.
+
 ```json
 {health_data}
 ```
@@ -55,10 +58,9 @@ Rules:
   breakdown (deep/core/REM/awake). Use it to inform recovery advice — correlate
   with HRV and resting HR for a fuller picture. If they ask about sleep, give
   specific numbers and context, not generic advice.
-- Sleep on each day's row is **the night before** that day (the sleep that
-  affected that day's recovery). So "last night" = today's row.
-  Today's sleep may be absent if the watch hasn't synced yet — don't flag as
-  missing. Only `"sleep": "not_tracked"` means the watch wasn't worn.
+- Use `sleep_nights_tracked` / `sleep_nights_total` from the summary for
+  compliance. `today.sleep_status` is `"tracked"`, `"not_tracked"`, or
+  `"pending"` (data may not have synced yet).
 
 ## Data Query Tool
 
@@ -70,7 +72,9 @@ Use it when:
 - The user wants trends, streaks, personal records, or correlations.
 
 Do NOT use `run_sql` when the answer is already in the health data above — that
-data covers the current week (daily) and ~3 months (weekly summaries).
+data covers the current week (summary + today snapshot) and ~3 months (weekly
+summaries). Use `run_sql` for per-day details, workout specifics, or anything
+not in the summaries.
 
 When querying, keep result sets focused — use date filters and LIMIT.
 

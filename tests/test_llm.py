@@ -22,6 +22,7 @@ from llm import (
     call_llm,
     extract_memory,
     load_context,
+    slim_for_prompt,
 )
 from models import DailySnapshot
 from store import store_snapshots
@@ -481,7 +482,6 @@ class TestBuildLlmData:
     def test_empty_db(self, in_memory_db: sqlite3.Connection) -> None:
         result = build_llm_data(in_memory_db, months=3)
         assert result["current_week"]["summary"] is None
-        assert result["current_week"]["days"] == []
         assert result["history"] == []
 
     @patch("llm.date")
@@ -572,13 +572,15 @@ class TestBuildLlmData:
         days = {d["date"]: d for d in result["current_week"]["days"]}
         # Mon: no pre-week data to shift in, today's sync heuristic doesn't
         # apply (it's Wed) — but no sleep was shifted in, so not_tracked
-        assert days["2026-03-09"]["sleep"] == "not_tracked"
+        assert days["2026-03-09"]["sleep_status"] == "not_tracked"
         # Tue: gets Mon night's sleep (7.4h)
         assert days["2026-03-10"]["sleep_total_h"] == 7.4
+        assert days["2026-03-10"]["sleep_status"] == "tracked"
         # Wed (today): gets Tue night's sleep (7.0h)
         assert days["2026-03-11"]["sleep_total_h"] == 7.0
+        assert days["2026-03-11"]["sleep_status"] == "tracked"
         # Thu: no sleep shifted in — not_tracked
-        assert days["2026-03-12"]["sleep"] == "not_tracked"
+        assert days["2026-03-12"]["sleep_status"] == "not_tracked"
         # Metrics unchanged
         assert days["2026-03-09"]["steps"] == 9500
         assert days["2026-03-10"]["steps"] == 12000
@@ -675,8 +677,8 @@ class TestBuildLlmData:
         result = build_llm_data(in_memory_db, months=3)
 
         days = {d["date"]: d for d in result["current_week"]["days"]}
-        # Today — sleep absent, not "not_tracked"
-        assert "sleep" not in days["2026-03-12"]
+        # Today — sleep_status is "pending", not "not_tracked"
+        assert days["2026-03-12"]["sleep_status"] == "pending"
 
     @patch("llm.datetime")
     @patch("llm.date")
@@ -698,6 +700,84 @@ class TestBuildLlmData:
         days = {d["date"]: d for d in result["current_week"]["days"]}
         # Sunday (Mar 15) — its sleep was shifted forward (off the end),
         # no sleep remains → not_tracked
-        assert days["2026-03-15"]["sleep"] == "not_tracked"
+        assert days["2026-03-15"]["sleep_status"] == "not_tracked"
         # The week still has 7 days
         assert len(result["current_week"]["days"]) == 7
+
+    @patch("llm.datetime")
+    @patch("llm.date")
+    def test_sleep_compliance_fields(
+        self,
+        mock_date: MagicMock,
+        mock_datetime: MagicMock,
+        in_memory_db: sqlite3.Connection,
+        sample_snapshots: list[DailySnapshot],
+    ) -> None:
+        """Summary includes pre-computed sleep compliance stats."""
+        # Wed Mar 11.  Fixture has Mon-Sun.  After shift:
+        # Mon=not_tracked, Tue=tracked(7.4h), Wed(today)=tracked(7.0h from shift),
+        # Thu-Sun=not_tracked (no sleep in fixture).
+        mock_date.today.return_value = date(2026, 3, 11)
+        mock_date.fromisoformat = date.fromisoformat
+        mock_datetime.now.return_value = datetime(2026, 3, 11, 14, 0)
+        store_snapshots(in_memory_db, sample_snapshots)
+        result = build_llm_data(in_memory_db, months=3)
+
+        summary = result["current_week"]["summary"]
+        assert summary["sleep_nights_tracked"] == 2  # Tue, Wed (shifted sleep)
+        assert summary["sleep_nights_total"] == 7  # all 7 days eligible
+        assert "2026-03-09" in summary["sleep_not_tracked_dates"]
+        assert "2026-03-12" in summary["sleep_not_tracked_dates"]
+        assert len(summary["sleep_not_tracked_dates"]) == 5
+        assert summary["run_target"] == 2
+        assert summary["lift_target"] == 2
+
+    @patch("llm.datetime")
+    @patch("llm.date")
+    def test_today_snapshot_in_summary(
+        self,
+        mock_date: MagicMock,
+        mock_datetime: MagicMock,
+        in_memory_db: sqlite3.Connection,
+        sample_snapshots: list[DailySnapshot],
+    ) -> None:
+        """Summary includes a today snapshot with key vitals."""
+        mock_date.today.return_value = date(2026, 3, 11)
+        mock_date.fromisoformat = date.fromisoformat
+        mock_datetime.now.return_value = datetime(2026, 3, 11, 14, 0)
+        store_snapshots(in_memory_db, sample_snapshots)
+        result = build_llm_data(in_memory_db, months=3)
+
+        summary = result["current_week"]["summary"]
+        today = summary["today"]
+        assert today["date"] == "2026-03-11"
+        assert today["hrv_ms"] is not None
+        assert today["steps"] is not None
+        assert today["sleep_status"] in ("tracked", "pending", "not_tracked")
+
+    @patch("llm.datetime")
+    @patch("llm.date")
+    def test_slim_for_prompt_strips_days(
+        self,
+        mock_date: MagicMock,
+        mock_datetime: MagicMock,
+        in_memory_db: sqlite3.Connection,
+        sample_snapshots: list[DailySnapshot],
+    ) -> None:
+        """slim_for_prompt removes per-day arrays but keeps summary."""
+        mock_date.today.return_value = date(2026, 3, 11)
+        mock_date.fromisoformat = date.fromisoformat
+        mock_datetime.now.return_value = datetime(2026, 3, 11, 14, 0)
+        store_snapshots(in_memory_db, sample_snapshots)
+        result = build_llm_data(in_memory_db, months=3)
+
+        # Full result has days
+        assert "days" in result["current_week"]
+
+        # Slim version does not
+        slim = slim_for_prompt(result)
+        assert "days" not in slim["current_week"]
+        assert slim["current_week"]["summary"] is not None
+
+        # Original is not mutated
+        assert "days" in result["current_week"]

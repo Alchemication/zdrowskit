@@ -70,7 +70,7 @@ class TestCaseDataset:
         assert "# Profile" in context["me"]
         assert metadata["week_complete"] is False
         assert db_seed is None
-        assert "sleep" not in health_data["current_week"]["days"][-1]
+        assert health_data["current_week"]["days"][-1]["sleep_status"] == "pending"
 
 
 class TestChatEvalLoop:

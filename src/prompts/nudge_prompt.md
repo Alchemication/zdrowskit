@@ -26,9 +26,32 @@ weekly report.
 {history}
 
 ## Health Data (JSON)
+
+The JSON below contains **weekly summaries only** — no per-day breakdown.
+Use `run_sql` to query daily details, workout specifics, or historical data
+when the summary is insufficient.
+
 ```json
 {health_data}
 ```
+
+### Database schema (for run_sql)
+
+**daily** — one row per calendar day, PK: `date` (YYYY-MM-DD)
+
+- Activity: `steps`, `distance_km`, `active_energy_kj`, `exercise_min`, `stand_hours`, `flights_climbed`
+- Cardiac: `resting_hr` (bpm), `hrv_ms` (SDNN ms), `walking_hr_avg` (bpm), `hr_day_min`, `hr_day_max`, `vo2max` (ml/kg/min, sparse), `recovery_index` (= hrv_ms / resting_hr)
+- Sleep: `sleep_total_h`, `sleep_in_bed_h`, `sleep_efficiency_pct`, `sleep_deep_h`, `sleep_core_h` (= light), `sleep_rem_h`, `sleep_awake_h` — stored under **night-start date** (Mon row = Mon night's sleep, which affected Tue's recovery). NULL = not tracked.
+- Mobility: `walking_speed_kmh`, `walking_step_length_cm`, `walking_asymmetry_pct`, `walking_double_support_pct`, `running_stride_length_m`, `running_power_w`, `running_speed_kmh` (all sparse)
+
+**workout** — one row per session, PK: `start_utc`, FK: `date`
+
+- `type`, `category` (run/lift/walk/cycle/other), `duration_min`
+- `hr_min`/`hr_avg`/`hr_max`, `active_energy_kj`, `intensity_kcal_per_hr_kg`
+- `temperature_c`, `humidity_pct`
+- `gpx_distance_km`, `gpx_elevation_gain_m`, `gpx_avg_speed_ms`, `gpx_max_speed_p95_ms`
+- Pace: `duration_min / gpx_distance_km` = min/km (only when `gpx_distance_km IS NOT NULL`)
+- Speed: `gpx_avg_speed_ms * 3.6` = km/h
 
 ---
 
@@ -52,13 +75,12 @@ on its own line, nothing else. A SKIP is always better than a redundant message.
 If you do write, produce a single short message — maximum 80 words. Use **bold**
 for key numbers or actions. No headers. Keep it conversational.
 
-### Sleep tracking gaps
+### Sleep tracking compliance
 
-Sleep on each day's row is **the night before** that day. Today's sleep may
-be absent if the watch hasn't synced yet — don't flag as missing. Only
-`"sleep": "not_tracked"` means the watch wasn't worn — normal and not worth
-mentioning on its own. Only flag a tracking gap if sleep has been
-`not_tracked` for 3+ consecutive past days.
+Use `sleep_nights_tracked` / `sleep_nights_total` from the summary for
+compliance. `today.sleep_status` is `"tracked"`, `"not_tracked"`, or
+`"pending"` (data may not have synced yet — don't flag as missing). Only
+mention a tracking gap if 3+ consecutive nights were missed.
 
 ### System-initiated triggers (the user didn't do anything — be concise)
 
@@ -95,8 +117,9 @@ mm:ss/km format (e.g. 5:37/km), never as decimal minutes.
 ### Chart (optional, 0-1)
 
 Most nudges need no chart. Only include one when it genuinely helps make your
-point clearer than words alone. The `data` dict has the same structure as the
-JSON above.
+point clearer than words alone. The `data` dict in chart code includes
+per-day data at `data["current_week"]["days"]` (richer than the summary JSON
+above).
 
 <chart title="HRV This Week">
 import plotly.graph_objects as go

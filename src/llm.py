@@ -31,7 +31,7 @@ from pathlib import Path
 
 import litellm
 
-from aggregator import summarise
+from aggregator import WEEKLY_LIFT_TARGET, WEEKLY_RUN_TARGET, summarise
 from config import (
     CHART_THEME,
     MAX_COACH_FEEDBACK_ENTRIES,
@@ -114,6 +114,9 @@ def load_context(
     context_dir: Path,
     prompt_file: str = "prompt",
     prompts_dir: Path = PROMPTS_DIR,
+    *,
+    max_history: int | None = None,
+    max_log: int | None = None,
 ) -> dict[str, str]:
     """Read prompt templates and user context files.
 
@@ -128,6 +131,8 @@ def load_context(
             ``"prompt"``). Use ``"chat_prompt"`` for interactive chat
             or ``"nudge_prompt"`` for nudges.
         prompts_dir: Directory containing prompt template files.
+        max_history: Override MAX_HISTORY_ENTRIES for this call.
+        max_log: Override MAX_LOG_ENTRIES for this call.
 
     Returns:
         A dict mapping file stems (e.g. "soul", "prompt") to their
@@ -138,6 +143,9 @@ def load_context(
     Raises:
         FileNotFoundError: If the prompt file is missing.
     """
+    history_limit = max_history if max_history is not None else MAX_HISTORY_ENTRIES
+    log_limit = max_log if max_log is not None else MAX_LOG_ENTRIES
+
     result: dict[str, str] = {}
 
     # Load prompt template from prompts_dir
@@ -158,11 +166,11 @@ def load_context(
         if path.exists():
             content = path.read_text(encoding="utf-8")
             if name == "history":
-                content = _recent_history(content, MAX_HISTORY_ENTRIES)
+                content = _recent_history(content, history_limit)
             elif name == "coach_feedback":
                 content = _recent_history(content, MAX_COACH_FEEDBACK_ENTRIES)
             elif name == "log":
-                content = _recent_history(content, MAX_LOG_ENTRIES)
+                content = _recent_history(content, log_limit)
             result[name] = content
             logger.debug("Loaded context: %s", path)
         else:
@@ -659,10 +667,27 @@ def append_history(
     logger.info("History %s now has %d entries", history_path, len(entries))
 
 
+_SLEEP_KEYS = frozenset(
+    {
+        "sleep_total_h",
+        "sleep_in_bed_h",
+        "sleep_efficiency_pct",
+        "sleep_deep_h",
+        "sleep_core_h",
+        "sleep_rem_h",
+        "sleep_awake_h",
+    }
+)
+
+
 def build_llm_data(
     conn: sqlite3.Connection, months: int, week: str = "current"
 ) -> dict:
-    """Build the combined current-week + history JSON structure for LLM consumption.
+    """Build a compact summary + history JSON for LLM consumption.
+
+    The output is deliberately slim — pre-computed compliance stats, a today
+    snapshot, and weekly summaries.  Per-day detail is omitted; the LLM can
+    use ``run_sql`` to drill into specifics when needed.
 
     Args:
         conn: Open SQLite database connection.
@@ -671,13 +696,13 @@ def build_llm_data(
               today, "last" for the previous full Mon–Sun week.
 
     Returns:
-        A dict with 'current_week', 'history', and 'week_complete' keys,
-        JSON-serialisable.  Returns empty structure if the database has no data.
+        A dict with 'current_week', 'history', 'week_complete', and
+        'week_label' keys, JSON-serialisable.
     """
     dr = load_date_range(conn)
     if dr is None:
         return {
-            "current_week": {"summary": None, "days": []},
+            "current_week": {"summary": None},
             "history": [],
             "week_complete": False,
         }
@@ -719,61 +744,139 @@ def build_llm_data(
 
     all_days = [to_dict(s) for s in current_snaps]
 
-    # Shift sleep forward by one day.  Apple Health stores sleep under the
-    # night-start date, but for the LLM each day's sleep should be "the night
-    # before this day" — the sleep that affected this day's recovery.  We
-    # fetched one extra day before the week to supply Monday's sleep.
-    _SLEEP_KEYS = {
-        "sleep_total_h",
-        "sleep_in_bed_h",
-        "sleep_efficiency_pct",
-        "sleep_deep_h",
-        "sleep_core_h",
-        "sleep_rem_h",
-        "sleep_awake_h",
-    }
+    # --- Sleep shift ---
+    # Apple Health stores sleep under the night-start date, but for the LLM
+    # each day's sleep should be "the night before this day" — the sleep that
+    # affected this day's recovery.  We fetched one extra day before the week
+    # to supply Monday's sleep.
     for i in range(len(all_days) - 1, 0, -1):
         prev_day, cur_day = all_days[i - 1], all_days[i]
-        # Move previous day's sleep into current day.
         for k in _SLEEP_KEYS:
             cur_day[k] = prev_day.get(k)
             prev_day.pop(k, None)
-    # First day in all_days is the extra pre-week day — strip its remaining
-    # sleep (already moved forward) and then drop it from the output.
+    # Drop the extra pre-week day.
     if all_days and all_days[0].get("date", "") < week_start:
-        for k in _SLEEP_KEYS:
-            all_days[0].pop(k, None)
         all_days = all_days[1:]
     days = all_days
 
-    # Mark days with no sleep data.  After the shift, null sleep means the
-    # watch wasn't worn the night before — except for today (last night may
-    # not have synced yet) and yesterday before the sync cutoff.
-    today_iso = date.today().isoformat()
-    yesterday_iso = (date.today() - timedelta(days=1)).isoformat()
+    # --- Classify sleep status per day and compute compliance ---
+    today_iso = today.isoformat()
+    yesterday_iso = (today - timedelta(days=1)).isoformat()
     before_sync_cutoff = datetime.now().hour < SLEEP_SYNC_CUTOFF_HOUR
+
+    sleep_tracked = 0
+    sleep_total_eligible = 0
+    not_tracked_dates: list[str] = []
+
     for day in days:
-        if isinstance(day, dict) and all(day.get(k) is None for k in _SLEEP_KEYS):
-            for k in _SLEEP_KEYS:
-                day.pop(k, None)
+        if not isinstance(day, dict):
+            continue
+        day_date = day.get("date")
+        has_sleep = any(day.get(k) is not None for k in _SLEEP_KEYS)
 
-            day_date = day.get("date")
-            if day_date == today_iso:
-                pass  # last night may not have synced yet
-            elif day_date == yesterday_iso and before_sync_cutoff:
-                pass  # watch data likely hasn't synced yet
-            else:
-                day["sleep"] = "not_tracked"
+        if has_sleep:
+            day["sleep_status"] = "tracked"
+            sleep_tracked += 1
+            sleep_total_eligible += 1
+        elif day_date == today_iso:
+            day["sleep_status"] = "pending"
+            # Don't count today against compliance — data may not have synced.
+        elif day_date == yesterday_iso and before_sync_cutoff:
+            day["sleep_status"] = "pending"
+            # Before sync cutoff, yesterday is also pending.
+        else:
+            day["sleep_status"] = "not_tracked"
+            sleep_total_eligible += 1
+            not_tracked_dates.append(day_date or "")
 
-    # Exclude the extra pre-week day from the summary.
+    # --- Build the today snapshot ---
+    today_snapshot = _build_today_snapshot(days, today_iso)
+
+    # --- Assemble the summary ---
     week_snaps = [s for s in current_snaps if s.date >= week_start]
+    summary = to_dict(summarise(week_snaps)) if week_snaps else None
+
+    if summary:
+        # Inject pre-computed compliance and target fields.
+        summary["sleep_nights_tracked"] = sleep_tracked
+        summary["sleep_nights_total"] = sleep_total_eligible
+        summary["sleep_not_tracked_dates"] = not_tracked_dates
+        summary["run_target"] = WEEKLY_RUN_TARGET
+        summary["lift_target"] = WEEKLY_LIFT_TARGET
+        if today_snapshot:
+            summary["today"] = today_snapshot
 
     return {
         "current_week": {
-            "summary": to_dict(summarise(week_snaps)) if week_snaps else None,
+            "summary": summary,
+            # Per-day data kept for chart rendering; excluded from LLM prompt
+            # JSON by slim_for_prompt().
             "days": days,
         },
         "history": [{"summary": to_dict(summarise(w))} for w in history_weeks],
         "week_complete": today > date.fromisoformat(week_end),
         "week_label": week_label,
     }
+
+
+def slim_for_prompt(health_data: dict) -> dict:
+    """Return a copy of health_data with per-day arrays stripped.
+
+    The compact version contains only weekly summaries, pre-computed
+    compliance stats, and the today snapshot — suitable for embedding
+    in LLM prompts.  Per-day data is available to the LLM via run_sql.
+
+    The original dict (with ``days``) should still be passed to
+    ``render_chart()`` so chart code can access daily values.
+    """
+    import copy
+
+    slim = copy.deepcopy(health_data)
+    cw = slim.get("current_week")
+    if isinstance(cw, dict):
+        cw.pop("days", None)
+    return slim
+
+
+def _build_today_snapshot(days: list[dict], today_iso: str) -> dict | None:
+    """Extract a compact snapshot for today from the shifted day list.
+
+    Returns a dict with key vitals and minimal workout info, or None if
+    today is not in the data.
+    """
+    today_day = None
+    for d in days:
+        if isinstance(d, dict) and d.get("date") == today_iso:
+            today_day = d
+            break
+    if today_day is None:
+        return None
+
+    workouts = []
+    for w in today_day.get("workouts", []):
+        workouts.append(
+            {
+                "type": w.get("type"),
+                "category": w.get("category"),
+                "duration_min": w.get("duration_min"),
+            }
+        )
+
+    snapshot: dict = {
+        "date": today_iso,
+        "hrv_ms": today_day.get("hrv_ms"),
+        "resting_hr": today_day.get("resting_hr"),
+        "recovery_index": today_day.get("recovery_index"),
+        "steps": today_day.get("steps"),
+        "exercise_min": today_day.get("exercise_min"),
+        "sleep_status": today_day.get("sleep_status", "pending"),
+    }
+    # Include sleep metrics only if tracked.
+    if snapshot["sleep_status"] == "tracked":
+        snapshot["sleep_total_h"] = today_day.get("sleep_total_h")
+        snapshot["sleep_efficiency_pct"] = today_day.get("sleep_efficiency_pct")
+
+    if workouts:
+        snapshot["workouts"] = workouts
+
+    return snapshot

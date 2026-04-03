@@ -42,6 +42,7 @@ from llm import (
     call_llm,
     extract_memory,
     load_context,
+    slim_for_prompt,
 )
 from charts import ChartResult, extract_charts, render_chart, strip_charts
 from context_edit import ContextEdit
@@ -453,14 +454,17 @@ def cmd_insights(args: argparse.Namespace) -> None:
         baselines = compute_baselines(conn)
         _save_baselines(CONTEXT_DIR, baselines)
 
-    week_complete = health_data.pop("week_complete", False)
-    week_label = health_data.pop("week_label", None)
+    week_complete = health_data.get("week_complete", False)
+    week_label = health_data.get("week_label")
     context["review_facts"] = build_review_facts(
         {**health_data, "week_label": week_label},
         context,
         week_complete=week_complete,
     )
-    health_data_json = json.dumps(health_data, indent=2)
+    prompt_data = slim_for_prompt(health_data)
+    prompt_data.pop("week_complete", None)
+    prompt_data.pop("week_label", None)
+    health_data_json = json.dumps(prompt_data, indent=2)
 
     try:
         messages = build_messages(
@@ -473,24 +477,59 @@ def cmd_insights(args: argparse.Namespace) -> None:
         logger.error("Failed to render prompt.md template: %s", e)
         sys.exit(1)
 
+    from tools import execute_run_sql, run_sql_tool
+
+    tools = run_sql_tool()
+    max_iterations = 3
+
     logger.info("Calling %s ...", args.model)
-    try:
-        result = call_llm(
-            messages,
-            model=args.model,
-            conn=conn,
-            request_type="insights",
-            metadata={"week": args.week, "months": args.months},
-        )
-    except Exception as e:
-        err_name = type(e).__name__
-        if "authentication" in err_name.lower() or "auth" in str(e).lower():
-            logger.error(
-                "Authentication failed. Set ANTHROPIC_API_KEY in your .env file."
+    for iteration in range(max_iterations):
+        try:
+            result = call_llm(
+                messages,
+                model=args.model,
+                tools=tools,
+                conn=conn,
+                request_type="insights",
+                metadata={
+                    "week": args.week,
+                    "months": args.months,
+                    "iteration": iteration,
+                },
             )
-        else:
-            logger.error("LLM call failed: %s: %s", err_name, e)
-        sys.exit(1)
+        except Exception as e:
+            err_name = type(e).__name__
+            if "authentication" in err_name.lower() or "auth" in str(e).lower():
+                logger.error(
+                    "Authentication failed. Set ANTHROPIC_API_KEY in your .env file."
+                )
+            else:
+                logger.error("LLM call failed: %s: %s", err_name, e)
+            sys.exit(1)
+
+        if not result.tool_calls:
+            break
+
+        messages.append(result.raw_message)
+        for tc in result.tool_calls:
+            fn_name = tc.function.name
+            raw_args = tc.function.arguments
+            try:
+                args_dict = (
+                    json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+                )
+            except (ValueError, json.JSONDecodeError):
+                args_dict = {}
+
+            if fn_name == "run_sql":
+                logger.info("Insights SQL: %s", args_dict.get("query", "")[:200])
+                tool_result = execute_run_sql(Path(args.db), args_dict)
+            else:
+                tool_result = json.dumps({"error": f"Unknown tool: {fn_name}"})
+
+            messages.append(
+                {"role": "tool", "tool_call_id": tc.id, "content": tool_result}
+            )
 
     # Extract and render charts before stripping them from the response.
     chart_blocks = extract_charts(result.text)
@@ -569,14 +608,16 @@ def cmd_nudge(
     _trigger = trigger_type or getattr(args, "trigger", "new_data")
 
     try:
-        context = load_context(CONTEXT_DIR, prompt_file="nudge_prompt")
+        context = load_context(
+            CONTEXT_DIR, prompt_file="nudge_prompt", max_history=3, max_log=3
+        )
     except FileNotFoundError as e:
         logger.error("%s", e)
         sys.exit(1)
 
     conn = open_db(Path(args.db))
     health_data = build_llm_data(conn, getattr(args, "months", 1))
-    health_data_json = json.dumps(health_data, indent=2)
+    health_data_json = json.dumps(slim_for_prompt(health_data), indent=2)
 
     recent_nudge_entries: list[dict] = getattr(args, "recent_nudges", [])
     if recent_nudge_entries:
@@ -598,25 +639,56 @@ def cmd_nudge(
 
     messages = build_messages(context, health_data_json)
 
+    from tools import execute_run_sql, run_sql_tool
+
     model = getattr(args, "model", DEFAULT_MODEL)
+    tools = run_sql_tool()
+    max_iterations = 3
+
     logger.info("Calling %s for nudge (trigger: %s) ...", model, _trigger)
-    try:
-        result = call_llm(
-            messages,
-            model=model,
-            conn=conn,
-            request_type="nudge",
-            metadata={"trigger_type": _trigger},
-        )
-    except Exception as e:
-        err_name = type(e).__name__
-        if "authentication" in err_name.lower() or "auth" in str(e).lower():
-            logger.error(
-                "Authentication failed. Set ANTHROPIC_API_KEY in your .env file."
+    for iteration in range(max_iterations):
+        try:
+            result = call_llm(
+                messages,
+                model=model,
+                tools=tools,
+                conn=conn,
+                request_type="nudge",
+                metadata={"trigger_type": _trigger, "iteration": iteration},
             )
-        else:
-            logger.error("LLM call failed: %s: %s", err_name, e)
-        sys.exit(1)
+        except Exception as e:
+            err_name = type(e).__name__
+            if "authentication" in err_name.lower() or "auth" in str(e).lower():
+                logger.error(
+                    "Authentication failed. Set ANTHROPIC_API_KEY in your .env file."
+                )
+            else:
+                logger.error("LLM call failed: %s: %s", err_name, e)
+            sys.exit(1)
+
+        if not result.tool_calls:
+            break
+
+        messages.append(result.raw_message)
+        for tc in result.tool_calls:
+            fn_name = tc.function.name
+            raw_args = tc.function.arguments
+            try:
+                args_dict = (
+                    json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+                )
+            except (ValueError, json.JSONDecodeError):
+                args_dict = {}
+
+            if fn_name == "run_sql":
+                logger.info("Nudge SQL: %s", args_dict.get("query", "")[:200])
+                tool_result = execute_run_sql(Path(args.db), args_dict)
+            else:
+                tool_result = json.dumps({"error": f"Unknown tool: {fn_name}"})
+
+            messages.append(
+                {"role": "tool", "tool_call_id": tc.id, "content": tool_result}
+            )
 
     raw_text = result.text.strip()
 
@@ -709,8 +781,8 @@ def cmd_coach(args: argparse.Namespace) -> tuple[str, list[ContextEdit]]:
     baselines = compute_baselines(conn)
     _save_baselines(CONTEXT_DIR, baselines)
 
-    week_complete = health_data.pop("week_complete", False)
-    week_label = health_data.pop("week_label", None)
+    week_complete = health_data.get("week_complete", False)
+    week_label = health_data.get("week_label")
     context["review_facts"] = build_review_facts(
         {**health_data, "week_label": week_label},
         context,
@@ -727,7 +799,10 @@ def cmd_coach(args: argparse.Namespace) -> tuple[str, list[ContextEdit]]:
     else:
         context["recent_nudges"] = "(none)"
 
-    health_data_json = json.dumps(health_data, indent=2)
+    prompt_data = slim_for_prompt(health_data)
+    prompt_data.pop("week_complete", None)
+    prompt_data.pop("week_label", None)
+    health_data_json = json.dumps(prompt_data, indent=2)
 
     try:
         messages = build_messages(

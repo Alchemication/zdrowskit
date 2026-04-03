@@ -1,7 +1,7 @@
 {
   "current_week": {
     "summary": {
-      "week_label": "2026-W13 (2026-03-23 – 2026-03-29)",
+      "week_label": "2026-W13 (2026-03-23 \u2013 2026-03-29)",
       "run_count": 3,
       "lift_count": 2,
       "walk_count": 1,
@@ -26,7 +26,12 @@
       "avg_sleep_rem_h": 1.76,
       "avg_sleep_awake_h": 0.42,
       "run_consistency_pct": 100.0,
-      "lift_consistency_pct": 100.0
+      "lift_consistency_pct": 100.0,
+      "sleep_nights_tracked": 7,
+      "sleep_nights_total": 7,
+      "sleep_not_tracked_dates": [],
+      "run_target": 2,
+      "lift_target": 2
     },
     "days": [
       {
@@ -52,7 +57,8 @@
             "gpx_elevation_gain_m": 28.0
           }
         ],
-        "recovery_index": 0.764
+        "recovery_index": 0.764,
+        "sleep_status": "tracked"
       },
       {
         "date": "2026-03-24",
@@ -75,7 +81,8 @@
             "hr_max": 118
           }
         ],
-        "recovery_index": 0.732
+        "recovery_index": 0.732,
+        "sleep_status": "tracked"
       },
       {
         "date": "2026-03-25",
@@ -89,7 +96,8 @@
         "sleep_rem_h": 1.7,
         "sleep_awake_h": 0.8,
         "workouts": [],
-        "recovery_index": 0.684
+        "recovery_index": 0.684,
+        "sleep_status": "tracked"
       },
       {
         "date": "2026-03-26",
@@ -114,7 +122,8 @@
             "gpx_elevation_gain_m": 36.0
           }
         ],
-        "recovery_index": 0.818
+        "recovery_index": 0.818,
+        "sleep_status": "tracked"
       },
       {
         "date": "2026-03-27",
@@ -137,7 +146,8 @@
             "hr_max": 122
           }
         ],
-        "recovery_index": 0.87
+        "recovery_index": 0.87,
+        "sleep_status": "tracked"
       },
       {
         "date": "2026-03-28",
@@ -151,7 +161,8 @@
         "sleep_rem_h": 1.9,
         "sleep_awake_h": 0.2,
         "workouts": [],
-        "recovery_index": 0.981
+        "recovery_index": 0.981,
+        "sleep_status": "tracked"
       },
       {
         "date": "2026-03-29",
@@ -176,7 +187,8 @@
             "gpx_elevation_gain_m": 32.0
           }
         ],
-        "recovery_index": 1.075
+        "recovery_index": 1.075,
+        "sleep_status": "tracked"
       }
     ]
   },

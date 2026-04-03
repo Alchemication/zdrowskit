@@ -107,11 +107,11 @@ def log_update_meaningful(
 # ---------------------------------------------------------------------------
 
 
-def _set_sleep_marker(day: dict, marker: str) -> None:
-    """Replace a day's sleep data with a string marker."""
+def _set_sleep_marker(day: dict, status: str) -> None:
+    """Replace a day's sleep data with a status marker."""
     for field in _SLEEP_FIELDS:
         day.pop(field, None)
-    day["sleep"] = marker
+    day["sleep_status"] = status
 
 
 def sleep_last_night_query(
@@ -138,11 +138,11 @@ def sleep_last_night_query(
     yesterday["sleep_rem_h"] = 1.28
     yesterday["sleep_awake_h"] = 0.68
 
-    # Today: no sleep fields at all (tonight hasn't happened).
+    # Today: no sleep fields, status is pending (tonight hasn't happened).
     today = days[-1]
     for field in _SLEEP_FIELDS:
         today.pop(field, None)
-    today.pop("sleep", None)
+    today["sleep_status"] = "pending"
 
     return context, health_data
 
@@ -156,7 +156,7 @@ def sleep_sync_pending_yesterday(
         yesterday = days[-2]
         for field in _SLEEP_FIELDS:
             yesterday.pop(field, None)
-        yesterday.pop("sleep", None)
+        yesterday["sleep_status"] = "pending"
     return context, health_data
 
 

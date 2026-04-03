@@ -1094,6 +1094,7 @@ class ZdrowskitDaemon:
             build_messages,
             call_llm,
             load_context,
+            slim_for_prompt,
         )
         from tools import all_chat_tools, execute_tool
 
@@ -1127,7 +1128,7 @@ class ZdrowskitDaemon:
 
         messages = build_messages(
             ctx,
-            health_data_json=_json.dumps(health_data, default=str),
+            health_data_json=_json.dumps(slim_for_prompt(health_data), default=str),
             baselines=baselines,
         )
 

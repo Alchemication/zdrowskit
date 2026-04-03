@@ -34,7 +34,23 @@
       "avg_sleep_rem_h": 1.95,
       "avg_sleep_awake_h": 0.31,
       "run_consistency_pct": 100.0,
-      "lift_consistency_pct": 100.0
+      "lift_consistency_pct": 100.0,
+      "sleep_nights_tracked": 4,
+      "sleep_nights_total": 5,
+      "sleep_not_tracked_dates": [
+        "2026-03-27"
+      ],
+      "run_target": 2,
+      "lift_target": 2,
+      "today": {
+        "date": "2026-03-28",
+        "hrv_ms": 64.70298292472671,
+        "resting_hr": 48,
+        "recovery_index": 1.348,
+        "steps": 365,
+        "exercise_min": null,
+        "sleep_status": "pending"
+      }
     },
     "days": [
       {
@@ -86,7 +102,8 @@
             "gpx_max_speed_p95_ms": 3.0744
           }
         ],
-        "recovery_index": 0.7771
+        "recovery_index": 0.7771,
+        "sleep_status": "tracked"
       },
       {
         "date": "2026-03-24",
@@ -137,7 +154,8 @@
             "gpx_max_speed_p95_ms": null
           }
         ],
-        "recovery_index": 0.9447
+        "recovery_index": 0.9447,
+        "sleep_status": "tracked"
       },
       {
         "date": "2026-03-25",
@@ -188,7 +206,8 @@
             "gpx_max_speed_p95_ms": 3.2668
           }
         ],
-        "recovery_index": 0.6323
+        "recovery_index": 0.6323,
+        "sleep_status": "tracked"
       },
       {
         "date": "2026-03-26",
@@ -239,7 +258,8 @@
             "gpx_max_speed_p95_ms": null
           }
         ],
-        "recovery_index": 0.9207
+        "recovery_index": 0.9207,
+        "sleep_status": "tracked"
       },
       {
         "date": "2026-03-27",
@@ -284,7 +304,7 @@
           }
         ],
         "recovery_index": 1.0062,
-        "sleep": "not_tracked"
+        "sleep_status": "not_tracked"
       },
       {
         "date": "2026-03-28",
@@ -310,7 +330,8 @@
         "running_power_w": null,
         "running_speed_kmh": null,
         "workouts": [],
-        "recovery_index": 1.348
+        "recovery_index": 1.348,
+        "sleep_status": "pending"
       }
     ]
   },
