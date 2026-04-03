@@ -25,6 +25,7 @@ import json
 import logging
 import re
 import sys
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -62,6 +63,21 @@ from store import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class CommandResult:
+    """Return value from LLM-powered commands that send via Telegram.
+
+    Attributes:
+        text: The LLM response text (or None if skipped).
+        llm_call_id: Database row id of the logged LLM call.
+        telegram_message_id: Message id of the last Telegram message sent.
+    """
+
+    text: str | None = None
+    llm_call_id: int | None = None
+    telegram_message_id: int | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -430,12 +446,20 @@ def cmd_context(args: argparse.Namespace) -> None:
             console.print(Panel(preview, title=name, border_style="dim", width=80))
 
 
-def cmd_insights(args: argparse.Namespace) -> None:
+def cmd_insights(
+    args: argparse.Namespace,
+    reply_markup: dict | None = None,
+) -> CommandResult:
     """Handle the 'insights' subcommand: generate LLM-driven health report.
 
     Args:
         args: Parsed CLI arguments with db, data_dir, months, model,
               no_update_history, and explain attributes.
+        reply_markup: Optional Telegram reply markup (e.g. feedback keyboard)
+            attached to the last message chunk.
+
+    Returns:
+        A CommandResult with text, llm_call_id, and telegram_message_id.
     """
     try:
         context = load_context(CONTEXT_DIR)
@@ -572,16 +596,29 @@ def cmd_insights(args: argparse.Namespace) -> None:
     report_type = "Review" if args.week == "last" else "Progress"
     notify_subject = f"Week {week_label} {report_type}" if week_label else "Report"
 
+    telegram_message_id: int | None = None
     if args.email:
         send_email(visible_report, notify_subject)
     if args.telegram:
-        send_telegram_report(visible_report, notify_subject, charts=chart_results)
+        telegram_message_id = send_telegram_report(
+            visible_report,
+            notify_subject,
+            charts=chart_results,
+            reply_markup=reply_markup,
+        )
+
+    return CommandResult(
+        text=visible_report,
+        llm_call_id=result.llm_call_id,
+        telegram_message_id=telegram_message_id,
+    )
 
 
 def cmd_nudge(
     args: argparse.Namespace,
     trigger_type: str | None = None,
-) -> str | None:
+    reply_markup: dict | None = None,
+) -> CommandResult:
     """Handle the 'nudge' subcommand: send a short context-aware notification.
 
     Nudge does not update history.md or baselines. It is designed for short
@@ -591,7 +628,7 @@ def cmd_nudge(
     Delivery defaults to Telegram. Pass --email or --telegram to override.
 
     If the LLM determines there is nothing new worth saying, it responds with
-    "SKIP" and this function returns False without sending anything.
+    "SKIP" and this function returns an empty CommandResult.
 
     Args:
         args: Parsed CLI arguments with db, model, email, telegram, trigger,
@@ -600,10 +637,11 @@ def cmd_nudge(
             called programmatically (e.g. from the daemon). One of:
             "new_data", "log_update", "goal_updated", "plan_updated",
             "missed_session".
+        reply_markup: Optional Telegram reply markup (e.g. feedback keyboard)
+            attached to the last message chunk.
 
     Returns:
-        The nudge text if sent, None if the LLM chose to SKIP or an error
-        occurred.
+        A CommandResult with text, llm_call_id, and telegram_message_id.
     """
     _trigger = trigger_type or getattr(args, "trigger", "new_data")
 
@@ -696,7 +734,7 @@ def cmd_nudge(
     # LLMs sometimes reason before/after the SKIP directive.
     if raw_text.upper() == "SKIP" or "\nSKIP\n" in f"\n{raw_text}\n":
         logger.info("Nudge skipped by LLM — nothing new to say (trigger: %s)", _trigger)
-        return None
+        return CommandResult()
 
     # Extract and render optional chart(s).
     chart_blocks = extract_charts(raw_text)
@@ -734,6 +772,7 @@ def cmd_nudge(
     if not use_email and not use_telegram:
         use_telegram = True  # Default channel
 
+    telegram_message_id: int | None = None
     subject = f"zdrowskit — {_trigger.replace('_', ' ')}"
     if use_email:
         send_email(nudge_text, subject)
@@ -741,12 +780,19 @@ def cmd_nudge(
         # Send chart photos before the text nudge.
         for chart in nudge_charts:
             send_telegram_photo(chart.image_bytes, caption=f"**{chart.title}**")
-        send_telegram(nudge_text, subject)
+        telegram_message_id = send_telegram(nudge_text, subject, reply_markup)
 
-    return nudge_text
+    return CommandResult(
+        text=nudge_text,
+        llm_call_id=result.llm_call_id,
+        telegram_message_id=telegram_message_id,
+    )
 
 
-def cmd_coach(args: argparse.Namespace) -> tuple[str, list[ContextEdit]]:
+def cmd_coach(
+    args: argparse.Namespace,
+    reply_markup: dict | None = None,
+) -> tuple[CommandResult, list[ContextEdit]]:
     """Generate coaching proposals for plan/goal updates.
 
     Reviews the week's data against current plan and goals, and proposes
@@ -756,10 +802,12 @@ def cmd_coach(args: argparse.Namespace) -> tuple[str, list[ContextEdit]]:
     Args:
         args: Parsed CLI arguments with db, model, email, telegram,
               and months attributes.
+        reply_markup: Optional Telegram reply markup (e.g. feedback keyboard)
+            attached to the last message chunk.
 
     Returns:
-        A tuple of (visible_text, list_of_edits). The visible text is the
-        coaching reasoning; edits are the proposed context file changes.
+        A tuple of (CommandResult, list_of_edits). The CommandResult contains
+        the coaching text, llm_call_id, and telegram_message_id.
     """
     from context_edit import context_edit_from_tool_call
     from llm import context_update_tool
@@ -882,12 +930,20 @@ def cmd_coach(args: argparse.Namespace) -> tuple[str, list[ContextEdit]]:
     use_email = getattr(args, "email", False)
     use_telegram = getattr(args, "telegram", False)
 
+    telegram_message_id: int | None = None
     if use_email:
         send_email(visible_text, "Coaching Review")
     if use_telegram:
-        send_telegram(visible_text, "Coaching Review")
+        telegram_message_id = send_telegram(
+            visible_text, "Coaching Review", reply_markup
+        )
 
-    return visible_text, edits
+    cmd_result = CommandResult(
+        text=visible_text,
+        llm_call_id=result.llm_call_id,
+        telegram_message_id=telegram_message_id,
+    )
+    return cmd_result, edits
 
 
 def cmd_llm_log(args: argparse.Namespace) -> None:

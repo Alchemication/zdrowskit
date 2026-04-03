@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from commands import CommandResult
 from context_edit import (
     ContextEdit,
     PendingContextEdit,
@@ -20,6 +21,10 @@ class TestWeeklyReportScheduling:
         daemon = ZdrowskitDaemon("test-model", tmp_path / "test.db", tmp_path)
         events: list[str] = []
 
+        def _mock_insights(args):
+            events.append("insights")
+            return CommandResult(text="report text")
+
         with (
             patch.object(daemon, "_run_import"),
             patch.object(
@@ -27,8 +32,9 @@ class TestWeeklyReportScheduling:
             ),
             patch(
                 "commands.cmd_insights",
-                side_effect=lambda args: events.append("insights"),
+                side_effect=_mock_insights,
             ),
+            patch.object(daemon, "_attach_feedback_button"),
             patch.object(
                 daemon,
                 "_run_coach",
@@ -77,7 +83,6 @@ class TestCoachFeedbackFlow:
         daemon._poller.send_reply.assert_called_once_with(
             "Optional: reply with why you rejected this suggestion.",
             reply_to_message_id=42,
-            force_reply=True,
         )
         assert daemon._pending_rejection_reasons[321].startswith("cf_")
 

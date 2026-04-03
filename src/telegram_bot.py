@@ -74,6 +74,38 @@ class ConversationBuffer:
             return len(self._messages)
 
 
+# ---------------------------------------------------------------------------
+# Feedback inline keyboards
+# ---------------------------------------------------------------------------
+
+FEEDBACK_CATEGORIES: dict[str, str] = {
+    "inaccurate": "Inaccurate",
+    "not_useful": "Not useful",
+    "too_verbose": "Too verbose",
+    "wrong_tone": "Wrong tone",
+}
+
+
+def feedback_keyboard(llm_call_id: int) -> list[list[dict[str, str]]]:
+    """Single 👎 button for an LLM response message."""
+    return [[{"text": "\U0001f44e", "callback_data": f"fb_neg:{llm_call_id}"}]]
+
+
+def feedback_category_keyboard(llm_call_id: int) -> list[list[dict[str, str]]]:
+    """2×2 category picker shown after the user taps 👎."""
+    cats = list(FEEDBACK_CATEGORIES.items())
+    return [
+        [
+            {"text": cats[0][1], "callback_data": f"fb_cat:{llm_call_id}:{cats[0][0]}"},
+            {"text": cats[1][1], "callback_data": f"fb_cat:{llm_call_id}:{cats[1][0]}"},
+        ],
+        [
+            {"text": cats[2][1], "callback_data": f"fb_cat:{llm_call_id}:{cats[2][0]}"},
+            {"text": cats[3][1], "callback_data": f"fb_cat:{llm_call_id}:{cats[3][0]}"},
+        ],
+    ]
+
+
 class TelegramPoller:
     """Long-polling client for the Telegram Bot API.
 
@@ -273,6 +305,42 @@ class TelegramPoller:
                 logger.warning("Failed to edit message %d", message_id, exc_info=True)
         except Exception:
             logger.warning("Failed to edit message %d", message_id, exc_info=True)
+
+    def edit_message_reply_markup(
+        self,
+        message_id: int,
+        buttons: list[list[dict[str, str]]] | None = None,
+    ) -> None:
+        """Edit only the inline keyboard on an existing message.
+
+        Uses Telegram's ``editMessageReplyMarkup`` so the message text
+        is left untouched — safe for chunked messages.
+
+        Args:
+            message_id: ID of the message to edit.
+            buttons: New inline keyboard rows, or None to remove the keyboard.
+        """
+        url = f"{self._base_url}/editMessageReplyMarkup"
+        payload: dict = {
+            "chat_id": self._chat_id,
+            "message_id": message_id,
+        }
+        if buttons is not None:
+            payload["reply_markup"] = {"inline_keyboard": buttons}
+        else:
+            payload["reply_markup"] = {"inline_keyboard": []}
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            url, data=data, headers={"Content-Type": "application/json"}
+        )
+        try:
+            urllib.request.urlopen(req)  # noqa: S310
+        except Exception:
+            logger.warning(
+                "Failed to edit reply markup for message %d",
+                message_id,
+                exc_info=True,
+            )
 
     def send_reply(
         self,

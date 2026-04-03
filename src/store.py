@@ -106,6 +106,17 @@ CREATE TABLE IF NOT EXISTS llm_call (
 
 CREATE INDEX IF NOT EXISTS llm_call_type ON llm_call(request_type);
 CREATE INDEX IF NOT EXISTS llm_call_ts   ON llm_call(timestamp);
+
+CREATE TABLE IF NOT EXISTS llm_feedback (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    llm_call_id   INTEGER NOT NULL REFERENCES llm_call(id),
+    category      TEXT NOT NULL,
+    reason        TEXT,
+    created_at    TEXT NOT NULL,
+    message_type  TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS llm_feedback_call ON llm_feedback(llm_call_id);
 """
 
 
@@ -494,3 +505,60 @@ def log_llm_call(
         "Logged LLM call id=%d type=%s model=%s", cursor.lastrowid, request_type, model
     )
     return cursor.lastrowid
+
+
+def log_feedback(
+    conn: sqlite3.Connection,
+    llm_call_id: int,
+    category: str,
+    message_type: str,
+    reason: str | None = None,
+) -> int:
+    """Insert an LLM feedback record.
+
+    Args:
+        conn: Open database connection.
+        llm_call_id: The llm_call row this feedback refers to.
+        category: Feedback category (inaccurate, not_useful, too_verbose, wrong_tone).
+        message_type: The LLM output type (insights, nudge, coach, chat).
+        reason: Optional free-text explanation.
+
+    Returns:
+        The row id of the inserted record.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    cursor = conn.execute(
+        """
+        INSERT INTO llm_feedback (llm_call_id, category, reason, created_at, message_type)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (llm_call_id, category, reason, now, message_type),
+    )
+    conn.commit()
+    logger.debug(
+        "Logged feedback id=%d llm_call_id=%d category=%s",
+        cursor.lastrowid,
+        llm_call_id,
+        category,
+    )
+    return cursor.lastrowid
+
+
+def update_feedback_reason(
+    conn: sqlite3.Connection,
+    feedback_id: int,
+    reason: str,
+) -> None:
+    """Update the free-text reason on an existing feedback record.
+
+    Args:
+        conn: Open database connection.
+        feedback_id: The llm_feedback row to update.
+        reason: The user-provided explanation text.
+    """
+    conn.execute(
+        "UPDATE llm_feedback SET reason = ? WHERE id = ?",
+        (reason, feedback_id),
+    )
+    conn.commit()
+    logger.debug("Updated feedback id=%d with reason", feedback_id)

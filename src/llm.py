@@ -82,6 +82,8 @@ class LLMResult:
     raw_message: dict | None = None
     """The assistant message dict suitable for appending back to the messages
     list in a tool-calling loop (includes ``tool_calls`` when present)."""
+    llm_call_id: int | None = None
+    """Database row id from ``llm_call`` table, set when the call is logged."""
 
 
 DEFAULT_SOUL = (
@@ -592,7 +594,7 @@ def call_llm(
         if reasoning_effort is not None:
             params["reasoning_effort"] = reasoning_effort
         try:
-            log_llm_call(
+            row_id = log_llm_call(
                 conn,
                 request_type=request_type,
                 model=model,
@@ -606,6 +608,7 @@ def call_llm(
                 cost=result.cost,
                 metadata=metadata,
             )
+            result.llm_call_id = row_id
         except Exception:
             logger.warning("Failed to log LLM call to DB", exc_info=True)
 

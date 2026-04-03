@@ -253,7 +253,13 @@ def chunk_text(text: str, max_len: int = 4000) -> list[str]:
     return chunks
 
 
-def _send_telegram_chunk(url: str, chat_id: str, text: str, html_text: str) -> bool:
+def _send_telegram_chunk(
+    url: str,
+    chat_id: str,
+    text: str,
+    html_text: str,
+    reply_markup: dict | None = None,
+) -> int | None:
     """Send a single Telegram message chunk, falling back to plain text.
 
     Tries HTML parse_mode first.  If Telegram rejects the markup (e.g.
@@ -265,9 +271,10 @@ def _send_telegram_chunk(url: str, chat_id: str, text: str, html_text: str) -> b
         chat_id: Target chat ID.
         text: Original plain-text version (fallback).
         html_text: HTML-formatted version (preferred).
+        reply_markup: Optional Telegram reply markup (e.g. inline keyboard).
 
     Returns:
-        True if the chunk was sent successfully, False otherwise.
+        The message_id of the sent message, or None on failure.
     """
     import urllib.error
     import urllib.request
@@ -278,18 +285,23 @@ def _send_telegram_chunk(url: str, chat_id: str, text: str, html_text: str) -> b
         "parse_mode": "HTML",
         "disable_web_page_preview": True,
     }
+    if reply_markup is not None:
+        payload["reply_markup"] = reply_markup
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         url, data=data, headers={"Content-Type": "application/json"}
     )
     try:
-        urllib.request.urlopen(req)  # noqa: S310
-        return True
+        with urllib.request.urlopen(req) as resp:  # noqa: S310
+            body = json.loads(resp.read().decode("utf-8"))
+        if body.get("ok"):
+            return body["result"]["message_id"]
+        return None
     except urllib.error.HTTPError as e:
         logger.warning("HTML send failed (%s), retrying as plain text", e)
     except Exception as e:
         logger.error("Failed to send Telegram message: %s", e)
-        return False
+        return None
 
     # Fallback: plain text, no parse_mode.
     fallback_payload: dict = {
@@ -297,19 +309,28 @@ def _send_telegram_chunk(url: str, chat_id: str, text: str, html_text: str) -> b
         "text": text,
         "disable_web_page_preview": True,
     }
+    if reply_markup is not None:
+        fallback_payload["reply_markup"] = reply_markup
     data = json.dumps(fallback_payload).encode("utf-8")
     req = urllib.request.Request(
         url, data=data, headers={"Content-Type": "application/json"}
     )
     try:
-        urllib.request.urlopen(req)  # noqa: S310
-        return True
+        with urllib.request.urlopen(req) as resp:  # noqa: S310
+            body = json.loads(resp.read().decode("utf-8"))
+        if body.get("ok"):
+            return body["result"]["message_id"]
+        return None
     except Exception as e:
         logger.error("Fallback plain-text send also failed: %s", e)
-        return False
+        return None
 
 
-def send_telegram(report: str, week_label: str) -> None:
+def send_telegram(
+    report: str,
+    week_label: str,
+    reply_markup: dict | None = None,
+) -> int | None:
     """Send the report via Telegram Bot API with HTML formatting.
 
     Converts markdown to Telegram-compatible HTML.  Falls back to plain
@@ -320,16 +341,21 @@ def send_telegram(report: str, week_label: str) -> None:
     Args:
         report: The markdown report text.
         week_label: Human-readable week label for the message.
+        reply_markup: Optional Telegram reply markup (e.g. inline keyboard)
+            attached to the **last** chunk only.
+
+    Returns:
+        The message_id of the last sent chunk, or None on failure.
     """
     bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID")
 
     if not bot_token:
         logger.error("TELEGRAM_BOT_TOKEN not set. Add it to your .env file.")
-        return
+        return None
     if not chat_id:
         logger.error("TELEGRAM_CHAT_ID not set. Add it to your .env file.")
-        return
+        return None
 
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     html_report = md_to_telegram_html(report)
@@ -337,13 +363,19 @@ def send_telegram(report: str, week_label: str) -> None:
     plain_chunks = chunk_text(report)
     html_chunks = chunk_text(html_report)
 
+    last_message_id: int | None = None
     for i, html in enumerate(html_chunks):
         plain = plain_chunks[i] if i < len(plain_chunks) else html
-        if not _send_telegram_chunk(url, chat_id, plain, html):
+        is_last = i == len(html_chunks) - 1
+        chunk_markup = reply_markup if is_last else None
+        msg_id = _send_telegram_chunk(url, chat_id, plain, html, chunk_markup)
+        if msg_id is None:
             logger.error("Aborting Telegram send at chunk %d", i + 1)
-            return
+            return None
+        last_message_id = msg_id
 
     logger.info("Telegram message sent to chat %s", chat_id)
+    return last_message_id
 
 
 def _get_telegram_creds() -> tuple[str, str] | None:
@@ -454,7 +486,8 @@ def send_telegram_report(
     report: str,
     week_label: str,
     charts: list | None = None,
-) -> None:
+    reply_markup: dict | None = None,
+) -> int | None:
     """Send a report with optional chart photos followed by the full text.
 
     Chart photos are sent first (one ``sendPhoto`` per chart), then the
@@ -465,10 +498,15 @@ def send_telegram_report(
         report: The markdown report text (chart blocks already stripped).
         week_label: Human-readable week label.
         charts: Optional list of :class:`~charts.ChartResult` instances.
+        reply_markup: Optional Telegram reply markup attached to the last
+            text chunk.
+
+    Returns:
+        The message_id of the last sent text chunk, or None on failure.
     """
     creds = _get_telegram_creds()
     if creds is None:
-        return
+        return None
 
     bot_token, chat_id = creds
 
@@ -488,10 +526,16 @@ def send_telegram_report(
     plain_chunks = chunk_text(report)
     html_chunks = chunk_text(html_report)
 
+    last_message_id: int | None = None
     for i, html in enumerate(html_chunks):
         plain = plain_chunks[i] if i < len(plain_chunks) else html
-        if not _send_telegram_chunk(url, chat_id, plain, html):
+        is_last = i == len(html_chunks) - 1
+        chunk_markup = reply_markup if is_last else None
+        msg_id = _send_telegram_chunk(url, chat_id, plain, html, chunk_markup)
+        if msg_id is None:
             logger.error("Aborting Telegram report send at chunk %d", i + 1)
-            return
+            return None
+        last_message_id = msg_id
 
     logger.info("Telegram report sent to chat %s", chat_id)
+    return last_message_id
