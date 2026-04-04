@@ -8,9 +8,29 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from commands import cmd_coach, cmd_db, cmd_llm_log, cmd_nudge, interpret_notify_request
+from commands import (
+    TELEGRAM_BOT_COMMANDS,
+    cmd_coach,
+    cmd_db,
+    cmd_llm_log,
+    cmd_nudge,
+    interpret_notify_request,
+)
 from llm import LLMResult
 from store import log_feedback, log_llm_call, open_db
+
+
+class TestTelegramBotCommands:
+    def test_registered_bot_commands_match_telegram_surface(self) -> None:
+        assert TELEGRAM_BOT_COMMANDS == [
+            {"command": "review", "description": "Weekly report"},
+            {"command": "coach", "description": "Coaching review"},
+            {"command": "status", "description": "Bot and data status"},
+            {"command": "notify", "description": "Notification settings"},
+            {"command": "context", "description": "View context files"},
+            {"command": "clear", "description": "Reset chat memory"},
+            {"command": "help", "description": "Command list"},
+        ]
 
 
 class TestCmdCoach:

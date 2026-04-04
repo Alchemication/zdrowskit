@@ -235,6 +235,132 @@ class ZdrowskitDaemon:
             value_type="int",
         )
 
+    def _format_status_timestamp(self, value: str | None) -> str:
+        """Return a compact local timestamp label for daemon status output."""
+        if not value:
+            return "never"
+        try:
+            ts = datetime.fromisoformat(value)
+        except ValueError:
+            return value
+        return ts.astimezone().strftime("%Y-%m-%d %H:%M")
+
+    def _build_status_lines(self) -> list[str]:
+        """Build a Telegram-friendly external status summary."""
+        from notification_prefs import (
+            active_temporary_mutes,
+            effective_notification_prefs,
+        )
+        from store import load_date_range, open_db
+
+        now = datetime.now().astimezone()
+        prefs = self._load_notification_prefs(now=now)
+        effective = effective_notification_prefs(prefs)
+        active_mutes = active_temporary_mutes(prefs, now=now)
+
+        conversation = getattr(self, "_conversation", None)
+        buffer_len = len(conversation) if conversation is not None else 0
+        nudge_count = self._state.get("nudge_count_today", 0)
+        quiet_queue = self._state.get("quiet_queue", [])
+        queue_len = len(quiet_queue) if isinstance(quiet_queue, list) else 0
+
+        lines = [
+            "System status:",
+            f"- Chat memory: {buffer_len} messages",
+            f"- Nudges today: {nudge_count}/{effective['nudges']['max_per_day']}",
+            f"- Last nudge: {self._format_status_timestamp(self._state.get('last_nudge_ts'))}",
+            f"- Last report: {self._format_status_timestamp(self._state.get('last_report_ts'))}",
+            f"- Last coach run: {self._format_status_timestamp(self._state.get('last_coach_date'))}",
+            (
+                "- Nudges: "
+                f"{'on' if effective['nudges']['enabled'] else 'off'} "
+                f"(not before {effective['nudges']['earliest_time']})"
+            ),
+            (
+                "- Weekly report: "
+                f"{'on' if effective['weekly_insights']['enabled'] else 'off'} "
+                f"({effective['weekly_insights']['weekday'].title()} "
+                f"{effective['weekly_insights']['time']})"
+            ),
+            (
+                "- Midweek report: "
+                f"{'on' if effective['midweek_report']['enabled'] else 'off'} "
+                f"({effective['midweek_report']['weekday'].title()} "
+                f"{effective['midweek_report']['time']})"
+            ),
+        ]
+
+        if queue_len:
+            lines.append(f"- Queued nudges: {queue_len}")
+
+        if active_mutes:
+            mute_summary = "; ".join(
+                f"{entry['target']} until {self._format_status_timestamp(entry['expires_at'])}"
+                for entry in active_mutes
+            )
+            lines.append(f"- Active mutes: {mute_summary}")
+        else:
+            lines.append("- Active mutes: none")
+
+        try:
+            conn = open_db(self.db)
+            dr = load_date_range(conn)
+            if dr is None:
+                lines.append("- Data: database is empty")
+            else:
+                day_count = conn.execute("SELECT COUNT(*) FROM daily").fetchone()[0]
+                workout_count = conn.execute("SELECT COUNT(*) FROM workout").fetchone()[
+                    0
+                ]
+                lines.append(
+                    f"- Data: {day_count} days, {workout_count} workouts ({dr[0]} to {dr[1]})"
+                )
+        except sqlite3.DatabaseError:
+            logger.warning(
+                "Failed to load DB status for Telegram /status",
+                exc_info=True,
+            )
+            lines.append("- Data: unavailable")
+
+        return lines
+
+    def _run_review(
+        self,
+        *,
+        week: str = "last",
+        skip_import: bool = False,
+    ) -> None:
+        """Run a manual review report and send it via Telegram."""
+        if week not in {"current", "last"}:
+            raise ValueError(f"Unsupported review week: {week}")
+
+        if not skip_import:
+            self._run_import()
+
+        from commands import cmd_insights
+
+        args = types.SimpleNamespace(
+            db=str(self.db),
+            model=self.model,
+            email=False,
+            telegram=True,
+            week=week,
+            months=3,
+            no_update_baselines=False,
+            no_update_history=False,
+            explain=False,
+            data_dir=None,
+        )
+        try:
+            logger.info("Running manual review report (%s)", week)
+            result = cmd_insights(args)
+            self._attach_feedback_button(result, "insights")
+            self._record_report("review" if week == "last" else "progress")
+            self._state["last_report_ts"] = datetime.now().isoformat()
+            _save_state(self._state)
+        except SystemExit:
+            logger.error("Manual review report failed (%s)", week)
+
     @staticmethod
     def _restore_pending_reason_map(
         raw: object,
@@ -448,8 +574,8 @@ class ZdrowskitDaemon:
             True if a nudge may be sent; False if suppressed.
         """
         prefs = self._load_notification_prefs(now=datetime.now().astimezone())
-        max_nudges_per_day = prefs.get("overrides", {}).get("nudges", {}).get(
-            "max_per_day"
+        max_nudges_per_day = (
+            prefs.get("overrides", {}).get("nudges", {}).get("max_per_day")
         )
         if not isinstance(max_nudges_per_day, int):
             from notification_prefs import effective_notification_prefs
@@ -996,25 +1122,32 @@ class ZdrowskitDaemon:
             self._poller.send_reply(
                 "Conversation cleared.", reply_to_message_id=message_id
             )
+        elif cmd == "/review":
+            parts = text.split()
+            week = "last"
+            if len(parts) > 1:
+                raw_week = parts[1].lower()
+                if raw_week not in {"current", "last"}:
+                    self._poller.send_reply(
+                        "Use /review or /review current or /review last.",
+                        reply_to_message_id=message_id,
+                    )
+                    return
+                week = raw_week
+            label = "this week so far" if week == "current" else "last week"
+            self._poller.send_reply(
+                f"Running review for {label}…", reply_to_message_id=message_id
+            )
+            self._run_review(week=week, skip_import=False)
         elif cmd == "/notify":
             args = text.split(maxsplit=1)
             request_text = args[1].strip() if len(args) > 1 else ""
             self._handle_notify_command(request_text, message_id)
         elif cmd == "/status":
-            nudge_count = self._state.get("nudge_count_today", 0)
-            prefs = self._load_notification_prefs(now=datetime.now().astimezone())
-            from notification_prefs import effective_notification_prefs
-
-            max_nudges = effective_notification_prefs(prefs)["nudges"]["max_per_day"]
-            buf_len = len(self._conversation)
-            lines = [
-                f"Buffer: {buf_len} messages",
-                f"Nudges today: {nudge_count}/{max_nudges}",
-            ]
-            last_nudge = self._state.get("last_nudge_ts")
-            if last_nudge:
-                lines.append(f"Last nudge: {last_nudge[:16]}")
-            self._poller.send_reply("\n".join(lines), reply_to_message_id=message_id)
+            self._poller.send_reply(
+                "\n".join(self._build_status_lines()),
+                reply_to_message_id=message_id,
+            )
         elif cmd == "/context":
             parts = text.split()
             file_arg = parts[1] if len(parts) > 1 else None
@@ -1035,10 +1168,17 @@ class ZdrowskitDaemon:
                 if f.stat().st_size > 0
             )
             ctx_opts = ", ".join(ctx_names) if ctx_names else "none found"
-            lines = [
-                f"/{c['command']} — {c['description']}" for c in TELEGRAM_BOT_COMMANDS
-            ]
-            lines.append(f"\n/context <name> — Show full file ({ctx_opts})")
+            lines = []
+            for command in TELEGRAM_BOT_COMMANDS:
+                if command["command"] == "review":
+                    lines.append(
+                        f"/review [current|last] — {command['description']} (default: last)"
+                    )
+                elif command["command"] == "context":
+                    lines.append(f"/context [name] — {command['description']}")
+                else:
+                    lines.append(f"/{command['command']} — {command['description']}")
+            lines.append(f"\nAvailable context files: {ctx_opts}")
             self._poller.send_reply("\n".join(lines), reply_to_message_id=message_id)
         else:
             self._poller.send_reply(
@@ -1091,14 +1231,15 @@ class ZdrowskitDaemon:
                 or payload.get("reason")
                 or "That request is not supported yet."
             )
+            summary_text = format_notification_summary(
+                prefs,
+                now=now,
+                include_examples=True,
+                max_nudges_per_day=MAX_NUDGES_PER_DAY,
+            )
             text = (
                 f"{reason}\n\n"
-                f"{format_notification_summary(
-                    prefs,
-                    now=now,
-                    include_examples=True,
-                    max_nudges_per_day=MAX_NUDGES_PER_DAY,
-                )}"
+                f"{summary_text}"
             )
             self._poller.send_reply(text, reply_to_message_id=message_id)
             return

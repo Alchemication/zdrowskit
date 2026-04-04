@@ -560,3 +560,139 @@ class TestNotifyFlow:
         )
 
         daemon._poller.edit_message.assert_called_once()
+
+
+class TestTelegramCommands:
+    def test_review_runs_last_week_insights_flow(self, tmp_path: Path) -> None:
+        daemon = _make_daemon(tmp_path)
+        daemon._poller = MagicMock()
+
+        with (
+            patch.object(daemon, "_run_import"),
+            patch(
+                "commands.cmd_insights",
+                return_value=CommandResult(text="report"),
+            ) as cmd_insights,
+            patch.object(daemon, "_attach_feedback_button"),
+            patch.object(daemon, "_record_report"),
+        ):
+            daemon._handle_command("/review", 42)
+
+        daemon._poller.send_reply.assert_called_once_with(
+            "Running review for last week…",
+            reply_to_message_id=42,
+        )
+        args = cmd_insights.call_args.args[0]
+        assert args.week == "last"
+        assert args.telegram is True
+
+    def test_review_accepts_current_week_argument(self, tmp_path: Path) -> None:
+        daemon = _make_daemon(tmp_path)
+        daemon._poller = MagicMock()
+
+        with (
+            patch.object(daemon, "_run_import"),
+            patch(
+                "commands.cmd_insights",
+                return_value=CommandResult(text="report"),
+            ) as cmd_insights,
+            patch.object(daemon, "_attach_feedback_button"),
+            patch.object(daemon, "_record_report"),
+        ):
+            daemon._handle_command("/review current", 24)
+
+        daemon._poller.send_reply.assert_called_once_with(
+            "Running review for this week so far…",
+            reply_to_message_id=24,
+        )
+        args = cmd_insights.call_args.args[0]
+        assert args.week == "current"
+
+    def test_review_rejects_invalid_argument(self, tmp_path: Path) -> None:
+        daemon = _make_daemon(tmp_path)
+        daemon._poller = MagicMock()
+
+        with patch.object(daemon, "_run_review") as run_review:
+            daemon._handle_command("/review tomorrow", 11)
+
+        daemon._poller.send_reply.assert_called_once_with(
+            "Use /review or /review current or /review last.",
+            reply_to_message_id=11,
+        )
+        run_review.assert_not_called()
+
+    def test_status_includes_system_and_data_summary(self, tmp_path: Path) -> None:
+        daemon = _make_daemon(tmp_path)
+        daemon._poller = MagicMock()
+        daemon._state.update(
+            {
+                "nudge_count_today": 2,
+                "last_nudge_ts": "2026-04-05T08:15:00+00:00",
+                "last_report_ts": "2026-04-05T09:00:00+00:00",
+                "last_coach_date": "2026-04-05",
+                "quiet_queue": [{"trigger": "new_data"}],
+            }
+        )
+        conn = open_db(tmp_path / "test.db")
+        conn.execute(
+            """
+            INSERT INTO daily (date, steps, exercise_min, stand_hours, imported_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            ("2026-04-04", 10000, 45, 12, "2026-04-05T09:30:00+00:00"),
+        )
+        conn.execute(
+            """
+            INSERT INTO workout (
+                start_utc, date, type, category, duration_min, imported_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "2026-04-04T07:00:00+00:00",
+                "2026-04-04",
+                "Outdoor Run",
+                "run",
+                45,
+                "2026-04-05T09:30:00+00:00",
+            ),
+        )
+        conn.commit()
+
+        daemon._handle_command("/status", 77)
+
+        daemon._poller.send_reply.assert_called_once()
+        sent = daemon._poller.send_reply.call_args.args[0]
+        assert "System status:" in sent
+        assert "- Nudges today: 2/3" in sent
+        assert "- Last report: 2026-04-05 " in sent
+        assert "- Last coach run: 2026-04-05 " in sent
+        assert "- Queued nudges: 1" in sent
+        assert "- Active mutes: none" in sent
+        assert "- Data: 1 days, 1 workouts (2026-04-04 to 2026-04-04)" in sent
+
+    def test_status_handles_missing_state_fields(self, tmp_path: Path) -> None:
+        daemon = _make_daemon(tmp_path)
+        daemon._poller = MagicMock()
+
+        daemon._handle_command("/status", 88)
+
+        daemon._poller.send_reply.assert_called_once()
+        sent = daemon._poller.send_reply.call_args.args[0]
+        assert "- Last nudge: never" in sent
+        assert "- Last report: never" in sent
+        assert "- Last coach run: never" in sent
+        assert "- Data: database is empty" in sent
+
+    def test_help_mentions_review_and_context_usage(self, tmp_path: Path) -> None:
+        daemon = _make_daemon(tmp_path)
+        daemon._poller = MagicMock()
+        (tmp_path / "me.md").write_text("About me\n", encoding="utf-8")
+
+        daemon._handle_command("/help", 55)
+
+        daemon._poller.send_reply.assert_called_once()
+        sent = daemon._poller.send_reply.call_args.args[0]
+        assert "/review [current|last] — Weekly report (default: last)" in sent
+        assert "/context [name] — View context files" in sent
+        assert "Available context files:" in sent
+        assert "me" in sent
