@@ -68,6 +68,17 @@ logger = logging.getLogger(__name__)
 
 _LLM_LOG_NEARBY_WINDOW_S = 120
 _LLM_LOG_MAX_PANEL_CHARS = 20000
+_NUDGE_TOOL_FOLLOWUP = (
+    "Use the tool results above to write the final nudge now. Output only one "
+    "short user-facing message (maximum 80 words) or SKIP. Do not mention "
+    "checking data, reviewing notifications, or that something is genuinely "
+    "new. No headers; the app adds them."
+)
+_NUDGE_NONFINAL_RETRY = (
+    "That was internal reasoning, not a finished nudge. Rewrite it as the "
+    "final user-facing nudge now: one short message (maximum 80 words) or "
+    "SKIP. Do not mention checking, reviewing, or deciding whether to send."
+)
 
 
 @dataclass
@@ -210,6 +221,29 @@ def _print_explain(
     # Saved report path
     if report_path:
         stderr.print(f"\n[dim]Report saved to:[/dim] [cyan]{report_path}[/cyan]")
+
+
+def _looks_like_nonfinal_nudge(text: str) -> bool:
+    """Return True when a nudge reply looks like internal reasoning.
+
+    Args:
+        text: Raw assistant text returned by the model.
+
+    Returns:
+        True when the text looks like planning or meta-commentary rather than a
+        user-facing nudge.
+    """
+    normalized = " ".join(text.strip().split()).lower()
+    if not normalized:
+        return False
+
+    meta_patterns = (
+        r"^(let me|i(?:'ll| will))\b",
+        r"^the \d{1,2}:\d{2}\s?(?:am|pm) notification prescribed\b",
+        r"\bgenuinely new data worth (?:a quick response|saying)\b",
+        r"\bwhat(?:'s| is) actually new\b",
+    )
+    return any(re.search(pattern, normalized) for pattern in meta_patterns)
 
 
 def _save_baselines(context_dir: Path, baselines: str) -> None:
@@ -858,6 +892,17 @@ def cmd_nudge(
             sys.exit(1)
 
         if not result.tool_calls:
+            raw_text = result.text.strip()
+            if _looks_like_nonfinal_nudge(raw_text) and iteration < max_iterations - 1:
+                logger.warning(
+                    "Nudge returned non-final meta text on iteration %d; retrying",
+                    iteration,
+                )
+                messages.append(
+                    result.raw_message or {"role": "assistant", "content": result.text}
+                )
+                messages.append({"role": "user", "content": _NUDGE_NONFINAL_RETRY})
+                continue
             break
 
         messages.append(result.raw_message)
@@ -880,6 +925,7 @@ def cmd_nudge(
             messages.append(
                 {"role": "tool", "tool_call_id": tc.id, "content": tool_result}
             )
+        messages.append({"role": "user", "content": _NUDGE_TOOL_FOLLOWUP})
 
     raw_text = result.text.strip()
 

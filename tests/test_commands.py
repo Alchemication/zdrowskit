@@ -6,7 +6,7 @@ import json
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from commands import cmd_coach, cmd_llm_log
+from commands import cmd_coach, cmd_llm_log, cmd_nudge
 from llm import LLMResult
 from store import log_feedback, log_llm_call
 
@@ -309,3 +309,131 @@ class TestCmdLlmLog:
         assert tool_result_entry["tool_call_id"] == "call_1"
         assert payload["transcript"][-1]["role"] == "assistant_final"
         assert nearby_ids == [earlier_id, target_id]
+
+
+class TestCmdNudge:
+    def test_retries_when_model_returns_meta_text_instead_of_final_nudge(
+        self,
+        in_memory_db,
+        capsys,
+    ) -> None:
+        args = SimpleNamespace(
+            db="ignored.db",
+            model="test-model",
+            months=1,
+            trigger="new_data",
+            email=False,
+            telegram=False,
+        )
+        seen_messages: list[list[dict[str, str]]] = []
+
+        tool_call = SimpleNamespace(
+            id="call_1",
+            function=SimpleNamespace(
+                name="run_sql",
+                arguments='{"query": "SELECT 1"}',
+            ),
+        )
+        first_result = LLMResult(
+            text="Let me check what's actually new since the last notification.",
+            model="test-model",
+            input_tokens=1,
+            output_tokens=1,
+            total_tokens=2,
+            latency_s=0.1,
+            tool_calls=[tool_call],
+            raw_message={
+                "role": "assistant",
+                "content": "Let me check what's actually new since the last notification.",
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "function": {
+                            "name": "run_sql",
+                            "arguments": '{"query": "SELECT 1"}',
+                        },
+                    }
+                ],
+            },
+        )
+        second_result = LLMResult(
+            text=(
+                "The 9:02 AM notification prescribed today's easy run. "
+                "Now the run is done, so that's genuinely new data worth a quick response."
+            ),
+            model="test-model",
+            input_tokens=1,
+            output_tokens=1,
+            total_tokens=2,
+            latency_s=0.1,
+            raw_message={
+                "role": "assistant",
+                "content": (
+                    "The 9:02 AM notification prescribed today's easy run. "
+                    "Now the run is done, so that's genuinely new data worth a quick response."
+                ),
+            },
+        )
+        third_result = LLMResult(
+            text=(
+                "Easy run done. **5.3 km at 5:42/km, HR 155** on a flat route "
+                "was exactly right. Don't add more tonight. Tomorrow is "
+                "**tempo only if HRV clears 48 ms**; otherwise easy 5 km."
+            ),
+            model="test-model",
+            input_tokens=1,
+            output_tokens=1,
+            total_tokens=2,
+            latency_s=0.1,
+            raw_message={
+                "role": "assistant",
+                "content": (
+                    "Easy run done. **5.3 km at 5:42/km, HR 155** on a flat route "
+                    "was exactly right. Don't add more tonight. Tomorrow is "
+                    "**tempo only if HRV clears 48 ms**; otherwise easy 5 km."
+                ),
+            },
+        )
+
+        def fake_call_llm(messages, **kwargs):
+            seen_messages.append(messages.copy())
+            return [first_result, second_result, third_result][len(seen_messages) - 1]
+
+        with (
+            patch("commands.load_context", return_value={"prompt": "x", "soul": "y"}),
+            patch("commands.open_db", return_value=in_memory_db),
+            patch(
+                "commands.build_llm_data",
+                return_value={
+                    "current_week": {"summary": {"week_label": "2026-W14"}, "days": []},
+                    "history": [],
+                    "week_complete": False,
+                    "week_label": "2026-W14",
+                },
+            ),
+            patch(
+                "commands.build_messages",
+                return_value=[
+                    {"role": "system", "content": "s"},
+                    {"role": "user", "content": "u"},
+                ],
+            ),
+            patch("commands.call_llm", side_effect=fake_call_llm),
+            patch("tools.run_sql_tool", return_value=[{"type": "function"}]),
+            patch("tools.execute_run_sql", return_value="[]"),
+            patch("commands._save_nudge"),
+            patch("commands.send_telegram", return_value=123) as send_telegram,
+        ):
+            result = cmd_nudge(args)
+
+        captured = capsys.readouterr()
+        assert result.telegram_message_id == 123
+        assert "Let me check" not in captured.out
+        assert "genuinely new data worth a quick response" not in captured.out
+        assert "Easy run done." in captured.out
+        assert len(seen_messages) == 3
+        assert seen_messages[1][-1]["content"].startswith("Use the tool results above")
+        assert seen_messages[2][-1]["content"].startswith("That was internal reasoning")
+        sent_text = send_telegram.call_args.args[0]
+        assert sent_text.startswith("**📊 Data Sync**")
+        assert "Easy run done." in sent_text

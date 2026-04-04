@@ -143,7 +143,7 @@ def summarise(snapshots: list[DailySnapshot]) -> WeeklySummary:
     """
     all_workouts = [w for s in snapshots for w in s.workouts]
     runs = [w for w in all_workouts if w.category == "run"]
-    lifts = [w for w in all_workouts if w.category == "lift"]
+    lifts = [w for w in all_workouts if w.counts_as_lift]
     walks = [w for w in all_workouts if w.category == "walk"]
 
     # --- Run aggregates ---

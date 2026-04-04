@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from parsers.workouts import _category, _qty, parse_workouts
+from parsers.workouts import _category, _counts_as_lift, _qty, parse_workouts
 
 
 class TestCategory:
@@ -37,6 +37,17 @@ class TestQty:
 
     def test_missing_qty_key(self) -> None:
         assert _qty({"units": "count/min"}) is None
+
+
+class TestCountsAsLift:
+    def test_traditional_strength_always_counts(self) -> None:
+        assert _counts_as_lift("Traditional Strength Training", 5.0) is True
+
+    def test_short_functional_strength_does_not_count(self) -> None:
+        assert _counts_as_lift("Functional Strength Training", 14.9) is False
+
+    def test_functional_strength_at_threshold_counts(self) -> None:
+        assert _counts_as_lift("Functional Strength Training", 15.0) is True
 
 
 class TestParseWorkouts:
@@ -72,3 +83,55 @@ class TestParseWorkouts:
         run = [w for w in workouts if w.category == "run"][0]
         assert run.temperature_c == 8.0
         assert run.humidity_pct == 65
+
+    def test_filters_out_sub_minute_workout(self, tmp_path: Path) -> None:
+        path = tmp_path / "workouts.json"
+        path.write_text(
+            """
+            {
+              "data": {
+                "workouts": [
+                  {
+                    "name": "Functional Strength Training",
+                    "start": "2026-03-10 07:00:00 +0000",
+                    "duration": 30
+                  },
+                  {
+                    "name": "Outdoor Run",
+                    "start": "2026-03-10 07:02:00 +0000",
+                    "duration": 1200
+                  }
+                ]
+              }
+            }
+            """.strip()
+        )
+
+        workouts = parse_workouts(path)
+
+        assert len(workouts) == 1
+        assert workouts[0].type == "Outdoor Run"
+
+    def test_short_functional_strength_is_kept_but_not_counted(self, tmp_path: Path) -> None:
+        path = tmp_path / "workouts.json"
+        path.write_text(
+            """
+            {
+              "data": {
+                "workouts": [
+                  {
+                    "name": "Functional Strength Training",
+                    "start": "2026-03-10 07:00:00 +0000",
+                    "duration": 600
+                  }
+                ]
+              }
+            }
+            """.strip()
+        )
+
+        workouts = parse_workouts(path)
+
+        assert len(workouts) == 1
+        assert workouts[0].category == "lift"
+        assert workouts[0].counts_as_lift is False

@@ -40,6 +40,9 @@ _CATEGORY_MAP: dict[str, str] = {
     "indoor cycle": "cycle",
 }
 
+_MIN_WORKOUT_DURATION_MIN = 1.0
+_FUNCTIONAL_LIFT_MIN_DURATION = 15.0
+
 
 def _category(name: str) -> str:
     """Map a workout name to its normalised category string.
@@ -51,6 +54,24 @@ def _category(name: str) -> str:
         One of "run", "lift", "walk", "cycle", or "other".
     """
     return _CATEGORY_MAP.get(name.lower(), "other")
+
+
+def _counts_as_lift(name: str, duration_min: float) -> bool:
+    """Return whether a workout should count as a completed lift.
+
+    Args:
+        name: Raw workout name from the JSON.
+        duration_min: Elapsed workout duration in minutes.
+
+    Returns:
+        True when the workout should count toward weekly lift completion.
+    """
+    normalized = name.lower()
+    if normalized == "traditional strength training":
+        return True
+    if normalized == "functional strength training":
+        return duration_min >= _FUNCTIONAL_LIFT_MIN_DURATION
+    return False
 
 
 def _qty(obj: dict | None) -> float | None:
@@ -78,6 +99,28 @@ def _parse_apple_dt(raw: str) -> datetime:
         A timezone-aware datetime normalised to UTC.
     """
     return datetime.strptime(raw, "%Y-%m-%d %H:%M:%S %z").astimezone(timezone.utc)
+
+
+def _duration_min(w: dict, start_dt: datetime) -> float:
+    """Return workout duration in minutes from explicit or derived fields.
+
+    Args:
+        w: Raw workout dict from the JSON.
+        start_dt: Parsed workout start datetime in UTC.
+
+    Returns:
+        Workout duration in minutes.
+    """
+    duration_s = w.get("duration")
+    if duration_s is not None:
+        return float(duration_s) / 60.0
+
+    end_raw = w.get("end")
+    if isinstance(end_raw, str):
+        end_dt = _parse_apple_dt(end_raw)
+        return max(0.0, (end_dt - start_dt).total_seconds() / 60.0)
+
+    return 0.0
 
 
 def _percentile(values: list[float], p: float) -> float:
@@ -154,7 +197,10 @@ def parse_workouts(path: Path) -> list[WorkoutSnapshot]:
     for w in data["data"]["workouts"]:
         name = w.get("name", "Unknown")
         start_dt = _parse_apple_dt(w["start"])
-        duration_s = w.get("duration", 0.0)
+        duration_min = _duration_min(w, start_dt)
+
+        if duration_min < _MIN_WORKOUT_DURATION_MIN:
+            continue
 
         # Heart rate — nested {"avg": {"qty": x}, "min": {...}, "max": {...}}
         hr_block = w.get("heartRate", {})
@@ -184,8 +230,9 @@ def parse_workouts(path: Path) -> list[WorkoutSnapshot]:
             WorkoutSnapshot(
                 type=name,
                 category=_category(name),
+                counts_as_lift=_counts_as_lift(name, duration_min),
                 start_utc=start_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
-                duration_min=duration_s / 60.0,
+                duration_min=duration_min,
                 hr_min=int(hr_min_val) if hr_min_val is not None else None,
                 hr_avg=hr_avg,
                 hr_max=int(hr_max_val) if hr_max_val is not None else None,

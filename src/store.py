@@ -70,6 +70,7 @@ CREATE TABLE IF NOT EXISTS workout (
     date                     TEXT NOT NULL REFERENCES daily(date),
     type                     TEXT NOT NULL,
     category                 TEXT NOT NULL,
+    counts_as_lift           INTEGER NOT NULL DEFAULT 0,
     duration_min             REAL NOT NULL,
     hr_min                   INTEGER,
     hr_avg                   REAL,
@@ -189,6 +190,23 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if sleep_cols[0] not in daily_cols:
         logger.info("Migrated daily: added sleep columns")
 
+    workout_cols = {r[1] for r in conn.execute("PRAGMA table_info(workout)").fetchall()}
+    if workout_cols and "counts_as_lift" not in workout_cols:
+        conn.execute(
+            "ALTER TABLE workout ADD COLUMN counts_as_lift INTEGER NOT NULL DEFAULT 0"
+        )
+        conn.execute(
+            """
+            UPDATE workout
+            SET counts_as_lift = CASE
+                WHEN lower(type) = 'traditional strength training' THEN 1
+                WHEN lower(type) = 'functional strength training' AND duration_min >= 15 THEN 1
+                ELSE 0
+            END
+            """
+        )
+        logger.info("Migrated workout: added 'counts_as_lift' column")
+
 
 def store_snapshots(conn: sqlite3.Connection, snapshots: list[DailySnapshot]) -> int:
     """Upsert DailySnapshots and their workouts into the database.
@@ -275,7 +293,7 @@ def store_snapshots(conn: sqlite3.Connection, snapshots: list[DailySnapshot]) ->
                 conn.execute(
                     """
                     INSERT INTO workout (
-                        start_utc, date, type, category, duration_min,
+                        start_utc, date, type, category, counts_as_lift, duration_min,
                         hr_min, hr_avg, hr_max,
                         active_energy_kj, intensity_kcal_per_hr_kg,
                         temperature_c, humidity_pct,
@@ -283,7 +301,7 @@ def store_snapshots(conn: sqlite3.Connection, snapshots: list[DailySnapshot]) ->
                         gpx_avg_speed_ms, gpx_max_speed_p95_ms,
                         imported_at
                     ) VALUES (
-                        ?, ?, ?, ?, ?,
+                        ?, ?, ?, ?, ?, ?,
                         ?, ?, ?,
                         ?, ?,
                         ?, ?,
@@ -297,6 +315,7 @@ def store_snapshots(conn: sqlite3.Connection, snapshots: list[DailySnapshot]) ->
                         s.date,
                         w.type,
                         w.category,
+                        int(w.counts_as_lift),
                         w.duration_min,
                         w.hr_min,
                         w.hr_avg,
@@ -373,6 +392,7 @@ def load_snapshots(
             WorkoutSnapshot(
                 type=row["type"],
                 category=row["category"],
+                counts_as_lift=bool(row["counts_as_lift"]),
                 start_utc=row["start_utc"],
                 duration_min=row["duration_min"],
                 hr_min=row["hr_min"],

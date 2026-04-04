@@ -100,6 +100,7 @@ class TestStoreAndLoad:
         w = day.workouts[0]
         assert w.type == "Outdoor Run"
         assert w.category == "run"
+        assert w.counts_as_lift is False
         assert w.duration_min == 35.0
         assert w.hr_avg == 155.0
         assert w.gpx_distance_km == 5.2
@@ -179,6 +180,28 @@ class TestUpsertReplacesWorkouts:
         assert len(loaded[0].workouts) == 2
         categories = {w.category for w in loaded[0].workouts}
         assert categories == {"run", "lift"}
+
+    def test_counts_as_lift_round_trip(self, in_memory_db: sqlite3.Connection) -> None:
+        functional = WorkoutSnapshot(
+            type="Functional Strength Training",
+            category="lift",
+            counts_as_lift=False,
+            start_utc="2026-03-10T07:00:00Z",
+            duration_min=8.0,
+        )
+        traditional = WorkoutSnapshot(
+            type="Traditional Strength Training",
+            category="lift",
+            counts_as_lift=True,
+            start_utc="2026-03-10T17:00:00Z",
+            duration_min=45.0,
+        )
+        day = DailySnapshot(date="2026-03-10", workouts=[functional, traditional])
+
+        store_snapshots(in_memory_db, [day])
+        loaded = load_snapshots(in_memory_db)
+
+        assert [w.counts_as_lift for w in loaded[0].workouts] == [False, True]
 
 
 class TestRoundTripNullWorkoutFields:
@@ -334,6 +357,48 @@ class TestMigrate:
             r[1] for r in conn.execute("PRAGMA table_info(llm_call)").fetchall()
         }
         assert "cost" in cols_after
+
+    def test_adds_counts_as_lift_and_backfills(self) -> None:
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.executescript("""
+            CREATE TABLE daily (
+                date TEXT PRIMARY KEY
+            );
+            CREATE TABLE workout (
+                start_utc TEXT PRIMARY KEY,
+                date TEXT NOT NULL,
+                type TEXT NOT NULL,
+                category TEXT NOT NULL,
+                duration_min REAL NOT NULL
+            );
+            CREATE TABLE llm_call (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                request_type TEXT NOT NULL,
+                model TEXT NOT NULL,
+                messages_json TEXT NOT NULL,
+                response_text TEXT NOT NULL,
+                params_json TEXT,
+                input_tokens INTEGER NOT NULL,
+                output_tokens INTEGER NOT NULL,
+                total_tokens INTEGER NOT NULL,
+                latency_s REAL NOT NULL,
+                metadata_json TEXT
+            );
+            INSERT INTO workout (start_utc, date, type, category, duration_min) VALUES
+                ('2026-03-10T07:00:00Z', '2026-03-10', 'Functional Strength Training', 'lift', 8.0),
+                ('2026-03-10T17:00:00Z', '2026-03-10', 'Traditional Strength Training', 'lift', 45.0);
+        """)
+
+        _migrate(conn)
+
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(workout)").fetchall()}
+        assert "counts_as_lift" in cols
+        rows = conn.execute(
+            "SELECT type, counts_as_lift FROM workout ORDER BY start_utc"
+        ).fetchall()
+        assert [row["counts_as_lift"] for row in rows] == [0, 1]
 
     def test_noop_when_column_exists(self, in_memory_db: sqlite3.Connection) -> None:
         """Migrate should be safe to call when schema is already up-to-date."""

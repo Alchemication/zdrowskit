@@ -74,6 +74,9 @@ on its own line, nothing else. A SKIP is always better than a redundant message.
 
 If you do write, produce a single short message — maximum 80 words. Use **bold**
 for key numbers or actions. No headers. Keep it conversational.
+Do not narrate your reasoning. Do not say things like "let me check", "that's
+new data worth responding to", or explain why you're about to answer. Output
+only the final user-facing nudge.
 
 ### Sleep tracking compliance
 
@@ -86,8 +89,14 @@ mention a tracking gap if 3+ consecutive nights were missed.
 
 - **new_data**: New health data just synced. One data-driven observation and one
   concrete suggestion for the rest of the day or tomorrow. Skip the obvious.
+  Do not just restate the last prescription unless the new data changes the
+  decision. If the new event is that a prescribed session was completed, focus
+  on what that completion means now.
   If sleep data is available, factor it in — a bad night's sleep is a reason to
   suggest an easier session or earlier bedtime, not just note the number.
+  Do not remind them to wear the watch unless there were 3+ consecutive missed
+  nights, or that reminder is the single most useful action for tomorrow's
+  decision.
 
 - **missed_session**: No workout was logged today. First check the Current
   Training Plan above — if today is a rest day or off day, respond with SKIP

@@ -23,6 +23,9 @@ class WorkoutSnapshot:
     Attributes:
         type: Human-readable workout name, e.g. "Outdoor Run".
         category: Normalised bucket: "run" | "lift" | "walk" | "cycle" | "other".
+        counts_as_lift: Whether zdrowskit should treat this as a completed
+            strength session for weekly planning and summaries. If omitted,
+            it is derived from workout type and duration.
         start_utc: ISO 8601 UTC start time, e.g. "2026-03-10T17:04:05Z".
         duration_min: Elapsed workout time in minutes.
         hr_min: Minimum heart rate (bpm) during the workout.
@@ -42,6 +45,7 @@ class WorkoutSnapshot:
     category: str  # "run" | "lift" | "walk" | "other"
     start_utc: str  # ISO datetime string
     duration_min: float
+    counts_as_lift: bool | None = None
     hr_min: int | None = None
     hr_avg: float | None = None
     hr_max: int | None = None
@@ -54,6 +58,19 @@ class WorkoutSnapshot:
     gpx_elevation_gain_m: float | None = None
     gpx_avg_speed_ms: float | None = None
     gpx_max_speed_p95_ms: float | None = None
+
+    def __post_init__(self) -> None:
+        """Derive lift-counting semantics when not explicitly provided."""
+        if self.counts_as_lift is not None:
+            return
+
+        normalized = self.type.lower()
+        if normalized == "traditional strength training":
+            self.counts_as_lift = True
+        elif normalized == "functional strength training":
+            self.counts_as_lift = self.duration_min >= 15.0
+        else:
+            self.counts_as_lift = False
 
 
 @dataclass

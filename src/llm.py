@@ -861,6 +861,7 @@ def _build_today_snapshot(days: list[dict], today_iso: str) -> dict | None:
             {
                 "type": w.get("type"),
                 "category": w.get("category"),
+                "counts_as_lift": w.get("counts_as_lift"),
                 "duration_min": w.get("duration_min"),
             }
         )

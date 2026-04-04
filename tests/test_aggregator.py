@@ -276,3 +276,67 @@ class TestSummarise:
         assert summary.avg_steps == 0
         assert summary.avg_recovery_index is None
         assert summary.hrv_trend is None
+
+    def test_short_functional_warmup_does_not_increment_lift_count(self) -> None:
+        snaps = [
+            DailySnapshot(
+                date="2026-03-09",
+                workouts=[
+                    WorkoutSnapshot(
+                        type="Traditional Strength Training",
+                        category="lift",
+                        start_utc="2026-03-09T17:00:00Z",
+                        duration_min=45.0,
+                    )
+                ],
+            ),
+            DailySnapshot(
+                date="2026-03-10",
+                workouts=[
+                    WorkoutSnapshot(
+                        type="Functional Strength Training",
+                        category="lift",
+                        start_utc="2026-03-10T07:00:00Z",
+                        duration_min=6.0,
+                    )
+                ],
+            ),
+        ]
+
+        summary = summarise(snaps)
+
+        assert summary.lift_count == 1
+        assert summary.total_lift_min == 45.0
+
+    def test_second_real_lift_updates_lift_count(self) -> None:
+        snaps = [
+            DailySnapshot(
+                date="2026-03-09",
+                workouts=[
+                    WorkoutSnapshot(
+                        type="Traditional Strength Training",
+                        category="lift",
+                        start_utc="2026-03-09T17:00:00Z",
+                        duration_min=45.0,
+                    )
+                ],
+            ),
+            DailySnapshot(
+                date="2026-03-10",
+                workouts=[
+                    WorkoutSnapshot(
+                        type="Functional Strength Training",
+                        category="lift",
+                        start_utc="2026-03-10T07:00:00Z",
+                        duration_min=18.0,
+                        hr_avg=108.0,
+                    )
+                ],
+            ),
+        ]
+
+        summary = summarise(snaps)
+
+        assert summary.lift_count == 2
+        assert summary.total_lift_min == 63.0
+        assert summary.avg_lift_hr == 108.0

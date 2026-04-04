@@ -543,6 +543,7 @@ class TestBuildLlmData:
         assert "steps" in day
         assert "workouts" in day
         assert "recovery_index" in day
+        assert "counts_as_lift" in day["workouts"][0]
 
     @patch("llm.datetime")
     @patch("llm.date")
@@ -742,18 +743,19 @@ class TestBuildLlmData:
         sample_snapshots: list[DailySnapshot],
     ) -> None:
         """Summary includes a today snapshot with key vitals."""
-        mock_date.today.return_value = date(2026, 3, 11)
+        mock_date.today.return_value = date(2026, 3, 10)
         mock_date.fromisoformat = date.fromisoformat
-        mock_datetime.now.return_value = datetime(2026, 3, 11, 14, 0)
+        mock_datetime.now.return_value = datetime(2026, 3, 10, 14, 0)
         store_snapshots(in_memory_db, sample_snapshots)
         result = build_llm_data(in_memory_db, months=3)
 
         summary = result["current_week"]["summary"]
         today = summary["today"]
-        assert today["date"] == "2026-03-11"
+        assert today["date"] == "2026-03-10"
         assert today["hrv_ms"] is not None
         assert today["steps"] is not None
         assert today["sleep_status"] in ("tracked", "pending", "not_tracked")
+        assert "counts_as_lift" in today["workouts"][0]
 
     @patch("llm.datetime")
     @patch("llm.date")
