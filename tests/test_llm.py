@@ -148,20 +148,17 @@ class TestRepoPrompts:
     def test_chat_prompt_states_conversational_purpose_and_boundaries(self) -> None:
         prompt = (PROMPTS_DIR / "chat_prompt.md").read_text(encoding="utf-8")
         assert "Purpose: answer the user's current question or message" in prompt
-        assert "This is not a proactive nudge and not a weekly plan/goals review." in prompt
+        assert "Stay focused on the current conversation turn." in prompt
         assert "## Recent User Notes" in prompt
         assert "## Recent Durable Coaching Context" in prompt
         assert "## Recent Coach Recommendation" in prompt
-        assert "Do not turn a simple answer into a weekly review" in prompt
 
     def test_weekly_report_prompt_states_report_role_and_boundaries(self) -> None:
         prompt = (PROMPTS_DIR / "prompt.md").read_text(encoding="utf-8")
-        normalized = " ".join(prompt.split())
         assert "Purpose: this is a weekly report that interprets what happened" in prompt
-        assert "It is not a reactive nudge and not a plan/goals editing workflow." in normalized
+        assert "help the user understand what happened and what to do next." in prompt
         assert "## Recent User Notes This Week" in prompt
         assert "## Recent Durable Coaching Context" in prompt
-        assert "Do not write this like a quick chat reply or a reactive nudge." in prompt
 
 
 class TestBuildMessages:
