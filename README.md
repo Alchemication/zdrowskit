@@ -258,7 +258,7 @@ Each notification type is a distinct LLM call with its own prompt, context, tool
 
 | Channel | Purpose | Trigger | Frequency | Length | Tools | Special output |
 |---------|---------|---------|-----------|--------|-------|----------------|
-| **Insights** | Full weekly report | Scheduled (default: Mon 8am) or manual | 1×/week | ~600 words | `run_sql` | `<chart>` (0+), `<memory>` (always 1, appended to `history.md`) |
+| **Insights** | Full weekly report | Scheduled (default: Mon 8am) or manual `/review` | 1×/week | ~600 words | `run_sql` | `<chart>` (0+), `<memory>` (always 1, appended to `history.md`) |
 | **Coach** | Weekly plan/goals review, with optional proposals | After insights or manual `/coach` | 1×/week | ~300 words | `run_sql`, `update_context` (plan, goals only) | `update_context` tool calls (0–2) |
 | **Nudge** | Short reactive next-action nudge | Data sync, file edit, missed session | Up to 3/day by default | 80 words | `run_sql` | `SKIP` if nothing changes; `<chart>` (0–1) |
 | **Chat** | Interactive conversation — answer the current message, ask anything, get charts | Your Telegram message | On demand | 150 words | `run_sql` (up to 5/turn), `update_context` (any file) | `<chart>` (optional), `update_context` (at most 1) |
@@ -310,7 +310,8 @@ The daemon runs a Telegram long-polling listener alongside the file watcher. Sen
 - Reply to a nudge or report — the bot knows which message you're responding to
 - Share updates naturally ("my weight is 76kg now") — the LLM proposes context file edits with Accept/Reject buttons
 - Thumbs down a bad output, pick a category, optionally reply with more detail, and undo it if you tapped it during testing or a demo
-- Commands: `/review`, `/coach`, `/notify`, `/clear`, `/status`, `/context [name]`, `/help`
+- Commands: `/review [current|last]`, `/coach`, `/notify`, `/clear`, `/status`, `/context [name]`, `/help`
+- `/status` shows bot state, data coverage, recent activity, and notification state
 - Conversation buffer: last 20 messages in memory, resets on daemon restart
 
 ### Cross-message awareness
