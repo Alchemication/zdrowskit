@@ -158,7 +158,7 @@ uv run python main.py coach --telegram                   # send proposals with A
 
 uv run python main.py llm-log                           # last 10 LLM calls
 uv run python main.py llm-log --stats                   # usage summary by type and model
-uv run python main.py llm-log --id 42                   # full detail for a specific call
+uv run python main.py llm-log --id 42                   # full stored trace for one LLM call (messages, tool use, response)
 uv run python main.py llm-log --feedback                # recent thumbs-down feedback
 uv run python main.py llm-log --json                    # output as JSON
 

@@ -203,3 +203,109 @@ class TestCmdLlmLog:
         payload = json.loads(capsys.readouterr().out)
         assert payload["id"] == call_id
         assert payload["request_type"] == "chat"
+        assert payload["messages"] == [{"role": "user", "content": "hello"}]
+        assert payload["transcript"][-1]["role"] == "assistant_final"
+        assert payload["transcript"][-1]["content"] == "response"
+        assert payload["nearby_calls"][0]["id"] == call_id
+        assert payload["nearby_calls"][0]["selected"] is True
+
+    def test_detail_json_normalizes_tool_calls_and_nearby_calls(
+        self,
+        in_memory_db,
+        capsys,
+    ) -> None:
+        messages = [
+            {"role": "system", "content": "system prompt"},
+            {"role": "user", "content": "show me the latest nudge"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {
+                            "name": "run_sql",
+                            "arguments": '{"query": "SELECT 1"}',
+                        },
+                    }
+                ],
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "call_1",
+                "content": '{"rows": [{"value": 1}]}',
+            },
+        ]
+        earlier_id = log_llm_call(
+            in_memory_db,
+            request_type="chat",
+            model="test-model",
+            messages=[{"role": "user", "content": "earlier"}],
+            response_text="earlier response",
+        )
+        target_id = log_llm_call(
+            in_memory_db,
+            request_type="chat",
+            model="test-model",
+            messages=messages,
+            response_text="Here is the answer.",
+        )
+        other_type_id = log_llm_call(
+            in_memory_db,
+            request_type="nudge",
+            model="test-model",
+            messages=[{"role": "user", "content": "different type"}],
+            response_text="skip",
+        )
+        far_id = log_llm_call(
+            in_memory_db,
+            request_type="chat",
+            model="test-model",
+            messages=[{"role": "user", "content": "far away"}],
+            response_text="later response",
+        )
+        in_memory_db.execute(
+            "UPDATE llm_call SET timestamp = ? WHERE id = ?",
+            ("2026-03-15T10:00:30+00:00", earlier_id),
+        )
+        in_memory_db.execute(
+            "UPDATE llm_call SET timestamp = ? WHERE id = ?",
+            ("2026-03-15T10:01:00+00:00", target_id),
+        )
+        in_memory_db.execute(
+            "UPDATE llm_call SET timestamp = ? WHERE id = ?",
+            ("2026-03-15T10:01:30+00:00", other_type_id),
+        )
+        in_memory_db.execute(
+            "UPDATE llm_call SET timestamp = ? WHERE id = ?",
+            ("2026-03-15T10:04:30+00:00", far_id),
+        )
+        in_memory_db.commit()
+        args = SimpleNamespace(
+            db="ignored.db",
+            last=10,
+            stats=False,
+            id=target_id,
+            feedback=False,
+            json=True,
+        )
+
+        with patch("commands.open_db", return_value=in_memory_db):
+            cmd_llm_log(args)
+
+        payload = json.loads(capsys.readouterr().out)
+        assistant_tool_entry = payload["transcript"][2]
+        tool_result_entry = payload["transcript"][3]
+        nearby_ids = [row["id"] for row in payload["nearby_calls"]]
+
+        assert assistant_tool_entry["role"] == "assistant"
+        assert assistant_tool_entry["tool_calls"][0]["name"] == "run_sql"
+        assert (
+            assistant_tool_entry["tool_calls"][0]["arguments"]
+            == '{"query": "SELECT 1"}'
+        )
+        assert tool_result_entry["role"] == "tool"
+        assert tool_result_entry["tool_call_id"] == "call_1"
+        assert payload["transcript"][-1]["role"] == "assistant_final"
+        assert nearby_ids == [earlier_id, target_id]

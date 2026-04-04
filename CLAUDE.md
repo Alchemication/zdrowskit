@@ -1,5 +1,3 @@
-# CLAUDE.md
-
 ## What is zdrowskit
 
 Your 24/7 ultra-personal trainer. Parses Apple Health exports (metrics, workouts, GPX routes, sleep), stores them in SQLite, and uses an LLM to generate personalised weekly reports and short nudges via Telegram/email. A daemon watches for new data, fires nudges automatically, and listens for incoming Telegram messages for interactive two-way coaching chat — including ad-hoc data queries and on-demand charts.
@@ -25,6 +23,8 @@ uv run python src/daemon.py --foreground  # run filesystem watcher + chat in for
 uv run python -m evals.run               # run all AI evals (add --model, --scenario, --reasoning-effort)
 uv run python -m evals.data.extract      # refresh eval blueprints from live data
 ```
+
+Preferred LLM tracing path for debugging: use `uv run python main.py llm-log --id N` to inspect the full stored trace for one call, including messages, tool use, and final response.
 
 ## Collaboration Style
 

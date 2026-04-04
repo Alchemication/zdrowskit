@@ -66,6 +66,9 @@ from store import (
 
 logger = logging.getLogger(__name__)
 
+_LLM_LOG_NEARBY_WINDOW_S = 120
+_LLM_LOG_MAX_PANEL_CHARS = 20000
+
 
 @dataclass
 class CommandResult:
@@ -219,6 +222,154 @@ def _save_baselines(context_dir: Path, baselines: str) -> None:
     path = context_dir / "baselines.md"
     path.write_text(baselines.rstrip() + "\n", encoding="utf-8")
     logger.info("Saved baselines to %s", path)
+
+
+def _try_parse_json_text(content: str) -> str | None:
+    """Pretty-print JSON content when possible.
+
+    Args:
+        content: Candidate JSON string.
+
+    Returns:
+        Pretty-printed JSON text, or None if parsing fails.
+    """
+    try:
+        parsed = json.loads(content)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+    return json.dumps(parsed, indent=2, sort_keys=True)
+
+
+def _format_llm_log_content(content: object) -> str:
+    """Normalize logged message content for display.
+
+    Args:
+        content: Raw message content from the DB payload.
+
+    Returns:
+        Display-ready text.
+    """
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        pretty = _try_parse_json_text(content)
+        return pretty if pretty is not None else content
+    return json.dumps(content, indent=2, sort_keys=True)
+
+
+def _clip_llm_log_text(content: str, limit: int = _LLM_LOG_MAX_PANEL_CHARS) -> str:
+    """Clip extremely large content for terminal display.
+
+    Args:
+        content: Full text to render.
+        limit: Maximum characters to keep before clipping.
+
+    Returns:
+        Original text when short enough, otherwise a clipped preview with size note.
+    """
+    if len(content) <= limit:
+        return content
+    return content[:limit] + f"\n\n… [truncated, {len(content):,} chars total]"
+
+
+def _normalize_llm_log_transcript(
+    messages: list[dict],
+    response_text: str,
+) -> list[dict[str, object]]:
+    """Build a normalized transcript for llm-log detail mode.
+
+    Args:
+        messages: Parsed messages_json payload.
+        response_text: Final assistant text stored in llm_call.
+
+    Returns:
+        A normalized transcript list suitable for JSON output and rich rendering.
+    """
+    transcript: list[dict[str, object]] = []
+    for index, msg in enumerate(messages, start=1):
+        role = str(msg.get("role", "unknown"))
+        entry: dict[str, object] = {
+            "index": index,
+            "role": role,
+            "content": msg.get("content", ""),
+        }
+        if role == "assistant" and msg.get("tool_calls"):
+            tool_calls: list[dict[str, object]] = []
+            for tool_index, tc in enumerate(msg.get("tool_calls", []), start=1):
+                fn = tc.get("function") or {}
+                tool_calls.append(
+                    {
+                        "index": tool_index,
+                        "id": tc.get("id"),
+                        "type": tc.get("type", "function"),
+                        "name": fn.get("name"),
+                        "arguments": fn.get("arguments", ""),
+                    }
+                )
+            entry["tool_calls"] = tool_calls
+        if role == "tool":
+            entry["tool_call_id"] = msg.get("tool_call_id")
+        transcript.append(entry)
+
+    transcript.append(
+        {
+            "index": len(messages) + 1,
+            "role": "assistant_final",
+            "content": response_text,
+            "highlighted": True,
+        }
+    )
+    return transcript
+
+
+def _load_nearby_llm_calls(
+    conn,
+    target_row,
+    window_s: int = _LLM_LOG_NEARBY_WINDOW_S,
+) -> list[dict[str, object]]:
+    """Load nearby same-type LLM calls around a selected row.
+
+    Args:
+        conn: Open SQLite connection.
+        target_row: Selected llm_call row.
+        window_s: Absolute time window for inclusion.
+
+    Returns:
+        Nearby calls, including the selected row, ordered by timestamp then id.
+    """
+    target_ts = datetime.fromisoformat(target_row["timestamp"])
+    rows = conn.execute(
+        """
+        SELECT id, timestamp, request_type, model, input_tokens, output_tokens,
+               total_tokens, latency_s
+        FROM llm_call
+        WHERE request_type = ?
+        ORDER BY timestamp ASC, id ASC
+        """,
+        (target_row["request_type"],),
+    ).fetchall()
+
+    nearby: list[dict[str, object]] = []
+    for row in rows:
+        row_ts = datetime.fromisoformat(row["timestamp"])
+        delta_s = abs((row_ts - target_ts).total_seconds())
+        if delta_s > window_s:
+            continue
+        nearby.append(
+            {
+                "id": row["id"],
+                "timestamp": row["timestamp"],
+                "request_type": row["request_type"],
+                "model": row["model"],
+                "input_tokens": row["input_tokens"],
+                "output_tokens": row["output_tokens"],
+                "total_tokens": row["total_tokens"],
+                "latency_s": row["latency_s"],
+                "delta_s": round(delta_s, 3),
+                "selected": row["id"] == target_row["id"],
+            }
+        )
+    return nearby
 
 
 def _save_report(report: str, week: str) -> Path:
@@ -970,8 +1121,15 @@ def cmd_llm_log(args: argparse.Namespace) -> None:
             print(f"No LLM call found with id={args.id}")
             sys.exit(1)
 
+        messages = json.loads(row["messages_json"])
+        transcript = _normalize_llm_log_transcript(messages, row["response_text"])
+        nearby_calls = _load_nearby_llm_calls(conn, row)
+
         if args.json:
             detail = {k: row[k] for k in row.keys()}
+            detail["messages"] = messages
+            detail["transcript"] = transcript
+            detail["nearby_calls"] = nearby_calls
             print(json.dumps(detail, indent=2))
             return
 
@@ -1002,6 +1160,32 @@ def cmd_llm_log(args: argparse.Namespace) -> None:
             meta_table.add_row("Metadata", row["metadata_json"])
         console.print(meta_table)
 
+        if nearby_calls:
+            nearby_table = Table(
+                title="Nearby Calls (~2 min, same type)", show_lines=False
+            )
+            nearby_table.add_column("ID", justify="right", style="dim")
+            nearby_table.add_column("When")
+            nearby_table.add_column("Model", style="dim")
+            nearby_table.add_column("Latency", justify="right")
+            nearby_table.add_column("In tok", justify="right")
+            nearby_table.add_column("Out tok", justify="right")
+            nearby_table.add_column("Delta", justify="right")
+            for nearby in nearby_calls:
+                row_style = "bold green" if nearby["selected"] else ""
+                marker = ">" if nearby["selected"] else ""
+                nearby_table.add_row(
+                    f"{marker}{nearby['id']}",
+                    str(nearby["timestamp"])[:19],
+                    str(nearby["model"]).split("/")[-1],
+                    f"{float(nearby['latency_s']):.1f}s",
+                    f"{int(nearby['input_tokens']):,}",
+                    f"{int(nearby['output_tokens']):,}",
+                    f"{float(nearby['delta_s']):.0f}s",
+                    style=row_style,
+                )
+            console.print(nearby_table)
+
         feedback_rows = load_feedback_for_call(conn, args.id)
         if feedback_rows:
             feedback_table = Table(title="Feedback", show_lines=False)
@@ -1020,25 +1204,59 @@ def cmd_llm_log(args: argparse.Namespace) -> None:
                 )
             console.print(feedback_table)
 
-        messages = json.loads(row["messages_json"])
-        for msg in messages:
-            content = msg["content"]
-            max_chars = 2000
-            if len(content) > max_chars:
-                content = (
-                    content[:max_chars] + f"\n\n… ({len(msg['content']):,} chars total)"
-                )
-            console.print(
-                Panel(content, title=f"[bold]{msg['role']}[/bold]", border_style="dim")
+        for entry in transcript[:-1]:
+            role = str(entry["role"])
+            content = _clip_llm_log_text(
+                _format_llm_log_content(entry.get("content", ""))
             )
 
-        response = row["response_text"]
-        if len(response) > 3000:
-            response = (
-                response[:3000] + f"\n\n… ({len(row['response_text']):,} chars total)"
+            if role == "assistant" and entry.get("tool_calls"):
+                sections: list[str] = []
+                if content.strip():
+                    sections.append(content)
+                for tool_call in entry["tool_calls"]:
+                    tool_parts = [
+                        f"Tool call #{tool_call['index']}",
+                        f"Name: {tool_call['name'] or '(unknown)'}",
+                    ]
+                    if tool_call.get("id"):
+                        tool_parts.append(f"ID: {tool_call['id']}")
+                    args_text = _clip_llm_log_text(
+                        _format_llm_log_content(tool_call.get("arguments", ""))
+                    )
+                    if args_text.strip():
+                        tool_parts.append(f"Arguments:\n{args_text}")
+                    sections.append("\n".join(tool_parts))
+                content = "\n\n".join(sections).strip()
+            elif role == "tool":
+                tool_id = entry.get("tool_call_id")
+                if tool_id:
+                    content = f"Tool call ID: {tool_id}\n\n{content}".strip()
+
+            title = role.replace("_", " ").title()
+            border_style = {
+                "system": "blue",
+                "user": "cyan",
+                "assistant": "magenta",
+                "tool": "yellow",
+            }.get(role, "dim")
+            console.print(
+                Panel(
+                    content or "[dim](empty)[/dim]",
+                    title=f"[bold]{title}[/bold]",
+                    border_style=border_style,
+                )
             )
+
+        final_response = _clip_llm_log_text(
+            _format_llm_log_content(transcript[-1]["content"])
+        )
         console.print(
-            Panel(response, title="[bold]Response[/bold]", border_style="green")
+            Panel(
+                final_response or "[dim](empty)[/dim]",
+                title=f"[bold green]Final Response for Call #{row['id']}[/bold green]",
+                border_style="green",
+            )
         )
         return
 
