@@ -1,4 +1,4 @@
-"""Tests for scheduled coach behavior and Telegram feedback flow."""
+"""Tests for nudge scheduling, scheduled coach behavior, and Telegram feedback flow."""
 
 from __future__ import annotations
 
@@ -54,6 +54,26 @@ class TestWeeklyReportScheduling:
             daemon._run_weekly_report()
 
         assert events == ["insights", "record", "coach:last:True"]
+
+
+class TestNudgeScheduling:
+    def test_run_nudge_queues_before_10am(self, tmp_path: Path) -> None:
+        daemon = _make_daemon(tmp_path)
+        fake_now = daemon_module.datetime(2026, 4, 5, 9, 30)
+        fake_datetime = MagicMock()
+        fake_datetime.now.return_value = fake_now
+
+        with (
+            patch.object(daemon_module, "QUIET_HOUR_END", 10),
+            patch.object(daemon_module, "datetime", fake_datetime),
+            patch("commands.cmd_nudge") as cmd_nudge,
+        ):
+            daemon._run_nudge("new_data")
+
+        assert daemon._state["quiet_queue"][0]["trigger"] == "new_data"
+        cmd_nudge.assert_not_called()
+        state = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
+        assert state["quiet_queue"][0]["trigger"] == "new_data"
 
 
 class TestCoachFeedbackFlow:

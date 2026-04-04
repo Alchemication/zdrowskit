@@ -131,6 +131,7 @@ class TestRepoPrompts:
         assert "A nudge is not a summary of the latest sync." in prompt
         assert "If the trigger does not materially change the next action" in prompt
         assert "does not revise long-term goals or the training plan" in prompt
+        assert "Treat the Recent Nudges Already Sent section as high-priority context" in prompt
         assert "## Recent Nudges Already Sent" in prompt
         assert "## Recent Coach Recommendation" in prompt
         assert "## Recent User Notes" in prompt

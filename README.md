@@ -293,7 +293,7 @@ Each channel sees what the others recently said so the LLM avoids redundancy:
 
 ### Suppression and rate limiting
 
-- **Quiet hours:** nudges suppressed before 9 AM (sleep data hasn't synced yet). Triggers queue and drain as one consolidated nudge when the window opens
+- **Quiet hours:** nudges suppressed before 10 AM (sleep data often hasn't synced yet). Triggers queue and drain as one consolidated nudge when the window opens
 - **Report suppression:** nudges suppressed ±1 hour around scheduled reports — the report already covers the big picture
 - **Rate limits:** max 3 nudges/day, min 90 minutes apart
 - **LLM SKIP:** the nudge LLM can respond `SKIP` if there's nothing genuinely new to say

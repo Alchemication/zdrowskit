@@ -71,6 +71,12 @@ reference them only to interpret the current event and decide what matters now.
 
 Before writing anything, decide: is there something genuinely new or actionable
 to say that hasn't already been covered in the recent notifications above?
+Treat the Recent Nudges Already Sent section as high-priority context: it is
+the strongest evidence of what the user has already been told. Do not repeat
+the same observation, recommendation, rationale, or watch reminder unless the
+new data materially changes it. If a recent nudge already contains the correct
+call for today or tomorrow, either update that call because something changed
+or respond with SKIP.
 
 Also check the Last Coach Review above — if the coach already covered this
 topic within the last few days, respond with SKIP unless there is genuinely

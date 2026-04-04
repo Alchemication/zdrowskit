@@ -72,7 +72,7 @@ MORNING_REPORT_HOUR_END = 9
 MIDWEEK_REPORT_HOUR_START = 9
 MIDWEEK_REPORT_HOUR_END = 10
 
-QUIET_HOUR_END = 9  # Suppress event-driven nudges before this hour (local time)
+QUIET_HOUR_END = 10  # Suppress event-driven nudges before this hour (local time)
 COACH_SUPPRESSION_S = 3600  # ±1 hour: suppress nudges around scheduled reports
 
 # ---------------------------------------------------------------------------
