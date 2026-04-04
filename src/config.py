@@ -4,6 +4,7 @@ Public API:
     SHORTCUTS_DATA_DIR    — iCloud path for iOS Shortcuts health exports.
     AUTOEXPORT_DATA_DIR   — iCloud path for Auto Export app automation exports.
     CONTEXT_DIR           — directory containing user context files (me, goals, etc.).
+    NOTIFICATION_PREFS_PATH — JSON file storing notification preference overrides.
     PROMPTS_DIR           — directory containing prompt templates (prompt.md, soul.md, etc.).
     REPORTS_DIR           — directory where generated reports are saved.
     NUDGES_DIR            — directory where sent nudges are saved.
@@ -38,6 +39,9 @@ _SOURCE_DEFAULTS: dict[str, Path] = {
     "autoexport": AUTOEXPORT_DATA_DIR,
 }
 CONTEXT_DIR: Path = Path.home() / "Documents" / "zdrowskit" / "ContextFiles"
+NOTIFICATION_PREFS_PATH: Path = (
+    Path.home() / "Documents" / "zdrowskit" / "notification_prefs.json"
+)
 PROMPTS_DIR: Path = Path(__file__).resolve().parent / "prompts"
 REPORTS_DIR: Path = Path.home() / "Documents" / "zdrowskit" / "Reports"
 NUDGES_DIR: Path = Path.home() / "Documents" / "zdrowskit" / "Nudges"

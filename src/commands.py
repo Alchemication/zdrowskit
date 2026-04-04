@@ -29,6 +29,7 @@ import sys
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 from aggregator import summarise
 from assembler import assemble
@@ -39,7 +40,14 @@ from db.migrations import (
     get_live_schema,
     list_migrations,
 )
-from config import CONTEXT_DIR, NUDGES_DIR, PROMPTS_DIR, REPORTS_DIR, resolve_data_dir
+from config import (
+    CONTEXT_DIR,
+    NUDGES_DIR,
+    NOTIFICATION_PREFS_PATH,
+    PROMPTS_DIR,
+    REPORTS_DIR,
+    resolve_data_dir,
+)
 from llm import (
     DEFAULT_MODEL,
     LLMResult,
@@ -55,6 +63,12 @@ from llm import (
 from charts import ChartResult, extract_charts, render_chart, strip_charts
 from context_edit import ContextEdit
 from notify import send_email, send_telegram, send_telegram_photo, send_telegram_report
+from notification_prefs import (
+    DEFAULT_NOTIFICATION_PREFS,
+    active_temporary_mutes,
+    effective_notification_prefs,
+    validate_notification_changes,
+)
 from report import (
     current_week_bounds,
     group_by_week,
@@ -87,6 +101,7 @@ _NUDGE_NONFINAL_RETRY = (
     "final user-facing nudge now: one short message (maximum 80 words) or "
     "SKIP. Do not mention checking, reviewing, or deciding whether to send."
 )
+NOTIFY_MODEL = "anthropic/claude-3-5-haiku-latest"
 
 
 @dataclass
@@ -229,6 +244,119 @@ def _print_explain(
     # Saved report path
     if report_path:
         stderr.print(f"\n[dim]Report saved to:[/dim] [cyan]{report_path}[/cyan]")
+
+
+def _extract_json_object(text: str) -> dict[str, Any]:
+    """Parse a top-level JSON object from model output.
+
+    Accepts plain JSON or a fenced code block containing JSON.
+    """
+    candidate = text.strip()
+    if candidate.startswith("```"):
+        candidate = re.sub(r"^```(?:json)?\s*", "", candidate)
+        candidate = re.sub(r"\s*```$", "", candidate)
+    data = json.loads(candidate)
+    if not isinstance(data, dict):
+        raise ValueError("Notify interpreter must return a JSON object")
+    return data
+
+
+def interpret_notify_request(
+    request_text: str,
+    *,
+    db: str | Path,
+    prefs: dict[str, Any],
+    now: datetime | None = None,
+    clarification_answer: str | None = None,
+    model: str = NOTIFY_MODEL,
+) -> dict[str, Any]:
+    """Interpret a Telegram /notify request into a structured payload."""
+    now = now or datetime.now().astimezone()
+
+    try:
+        context = load_context(
+            CONTEXT_DIR,
+            prompt_file="notify_prompt",
+            max_history=0,
+            max_log=0,
+        )
+    except FileNotFoundError as exc:
+        logger.error("%s", exc)
+        raise
+
+    context["current_settings"] = json.dumps(
+        effective_notification_prefs(prefs), indent=2, sort_keys=True
+    )
+    context["default_settings"] = json.dumps(
+        effective_notification_prefs(DEFAULT_NOTIFICATION_PREFS),
+        indent=2,
+        sort_keys=True,
+    )
+    context["active_mutes"] = json.dumps(
+        active_temporary_mutes(prefs, now=now), indent=2, sort_keys=True
+    )
+    context["notify_request"] = request_text
+    context["clarification_answer"] = clarification_answer or "(none)"
+    context["timezone"] = now.tzname() or str(now.tzinfo) or "local"
+
+    messages = build_messages(
+        context,
+        health_data_json="{}",
+        baselines=None,
+        week_complete=False,
+        today=now.date(),
+    )
+
+    conn = open_db(Path(db))
+    try:
+        result = call_llm(
+            messages,
+            model=model,
+            max_tokens=512,
+            temperature=0,
+            conn=conn,
+            request_type="notify",
+            metadata={
+                "request_text": request_text,
+                "clarification_answer": clarification_answer,
+                "prefs_path": str(NOTIFICATION_PREFS_PATH),
+            },
+        )
+    finally:
+        conn.close()
+
+    payload = _extract_json_object(result.text)
+    status = payload.get("status")
+    intent = payload.get("intent")
+    if status not in {"proposal", "needs_clarification", "unsupported"}:
+        raise ValueError(f"Unsupported notify status: {status}")
+    if intent not in {
+        "show",
+        "set",
+        "enable",
+        "disable",
+        "reset",
+        "reset_all",
+        "mute_until",
+    }:
+        raise ValueError(f"Unsupported notify intent: {intent}")
+
+    payload["changes"] = validate_notification_changes(payload.get("changes", []))
+    if status == "needs_clarification":
+        question = payload.get("clarification_question")
+        if not isinstance(question, str) or not question.strip():
+            raise ValueError("Notify clarification must include a question")
+        payload["clarification_question"] = question.strip()
+    else:
+        payload["clarification_question"] = None
+
+    summary = payload.get("summary", "")
+    payload["summary"] = summary.strip() if isinstance(summary, str) else ""
+    reason = payload.get("reason", "")
+    payload["reason"] = reason.strip() if isinstance(reason, str) else ""
+    payload["llm_call_id"] = result.llm_call_id
+    payload["model"] = result.model
+    return payload
 
 
 def _looks_like_nonfinal_nudge(text: str) -> bool:
@@ -620,7 +748,7 @@ def cmd_db(args: argparse.Namespace) -> None:
                     f"Database file does not exist:\n[bold]{db_path}[/bold]",
                     title="DB Status",
                     border_style="yellow",
-            )
+                )
             )
             table = Table(title="Available Migrations", show_lines=False)
             table.add_column("Status", style="cyan", no_wrap=True)
@@ -1798,6 +1926,7 @@ def cmd_daemon_stop(args: argparse.Namespace) -> None:  # noqa: ARG001
 TELEGRAM_BOT_COMMANDS: list[dict[str, str]] = [
     {"command": "clear", "description": "Reset conversation buffer"},
     {"command": "coach", "description": "Run coaching review and propose plan updates"},
+    {"command": "notify", "description": "Show or change notification preferences"},
     {"command": "status", "description": "Nudge count, buffer size, last nudge time"},
     {"command": "context", "description": "List context files (add name to view one)"},
     {"command": "help", "description": "Show available commands"},

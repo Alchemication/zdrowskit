@@ -16,12 +16,15 @@ from context_edit import (
     new_feedback_entry,
 )
 from daemon import ZdrowskitDaemon
+from notification_prefs import load_notification_prefs
 from store import log_llm_call, open_db
 
 
 def _make_daemon(tmp_path: Path) -> ZdrowskitDaemon:
     daemon_module.STATE_FILE = tmp_path / "state.json"
-    return ZdrowskitDaemon("test-model", tmp_path / "test.db", tmp_path)
+    daemon = ZdrowskitDaemon("test-model", tmp_path / "test.db", tmp_path)
+    daemon._notification_prefs_path = tmp_path / "notification_prefs.json"
+    return daemon
 
 
 class TestWeeklyReportScheduling:
@@ -64,7 +67,6 @@ class TestNudgeScheduling:
         fake_datetime.now.return_value = fake_now
 
         with (
-            patch.object(daemon_module, "QUIET_HOUR_END", 10),
             patch.object(daemon_module, "datetime", fake_datetime),
             patch("commands.cmd_nudge") as cmd_nudge,
         ):
@@ -74,6 +76,111 @@ class TestNudgeScheduling:
         cmd_nudge.assert_not_called()
         state = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
         assert state["quiet_queue"][0]["trigger"] == "new_data"
+
+    def test_disabled_nudges_skip_without_queueing(self, tmp_path: Path) -> None:
+        daemon = _make_daemon(tmp_path)
+        daemon._notification_prefs_path.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "overrides": {"nudges": {"enabled": False}},
+                    "temporary_mutes": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        with patch("commands.cmd_nudge") as cmd_nudge:
+            daemon._run_nudge("new_data")
+
+        assert daemon._state.get("quiet_queue") is None
+        cmd_nudge.assert_not_called()
+
+    def test_temporary_mute_skips_weekly_report_without_llm_call(
+        self, tmp_path: Path
+    ) -> None:
+        daemon = _make_daemon(tmp_path)
+        daemon._notification_prefs_path.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "overrides": {},
+                    "temporary_mutes": [
+                        {
+                            "target": "weekly_insights",
+                            "expires_at": "2099-01-01T12:00:00+00:00",
+                            "source_text": "mute weekly insights this week",
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        with patch("commands.cmd_insights") as cmd_insights:
+            daemon._run_weekly_report()
+
+        cmd_insights.assert_not_called()
+
+    def test_custom_weekly_schedule_is_used(self, tmp_path: Path) -> None:
+        daemon = _make_daemon(tmp_path)
+        daemon._notification_prefs_path.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "overrides": {
+                        "weekly_insights": {
+                            "weekday": "tuesday",
+                            "time": "08:30",
+                        }
+                    },
+                    "temporary_mutes": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+        fake_now = daemon_module.datetime(2026, 4, 7, 9, 0)
+        fake_datetime = MagicMock()
+        fake_datetime.now.return_value = fake_now
+
+        with patch.object(daemon_module, "datetime", fake_datetime):
+            prefs = daemon._load_notification_prefs(now=fake_now.astimezone())
+            assert daemon_module.datetime.now.return_value == fake_now
+            from notification_prefs import scheduled_report_due
+
+            assert scheduled_report_due(
+                prefs,
+                "weekly_insights",
+                now=fake_now.astimezone(),
+            )
+
+    def test_expired_mute_resumes_normal_behavior_without_replay(
+        self, tmp_path: Path
+    ) -> None:
+        daemon = _make_daemon(tmp_path)
+        daemon._notification_prefs_path.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "overrides": {},
+                    "temporary_mutes": [
+                        {
+                            "target": "nudges",
+                            "expires_at": "2026-04-05T08:00:00+00:00",
+                            "source_text": "mute nudges today",
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        prefs = load_notification_prefs(
+            daemon._notification_prefs_path,
+            now=daemon_module.datetime.fromisoformat("2026-04-05T09:00:00+00:00"),
+        )
+
+        assert prefs["temporary_mutes"] == []
 
 
 class TestCoachFeedbackFlow:
@@ -318,3 +425,121 @@ class TestTelegramFeedbackFlow:
 
         daemon._poller.send_message_with_keyboard.assert_called_once()
         daemon._poller.edit_message_reply_markup.assert_not_called()
+
+
+class TestNotifyFlow:
+    def test_notify_without_args_shows_summary(self, tmp_path: Path) -> None:
+        daemon = _make_daemon(tmp_path)
+        daemon._poller = MagicMock()
+
+        daemon._handle_command("/notify", 77)
+
+        daemon._poller.send_reply.assert_called_once()
+        sent = daemon._poller.send_reply.call_args.args[0]
+        assert "Current notification settings:" in sent
+        assert "Examples:" in sent
+
+    def test_notify_accept_persists_json(self, tmp_path: Path) -> None:
+        daemon = _make_daemon(tmp_path)
+        daemon._poller = MagicMock()
+        daemon._pending_notify_proposals["np_1"] = daemon_module.PendingNotifyProposal(
+            request_text="no nudges before 11am",
+            preview="Proposed notification changes:\n- Nudge earliest time: 10:00 -> 11:00",
+            summary="Move nudges to after 11:00.",
+            changes=[
+                {
+                    "action": "set",
+                    "path": "nudges.earliest_time",
+                    "value": "11:00",
+                }
+            ],
+        )
+
+        daemon._handle_telegram_callback(
+            {
+                "id": "cb_notify",
+                "data": "notify_accept:np_1",
+                "message": {"message_id": 10},
+            }
+        )
+
+        prefs = load_notification_prefs(daemon._notification_prefs_path)
+        assert prefs["overrides"]["nudges"]["earliest_time"] == "11:00"
+        daemon._poller.edit_message.assert_called_once()
+
+    def test_notify_reject_leaves_json_unchanged(self, tmp_path: Path) -> None:
+        daemon = _make_daemon(tmp_path)
+        daemon._poller = MagicMock()
+        daemon._pending_notify_proposals["np_2"] = daemon_module.PendingNotifyProposal(
+            request_text="turn off midweek report",
+            preview="Proposed notification changes:\n- Midweek report: Thursday 09:00 (on) -> Thursday 09:00 (off)",
+            summary="Turn off midweek report.",
+            changes=[
+                {
+                    "action": "set",
+                    "path": "midweek_report.enabled",
+                    "value": False,
+                }
+            ],
+        )
+
+        daemon._handle_telegram_callback(
+            {
+                "id": "cb_notify_reject",
+                "data": "notify_reject:np_2",
+                "message": {"message_id": 12},
+            }
+        )
+
+        prefs = load_notification_prefs(daemon._notification_prefs_path)
+        assert prefs["overrides"] == {}
+        daemon._poller.edit_message.assert_called_once()
+
+    def test_notify_clarification_reply_continues_request(self, tmp_path: Path) -> None:
+        daemon = _make_daemon(tmp_path)
+        daemon._poller = MagicMock()
+        daemon._pending_notify_clarifications[222] = (
+            daemon_module.PendingNotifyClarification(
+                request_text="move reports to Tuesday"
+            )
+        )
+
+        with patch(
+            "commands.interpret_notify_request",
+            return_value={
+                "status": "proposal",
+                "intent": "set",
+                "changes": [
+                    {
+                        "action": "set",
+                        "path": "weekly_insights.weekday",
+                        "value": "tuesday",
+                    }
+                ],
+                "summary": "Move weekly insights to Tuesday.",
+                "clarification_question": None,
+                "reason": "clarified weekly insights",
+            },
+        ):
+            handled = daemon._consume_notify_clarification(
+                {"message_id": 222},
+                "weekly insights",
+                {"message_id": 333},
+            )
+
+        assert handled is True
+        daemon._poller.send_message_with_keyboard.assert_called_once()
+
+    def test_stale_notify_proposal_expires_after_restart(self, tmp_path: Path) -> None:
+        daemon = _make_daemon(tmp_path)
+        daemon._poller = MagicMock()
+
+        daemon._handle_telegram_callback(
+            {
+                "id": "cb_notify_expired",
+                "data": "notify_accept:missing",
+                "message": {"message_id": 15},
+            }
+        )
+
+        daemon._poller.edit_message.assert_called_once()

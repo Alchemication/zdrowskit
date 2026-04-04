@@ -131,7 +131,10 @@ class TestRepoPrompts:
         assert "A nudge is not a summary of the latest sync." in prompt
         assert "If the trigger does not materially change the next action" in prompt
         assert "does not revise long-term goals or the training plan" in prompt
-        assert "Treat the Recent Nudges Already Sent section as high-priority context" in prompt
+        assert (
+            "Treat the Recent Nudges Already Sent section as high-priority context"
+            in prompt
+        )
         assert "## Recent Nudges Already Sent" in prompt
         assert "## Recent Coach Recommendation" in prompt
         assert "## Recent User Notes" in prompt
@@ -154,9 +157,17 @@ class TestRepoPrompts:
         assert "## Recent Durable Coaching Context" in prompt
         assert "## Recent Coach Recommendation" in prompt
 
+    def test_notify_prompt_requires_json_only_output(self) -> None:
+        prompt = (PROMPTS_DIR / "notify_prompt.md").read_text(encoding="utf-8")
+        assert "Return JSON only." in prompt
+        assert '`status = "needs_clarification"`' in prompt
+        assert '"action":"mute_until"' in prompt
+
     def test_weekly_report_prompt_states_report_role_and_boundaries(self) -> None:
         prompt = (PROMPTS_DIR / "prompt.md").read_text(encoding="utf-8")
-        assert "Purpose: this is a weekly report that interprets what happened" in prompt
+        assert (
+            "Purpose: this is a weekly report that interprets what happened" in prompt
+        )
         assert "help the user understand what happened and what to do next." in prompt
         assert "## Recent User Notes This Week" in prompt
         assert "## Recent Durable Coaching Context" in prompt

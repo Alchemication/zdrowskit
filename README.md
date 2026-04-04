@@ -7,6 +7,7 @@ Your watch collects thousands of data points a week. Apple shows you rings. zdro
 - **Personalised weekly reports** — not generic summaries, but analysis that knows your goals, your plan, your injuries, and what you wrote in your journal last Tuesday
 - **Coaching proposals** — every Monday after the weekly report, the coach reviews the completed week and proposes concrete changes to your training plan or goals, with diff-first Approve/Reject buttons in Telegram
 - **Reactive nudges** — skipped a session? New data synced? The coach notices and says something useful (or stays quiet if there's nothing to say)
+- **Adjust notifications from Telegram** — use `/notify` to change report days/times, mute nudges temporarily, or reset everything to defaults with an Approve/Reject confirmation
 - **Ask anything about your data** — "What's my fastest 1km pace?", "How's my HRV trending since January?", "Do I sleep worse after evening runs?" — if the data exists, it'll find the answer and chart it
 - **Two-way conversation** — reply to a report, update your goals mid-chat, get a chart on demand. It's a Telegram conversation, not a dashboard
 
@@ -33,7 +34,7 @@ Auto Export iOS app (iCloud Drive, on a schedule)
         zdrowskit nudge           → short reactive notification (≤80 words)
             + context files: your profile, goals, plan, journal
             ↓
-        Telegram / Email          → delivered to your phone or inbox
+        Telegram                  → delivered to your phone
             ↑
         zdrowskit daemon          → watches for new data and context changes,
                                     triggers reports and nudges automatically
@@ -42,7 +43,7 @@ Auto Export iOS app (iCloud Drive, on a schedule)
                                     + generates on-demand Plotly charts
 ```
 
-zdrowskit is a local pipeline. Your data stays on your machine in a SQLite database. The only external calls are the LLM API and your chosen notification channel.
+zdrowskit is a local pipeline. Your data stays on your machine in a SQLite database. The only external calls are the LLM API and Telegram.
 
 ## Getting your data out of Apple Health
 
@@ -123,7 +124,7 @@ Normal CLI usage auto-applies pending SQLite migrations when the database is ope
    cp examples/context/*.md ~/Documents/zdrowskit/ContextFiles/
    ```
 2. Edit them with your real data — at minimum `me.md`, `goals.md`, and `plan.md`
-3. Add your API key to `.env` (plus notification credentials — see [Notifications](#notifications)):
+3. Add your API key to `.env` (plus Telegram credentials — see [Notifications](#notifications)):
    ```
    ANTHROPIC_API_KEY=sk-ant-...
    ```
@@ -149,14 +150,12 @@ uv run python main.py context                  # show context files and their st
 uv run python main.py insights                 # personalised weekly report via LLM
 uv run python main.py insights --week last     # full review of previous week
 uv run python main.py insights --explain       # show diagnostics (tokens, cost, context)
-uv run python main.py insights --email         # send report via email
 uv run python main.py insights --telegram      # send report via Telegram
 
 uv run python main.py nudge                             # short nudge via Telegram (default)
 uv run python main.py nudge --trigger log_update        # respond to a log.md change
 uv run python main.py nudge --trigger missed_session    # missed training day reminder
 uv run python main.py nudge --trigger goal_updated      # acknowledge a goals change
-uv run python main.py nudge --email                     # send nudge via email instead
 
 uv run python main.py coach                              # coaching review: propose plan/goal updates for last week
 uv run python main.py coach --week current               # provisional review of the current week so far
@@ -190,7 +189,9 @@ launchctl load ~/Library/LaunchAgents/com.zdrowskit.daemon.plist
 
 What it watches and when it acts is covered in the [Notifications](#notifications) section — triggers, suppression rules, and cross-channel awareness.
 
-**State file:** `~/Documents/zdrowskit/.daemon_state.json` tracks rate limits, recent nudge history, coach summaries, the quiet-hours queue, and pending Telegram reason prompts for feedback / proposal rejection. Delete or reset it to force a notification.
+**State file:** `~/Documents/zdrowskit/.daemon_state.json` tracks rate limits, recent nudge history, coach summaries, the deferred nudge queue, and pending Telegram reason prompts for feedback / proposal rejection.
+
+**Notification prefs:** `~/Documents/zdrowskit/notification_prefs.json` stores notification overrides and temporary mutes set via Telegram `/notify`. Delete it to fall back to built-in defaults.
 
 **Logs:** `~/Library/Logs/zdrowskit.daemon.log` (rotating, 7 days).
 
@@ -218,6 +219,7 @@ tail -f ~/Library/Logs/zdrowskit.daemon.log
 | Change to the `.plist` itself | See below |
 | Context file changes (`*.md`) | **No restart needed** — read at trigger time |
 | State file reset | **No restart needed** — read on every trigger |
+| `notification_prefs.json` edit/reset | **No restart needed** — read on every trigger |
 
 **Updating the plist** (full reload required after editing `launchd/com.zdrowskit.daemon.plist`):
 ```bash
@@ -256,10 +258,39 @@ Each notification type is a distinct LLM call with its own prompt, context, tool
 
 | Channel | Purpose | Trigger | Frequency | Length | Tools | Special output |
 |---------|---------|---------|-----------|--------|-------|----------------|
-| **Insights** | Full weekly report | Scheduled (Mon 8am) or manual | 1×/week | ~600 words | `run_sql` | `<chart>` (0+), `<memory>` (always 1, appended to `history.md`) |
+| **Insights** | Full weekly report | Scheduled (default: Mon 8am) or manual | 1×/week | ~600 words | `run_sql` | `<chart>` (0+), `<memory>` (always 1, appended to `history.md`) |
 | **Coach** | Weekly plan/goals review, with optional proposals | After insights or manual `/coach` | 1×/week | ~300 words | `run_sql`, `update_context` (plan, goals only) | `update_context` tool calls (0–2) |
-| **Nudge** | Short reactive next-action nudge | Data sync, file edit, missed session | Up to 3/day | 80 words | `run_sql` | `SKIP` if nothing changes; `<chart>` (0–1) |
+| **Nudge** | Short reactive next-action nudge | Data sync, file edit, missed session | Up to 3/day by default | 80 words | `run_sql` | `SKIP` if nothing changes; `<chart>` (0–1) |
 | **Chat** | Interactive conversation — answer the current message, ask anything, get charts | Your Telegram message | On demand | 150 words | `run_sql` (up to 5/turn), `update_context` (any file) | `<chart>` (optional), `update_context` (at most 1) |
+
+### Notification preferences via Telegram
+
+Use `/notify` in Telegram to inspect and change notification behavior without editing files by hand.
+
+- `/notify` shows current effective settings, active temporary mutes, and examples
+- `/notify no nudges before 11am`
+- `/notify send weekly insights on Tuesday at 8`
+- `/notify turn off midweek report`
+- `/notify mute nudges today`
+- `/notify bring weekly insights back to default`
+- `/notify set all as default`
+
+How it works:
+
+- A small LLM interprets the request into a strict structured proposal
+- The bot shows the interpreted change back to you with `Accept` / `Reject`
+- Nothing is saved until you tap `Accept`
+- If the request is ambiguous, the bot asks a short clarification question
+- Preferences live in `~/Documents/zdrowskit/notification_prefs.json`
+
+What can be changed:
+
+- nudges on/off
+- nudge earliest send time
+- weekly insights on/off, weekday, and time
+- midweek report on/off, weekday, and time
+- temporary mutes for all notifications or one notification type
+- reset one setting or everything back to built-in defaults
 
 ### What triggers nudges
 
@@ -279,7 +310,7 @@ The daemon runs a Telegram long-polling listener alongside the file watcher. Sen
 - Reply to a nudge or report — the bot knows which message you're responding to
 - Share updates naturally ("my weight is 76kg now") — the LLM proposes context file edits with Accept/Reject buttons
 - Thumbs down a bad output, pick a category, optionally reply with more detail, and undo it if you tapped it during testing or a demo
-- Commands: `/coach`, `/clear`, `/status`, `/context [name]`, `/help`
+- Commands: `/coach`, `/notify`, `/clear`, `/status`, `/context [name]`, `/help`
 - Conversation buffer: last 20 messages in memory, resets on daemon restart
 
 ### Cross-message awareness
@@ -293,24 +324,20 @@ Each channel sees what the others recently said so the LLM avoids redundancy:
 
 ### Suppression and rate limiting
 
-- **Quiet hours:** nudges suppressed before 10 AM (sleep data often hasn't synced yet). Triggers queue and drain as one consolidated nudge when the window opens
+- **Earliest nudge time:** nudges are deferred until the configured earliest send time. Triggers queue and drain as one consolidated nudge once the window opens
+- **Temporary mute / disable:** when a notification type is muted or disabled, the daemon skips the notification LLM call entirely
 - **Report suppression:** nudges suppressed ±1 hour around scheduled reports — the report already covers the big picture
-- **Rate limits:** max 3 nudges/day, min 90 minutes apart
+- **Rate limits:** max 3 nudges/day by default, min 90 minutes apart
 - **LLM SKIP:** the nudge LLM can respond `SKIP` if there's nothing genuinely new to say
 - **Coach:** runs at most once per calendar day
+- **No replay after mute:** skipped nudges/reports are not replayed after a temporary mute expires
 
-### Delivery configuration
+### Telegram configuration
 
-**Telegram** (default for nudges, chat, and daemon-triggered reports):
+**Telegram** (for nudges, chat, and daemon-triggered reports):
 ```env
 TELEGRAM_BOT_TOKEN=123456789:ABCdefGHI...
 TELEGRAM_CHAT_ID=123456789
-```
-
-**Email** via [Resend](https://resend.com) (good for the full weekly report):
-```env
-RESEND_API_KEY=re_xxxxx
-EMAIL_TO=you@example.com
 ```
 
 ## Testing
@@ -343,7 +370,7 @@ uv run python -m evals.data.extract                                 # refresh bl
 - **Mac** — the daemon watches your iCloud Drive folder, so it needs to run on a Mac where iCloud syncs. The rest of the stack (Python, SQLite) runs anywhere, but the data pipeline assumes macOS paths.
 - **A capable LLM** — this isn't a simple summariser. The coach writes personalised reports, decides when to stay quiet, generates SQL queries against your data, and produces chart code. That requires real intelligence. **Recommended: Claude Opus 4.6** (or equivalent). **Minimum: Claude Sonnet 4.6** — anything below that and the reports get generic, the queries get unreliable, and the charts break. Any model provider works — zdrowskit uses [litellm](https://github.com/BerriAI/litellm) so you can swap in OpenAI, Google, or any compatible API.
 - **Python 3.11+** and [uv](https://github.com/astral-sh/uv)
-- **Telegram bot** (for notifications and chat) and/or **Resend** account (for email delivery)
+- **Telegram bot** (for notifications and chat)
 
 ## Stack
 
@@ -352,5 +379,4 @@ uv run python -m evals.data.extract                                 # refresh bl
 - [litellm](https://github.com/BerriAI/litellm) for LLM calls (provider-agnostic)
 - [Plotly](https://plotly.com/python/) for chart rendering (PNG via Kaleido)
 - [watchdog](https://github.com/gorakhargosh/watchdog) for filesystem monitoring
-- [Resend](https://resend.com) for email delivery (optional)
 - Telegram Bot API for notifications and interactive chat

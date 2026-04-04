@@ -8,7 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from commands import cmd_coach, cmd_db, cmd_llm_log, cmd_nudge
+from commands import cmd_coach, cmd_db, cmd_llm_log, cmd_nudge, interpret_notify_request
 from llm import LLMResult
 from store import log_feedback, log_llm_call, open_db
 
@@ -439,6 +439,96 @@ class TestCmdNudge:
         sent_text = send_telegram.call_args.args[0]
         assert sent_text.startswith("**📊 Data Sync**")
         assert "Easy run done." in sent_text
+
+
+class TestInterpretNotifyRequest:
+    def test_validates_and_returns_structured_payload(self, in_memory_db) -> None:
+        result = LLMResult(
+            text=json.dumps(
+                {
+                    "status": "proposal",
+                    "intent": "set",
+                    "changes": [
+                        {
+                            "action": "set",
+                            "path": "nudges.earliest_time",
+                            "value": "11:00",
+                        }
+                    ],
+                    "summary": "Move nudges to after 11:00.",
+                    "clarification_question": None,
+                    "reason": "direct time request",
+                }
+            ),
+            model="test-model",
+            input_tokens=1,
+            output_tokens=1,
+            total_tokens=2,
+            latency_s=0.1,
+            llm_call_id=7,
+        )
+
+        with (
+            patch("commands.load_context", return_value={"prompt": "x", "soul": "y"}),
+            patch(
+                "commands.build_messages",
+                return_value=[
+                    {"role": "system", "content": "s"},
+                    {"role": "user", "content": "u"},
+                ],
+            ),
+            patch("commands.open_db", return_value=in_memory_db),
+            patch("commands.call_llm", return_value=result),
+        ):
+            payload = interpret_notify_request(
+                "no nudges before 11am",
+                db="ignored.db",
+                prefs={"overrides": {}, "temporary_mutes": [], "version": 1},
+            )
+
+        assert payload["status"] == "proposal"
+        assert payload["changes"][0]["path"] == "nudges.earliest_time"
+        assert payload["llm_call_id"] == 7
+
+    def test_requires_clarification_question_when_needed(self, in_memory_db) -> None:
+        result = LLMResult(
+            text=json.dumps(
+                {
+                    "status": "needs_clarification",
+                    "intent": "set",
+                    "changes": [],
+                    "summary": "",
+                    "clarification_question": "Do you mean weekly insights or the midweek report?",
+                    "reason": "report type ambiguous",
+                }
+            ),
+            model="test-model",
+            input_tokens=1,
+            output_tokens=1,
+            total_tokens=2,
+            latency_s=0.1,
+        )
+
+        with (
+            patch("commands.load_context", return_value={"prompt": "x", "soul": "y"}),
+            patch(
+                "commands.build_messages",
+                return_value=[
+                    {"role": "system", "content": "s"},
+                    {"role": "user", "content": "u"},
+                ],
+            ),
+            patch("commands.open_db", return_value=in_memory_db),
+            patch("commands.call_llm", return_value=result),
+        ):
+            payload = interpret_notify_request(
+                "move reports to Tuesday",
+                db="ignored.db",
+                prefs={"overrides": {}, "temporary_mutes": [], "version": 1},
+            )
+
+        assert payload["status"] == "needs_clarification"
+        assert payload["clarification_question"].startswith("Do you mean")
 
 
 class TestCmdDb:

@@ -24,6 +24,7 @@ import sys
 import threading
 import time
 import types
+from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -35,6 +36,24 @@ if TYPE_CHECKING:
     from llm import LLMResult
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class PendingNotifyProposal:
+    """A pending notification preference proposal awaiting user confirmation."""
+
+    request_text: str
+    preview: str
+    summary: str
+    changes: list[dict]
+
+
+@dataclass
+class PendingNotifyClarification:
+    """A pending clarification prompt for a /notify request."""
+
+    request_text: str
+
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -66,13 +85,6 @@ SCHEDULED_CHECK_INTERVAL_S = 30 * 60  # check every 30 min
 EVENING_HOUR_START = 20
 EVENING_HOUR_END = 21
 
-MORNING_REPORT_HOUR_START = 8
-MORNING_REPORT_HOUR_END = 9
-
-MIDWEEK_REPORT_HOUR_START = 9
-MIDWEEK_REPORT_HOUR_END = 10
-
-QUIET_HOUR_END = 10  # Suppress event-driven nudges before this hour (local time)
 COACH_SUPPRESSION_S = 3600  # ±1 hour: suppress nudges around scheduled reports
 
 # ---------------------------------------------------------------------------
@@ -204,11 +216,16 @@ class ZdrowskitDaemon:
         self.context_dir = context_dir
 
         self._state = _load_state()
+        from config import NOTIFICATION_PREFS_PATH
+
+        self._notification_prefs_path = NOTIFICATION_PREFS_PATH
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
         self._health_timer: threading.Timer | None = None
         self._context_timers: dict[str, threading.Timer] = {}
         self._context_fire_times: dict[str, float] = {}
+        self._pending_notify_proposals: dict[str, PendingNotifyProposal] = {}
+        self._pending_notify_clarifications: dict[int, PendingNotifyClarification] = {}
         self._pending_rejection_reasons = self._restore_pending_reason_map(
             self._state.get("pending_rejection_reasons"),
             value_type="str",
@@ -276,6 +293,50 @@ class ZdrowskitDaemon:
         if text.endswith(suffix):
             return text[: -len(suffix)]
         return text
+
+    def _load_notification_prefs(self, *, now: datetime | None = None) -> dict:
+        """Load notification preferences from disk."""
+        from notification_prefs import load_notification_prefs
+
+        return load_notification_prefs(self._notification_prefs_path, now=now)
+
+    def _save_notification_prefs(self, prefs: dict) -> None:
+        """Persist notification preferences to disk."""
+        from notification_prefs import save_notification_prefs
+
+        save_notification_prefs(prefs, path=self._notification_prefs_path)
+
+    @staticmethod
+    def _notify_keyboard(proposal_id: str) -> list[list[dict[str, str]]]:
+        """Inline keyboard for a pending /notify proposal."""
+        return [
+            [
+                {
+                    "text": "\u2705 Accept",
+                    "callback_data": f"notify_accept:{proposal_id}",
+                },
+                {
+                    "text": "\u274c Reject",
+                    "callback_data": f"notify_reject:{proposal_id}",
+                },
+            ]
+        ]
+
+    def _queue_nudge_trigger(
+        self, trigger: str, *, now: datetime | None = None
+    ) -> None:
+        """Append a nudge trigger to the deferred queue."""
+        now = now or datetime.now().astimezone()
+        queue: list[dict] = self._state.get("quiet_queue", [])
+        queue.append({"trigger": trigger, "ts": now.isoformat()})
+        self._state["quiet_queue"] = queue[-10:]
+        _save_state(self._state)
+
+    def _drop_queued_nudges(self) -> None:
+        """Drop any queued nudges without sending them."""
+        if self._state.get("quiet_queue"):
+            self._state["quiet_queue"] = []
+            _save_state(self._state)
 
     # ------------------------------------------------------------------
     # Scheduling / debounce
@@ -357,21 +418,22 @@ class ZdrowskitDaemon:
 
     def _is_report_imminent(self) -> bool:
         """Check if a scheduled report will fire within COACH_SUPPRESSION_S."""
-        now = datetime.now()
+        from notification_prefs import effective_notification_prefs
 
-        # Monday weekly report window
-        if now.weekday() == 0:
-            report_time = now.replace(
-                hour=MORNING_REPORT_HOUR_START, minute=0, second=0, microsecond=0
-            )
-            delta = (report_time - now).total_seconds()
-            if 0 < delta < COACH_SUPPRESSION_S:
-                return True
+        now = datetime.now().astimezone()
+        prefs = self._load_notification_prefs(now=now)
+        effective = effective_notification_prefs(prefs)
 
-        # Thursday midweek report window
-        if now.weekday() == 3:
+        for report_type in ("weekly_insights", "midweek_report"):
+            report = effective[report_type]
+            if now.strftime("%A").lower() != report["weekday"]:
+                continue
+            hour_str, minute_str = report["time"].split(":")
             report_time = now.replace(
-                hour=MIDWEEK_REPORT_HOUR_START, minute=0, second=0, microsecond=0
+                hour=int(hour_str),
+                minute=int(minute_str),
+                second=0,
+                microsecond=0,
             )
             delta = (report_time - now).total_seconds()
             if 0 < delta < COACH_SUPPRESSION_S:
@@ -460,9 +522,13 @@ class ZdrowskitDaemon:
             True if report may be sent; False if already sent today.
         """
         key = f"last_{report_type}_date"
+        skipped_key = f"last_{report_type}_skip_date"
         today_str = date.today().isoformat()
         if self._state.get(key) == today_str:
             logger.info("%s report suppressed: already sent today", report_type)
+            return False
+        if self._state.get(skipped_key) == today_str:
+            logger.info("%s report suppressed: already skipped today", report_type)
             return False
         return True
 
@@ -496,6 +562,19 @@ class ZdrowskitDaemon:
 
     def _run_weekly_report(self) -> None:
         """Run the full weekly insights report and send via Telegram."""
+        from notification_prefs import evaluate_report_delivery
+
+        now = datetime.now().astimezone()
+        prefs = self._load_notification_prefs(now=now)
+        decision = evaluate_report_delivery(prefs, "weekly_insights", now=now)
+        if decision["status"] != "allowed":
+            self._state["last_review_skip_date"] = date.today().isoformat()
+            _save_state(self._state)
+            logger.info(
+                "Weekly insights suppressed: %s",
+                decision.get("reason", "unknown"),
+            )
+            return
         if not self._can_send_report("review"):
             return
 
@@ -528,6 +607,19 @@ class ZdrowskitDaemon:
 
     def _run_midweek_report(self) -> None:
         """Run a mid-week progress report and send via Telegram."""
+        from notification_prefs import evaluate_report_delivery
+
+        now = datetime.now().astimezone()
+        prefs = self._load_notification_prefs(now=now)
+        decision = evaluate_report_delivery(prefs, "midweek_report", now=now)
+        if decision["status"] != "allowed":
+            self._state["last_progress_skip_date"] = date.today().isoformat()
+            _save_state(self._state)
+            logger.info(
+                "Midweek report suppressed: %s",
+                decision.get("reason", "unknown"),
+            )
+            return
         if not self._can_send_report("progress"):
             return
 
@@ -565,19 +657,30 @@ class ZdrowskitDaemon:
 
         Args:
             trigger: Trigger type string passed to cmd_nudge.
-            _from_drain: Internal flag — True when called from queue drain
-                to bypass the quiet-hours check.
+            _from_drain: Internal flag — True when called from the deferred
+                queue drain path.
         """
-        # Quiet hours: queue the trigger instead of sending
-        if not _from_drain and datetime.now().hour < QUIET_HOUR_END:
-            queue: list[dict] = self._state.get("quiet_queue", [])
-            queue.append({"trigger": trigger, "ts": datetime.now().isoformat()})
-            self._state["quiet_queue"] = queue[-10:]  # cap at 10
-            _save_state(self._state)
+        from notification_prefs import evaluate_nudge_delivery
+
+        now = datetime.now().astimezone()
+        prefs = self._load_notification_prefs(now=now)
+        decision = evaluate_nudge_delivery(prefs, now=now)
+        if decision["status"] == "suppressed":
             logger.info(
-                "Nudge queued during quiet hours (trigger: %s, queue size: %d)",
+                "Nudge suppressed by notification prefs: %s",
+                decision.get("reason", "unknown"),
+            )
+            return
+        if decision["status"] == "deferred":
+            if _from_drain:
+                logger.info("Deferred nudge still blocked at drain time; skipping")
+                return
+            self._queue_nudge_trigger(trigger, now=now)
+            logger.info(
+                "Nudge deferred until %s (trigger: %s, queue size: %d)",
+                decision.get("until", "later"),
                 trigger,
-                len(self._state["quiet_queue"]),
+                len(self._state.get("quiet_queue", [])),
             )
             return
 
@@ -607,7 +710,7 @@ class ZdrowskitDaemon:
             logger.error("Nudge failed (trigger: %s)", trigger)
 
     def _drain_quiet_queue(self) -> None:
-        """Process queued triggers from quiet hours as a single consolidated nudge."""
+        """Process deferred triggers as a single consolidated nudge."""
         queue: list[dict] = self._state.get("quiet_queue", [])
         if not queue:
             return
@@ -778,6 +881,9 @@ class ZdrowskitDaemon:
             )
             return
 
+        if reply_to and self._consume_notify_clarification(reply_to, text, message):
+            return
+
         message_id = message["message_id"]
 
         # Handle bot commands before the LLM.
@@ -879,6 +985,10 @@ class ZdrowskitDaemon:
             self._poller.send_reply(
                 "Conversation cleared.", reply_to_message_id=message_id
             )
+        elif cmd == "/notify":
+            args = text.split(maxsplit=1)
+            request_text = args[1].strip() if len(args) > 1 else ""
+            self._handle_notify_command(request_text, message_id)
         elif cmd == "/status":
             nudge_count = self._state.get("nudge_count_today", 0)
             buf_len = len(self._conversation)
@@ -920,6 +1030,174 @@ class ZdrowskitDaemon:
                 "Unknown command. Try /help",
                 reply_to_message_id=message_id,
             )
+
+    def _handle_notify_command(self, request_text: str, message_id: int) -> None:
+        """Handle the Telegram /notify command."""
+        from commands import interpret_notify_request
+        from notification_prefs import (
+            format_notification_summary,
+            format_proposed_changes,
+        )
+
+        now = datetime.now().astimezone()
+        prefs = self._load_notification_prefs(now=now)
+
+        if not request_text:
+            self._poller.send_reply(
+                format_notification_summary(prefs, now=now, include_examples=True),
+                reply_to_message_id=message_id,
+            )
+            return
+
+        try:
+            payload = interpret_notify_request(
+                request_text,
+                db=self.db,
+                prefs=prefs,
+                now=now,
+            )
+        except Exception:
+            logger.error("Notify interpretation failed", exc_info=True)
+            self._poller.send_reply(
+                "I couldn't interpret that notification request. Try /notify to see supported examples.",
+                reply_to_message_id=message_id,
+            )
+            return
+
+        status = payload["status"]
+        if status == "unsupported":
+            reason = (
+                payload.get("summary")
+                or payload.get("reason")
+                or "That request is not supported yet."
+            )
+            text = (
+                f"{reason}\n\n"
+                f"{format_notification_summary(prefs, now=now, include_examples=True)}"
+            )
+            self._poller.send_reply(text, reply_to_message_id=message_id)
+            return
+
+        if status == "needs_clarification":
+            prompt_id = self._poller.send_reply(
+                payload["clarification_question"],
+                reply_to_message_id=message_id,
+                force_reply=True,
+            )
+            if prompt_id is not None:
+                with self._lock:
+                    self._pending_notify_clarifications[prompt_id] = (
+                        PendingNotifyClarification(request_text=request_text)
+                    )
+            return
+
+        if payload["intent"] == "show" and not payload["changes"]:
+            self._poller.send_reply(
+                format_notification_summary(prefs, now=now, include_examples=True),
+                reply_to_message_id=message_id,
+            )
+            return
+
+        proposal_id = f"np_{time.time_ns()}"
+        preview = format_proposed_changes(prefs, payload["changes"], now=now)
+        summary = (
+            payload.get("summary") or "Review the proposed notification changes below."
+        )
+        self._pending_notify_proposals[proposal_id] = PendingNotifyProposal(
+            request_text=request_text,
+            preview=preview,
+            summary=summary,
+            changes=payload["changes"],
+        )
+        self._poller.send_message_with_keyboard(
+            f"{summary}\n\n{preview}",
+            self._notify_keyboard(proposal_id),
+            reply_to_message_id=message_id,
+        )
+
+    def _consume_notify_clarification(
+        self,
+        reply_to: dict,
+        text: str,
+        message: dict,
+    ) -> bool:
+        """Handle a free-text clarification reply for /notify."""
+        from commands import interpret_notify_request
+        from notification_prefs import (
+            format_notification_summary,
+            format_proposed_changes,
+        )
+
+        prompt_id = reply_to.get("message_id")
+        if prompt_id is None:
+            return False
+
+        with self._lock:
+            pending = self._pending_notify_clarifications.pop(prompt_id, None)
+        if pending is None:
+            return False
+
+        now = datetime.now().astimezone()
+        prefs = self._load_notification_prefs(now=now)
+        try:
+            payload = interpret_notify_request(
+                pending.request_text,
+                db=self.db,
+                prefs=prefs,
+                now=now,
+                clarification_answer=text,
+            )
+        except Exception:
+            logger.error("Notify clarification failed", exc_info=True)
+            self._poller.send_reply(
+                "I still couldn't parse that. Try /notify to see supported examples.",
+                reply_to_message_id=message["message_id"],
+            )
+            return True
+
+        if payload["status"] == "needs_clarification":
+            next_prompt_id = self._poller.send_reply(
+                payload["clarification_question"],
+                reply_to_message_id=message["message_id"],
+                force_reply=True,
+            )
+            if next_prompt_id is not None:
+                with self._lock:
+                    self._pending_notify_clarifications[next_prompt_id] = pending
+            return True
+
+        if payload["status"] == "unsupported":
+            self._poller.send_reply(
+                payload.get("summary")
+                or "That notification request is not supported yet.",
+                reply_to_message_id=message["message_id"],
+            )
+            return True
+
+        if payload["intent"] == "show" and not payload["changes"]:
+            self._poller.send_reply(
+                format_notification_summary(prefs, now=now, include_examples=True),
+                reply_to_message_id=message["message_id"],
+            )
+            return True
+
+        proposal_id = f"np_{time.time_ns()}"
+        preview = format_proposed_changes(prefs, payload["changes"], now=now)
+        summary = (
+            payload.get("summary") or "Review the proposed notification changes below."
+        )
+        self._pending_notify_proposals[proposal_id] = PendingNotifyProposal(
+            request_text=pending.request_text,
+            preview=preview,
+            summary=summary,
+            changes=payload["changes"],
+        )
+        self._poller.send_message_with_keyboard(
+            f"{summary}\n\n{preview}",
+            self._notify_keyboard(proposal_id),
+            reply_to_message_id=message["message_id"],
+        )
+        return True
 
     def _send_context_overview(
         self, message_id: int, file_arg: str | None = None
@@ -1161,6 +1439,45 @@ class ZdrowskitDaemon:
                 self._poller.answer_callback_query(cb_id, "Expired or already handled.")
                 if msg_id:
                     self._poller.edit_message(msg_id, "This edit has expired.")
+
+        elif data.startswith("notify_accept:"):
+            proposal_id = data.split(":", 1)[1]
+            pending = self._pending_notify_proposals.pop(proposal_id, None)
+            if not pending:
+                self._poller.answer_callback_query(cb_id, "This proposal expired.")
+                if msg_id:
+                    self._poller.edit_message(
+                        msg_id, "This notification proposal has expired."
+                    )
+                return
+
+            from notification_prefs import apply_notification_changes
+
+            now = datetime.now().astimezone()
+            prefs = self._load_notification_prefs(now=now)
+            updated = apply_notification_changes(prefs, pending.changes)
+            self._save_notification_prefs(updated)
+            self._poller.answer_callback_query(cb_id, "Applied!")
+            if msg_id:
+                self._poller.edit_message(
+                    msg_id,
+                    f"\u2705 Applied notification changes.\n\n{pending.preview}",
+                )
+
+        elif data.startswith("notify_reject:"):
+            proposal_id = data.split(":", 1)[1]
+            pending = self._pending_notify_proposals.pop(proposal_id, None)
+            self._poller.answer_callback_query(cb_id, "Discarded.")
+            if msg_id:
+                if pending is None:
+                    self._poller.edit_message(
+                        msg_id, "This notification proposal has expired."
+                    )
+                else:
+                    self._poller.edit_message(
+                        msg_id,
+                        f"\u274c Discarded notification changes.\n\n{pending.preview}",
+                    )
 
         elif data.startswith("ctx_diff:"):
             edit_id = data.split(":", 1)[1]
@@ -1449,26 +1766,29 @@ class ZdrowskitDaemon:
 
     def _scheduled_check_loop(self) -> None:
         """Background thread: periodic checks for morning reports and evening missed sessions."""
+        from notification_prefs import evaluate_nudge_delivery, scheduled_report_due
+
         while True:
             time.sleep(SCHEDULED_CHECK_INTERVAL_S)
-            now = datetime.now()
+            now = datetime.now().astimezone()
+            prefs = self._load_notification_prefs(now=now)
 
-            # Drain quiet-hours queue once the window opens
-            if now.hour >= QUIET_HOUR_END and self._state.get("quiet_queue"):
-                self._drain_quiet_queue()
+            # Drain or drop queued nudges once the nudge gate changes.
+            if self._state.get("quiet_queue"):
+                nudge_decision = evaluate_nudge_delivery(prefs, now=now)
+                if nudge_decision["status"] == "allowed":
+                    self._drain_quiet_queue()
+                elif nudge_decision["status"] == "suppressed":
+                    logger.info(
+                        "Dropping queued nudges due to notification prefs: %s",
+                        nudge_decision.get("reason", "unknown"),
+                    )
+                    self._drop_queued_nudges()
 
-            # Monday morning: full week review (previous Mon–Sun)
-            if (
-                now.weekday() == 0
-                and MORNING_REPORT_HOUR_START <= now.hour < MORNING_REPORT_HOUR_END
-            ):
+            if scheduled_report_due(prefs, "weekly_insights", now=now):
                 self._run_weekly_report()
 
-            # Thursday morning: mid-week progress check (current Mon–Thu)
-            if (
-                now.weekday() == 3
-                and MIDWEEK_REPORT_HOUR_START <= now.hour < MIDWEEK_REPORT_HOUR_END
-            ):
+            if scheduled_report_due(prefs, "midweek_report", now=now):
                 self._run_midweek_report()
 
             # Evening: check for missed sessions on training days
