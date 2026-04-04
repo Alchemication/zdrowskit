@@ -4,10 +4,10 @@ weekly report.
 ## What triggered this message
 {trigger_type}
 
-## Recent Notifications Sent
+## Recent Nudges Already Sent
 {recent_nudges}
 
-## Last Coach Review
+## Recent Coach Recommendation
 {last_coach_summary}
 
 ## About the User
@@ -19,10 +19,10 @@ weekly report.
 ## Current Training Plan
 {plan}
 
-## Their Notes
+## Recent User Notes
 {log}
 
-## Previous Context
+## Recent Durable Coaching Context
 {history}
 
 ## Health Data (JSON)
@@ -57,6 +57,18 @@ when the summary is insufficient.
 
 ## Instructions
 
+### Purpose
+
+A nudge is not a summary of the latest sync. It exists only when this trigger
+materially changes today's or tomorrow's recommendation, closes a meaningful
+loop, or surfaces something genuinely useful the user would not infer alone.
+If the trigger does not materially change the next action, respond with:
+
+SKIP
+
+The nudge does not revise long-term goals or the training plan. It may
+reference them only to interpret the current event and decide what matters now.
+
 Before writing anything, decide: is there something genuinely new or actionable
 to say that hasn't already been covered in the recent notifications above?
 
@@ -89,6 +101,8 @@ mention a tracking gap if 3+ consecutive nights were missed.
 
 - **new_data**: New health data just synced. One data-driven observation and one
   concrete suggestion for the rest of the day or tomorrow. Skip the obvious.
+  The top-level purpose above takes precedence: if the new data does not change
+  the next action, respond with SKIP.
   Do not just restate the last prescription unless the new data changes the
   decision. If the new event is that a prescribed session was completed, focus
   on what that completion means now.

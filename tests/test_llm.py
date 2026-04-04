@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from config import PROMPTS_DIR
 from llm import (
     FALLBACK_MODEL,
     LLMResult,
@@ -117,6 +118,50 @@ class TestLoadContext:
         assert "Feedback ID: cf_11" in ctx["coach_feedback"]
         assert "Feedback ID: cf_4" in ctx["coach_feedback"]
         assert "Feedback ID: cf_3" not in ctx["coach_feedback"]
+
+
+class TestRepoPrompts:
+    def test_soul_prompt_leaves_formatting_to_task_prompts(self) -> None:
+        soul = (PROMPTS_DIR / "soul.md").read_text(encoding="utf-8")
+        assert "Follow the task-specific instructions exactly" in soul
+        assert "markdown headers" not in soul
+
+    def test_nudge_prompt_states_event_driven_purpose_and_boundaries(self) -> None:
+        prompt = (PROMPTS_DIR / "nudge_prompt.md").read_text(encoding="utf-8")
+        assert "A nudge is not a summary of the latest sync." in prompt
+        assert "If the trigger does not materially change the next action" in prompt
+        assert "does not revise long-term goals or the training plan" in prompt
+        assert "## Recent Nudges Already Sent" in prompt
+        assert "## Recent Coach Recommendation" in prompt
+        assert "## Recent User Notes" in prompt
+        assert "## Recent Durable Coaching Context" in prompt
+
+    def test_coach_prompt_states_plan_goal_review_role(self) -> None:
+        prompt = (PROMPTS_DIR / "coach_prompt.md").read_text(encoding="utf-8")
+        normalized = " ".join(prompt.split())
+        assert "weekly review of whether the user's current training plan and" in prompt
+        assert "not a short reactive notification" in normalized
+        assert "Review adherence, recovery, constraints, and trajectory." in prompt
+        assert "Do not propose edits to any other files." in prompt
+        assert "## Recent Coaching History" in prompt
+
+    def test_chat_prompt_states_conversational_purpose_and_boundaries(self) -> None:
+        prompt = (PROMPTS_DIR / "chat_prompt.md").read_text(encoding="utf-8")
+        assert "Purpose: answer the user's current question or message" in prompt
+        assert "This is not a proactive nudge and not a weekly plan/goals review." in prompt
+        assert "## Recent User Notes" in prompt
+        assert "## Recent Durable Coaching Context" in prompt
+        assert "## Recent Coach Recommendation" in prompt
+        assert "Do not turn a simple answer into a weekly review" in prompt
+
+    def test_weekly_report_prompt_states_report_role_and_boundaries(self) -> None:
+        prompt = (PROMPTS_DIR / "prompt.md").read_text(encoding="utf-8")
+        normalized = " ".join(prompt.split())
+        assert "Purpose: this is a weekly report that interprets what happened" in prompt
+        assert "It is not a reactive nudge and not a plan/goals editing workflow." in normalized
+        assert "## Recent User Notes This Week" in prompt
+        assert "## Recent Durable Coaching Context" in prompt
+        assert "Do not write this like a quick chat reply or a reactive nudge." in prompt
 
 
 class TestBuildMessages:

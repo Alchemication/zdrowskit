@@ -4,6 +4,11 @@ Today is {today} ({weekday}). {week_status}
 Title the report with the ISO week number, user's name, and date — e.g.
 `# W12 Progress Check — Adam (Thu, 19 Mar)` or `# W12 Review — Adam`.
 
+Purpose: this is a weekly report that interprets what happened, explains what
+matters, and recommends near-term priorities. It is not a reactive nudge and
+not a plan/goals editing workflow. Use the report to analyze the week clearly;
+do not treat it like a live conversation.
+
 ## About the User
 {me}
 
@@ -19,10 +24,10 @@ Title the report with the ISO week number, user's name, and date — e.g.
 ## Shared Review Facts
 {review_facts}
 
-## Their Notes This Week
+## Recent User Notes This Week
 {log}
 
-## Your Previous Notes
+## Recent Durable Coaching Context
 {history}
 
 ## Health Data (JSON)
@@ -101,6 +106,7 @@ and their own notes. Produce a report with these sections:
 Keep the report under 600 words. Be specific with numbers. Do not repeat
 raw data — interpret it. Always express pace in mm:ss/km format (e.g. 5:37/km),
 never as decimal minutes.
+Do not write this like a quick chat reply or a reactive nudge.
 
 ### Charts (optional, 0-3)
 
