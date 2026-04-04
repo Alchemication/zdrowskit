@@ -29,6 +29,7 @@ uv run python -m evals.data.extract      # refresh eval blueprints from live dat
 Preferred LLM tracing path for debugging: use `uv run python main.py llm-log --id N` to inspect the full stored trace for one call, including messages, tool use, and final response.
 
 Database access should go through `store.open_db()` or `store.connect_db(..., migrate=True)` so pending SQLite migrations are applied automatically. Avoid raw `sqlite3.connect(...)` unless you intentionally need a migration-free connection.
+Database schema changes must be implemented as new timestamped migration files in `src/db/migrations/`. Do not add ad-hoc runtime `ALTER TABLE`, column-existence checks, or other schema-patching logic in application code.
 
 ## Collaboration Style
 
