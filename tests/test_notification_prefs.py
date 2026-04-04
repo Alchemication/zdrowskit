@@ -38,6 +38,7 @@ class TestNotificationPrefs:
             DEFAULT_NOTIFICATION_PREFS,
             [
                 {"action": "set", "path": "nudges.earliest_time", "value": "11:00"},
+                {"action": "set", "path": "nudges.max_per_day", "value": 4},
                 {
                     "action": "set",
                     "path": "weekly_insights.weekday",
@@ -48,6 +49,7 @@ class TestNotificationPrefs:
 
         effective = effective_notification_prefs(updated)
         assert effective["nudges"]["earliest_time"] == "11:00"
+        assert effective["nudges"]["max_per_day"] == 4
         assert effective["weekly_insights"]["weekday"] == "tuesday"
         assert effective["midweek_report"]["weekday"] == "thursday"
 
@@ -135,3 +137,23 @@ class TestNotificationPrefs:
 
         assert "Active temporary mutes:" in text
         assert "Nudges: muted until 2026-04-05T23:59:00+00:00" in text
+
+    def test_summary_can_show_daily_nudge_cap(self) -> None:
+        text = format_notification_summary(
+            DEFAULT_NOTIFICATION_PREFS,
+            now=datetime.fromisoformat("2026-04-05T10:00:00+00:00"),
+        )
+
+        assert "Max nudges per day: 3" in text
+
+    def test_invalid_nudge_cap_is_rejected(self) -> None:
+        from notification_prefs import validate_notification_changes
+
+        try:
+            validate_notification_changes(
+                [{"action": "set", "path": "nudges.max_per_day", "value": 0}]
+            )
+        except ValueError as exc:
+            assert "between 1 and 6" in str(exc)
+        else:
+            raise AssertionError("Expected ValueError for invalid nudge cap")

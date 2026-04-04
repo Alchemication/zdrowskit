@@ -163,6 +163,28 @@ class TestRepoPrompts:
         assert '`status = "needs_clarification"`' in prompt
         assert '"action":"mute_until"' in prompt
 
+    def test_notify_prompt_renders_with_build_messages(self) -> None:
+        ctx = {
+            "prompt": (PROMPTS_DIR / "notify_prompt.md").read_text(encoding="utf-8"),
+            "soul": "Be strict.",
+            "current_settings": "{}",
+            "default_settings": "{}",
+            "active_mutes": "[]",
+            "notify_request": "set all as default",
+            "clarification_answer": "(none)",
+            "timezone": "Europe/Dublin",
+        }
+
+        msgs = build_messages(
+            ctx,
+            health_data_json="{}",
+            week_complete=False,
+            today=date(2026, 4, 4),
+        )
+
+        assert len(msgs) == 2
+        assert "set all as default" in msgs[1]["content"]
+
     def test_weekly_report_prompt_states_report_role_and_boundaries(self) -> None:
         prompt = (PROMPTS_DIR / "prompt.md").read_text(encoding="utf-8")
         assert (

@@ -37,6 +37,7 @@ DAY_NAMES = (
 SETTABLE_PATHS = {
     "nudges.enabled",
     "nudges.earliest_time",
+    "nudges.max_per_day",
     "weekly_insights.enabled",
     "weekly_insights.weekday",
     "weekly_insights.time",
@@ -51,6 +52,8 @@ RESETTABLE_PATHS = SETTABLE_PATHS | {
     "all",
 }
 MUTE_TARGETS = {"all", "nudges", "weekly_insights", "midweek_report"}
+MIN_NUDGES_PER_DAY = 1
+MAX_REASONABLE_NUDGES_PER_DAY = 6
 
 DEFAULT_NOTIFICATION_PREFS: dict[str, Any] = {
     "version": PREFS_VERSION,
@@ -62,6 +65,7 @@ _DEFAULT_EFFECTIVE: dict[str, dict[str, Any]] = {
     "nudges": {
         "enabled": True,
         "earliest_time": "10:00",
+        "max_per_day": 3,
     },
     "weekly_insights": {
         "enabled": True,
@@ -110,6 +114,9 @@ def _normalise_overrides(overrides: object) -> dict[str, dict[str, Any]]:
                 continue
             if path.endswith(".enabled") and isinstance(value, bool):
                 clean_section[key] = value
+            elif path.endswith(".max_per_day") and isinstance(value, int):
+                if MIN_NUDGES_PER_DAY <= value <= MAX_REASONABLE_NUDGES_PER_DAY:
+                    clean_section[key] = value
             elif path.endswith(".earliest_time") or path.endswith(".time"):
                 if isinstance(value, str):
                     try:
@@ -361,6 +368,18 @@ def validate_notification_changes(changes: object) -> list[dict[str, Any]]:
                 raise ValueError(f"unsupported set path: {path}")
             if path.endswith(".enabled") and not isinstance(value, bool):
                 raise ValueError(f"{path} requires a boolean")
+            if path.endswith(".max_per_day"):
+                if not isinstance(value, int):
+                    raise ValueError(f"{path} requires an integer")
+                if not (
+                    MIN_NUDGES_PER_DAY
+                    <= value
+                    <= MAX_REASONABLE_NUDGES_PER_DAY
+                ):
+                    raise ValueError(
+                        f"{path} must be between {MIN_NUDGES_PER_DAY} and "
+                        f"{MAX_REASONABLE_NUDGES_PER_DAY}"
+                    )
             if path.endswith(".weekday") and value not in DAY_NAMES:
                 raise ValueError(f"{path} requires a weekday name")
             if path.endswith(".time") or path.endswith(".earliest_time"):
@@ -454,6 +473,7 @@ def format_notification_summary(
     *,
     now: datetime | None = None,
     include_examples: bool = False,
+    max_nudges_per_day: int | None = None,
 ) -> str:
     """Render the current settings and active temporary mutes."""
     now = now or datetime.now().astimezone()
@@ -464,6 +484,7 @@ def format_notification_summary(
         "Current notification settings:",
         f"- Nudges: {'on' if effective['nudges']['enabled'] else 'off'}",
         f"- Nudges not before: {effective['nudges']['earliest_time']}",
+        f"- Max nudges per day: {effective['nudges']['max_per_day']}",
         (
             "- Weekly insights: "
             f"{'on' if effective['weekly_insights']['enabled'] else 'off'}"
@@ -477,7 +498,6 @@ def format_notification_summary(
             f"{effective['midweek_report']['time']})"
         ),
     ]
-
     if mutes:
         lines.append("")
         lines.append("Active temporary mutes:")
@@ -537,6 +557,13 @@ def format_proposed_changes(
             "Nudge earliest time",
             before["nudges"]["earliest_time"],
             after["nudges"]["earliest_time"],
+        )
+    )
+    lines.append(
+        _section_line(
+            "Max nudges per day",
+            str(before["nudges"]["max_per_day"]),
+            str(after["nudges"]["max_per_day"]),
         )
     )
     lines.append(

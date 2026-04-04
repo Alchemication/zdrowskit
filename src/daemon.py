@@ -447,6 +447,17 @@ class ZdrowskitDaemon:
         Returns:
             True if a nudge may be sent; False if suppressed.
         """
+        prefs = self._load_notification_prefs(now=datetime.now().astimezone())
+        max_nudges_per_day = prefs.get("overrides", {}).get("nudges", {}).get(
+            "max_per_day"
+        )
+        if not isinstance(max_nudges_per_day, int):
+            from notification_prefs import effective_notification_prefs
+
+            max_nudges_per_day = effective_notification_prefs(prefs)["nudges"][
+                "max_per_day"
+            ]
+
         # Suppress near scheduled reports (±1 hour)
         last_report_ts = self._state.get("last_report_ts")
         if last_report_ts:
@@ -471,9 +482,9 @@ class ZdrowskitDaemon:
             self._state["nudge_count_today"] = 0
             self._state["nudge_date"] = today_str
 
-        if self._state.get("nudge_count_today", 0) >= MAX_NUDGES_PER_DAY:
+        if self._state.get("nudge_count_today", 0) >= max_nudges_per_day:
             logger.info(
-                "Nudge suppressed: daily limit (%d) reached", MAX_NUDGES_PER_DAY
+                "Nudge suppressed: daily limit (%d) reached", max_nudges_per_day
             )
             return False
 
@@ -991,10 +1002,14 @@ class ZdrowskitDaemon:
             self._handle_notify_command(request_text, message_id)
         elif cmd == "/status":
             nudge_count = self._state.get("nudge_count_today", 0)
+            prefs = self._load_notification_prefs(now=datetime.now().astimezone())
+            from notification_prefs import effective_notification_prefs
+
+            max_nudges = effective_notification_prefs(prefs)["nudges"]["max_per_day"]
             buf_len = len(self._conversation)
             lines = [
                 f"Buffer: {buf_len} messages",
-                f"Nudges today: {nudge_count}/{MAX_NUDGES_PER_DAY}",
+                f"Nudges today: {nudge_count}/{max_nudges}",
             ]
             last_nudge = self._state.get("last_nudge_ts")
             if last_nudge:
@@ -1044,7 +1059,12 @@ class ZdrowskitDaemon:
 
         if not request_text:
             self._poller.send_reply(
-                format_notification_summary(prefs, now=now, include_examples=True),
+                format_notification_summary(
+                    prefs,
+                    now=now,
+                    include_examples=True,
+                    max_nudges_per_day=MAX_NUDGES_PER_DAY,
+                ),
                 reply_to_message_id=message_id,
             )
             return
@@ -1073,7 +1093,12 @@ class ZdrowskitDaemon:
             )
             text = (
                 f"{reason}\n\n"
-                f"{format_notification_summary(prefs, now=now, include_examples=True)}"
+                f"{format_notification_summary(
+                    prefs,
+                    now=now,
+                    include_examples=True,
+                    max_nudges_per_day=MAX_NUDGES_PER_DAY,
+                )}"
             )
             self._poller.send_reply(text, reply_to_message_id=message_id)
             return
@@ -1093,7 +1118,12 @@ class ZdrowskitDaemon:
 
         if payload["intent"] == "show" and not payload["changes"]:
             self._poller.send_reply(
-                format_notification_summary(prefs, now=now, include_examples=True),
+                format_notification_summary(
+                    prefs,
+                    now=now,
+                    include_examples=True,
+                    max_nudges_per_day=MAX_NUDGES_PER_DAY,
+                ),
                 reply_to_message_id=message_id,
             )
             return
@@ -1176,7 +1206,12 @@ class ZdrowskitDaemon:
 
         if payload["intent"] == "show" and not payload["changes"]:
             self._poller.send_reply(
-                format_notification_summary(prefs, now=now, include_examples=True),
+                format_notification_summary(
+                    prefs,
+                    now=now,
+                    include_examples=True,
+                    max_nudges_per_day=MAX_NUDGES_PER_DAY,
+                ),
                 reply_to_message_id=message["message_id"],
             )
             return True

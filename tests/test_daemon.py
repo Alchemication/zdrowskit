@@ -182,6 +182,23 @@ class TestNudgeScheduling:
 
         assert prefs["temporary_mutes"] == []
 
+    def test_configured_nudge_cap_is_used(self, tmp_path: Path) -> None:
+        daemon = _make_daemon(tmp_path)
+        daemon._notification_prefs_path.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "overrides": {"nudges": {"max_per_day": 1}},
+                    "temporary_mutes": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+        daemon._state["nudge_date"] = daemon_module.date.today().isoformat()
+        daemon._state["nudge_count_today"] = 1
+
+        assert daemon._can_send_nudge() is False
+
 
 class TestCoachFeedbackFlow:
     def test_reject_records_feedback_and_prompts_for_reason(

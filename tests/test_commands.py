@@ -530,6 +530,54 @@ class TestInterpretNotifyRequest:
         assert payload["status"] == "needs_clarification"
         assert payload["clarification_question"].startswith("Do you mean")
 
+    def test_rejects_out_of_bounds_nudge_cap(self, in_memory_db) -> None:
+        result = LLMResult(
+            text=json.dumps(
+                {
+                    "status": "proposal",
+                    "intent": "set",
+                    "changes": [
+                        {
+                            "action": "set",
+                            "path": "nudges.max_per_day",
+                            "value": 0,
+                        }
+                    ],
+                    "summary": "Set max nudges to zero.",
+                    "clarification_question": None,
+                    "reason": "bad proposal",
+                }
+            ),
+            model="test-model",
+            input_tokens=1,
+            output_tokens=1,
+            total_tokens=2,
+            latency_s=0.1,
+        )
+
+        with (
+            patch("commands.load_context", return_value={"prompt": "x", "soul": "y"}),
+            patch(
+                "commands.build_messages",
+                return_value=[
+                    {"role": "system", "content": "s"},
+                    {"role": "user", "content": "u"},
+                ],
+            ),
+            patch("commands.open_db", return_value=in_memory_db),
+            patch("commands.call_llm", return_value=result),
+        ):
+            try:
+                interpret_notify_request(
+                    "set max nudges per day to 0",
+                    db="ignored.db",
+                    prefs={"overrides": {}, "temporary_mutes": [], "version": 1},
+                )
+            except ValueError as exc:
+                assert "between 1 and 6" in str(exc)
+            else:
+                raise AssertionError("Expected ValueError for invalid nudge cap")
+
 
 class TestCmdDb:
     def test_status_shows_applied_migrations(self, tmp_path: Path, capsys) -> None:

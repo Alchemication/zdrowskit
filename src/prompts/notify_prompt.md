@@ -22,6 +22,7 @@ Your job is to convert the user's request into a strict JSON object.
 - show current notification settings
 - set a custom time/day for weekly insights or the midweek report
 - set the earliest time nudges may send
+- set the maximum nudges per day
 - enable a target
 - disable a target
 - reset one target to default
@@ -34,6 +35,7 @@ Your job is to convert the user's request into a strict JSON object.
 - `weekly_insights`
 - `midweek_report`
 - `nudges.earliest_time`
+- `nudges.max_per_day`
 - `weekly_insights.weekday`
 - `weekly_insights.time`
 - `midweek_report.weekday`
@@ -47,36 +49,38 @@ Your job is to convert the user's request into a strict JSON object.
 - If the request asks for something unsupported, return `status = "unsupported"`.
 - When the request is clear, return `status = "proposal"`.
 - Prefer exact `HH:MM` 24-hour times.
+- For `nudges.max_per_day`, only propose integers between 1 and 6 inclusive.
 - Prefer exact weekday names: monday, tuesday, wednesday, thursday, friday, saturday, sunday.
 - For temporary mutes, resolve relative phrases like "today" or "until tomorrow 11am" into an exact ISO-8601 `expires_at` timestamp with timezone offset.
 - When muting, include the original request text as `source_text`.
 
 ## Change schema
 Each item in `changes` must be one of:
-- `{"action":"set","path":"nudges.enabled","value":false}`
-- `{"action":"set","path":"nudges.earliest_time","value":"11:00"}`
-- `{"action":"set","path":"weekly_insights.enabled","value":true}`
-- `{"action":"set","path":"weekly_insights.weekday","value":"tuesday"}`
-- `{"action":"set","path":"weekly_insights.time","value":"08:00"}`
-- `{"action":"set","path":"midweek_report.enabled","value":false}`
-- `{"action":"set","path":"midweek_report.weekday","value":"thursday"}`
-- `{"action":"set","path":"midweek_report.time","value":"09:00"}`
-- `{"action":"reset","path":"nudges"}`
-- `{"action":"reset","path":"weekly_insights"}`
-- `{"action":"reset","path":"midweek_report"}`
-- `{"action":"reset","path":"all"}`
-- `{"action":"reset_all"}`
-- `{"action":"mute_until","target":"all","expires_at":"2026-04-05T23:59:00+01:00","source_text":"mute all notifications today"}`
-- `{"action":"mute_until","target":"nudges","expires_at":"2026-04-05T23:59:00+01:00","source_text":"mute nudges today"}`
-- `{"action":"mute_until","target":"weekly_insights","expires_at":"2026-04-08T23:59:00+01:00","source_text":"pause weekly insights this week"}`
-- `{"action":"mute_until","target":"midweek_report","expires_at":"2026-04-08T23:59:00+01:00","source_text":"mute midweek report this week"}`
+- `{{"action":"set","path":"nudges.enabled","value":false}}`
+- `{{"action":"set","path":"nudges.earliest_time","value":"11:00"}}`
+- `{{"action":"set","path":"nudges.max_per_day","value":4}}`
+- `{{"action":"set","path":"weekly_insights.enabled","value":true}}`
+- `{{"action":"set","path":"weekly_insights.weekday","value":"tuesday"}}`
+- `{{"action":"set","path":"weekly_insights.time","value":"08:00"}}`
+- `{{"action":"set","path":"midweek_report.enabled","value":false}}`
+- `{{"action":"set","path":"midweek_report.weekday","value":"thursday"}}`
+- `{{"action":"set","path":"midweek_report.time","value":"09:00"}}`
+- `{{"action":"reset","path":"nudges"}}`
+- `{{"action":"reset","path":"weekly_insights"}}`
+- `{{"action":"reset","path":"midweek_report"}}`
+- `{{"action":"reset","path":"all"}}`
+- `{{"action":"reset_all"}}`
+- `{{"action":"mute_until","target":"all","expires_at":"2026-04-05T23:59:00+01:00","source_text":"mute all notifications today"}}`
+- `{{"action":"mute_until","target":"nudges","expires_at":"2026-04-05T23:59:00+01:00","source_text":"mute nudges today"}}`
+- `{{"action":"mute_until","target":"weekly_insights","expires_at":"2026-04-08T23:59:00+01:00","source_text":"pause weekly insights this week"}}`
+- `{{"action":"mute_until","target":"midweek_report","expires_at":"2026-04-08T23:59:00+01:00","source_text":"mute midweek report this week"}}`
 
 ## Final JSON schema
-{
+{{
   "status": "proposal" | "needs_clarification" | "unsupported",
   "intent": "show" | "set" | "enable" | "disable" | "reset" | "reset_all" | "mute_until",
   "changes": [],
   "summary": "short summary",
   "clarification_question": null,
   "reason": "short debug explanation"
-}
+}}

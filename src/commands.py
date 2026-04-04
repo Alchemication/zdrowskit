@@ -101,7 +101,7 @@ _NUDGE_NONFINAL_RETRY = (
     "final user-facing nudge now: one short message (maximum 80 words) or "
     "SKIP. Do not mention checking, reviewing, or deciding whether to send."
 )
-NOTIFY_MODEL = "anthropic/claude-3-5-haiku-latest"
+NOTIFY_MODEL = "anthropic/claude-haiku-4-5"
 
 
 @dataclass
