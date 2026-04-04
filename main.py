@@ -42,6 +42,12 @@ Examples:
     uv run python main.py status
         Show how many days and workouts are stored and what date range they cover.
 
+    uv run python main.py db status
+        Show migration status for the SQLite database.
+
+    uv run python main.py db schema
+        Print the live SQLite schema from the database.
+
     uv run python main.py insights
         Generate this week's personalized report using Claude Haiku.
 
@@ -96,6 +102,7 @@ sys.path.insert(0, str(Path(__file__).parent / "src"))
 from commands import (
     cmd_coach,
     cmd_context,
+    cmd_db,
     cmd_daemon_restart,
     cmd_daemon_stop,
     cmd_import,
@@ -182,6 +189,14 @@ def main() -> None:
     # status
     p_status = sub.add_parser("status", help="Show date range and row counts in DB")
     _add_db(p_status)
+
+    # db admin
+    p_db = sub.add_parser("db", help="Database admin: migrations and schema")
+    _add_db(p_db)
+    db_sub = p_db.add_subparsers(dest="db_cmd", required=True)
+    db_sub.add_parser("status", help="Show migration status for the database")
+    db_sub.add_parser("migrate", help="Apply pending database migrations")
+    db_sub.add_parser("schema", help="Print the live SQLite schema")
 
     # context
     sub.add_parser(
@@ -372,6 +387,7 @@ def main() -> None:
         "import": cmd_import,
         "report": cmd_report,
         "status": cmd_status,
+        "db": cmd_db,
         "context": cmd_context,
         "insights": cmd_insights,
         "nudge": cmd_nudge,

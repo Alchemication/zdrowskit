@@ -7,9 +7,10 @@ from pathlib import Path
 
 import pytest
 
+from db.migrations import apply_migrations, get_live_schema, list_migrations
 from models import DailySnapshot, WorkoutSnapshot
 from store import (
-    _migrate,
+    connect_db,
     delete_feedback,
     default_db_path,
     load_date_range,
@@ -36,6 +37,7 @@ class TestOpenDb:
         assert "daily" in tables
         assert "workout" in tables
         assert "llm_call" in tables
+        assert "schema_migrations" in tables
         conn.close()
 
 
@@ -324,13 +326,73 @@ class TestLlmFeedback:
         assert load_feedback_for_call(in_memory_db, call_id) == []
 
 
-class TestMigrate:
-    def test_adds_cost_column(self) -> None:
-        """Migrate should add 'cost' column to llm_call if missing."""
+class TestMigrations:
+    def test_applies_all_on_fresh_db(self) -> None:
         conn = sqlite3.connect(":memory:")
         conn.row_factory = sqlite3.Row
-        # Create llm_call WITHOUT cost column
+        conn.execute("PRAGMA foreign_keys = ON")
+
+        applied = apply_migrations(conn)
+
+        assert len(applied) == 4
+        statuses = list_migrations(conn)
+        assert all(status.status == "applied" for status in statuses)
+        schema = get_live_schema(conn)
+        assert "CREATE TABLE daily" in schema
+        assert "CREATE TABLE workout" in schema
+        assert "CREATE TABLE llm_call" in schema
+        assert "CREATE TABLE schema_migrations" in schema
+
+    def test_adopts_legacy_schema_and_applies_missing(self) -> None:
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
         conn.executescript("""
+            CREATE TABLE daily (
+                date                        TEXT PRIMARY KEY,
+                steps                       INTEGER,
+                distance_km                 REAL,
+                active_energy_kj            REAL,
+                exercise_min                INTEGER,
+                stand_hours                 INTEGER,
+                flights_climbed             REAL,
+                resting_hr                  INTEGER,
+                hrv_ms                      REAL,
+                walking_hr_avg              REAL,
+                hr_day_min                  INTEGER,
+                hr_day_max                  INTEGER,
+                vo2max                      REAL,
+                walking_speed_kmh           REAL,
+                walking_step_length_cm      REAL,
+                walking_asymmetry_pct       REAL,
+                walking_double_support_pct  REAL,
+                stair_speed_up_ms           REAL,
+                stair_speed_down_ms         REAL,
+                running_stride_length_m     REAL,
+                running_power_w             REAL,
+                running_speed_kmh           REAL,
+                recovery_index              REAL,
+                imported_at                 TEXT NOT NULL
+            );
+            CREATE TABLE workout (
+                start_utc                TEXT PRIMARY KEY,
+                date                     TEXT NOT NULL,
+                type                     TEXT NOT NULL,
+                category                 TEXT NOT NULL,
+                duration_min             REAL NOT NULL,
+                hr_min                   INTEGER,
+                hr_avg                   REAL,
+                hr_max                   INTEGER,
+                active_energy_kj         REAL,
+                intensity_kcal_per_hr_kg REAL,
+                temperature_c            REAL,
+                humidity_pct             INTEGER,
+                gpx_distance_km          REAL,
+                gpx_elevation_gain_m     REAL,
+                gpx_avg_speed_ms         REAL,
+                gpx_max_speed_p95_ms     REAL,
+                imported_at              TEXT NOT NULL
+            );
             CREATE TABLE llm_call (
                 id              INTEGER PRIMARY KEY AUTOINCREMENT,
                 timestamp       TEXT NOT NULL,
@@ -345,74 +407,46 @@ class TestMigrate:
                 latency_s       REAL NOT NULL,
                 metadata_json   TEXT
             );
-        """)
-        cols_before = {
-            r[1] for r in conn.execute("PRAGMA table_info(llm_call)").fetchall()
-        }
-        assert "cost" not in cols_before
-
-        _migrate(conn)
-
-        cols_after = {
-            r[1] for r in conn.execute("PRAGMA table_info(llm_call)").fetchall()
-        }
-        assert "cost" in cols_after
-
-    def test_adds_counts_as_lift_and_backfills(self) -> None:
-        conn = sqlite3.connect(":memory:")
-        conn.row_factory = sqlite3.Row
-        conn.executescript("""
-            CREATE TABLE daily (
-                date TEXT PRIMARY KEY
-            );
-            CREATE TABLE workout (
-                start_utc TEXT PRIMARY KEY,
-                date TEXT NOT NULL,
-                type TEXT NOT NULL,
-                category TEXT NOT NULL,
-                duration_min REAL NOT NULL
-            );
-            CREATE TABLE llm_call (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT NOT NULL,
-                request_type TEXT NOT NULL,
-                model TEXT NOT NULL,
-                messages_json TEXT NOT NULL,
-                response_text TEXT NOT NULL,
-                params_json TEXT,
-                input_tokens INTEGER NOT NULL,
-                output_tokens INTEGER NOT NULL,
-                total_tokens INTEGER NOT NULL,
-                latency_s REAL NOT NULL,
-                metadata_json TEXT
-            );
-            INSERT INTO workout (start_utc, date, type, category, duration_min) VALUES
-                ('2026-03-10T07:00:00Z', '2026-03-10', 'Functional Strength Training', 'lift', 8.0),
-                ('2026-03-10T17:00:00Z', '2026-03-10', 'Traditional Strength Training', 'lift', 45.0);
+            INSERT INTO workout (
+                start_utc, date, type, category, duration_min, imported_at
+            ) VALUES
+                ('2026-03-10T07:00:00Z', '2026-03-10', 'Functional Strength Training', 'lift', 8.0, '2026-04-04T15:30:00+00:00'),
+                ('2026-03-10T17:00:00Z', '2026-03-10', 'Traditional Strength Training', 'lift', 45.0, '2026-04-04T15:30:00+00:00');
         """)
 
-        _migrate(conn)
+        applied = apply_migrations(conn)
 
         cols = {r[1] for r in conn.execute("PRAGMA table_info(workout)").fetchall()}
         assert "counts_as_lift" in cols
+        llm_cols = {
+            r[1] for r in conn.execute("PRAGMA table_info(llm_call)").fetchall()
+        }
+        assert "cost" in llm_cols
+        daily_cols = {r[1] for r in conn.execute("PRAGMA table_info(daily)").fetchall()}
+        assert "sleep_total_h" in daily_cols
         rows = conn.execute(
             "SELECT type, counts_as_lift FROM workout ORDER BY start_utc"
         ).fetchall()
         assert [row["counts_as_lift"] for row in rows] == [0, 1]
+        assert {item.status for item in applied} == {"adopted", "applied"}
 
-    def test_noop_when_column_exists(self, in_memory_db: sqlite3.Connection) -> None:
-        """Migrate should be safe to call when schema is already up-to-date."""
-        cols_before = {
-            r[1] for r in in_memory_db.execute("PRAGMA table_info(llm_call)").fetchall()
+    def test_noop_when_current(self, in_memory_db: sqlite3.Connection) -> None:
+        statuses = list_migrations(in_memory_db)
+        assert all(status.status == "applied" for status in statuses)
+        applied = apply_migrations(in_memory_db)
+        assert applied == []
+
+
+class TestConnectDb:
+    def test_can_skip_auto_migrate(self, tmp_path: Path) -> None:
+        conn = connect_db(tmp_path / "test.db", migrate=False)
+        tables = {
+            r[0]
+            for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
         }
-        assert "cost" in cols_before
-
-        _migrate(in_memory_db)  # should not raise
-
-        cols_after = {
-            r[1] for r in in_memory_db.execute("PRAGMA table_info(llm_call)").fetchall()
-        }
-        assert "cost" in cols_after
+        assert tables == set()
 
 
 class TestDefaultDbPath:

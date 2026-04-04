@@ -500,11 +500,11 @@ def build_eval_db(
     ``db_seed["days"]`` when present, otherwise from
     ``health_data["current_week"]["days"]``.
     """
-    from store import _DDL
+    from db.migrations import apply_migrations
 
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
-    conn.executescript(_DDL)
+    apply_migrations(conn)
 
     seed_days = (db_seed or {}).get("days", [])
     days = seed_days or health_data.get("current_week", {}).get("days", [])

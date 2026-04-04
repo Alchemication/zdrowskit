@@ -8,10 +8,9 @@ from pathlib import Path
 
 import pytest
 
+from db.migrations import apply_migrations
 from models import DailySnapshot, WorkoutSnapshot
 from store import store_snapshots
-
-import store as store_mod
 from tools import execute_run_sql, execute_tool, run_sql_tool
 
 
@@ -27,7 +26,7 @@ def db_path(tmp_path: Path) -> Path:
     conn = sqlite3.connect(str(db))
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
-    conn.executescript(store_mod._DDL)
+    apply_migrations(conn)
 
     snapshots = [
         DailySnapshot(

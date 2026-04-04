@@ -7,9 +7,8 @@ from pathlib import Path
 
 import pytest
 
+from db.migrations import apply_migrations
 from models import DailySnapshot, WorkoutSnapshot
-
-import store as store_mod
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
@@ -167,5 +166,5 @@ def in_memory_db() -> sqlite3.Connection:
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
-    conn.executescript(store_mod._DDL)
+    apply_migrations(conn)
     return conn

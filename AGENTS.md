@@ -14,6 +14,8 @@ uv run python main.py nudge           # short LLM nudge (add --trigger TYPE)
 uv run python main.py coach           # coaching review with plan/goal proposals (add --week, --telegram, --email)
 uv run python main.py report          # terminal summary (add --llm, --history, --json)
 uv run python main.py status          # DB row counts + date range
+uv run python main.py db status       # migration status for the SQLite DB
+uv run python main.py db schema       # print the live SQLite schema
 uv run python main.py context         # show context files and their status
 uv run python main.py llm-log         # query LLM call history (add --stats, --id N, --json)
 uv run python main.py telegram-setup  # register bot /commands for Telegram autocomplete + menu
@@ -25,6 +27,8 @@ uv run python -m evals.data.extract      # refresh eval blueprints from live dat
 ```
 
 Preferred LLM tracing path for debugging: use `uv run python main.py llm-log --id N` to inspect the full stored trace for one call, including messages, tool use, and final response.
+
+Database access should go through `store.open_db()` or `store.connect_db(..., migrate=True)` so pending SQLite migrations are applied automatically. Avoid raw `sqlite3.connect(...)` unless you intentionally need a migration-free connection.
 
 ## Collaboration Style
 

@@ -24,101 +24,12 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
+from db.migrations import apply_migrations
 from models import DailySnapshot, WorkoutSnapshot
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_DB = Path.home() / "Documents" / "zdrowskit" / "health.db"
-
-_DDL = """
-CREATE TABLE IF NOT EXISTS daily (
-    date                        TEXT PRIMARY KEY,
-    steps                       INTEGER,
-    distance_km                 REAL,
-    active_energy_kj            REAL,
-    exercise_min                INTEGER,
-    stand_hours                 INTEGER,
-    flights_climbed             REAL,
-    resting_hr                  INTEGER,
-    hrv_ms                      REAL,
-    walking_hr_avg              REAL,
-    hr_day_min                  INTEGER,
-    hr_day_max                  INTEGER,
-    vo2max                      REAL,
-    walking_speed_kmh           REAL,
-    walking_step_length_cm      REAL,
-    walking_asymmetry_pct       REAL,
-    walking_double_support_pct  REAL,
-    stair_speed_up_ms           REAL,
-    stair_speed_down_ms         REAL,
-    running_stride_length_m     REAL,
-    running_power_w             REAL,
-    running_speed_kmh           REAL,
-    sleep_total_h               REAL,
-    sleep_in_bed_h              REAL,
-    sleep_efficiency_pct        REAL,
-    sleep_deep_h                REAL,
-    sleep_core_h                REAL,
-    sleep_rem_h                 REAL,
-    sleep_awake_h               REAL,
-    recovery_index              REAL,
-    imported_at                 TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS workout (
-    start_utc                TEXT PRIMARY KEY,
-    date                     TEXT NOT NULL REFERENCES daily(date),
-    type                     TEXT NOT NULL,
-    category                 TEXT NOT NULL,
-    counts_as_lift           INTEGER NOT NULL DEFAULT 0,
-    duration_min             REAL NOT NULL,
-    hr_min                   INTEGER,
-    hr_avg                   REAL,
-    hr_max                   INTEGER,
-    active_energy_kj         REAL,
-    intensity_kcal_per_hr_kg REAL,
-    temperature_c            REAL,
-    humidity_pct             INTEGER,
-    gpx_distance_km          REAL,
-    gpx_elevation_gain_m     REAL,
-    gpx_avg_speed_ms         REAL,
-    gpx_max_speed_p95_ms     REAL,
-    imported_at              TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS workout_date     ON workout(date);
-CREATE INDEX IF NOT EXISTS workout_category ON workout(category);
-
-CREATE TABLE IF NOT EXISTS llm_call (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    timestamp       TEXT NOT NULL,
-    request_type    TEXT NOT NULL,
-    model           TEXT NOT NULL,
-    messages_json   TEXT NOT NULL,
-    response_text   TEXT NOT NULL,
-    params_json     TEXT,
-    input_tokens    INTEGER NOT NULL,
-    output_tokens   INTEGER NOT NULL,
-    total_tokens    INTEGER NOT NULL,
-    latency_s       REAL NOT NULL,
-    cost            REAL,
-    metadata_json   TEXT
-);
-
-CREATE INDEX IF NOT EXISTS llm_call_type ON llm_call(request_type);
-CREATE INDEX IF NOT EXISTS llm_call_ts   ON llm_call(timestamp);
-
-CREATE TABLE IF NOT EXISTS llm_feedback (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    llm_call_id   INTEGER NOT NULL REFERENCES llm_call(id),
-    category      TEXT NOT NULL,
-    reason        TEXT,
-    created_at    TEXT NOT NULL,
-    message_type  TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS llm_feedback_call ON llm_feedback(llm_call_id);
-"""
 
 
 def default_db_path() -> Path:
@@ -136,14 +47,14 @@ def default_db_path() -> Path:
     return _DEFAULT_DB
 
 
-def open_db(path: Path) -> sqlite3.Connection:
-    """Open or create the SQLite database at *path*, run DDL, return connection.
+def connect_db(path: Path, *, migrate: bool = True) -> sqlite3.Connection:
+    """Open or create the SQLite database at *path* and optionally migrate.
 
-    The parent directory is created if it does not exist. DDL uses
-    CREATE TABLE IF NOT EXISTS so this is safe to call on every startup.
+    The parent directory is created if it does not exist.
 
     Args:
         path: Filesystem path for the SQLite database file.
+        migrate: Whether to auto-apply pending migrations.
 
     Returns:
         An open sqlite3.Connection with foreign keys enabled and WAL mode set.
@@ -154,58 +65,15 @@ def open_db(path: Path) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")
-    conn.executescript(_DDL)
-    _migrate(conn)
-    conn.commit()
+    if migrate:
+        apply_migrations(conn)
     logger.debug("Opened database: %s", path)
     return conn
 
 
-def _migrate(conn: sqlite3.Connection) -> None:
-    """Apply incremental schema migrations for columns added after initial DDL.
-
-    Each migration is guarded by a column-existence check so it runs at most
-    once and is safe to call on every startup.
-    """
-    cols = {r[1] for r in conn.execute("PRAGMA table_info(llm_call)").fetchall()}
-    if "cost" not in cols:
-        conn.execute("ALTER TABLE llm_call ADD COLUMN cost REAL")
-        logger.info("Migrated llm_call: added 'cost' column")
-
-    daily_cols = {r[1] for r in conn.execute("PRAGMA table_info(daily)").fetchall()}
-    if not daily_cols:
-        return  # daily table doesn't exist yet (e.g. partial schema in tests)
-    sleep_cols = [
-        "sleep_total_h",
-        "sleep_in_bed_h",
-        "sleep_efficiency_pct",
-        "sleep_deep_h",
-        "sleep_core_h",
-        "sleep_rem_h",
-        "sleep_awake_h",
-    ]
-    for col in sleep_cols:
-        if col not in daily_cols:
-            conn.execute(f"ALTER TABLE daily ADD COLUMN {col} REAL")
-    if sleep_cols[0] not in daily_cols:
-        logger.info("Migrated daily: added sleep columns")
-
-    workout_cols = {r[1] for r in conn.execute("PRAGMA table_info(workout)").fetchall()}
-    if workout_cols and "counts_as_lift" not in workout_cols:
-        conn.execute(
-            "ALTER TABLE workout ADD COLUMN counts_as_lift INTEGER NOT NULL DEFAULT 0"
-        )
-        conn.execute(
-            """
-            UPDATE workout
-            SET counts_as_lift = CASE
-                WHEN lower(type) = 'traditional strength training' THEN 1
-                WHEN lower(type) = 'functional strength training' AND duration_min >= 15 THEN 1
-                ELSE 0
-            END
-            """
-        )
-        logger.info("Migrated workout: added 'counts_as_lift' column")
+def open_db(path: Path) -> sqlite3.Connection:
+    """Open or create the SQLite database at *path* and apply migrations."""
+    return connect_db(path, migrate=True)
 
 
 def store_snapshots(conn: sqlite3.Connection, snapshots: list[DailySnapshot]) -> int:

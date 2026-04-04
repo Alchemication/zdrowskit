@@ -112,7 +112,9 @@ class TestParseWorkouts:
         assert len(workouts) == 1
         assert workouts[0].type == "Outdoor Run"
 
-    def test_short_functional_strength_is_kept_but_not_counted(self, tmp_path: Path) -> None:
+    def test_short_functional_strength_is_kept_but_not_counted(
+        self, tmp_path: Path
+    ) -> None:
         path = tmp_path / "workouts.json"
         path.write_text(
             """

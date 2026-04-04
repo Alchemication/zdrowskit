@@ -105,9 +105,15 @@ uv run python main.py import
 # See what's in the database
 uv run python main.py status
 
+# See DB migration status / inspect the live schema
+uv run python main.py db status
+uv run python main.py db schema
+
 # Get a weekly report
 uv run python main.py report
 ```
+
+Normal CLI usage auto-applies pending SQLite migrations when the database is opened. Use `uv run python main.py db status` when you want to inspect schema state explicitly.
 
 ### Setting up insights (LLM reports)
 

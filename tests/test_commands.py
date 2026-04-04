@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import sqlite3
 import json
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from commands import cmd_coach, cmd_llm_log, cmd_nudge
+from commands import cmd_coach, cmd_db, cmd_llm_log, cmd_nudge
 from llm import LLMResult
-from store import log_feedback, log_llm_call
+from store import log_feedback, log_llm_call, open_db
 
 
 class TestCmdCoach:
@@ -437,3 +439,113 @@ class TestCmdNudge:
         sent_text = send_telegram.call_args.args[0]
         assert sent_text.startswith("**📊 Data Sync**")
         assert "Easy run done." in sent_text
+
+
+class TestCmdDb:
+    def test_status_shows_applied_migrations(self, tmp_path: Path, capsys) -> None:
+        db_path = tmp_path / "test.db"
+        conn = open_db(db_path)
+        conn.close()
+
+        args = SimpleNamespace(db=str(db_path), db_cmd="status")
+        cmd_db(args)
+
+        out = capsys.readouterr().out
+        assert "Current migration:" in out
+        assert "File size:" in out
+        assert "Table Stats" in out
+        assert "schema_migrations" in out
+        assert "20260404_153000__001_initial_schema" in out
+        assert "applied" in out
+
+    def test_schema_prints_live_schema(self, tmp_path: Path, capsys) -> None:
+        db_path = tmp_path / "test.db"
+        conn = open_db(db_path)
+        conn.close()
+
+        args = SimpleNamespace(db=str(db_path), db_cmd="schema")
+        cmd_db(args)
+
+        out = capsys.readouterr().out
+        assert "CREATE TABLE schema_migrations" in out
+        assert "CREATE TABLE daily" in out
+        assert "CREATE TABLE workout" in out
+
+    def test_migrate_applies_pending_legacy_migrations(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        db_path = tmp_path / "legacy.db"
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.executescript(
+            """
+            CREATE TABLE daily (
+                date                        TEXT PRIMARY KEY,
+                steps                       INTEGER,
+                distance_km                 REAL,
+                active_energy_kj            REAL,
+                exercise_min                INTEGER,
+                stand_hours                 INTEGER,
+                flights_climbed             REAL,
+                resting_hr                  INTEGER,
+                hrv_ms                      REAL,
+                walking_hr_avg              REAL,
+                hr_day_min                  INTEGER,
+                hr_day_max                  INTEGER,
+                vo2max                      REAL,
+                walking_speed_kmh           REAL,
+                walking_step_length_cm      REAL,
+                walking_asymmetry_pct       REAL,
+                walking_double_support_pct  REAL,
+                stair_speed_up_ms           REAL,
+                stair_speed_down_ms         REAL,
+                running_stride_length_m     REAL,
+                running_power_w             REAL,
+                running_speed_kmh           REAL,
+                recovery_index              REAL,
+                imported_at                 TEXT NOT NULL
+            );
+            CREATE TABLE workout (
+                start_utc                TEXT PRIMARY KEY,
+                date                     TEXT NOT NULL,
+                type                     TEXT NOT NULL,
+                category                 TEXT NOT NULL,
+                duration_min             REAL NOT NULL,
+                hr_min                   INTEGER,
+                hr_avg                   REAL,
+                hr_max                   INTEGER,
+                active_energy_kj         REAL,
+                intensity_kcal_per_hr_kg REAL,
+                temperature_c            REAL,
+                humidity_pct             INTEGER,
+                gpx_distance_km          REAL,
+                gpx_elevation_gain_m     REAL,
+                gpx_avg_speed_ms         REAL,
+                gpx_max_speed_p95_ms     REAL,
+                imported_at              TEXT NOT NULL
+            );
+            CREATE TABLE llm_call (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp       TEXT NOT NULL,
+                request_type    TEXT NOT NULL,
+                model           TEXT NOT NULL,
+                messages_json   TEXT NOT NULL,
+                response_text   TEXT NOT NULL,
+                params_json     TEXT,
+                input_tokens    INTEGER NOT NULL,
+                output_tokens   INTEGER NOT NULL,
+                total_tokens    INTEGER NOT NULL,
+                latency_s       REAL NOT NULL,
+                metadata_json   TEXT
+            );
+            """
+        )
+        conn.close()
+
+        args = SimpleNamespace(db=str(db_path), db_cmd="migrate")
+        cmd_db(args)
+
+        out = capsys.readouterr().out
+        assert "Applied" in out
+        assert "20260404_154500__002_add_llm_call_cost" in out
