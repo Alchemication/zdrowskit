@@ -310,7 +310,7 @@ The daemon runs a Telegram long-polling listener alongside the file watcher. Sen
 - Reply to a nudge or report — the bot knows which message you're responding to
 - Share updates naturally ("my weight is 76kg now") — the LLM proposes context file edits with Accept/Reject buttons
 - Thumbs down a bad output, pick a category, optionally reply with more detail, and undo it if you tapped it during testing or a demo
-- Commands: `/review [current|last]`, `/notify`, `/clear`, `/status`, `/context [name]`, `/help`
+- Commands: `/review [current|last]`, `/coach [current|last]`, `/notify`, `/clear`, `/status`, `/context [name]`, `/help`
 - `/status` shows bot state, data coverage, recent activity, and notification state
 - Conversation buffer: last 20 messages in memory, resets on daemon restart
 
