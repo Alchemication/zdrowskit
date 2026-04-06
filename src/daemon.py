@@ -1083,18 +1083,18 @@ class ZdrowskitDaemon:
         *,
         week: str = "last",
         skip_import: bool = False,
-        force: bool = False,
     ) -> None:
         """Run a coaching review and send proposals via Telegram.
 
         Proposes concrete edits to plan.md / goals.md based on the
         week's data. Each proposal is sent as an inline Approve/Reject
-        button. If the LLM proposes no changes, only the reasoning text
-        is sent.
+        button. When the model returns SKIP (no plan/goal changes
+        warranted), nothing is sent — the coach is silent on no-change
+        weeks, mirroring the nudge SKIP behavior.
         """
         last_coach = self._state.get("last_coach_date", "")
         today_str = date.today().isoformat()
-        if not force and last_coach == today_str:
+        if last_coach == today_str:
             logger.debug("Coach already ran today, skipping")
             return
 
@@ -1357,11 +1357,6 @@ class ZdrowskitDaemon:
             parts = text.split()
             file_arg = parts[1] if len(parts) > 1 else None
             self._send_context_overview(message_id, file_arg)
-        elif cmd == "/coach":
-            self._poller.send_reply(
-                "Running coaching review…", reply_to_message_id=message_id
-            )
-            self._run_coach(week="last", skip_import=False, force=True)
         elif cmd == "/add":
             self._handle_add_command(message_id)
         elif cmd == "/help":

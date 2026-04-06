@@ -170,19 +170,22 @@ class TestRepoPrompts:
     def test_coach_prompt_states_plan_goal_review_role(self) -> None:
         prompt = (PROMPTS_DIR / "coach_prompt.md").read_text(encoding="utf-8")
         normalized = " ".join(prompt.split())
-        assert "weekly review of whether the user's current training plan and" in prompt
+        assert "weekly review of whether the user's current training plan and" in normalized
         assert "not a short reactive notification" in normalized
         assert "Do not propose edits to any other files." in prompt
         assert "## Recent Coaching History" in prompt
 
-    def test_coach_prompt_has_no_change_short_form_branch(self) -> None:
-        """Coach must default to a terse reply when no plan/goal changes are needed."""
+    def test_coach_prompt_has_skip_branch_for_no_change_weeks(self) -> None:
+        """Coach must SKIP (silent) when no plan/goal changes are warranted."""
         prompt = (PROMPTS_DIR / "coach_prompt.md").read_text(encoding="utf-8")
         normalized = " ".join(prompt.split())
-        assert "If no changes are warranted" in normalized
-        assert "80 words or less" in normalized
-        # The structured/long form is gated on actual changes.
-        assert "If changes are warranted" in normalized
+        # SKIP is the documented no-change output.
+        assert "SKIP" in prompt
+        assert "SKIP is the common case" in normalized
+        # The structured review is gated on having a concrete change to propose.
+        assert "structured review only when" in normalized
+        # And every concrete change must be backed by an update_context call.
+        assert "update_context" in prompt
 
     def test_chat_prompt_states_conversational_purpose_and_boundaries(self) -> None:
         prompt = (PROMPTS_DIR / "chat_prompt.md").read_text(encoding="utf-8")
