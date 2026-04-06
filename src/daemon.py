@@ -1144,6 +1144,7 @@ class ZdrowskitDaemon:
         *,
         week: str = "last",
         skip_import: bool = False,
+        force: bool = False,
     ) -> None:
         """Run a coaching review and send proposals via Telegram.
 
@@ -1152,10 +1153,18 @@ class ZdrowskitDaemon:
         button. When the model returns SKIP (no plan/goal changes
         warranted), nothing is sent — the coach is silent on no-change
         weeks, mirroring the nudge SKIP behavior.
+
+        Args:
+            week: Which week to review (``"last"`` or ``"current"``).
+            skip_import: Skip the pre-run import pass (used when a caller
+                has already imported, e.g. the weekly report path).
+            force: Bypass the "already ran today" guard. Set by manual
+                triggers like the ``/coach`` Telegram command so the user
+                can re-run on demand.
         """
         last_coach = self._state.get("last_coach_date", "")
         today_str = date.today().isoformat()
-        if last_coach == today_str:
+        if last_coach == today_str and not force:
             logger.debug("Coach already ran today, skipping")
             return
 
@@ -1433,6 +1442,27 @@ class ZdrowskitDaemon:
                 f"Running review for {label}…", reply_to_message_id=message_id
             )
             self._run_review(week=week, skip_import=False)
+        elif cmd == "/coach":
+            parts = text.split()
+            week = "last"
+            if len(parts) > 1:
+                raw_week = parts[1].lower()
+                if raw_week not in {"current", "last"}:
+                    self._poller.send_reply(
+                        "Use /coach or /coach current or /coach last.",
+                        reply_to_message_id=message_id,
+                    )
+                    return
+                week = raw_week
+            label = "this week so far" if week == "current" else "last week"
+            self._poller.send_reply(
+                f"Running coaching review for {label}…",
+                reply_to_message_id=message_id,
+            )
+            # force=True so the user can retrigger on demand (e.g. if the
+            # Monday scheduled run was missed or silent-SKIPped and they
+            # want to try again).
+            self._run_coach(week=week, skip_import=False, force=True)
         elif cmd == "/notify":
             args = text.split(maxsplit=1)
             request_text = args[1].strip() if len(args) > 1 else ""
@@ -1464,6 +1494,10 @@ class ZdrowskitDaemon:
                 if command["command"] == "review":
                     lines.append(
                         f"/review [current|last] — {command['description']} (default: last)"
+                    )
+                elif command["command"] == "coach":
+                    lines.append(
+                        f"/coach [current|last] — {command['description']} (default: last)"
                     )
                 elif command["command"] == "context":
                     lines.append(f"/context [name] — {command['description']}")

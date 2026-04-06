@@ -401,6 +401,23 @@ def main() -> None:
 
     args = parser.parse_args()
 
+    def _cli_coach(coach_args: argparse.Namespace) -> None:
+        """CLI wrapper for cmd_coach that surfaces proposed edits.
+
+        The daemon consumes the returned edits as per-edit Approve/Reject
+        Telegram buttons. In CLI mode there is no such delivery path, so
+        we print a summary to stdout instead of silently dropping them.
+        """
+        _, edits = cmd_coach(coach_args)
+        if edits:
+            print(f"\n---\nProposed context edits ({len(edits)}):")
+            for i, edit in enumerate(edits, start=1):
+                print(f"  {i}. [{edit.file}.md] {edit.action}: {edit.summary}")
+            print(
+                "\nNote: CLI mode only previews edits — run via the daemon "
+                "(/coach in Telegram) to get Approve/Reject buttons."
+            )
+
     dispatch = {
         "import": cmd_import,
         "report": cmd_report,
@@ -409,7 +426,7 @@ def main() -> None:
         "context": cmd_context,
         "insights": cmd_insights,
         "nudge": cmd_nudge,
-        "coach": cmd_coach,
+        "coach": _cli_coach,
         "llm-log": cmd_llm_log,
         "daemon-restart": cmd_daemon_restart,
         "daemon-stop": cmd_daemon_stop,
