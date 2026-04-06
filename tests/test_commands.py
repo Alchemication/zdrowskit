@@ -12,6 +12,7 @@ from commands import (
     TELEGRAM_BOT_COMMANDS,
     cmd_coach,
     cmd_db,
+    cmd_insights,
     cmd_llm_log,
     cmd_nudge,
     interpret_notify_request,
@@ -167,6 +168,118 @@ class TestCmdCoach:
         assert edits[0].summary == "Lighten next week"
         assert edits[0].file == "plan"
         assert edits[0].section == "## Weekly Structure"
+
+
+class TestCmdInsights:
+    def test_forces_synthesis_when_loop_exits_with_empty_text(
+        self,
+        in_memory_db,
+        capsys,
+    ) -> None:
+        """If the tool loop exhausts iterations with empty text, a final
+        tool-less synthesis call must run so we never ship a blank report."""
+        args = SimpleNamespace(
+            db="ignored.db",
+            model="test-model",
+            months=1,
+            week="last",
+            no_update_baselines=True,
+            no_update_history=True,
+            explain=False,
+            email=False,
+            telegram=False,
+        )
+
+        tool_call = SimpleNamespace(
+            id="call_1",
+            function=SimpleNamespace(
+                name="run_sql",
+                arguments='{"query": "SELECT 1"}',
+            ),
+        )
+        # All three iteration slots return empty text + a pending tool call.
+        empty_with_tool = LLMResult(
+            text="",
+            model="test-model",
+            input_tokens=1,
+            output_tokens=1,
+            total_tokens=2,
+            latency_s=0.1,
+            tool_calls=[tool_call],
+            raw_message={
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "function": {
+                            "name": "run_sql",
+                            "arguments": '{"query": "SELECT 1"}',
+                        },
+                    }
+                ],
+            },
+        )
+        # Final synthesis call returns real text.
+        synthesis_result = LLMResult(
+            text="W14 Review: solid week, no changes needed.",
+            model="test-model",
+            input_tokens=1,
+            output_tokens=1,
+            total_tokens=2,
+            latency_s=0.1,
+        )
+
+        seen_kwargs: list[dict] = []
+
+        def fake_call_llm(messages, **kwargs):
+            seen_kwargs.append(kwargs)
+            # Iterations 0, 1, 2 → empty + tool call. Iteration 3 (final
+            # synthesis, called with tools=None) → real text.
+            if kwargs.get("tools") is None:
+                return synthesis_result
+            return empty_with_tool
+
+        with (
+            patch("commands.load_context", return_value={"prompt": "x", "soul": "y"}),
+            patch("commands.open_db", return_value=in_memory_db),
+            patch(
+                "commands.build_llm_data",
+                return_value={
+                    "current_week": {
+                        "summary": {"week_label": "2026-W14"},
+                        "days": [],
+                    },
+                    "history": [],
+                    "week_complete": True,
+                    "week_label": "2026-W14",
+                },
+            ),
+            patch("commands.build_review_facts", return_value="facts"),
+            patch(
+                "commands.build_messages",
+                return_value=[
+                    {"role": "system", "content": "s"},
+                    {"role": "user", "content": "u"},
+                ],
+            ),
+            patch("commands.call_llm", side_effect=fake_call_llm),
+            patch("tools.run_sql_tool", return_value=[{"type": "function"}]),
+            patch("tools.execute_run_sql", return_value="[]"),
+            patch("commands._save_report", return_value=Path("/tmp/r.md")),
+        ):
+            result = cmd_insights(args)
+
+        captured = capsys.readouterr()
+        assert "W14 Review: solid week" in captured.out
+        # 3 in-loop iterations + 1 forced synthesis call = 4.
+        assert len(seen_kwargs) == 4
+        # Final call must have tools disabled.
+        assert seen_kwargs[-1].get("tools") is None
+        # Final-call metadata flags the synthesis fallback.
+        assert seen_kwargs[-1]["metadata"]["iteration"] == "final_synthesis"
+        # The returned CommandResult carries the synthesised text, not blank.
+        assert "W14 Review" in result.text
 
 
 class TestCmdLlmLog:

@@ -57,9 +57,21 @@ sleep quality), performance trends, and the user's own notes.
 Decide whether the plan or goals need adjusting. **Not every week warrants a
 change** — if the plan is working and the data supports it, say so and propose
 nothing. Only suggest changes backed by specific data points.
-Review adherence, recovery, constraints, and trajectory. Decide whether the
-current plan and goals should stay as-is or be adjusted. If no changes are
-warranted, say that clearly.
+
+### Decide first: changes or no changes
+
+Before writing anything, decide whether this week warrants a plan/goals
+adjustment. The response shape depends on the answer.
+
+**If no changes are warranted (the common case):** reply in **80 words or
+less**. One-line verdict ("no changes — plan is working"), one sentence
+citing the strongest supporting data point, one sentence on what to keep
+doing this coming week. Do NOT produce sections, do NOT recap the whole
+week, do NOT call `update_context`. The long structured review below is
+only for weeks that actually require adjustments.
+
+**If changes are warranted:** use the structured format below (≤300 words),
+and every concrete change MUST have a matching `update_context` tool call.
 
 ### When to propose changes
 
@@ -82,9 +94,6 @@ Match the section headings and structure already present in each file.
 Do not propose edits to any other files.
 
 Propose 0-2 updates per review. Keep the total response under 300 words.
-
-If no changes are warranted, simply state why the current plan remains
-appropriate (2-3 sentences). Do not call the `update_context` tool.
 
 **Important:** Every concrete change you recommend MUST have a matching
 `update_context` tool call. Never describe a change in prose without the

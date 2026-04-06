@@ -371,11 +371,7 @@ def validate_notification_changes(changes: object) -> list[dict[str, Any]]:
             if path.endswith(".max_per_day"):
                 if not isinstance(value, int):
                     raise ValueError(f"{path} requires an integer")
-                if not (
-                    MIN_NUDGES_PER_DAY
-                    <= value
-                    <= MAX_REASONABLE_NUDGES_PER_DAY
-                ):
+                if not (MIN_NUDGES_PER_DAY <= value <= MAX_REASONABLE_NUDGES_PER_DAY):
                     raise ValueError(
                         f"{path} must be between {MIN_NUDGES_PER_DAY} and "
                         f"{MAX_REASONABLE_NUDGES_PER_DAY}"

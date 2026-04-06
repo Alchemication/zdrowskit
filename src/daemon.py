@@ -2597,7 +2597,36 @@ class ZdrowskitDaemon:
                     }
                 )
 
-        # If we exhausted iterations, return the last result.
+        # If we exhausted iterations with an empty text (model still wanted
+        # to call tools), force one final synthesis pass without tools so
+        # the user never sees a blank reply.
+        if not result.text.strip():
+            logger.warning(
+                "Chat loop exited with empty text (tool_calls=%s); forcing final synthesis",
+                bool(result.tool_calls),
+            )
+            if result.tool_calls:
+                messages.append(result.raw_message)
+                for tc in result.tool_calls:
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "content": _json.dumps(
+                                {"error": "tool budget exhausted, answer now"}
+                            ),
+                        }
+                    )
+            result = call_llm(
+                messages,
+                model=self.model,
+                tools=None,
+                conn=conn,
+                request_type="chat",
+                max_tokens=1024,
+                metadata={"iteration": "final_synthesis"},
+            )
+
         return result, deferred_edits, query_rows
 
     # ------------------------------------------------------------------

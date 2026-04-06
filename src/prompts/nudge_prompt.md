@@ -109,7 +109,19 @@ mention a tracking gap if 3+ consecutive nights were missed.
 - **new_data**: New health data just synced. One data-driven observation and one
   concrete suggestion for the rest of the day or tomorrow. Skip the obvious.
   The top-level purpose above takes precedence: if the new data does not change
-  the next action, respond with SKIP.
+  the next action, respond with SKIP — **except** when the carve-out below
+  applies.
+
+  **Scheduled-session carve-out:** if the Current Training Plan above has a
+  session scheduled for today, and no nudge already sent today has prescribed
+  it, your nudge MUST restate today's session explicitly (session type +
+  distance/duration + intensity/pace target). Mixed recovery signals are an
+  input to *how* to run the session, not a reason to omit it. Only drop the
+  prescription when (a) the plan has no session today, (b) an earlier nudge
+  today already prescribed it unchanged, or (c) recovery is clearly bad
+  enough to convert it to rest — and in that case state the rest decision
+  explicitly.
+
   Do not just restate the last prescription unless the new data changes the
   decision. If the new event is that a prescribed session was completed, focus
   on what that completion means now.

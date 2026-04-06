@@ -1086,6 +1086,43 @@ def cmd_insights(
                 {"role": "tool", "tool_call_id": tc.id, "content": tool_result}
             )
 
+    # If the loop exited with an empty response (e.g. iteration cap reached
+    # while the model still wanted to call tools), force one final synthesis
+    # pass without tools so we never ship a blank report.
+    if not result.text.strip():
+        logger.warning(
+            "Insights loop exited with empty text (tool_calls=%s); forcing final synthesis",
+            bool(result.tool_calls),
+        )
+        if result.tool_calls:
+            messages.append(result.raw_message)
+            for tc in result.tool_calls:
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": json.dumps(
+                            {"error": "tool budget exhausted, synthesize now"}
+                        ),
+                    }
+                )
+        try:
+            result = call_llm(
+                messages,
+                model=args.model,
+                tools=None,
+                conn=conn,
+                request_type="insights",
+                metadata={
+                    "week": args.week,
+                    "months": args.months,
+                    "iteration": "final_synthesis",
+                },
+            )
+        except Exception as e:
+            logger.error("Final synthesis call failed: %s", e)
+            sys.exit(1)
+
     # Extract and render charts before stripping them from the response.
     chart_blocks = extract_charts(result.text)
     chart_results: list[ChartResult] = []

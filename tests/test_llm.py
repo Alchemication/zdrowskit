@@ -126,6 +126,14 @@ class TestRepoPrompts:
         assert "Follow the task-specific instructions exactly" in soul
         assert "markdown headers" not in soul
 
+    def test_soul_prompt_carries_voice_basics(self) -> None:
+        """Cross-cutting voice rules belong in soul.md so every task inherits them."""
+        soul = (PROMPTS_DIR / "soul.md").read_text(encoding="utf-8")
+        assert "Never open with" in soul
+        assert "Wait" in soul
+        assert "Do not narrate your own reasoning" in soul
+        assert "mm:ss/km" in soul
+
     def test_nudge_prompt_states_event_driven_purpose_and_boundaries(self) -> None:
         prompt = (PROMPTS_DIR / "nudge_prompt.md").read_text(encoding="utf-8")
         assert "A nudge is not a summary of the latest sync." in prompt
@@ -145,9 +153,17 @@ class TestRepoPrompts:
         normalized = " ".join(prompt.split())
         assert "weekly review of whether the user's current training plan and" in prompt
         assert "not a short reactive notification" in normalized
-        assert "Review adherence, recovery, constraints, and trajectory." in prompt
         assert "Do not propose edits to any other files." in prompt
         assert "## Recent Coaching History" in prompt
+
+    def test_coach_prompt_has_no_change_short_form_branch(self) -> None:
+        """Coach must default to a terse reply when no plan/goal changes are needed."""
+        prompt = (PROMPTS_DIR / "coach_prompt.md").read_text(encoding="utf-8")
+        normalized = " ".join(prompt.split())
+        assert "If no changes are warranted" in normalized
+        assert "80 words or less" in normalized
+        # The structured/long form is gated on actual changes.
+        assert "If changes are warranted" in normalized
 
     def test_chat_prompt_states_conversational_purpose_and_boundaries(self) -> None:
         prompt = (PROMPTS_DIR / "chat_prompt.md").read_text(encoding="utf-8")
@@ -156,6 +172,22 @@ class TestRepoPrompts:
         assert "## Recent User Notes" in prompt
         assert "## Recent Durable Coaching Context" in prompt
         assert "## Recent Coach Recommendation" in prompt
+
+    def test_chat_prompt_shows_plan_from_context_not_sql(self) -> None:
+        """Asking 'what is my plan' should be answered from injected context."""
+        prompt = (PROMPTS_DIR / "chat_prompt.md").read_text(encoding="utf-8")
+        normalized = " ".join(prompt.split())
+        assert "show me my goals" in normalized or "what is my plan" in normalized
+        assert "Do NOT run SQL" in normalized
+        assert 'Never begin a reply with "Wait"' in normalized
+
+    def test_nudge_prompt_has_scheduled_session_carveout(self) -> None:
+        """Nudge must restate today's scheduled session even when SKIP would otherwise apply."""
+        prompt = (PROMPTS_DIR / "nudge_prompt.md").read_text(encoding="utf-8")
+        normalized = " ".join(prompt.split())
+        assert "Scheduled-session carve-out" in normalized
+        assert "session scheduled for today" in normalized
+        assert "MUST restate today's session" in normalized
 
     def test_notify_prompt_requires_json_only_output(self) -> None:
         prompt = (PROMPTS_DIR / "notify_prompt.md").read_text(encoding="utf-8")
