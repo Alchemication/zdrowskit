@@ -118,6 +118,7 @@ class TestNotificationPrefs:
         )
 
     def test_summary_lists_active_mutes(self) -> None:
+        frozen_now = datetime.fromisoformat("2026-04-05T10:00:00+00:00")
         prefs = apply_notification_changes(
             DEFAULT_NOTIFICATION_PREFS,
             [
@@ -128,11 +129,12 @@ class TestNotificationPrefs:
                     "source_text": "mute nudges today",
                 }
             ],
+            now=frozen_now,
         )
 
         text = format_notification_summary(
             prefs,
-            now=datetime.fromisoformat("2026-04-05T10:00:00+00:00"),
+            now=frozen_now,
         )
 
         assert "Active temporary mutes:" in text

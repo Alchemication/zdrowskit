@@ -417,6 +417,8 @@ def validate_notification_changes(changes: object) -> list[dict[str, Any]]:
 def apply_notification_changes(
     prefs: dict[str, Any],
     changes: list[dict[str, Any]],
+    *,
+    now: datetime | None = None,
 ) -> dict[str, Any]:
     """Apply validated changes to the prefs payload and return a new dict."""
     updated = copy.deepcopy(prefs)
@@ -427,7 +429,7 @@ def apply_notification_changes(
         overrides = {}
         updated["overrides"] = overrides
 
-    mutes = active_temporary_mutes(updated)
+    mutes = active_temporary_mutes(updated, now=now)
     updated["temporary_mutes"] = mutes
 
     for change in validate_notification_changes(changes):
@@ -448,7 +450,7 @@ def apply_notification_changes(
                 }
             )
 
-    cleaned, _ = prune_expired_mutes(updated)
+    cleaned, _ = prune_expired_mutes(updated, now=now)
     cleaned["overrides"] = _normalise_overrides(cleaned.get("overrides", {}))
     return cleaned
 
@@ -528,7 +530,7 @@ def format_proposed_changes(
 ) -> str:
     """Render a human-readable before/after proposal summary."""
     now = now or datetime.now().astimezone()
-    updated = apply_notification_changes(prefs, changes)
+    updated = apply_notification_changes(prefs, changes, now=now)
     before = effective_notification_prefs(prefs)
     after = effective_notification_prefs(updated)
     before_mutes = active_temporary_mutes(prefs, now=now)
