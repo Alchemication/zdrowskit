@@ -1280,13 +1280,6 @@ class ZdrowskitDaemon:
             return
 
         kb = feedback_keyboard(call_id, message_type)
-        if message_type == "insights":
-            self._poller.send_message_with_keyboard(
-                "_Report feedback_: tap 👎 if something was off.",
-                kb,
-                reply_to_message_id=msg_id,
-            )
-            return
         self._poller.edit_message_reply_markup(msg_id, kb)
 
     def _handle_telegram_message(self, message: dict) -> None:

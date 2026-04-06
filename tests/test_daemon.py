@@ -431,7 +431,7 @@ class TestTelegramFeedbackFlow:
         restored_text = daemon._poller.edit_message_with_keyboard.call_args[0][1]
         assert restored_text == "That run was solid."
 
-    def test_insights_feedback_uses_footer_message(self, tmp_path: Path) -> None:
+    def test_insights_feedback_edits_last_chunk(self, tmp_path: Path) -> None:
         daemon = _make_daemon(tmp_path)
         daemon._poller = MagicMock()
 
@@ -440,8 +440,9 @@ class TestTelegramFeedbackFlow:
             "insights",
         )
 
-        daemon._poller.send_message_with_keyboard.assert_called_once()
-        daemon._poller.edit_message_reply_markup.assert_not_called()
+        daemon._poller.edit_message_reply_markup.assert_called_once()
+        assert daemon._poller.edit_message_reply_markup.call_args.args[0] == 44
+        daemon._poller.send_message_with_keyboard.assert_not_called()
 
 
 class TestNotifyFlow:
