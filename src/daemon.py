@@ -527,8 +527,13 @@ class ZdrowskitDaemon:
     def _fire_health(self) -> None:
         """Handle a health data trigger: import data, then nudge."""
         logger.info("Health trigger fired")
+        before = self._data_snapshot()
         self._run_import()
-        self._run_nudge("new_data")
+        after = self._data_snapshot()
+        trigger_context = self._format_data_delta(before, after)
+        self._state["last_data_snapshot"] = after
+        _save_state(self._state)
+        self._run_nudge("new_data", trigger_context=trigger_context)
 
     def _fire_context(self, stem: str) -> None:
         """Handle a context file change trigger.
@@ -559,7 +564,8 @@ class ZdrowskitDaemon:
         }
         trigger = trigger_map.get(stem, "log_update")
         logger.info("Context trigger fired: %s.md → %s", stem, trigger)
-        self._run_nudge(trigger)
+        trigger_context = self._format_context_trigger(stem, trigger)
+        self._run_nudge(trigger, trigger_context=trigger_context)
 
     # ------------------------------------------------------------------
     # Rate limiting
@@ -705,6 +711,158 @@ class ZdrowskitDaemon:
     # LLM calls
     # ------------------------------------------------------------------
 
+    def _data_snapshot(self) -> dict:
+        """Snapshot table-level markers used to compute import deltas.
+
+        Returns:
+            A dict with row counts and max-date markers for the daily,
+            workout_all, and sleep_all tables. Empty dict on failure.
+        """
+        try:
+            conn = sqlite3.connect(str(self.db))
+            cur = conn.cursor()
+            snap: dict = {}
+            for table, date_col in (
+                ("daily", "date"),
+                ("workout_all", "start_utc"),
+                ("sleep_all", "date"),
+            ):
+                try:
+                    row = cur.execute(
+                        f"SELECT COUNT(*), MAX({date_col}) FROM {table}"
+                    ).fetchone()
+                except sqlite3.Error:
+                    continue
+                snap[f"{table}_count"] = row[0] if row else 0
+                snap[f"{table}_max"] = row[1] if row else None
+            conn.close()
+            return snap
+        except sqlite3.Error as exc:
+            logger.warning("Data snapshot failed: %s", exc)
+            return {}
+
+    def _format_data_delta(self, before: dict, after: dict) -> str:
+        """Describe what records arrived between two data snapshots.
+
+        Args:
+            before: Snapshot taken before the import ran.
+            after: Snapshot taken after the import ran.
+
+        Returns:
+            Human-readable text the LLM can use to know what is actually new.
+            Falls back to a generic line when nothing identifiable changed.
+        """
+        if not after:
+            return "New health data synced (delta unavailable)."
+
+        lines: list[str] = []
+
+        # New workouts: rows with start_utc strictly greater than the prior max.
+        prev_workout_max = before.get("workout_all_max")
+        try:
+            conn = sqlite3.connect(str(self.db))
+            conn.row_factory = sqlite3.Row
+            if prev_workout_max:
+                rows = conn.execute(
+                    "SELECT start_utc, date, type, category, duration_min, "
+                    "gpx_distance_km FROM workout_all "
+                    "WHERE start_utc > ? ORDER BY start_utc",
+                    (prev_workout_max,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT start_utc, date, type, category, duration_min, "
+                    "gpx_distance_km FROM workout_all "
+                    "ORDER BY start_utc DESC LIMIT 3"
+                ).fetchall()
+            for r in rows:
+                dur = r["duration_min"]
+                dur_s = f"{dur:.0f} min" if dur is not None else "?"
+                dist = r["gpx_distance_km"]
+                dist_s = f", {dist:.2f} km" if dist is not None else ""
+                lines.append(
+                    f"- New workout: {r['type']} ({r['category']}), "
+                    f"{dur_s}{dist_s} on {r['date']}"
+                )
+
+            # New sleep nights: rows with date strictly greater than prior max.
+            prev_sleep_max = before.get("sleep_all_max")
+            if prev_sleep_max:
+                rows = conn.execute(
+                    "SELECT date, sleep_total_h, sleep_efficiency_pct "
+                    "FROM sleep_all WHERE date > ? ORDER BY date",
+                    (prev_sleep_max,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT date, sleep_total_h, sleep_efficiency_pct "
+                    "FROM sleep_all ORDER BY date DESC LIMIT 2"
+                ).fetchall()
+            for r in rows:
+                h = r["sleep_total_h"]
+                eff = r["sleep_efficiency_pct"]
+                h_s = f"{h:.1f}h" if h is not None else "?h"
+                eff_s = f", {eff:.0f}% efficiency" if eff is not None else ""
+                lines.append(f"- New sleep night: {r['date']} — {h_s}{eff_s}")
+
+            # New daily metric rows for dates beyond the previous max.
+            prev_daily_max = before.get("daily_max")
+            if prev_daily_max:
+                rows = conn.execute(
+                    "SELECT date, steps, hrv_ms, resting_hr FROM daily "
+                    "WHERE date > ? ORDER BY date",
+                    (prev_daily_max,),
+                ).fetchall()
+                for r in rows:
+                    parts = []
+                    if r["steps"] is not None:
+                        parts.append(f"steps {r['steps']}")
+                    if r["hrv_ms"] is not None:
+                        parts.append(f"HRV {r['hrv_ms']:.0f} ms")
+                    if r["resting_hr"] is not None:
+                        parts.append(f"RHR {r['resting_hr']:.0f} bpm")
+                    detail = ", ".join(parts) if parts else "(no metrics yet)"
+                    lines.append(f"- New daily row: {r['date']} — {detail}")
+            conn.close()
+        except sqlite3.Error as exc:
+            logger.warning("Delta query failed: %s", exc)
+            return "New health data synced (delta query failed)."
+
+        if not lines:
+            # No new identifiable rows — most likely an in-place refresh
+            # of today's metrics (e.g. a late HRV reading landing).
+            return (
+                "Health data refreshed but no new completed activities or sleep "
+                "nights since the previous sync. Today's metrics may have "
+                "updated in place."
+            )
+
+        return "Records added in this import:\n" + "\n".join(lines)
+
+    def _format_context_trigger(self, stem: str, trigger: str) -> str:
+        """Describe a context-file edit so the LLM knows where to look.
+
+        Args:
+            stem: File stem that was edited (``log``, ``goals``, ``plan``,
+                ``me``).
+            trigger: The mapped trigger type string.
+
+        Returns:
+            One-line description pointing the LLM to the relevant section.
+        """
+        section_map = {
+            "log": ("Recent User Notes", "log.md"),
+            "goals": ("Their Goals", "goals.md"),
+            "plan": ("Current Training Plan", "plan.md"),
+            "me": ("About the User", "me.md"),
+        }
+        section, filename = section_map.get(stem, ("Recent User Notes", f"{stem}.md"))
+        return (
+            f"The user just edited {filename} (trigger: {trigger}). "
+            f"The current contents are in the '{section}' section above — "
+            "respond to what changed there."
+        )
+
     def _run_import(self) -> None:
         """Import the latest health data from the iCloud directory into the DB."""
         from commands import cmd_import
@@ -809,7 +967,13 @@ class ZdrowskitDaemon:
         except SystemExit:
             logger.error("Mid-week progress report failed")
 
-    def _run_nudge(self, trigger: str, *, _from_drain: bool = False) -> None:
+    def _run_nudge(
+        self,
+        trigger: str,
+        *,
+        trigger_context: str | None = None,
+        _from_drain: bool = False,
+    ) -> None:
         """Run a nudge and send via Telegram.
 
         Passes recent nudge history so the LLM can decide whether there is
@@ -817,6 +981,10 @@ class ZdrowskitDaemon:
 
         Args:
             trigger: Trigger type string passed to cmd_nudge.
+            trigger_context: Optional human-readable description of *what*
+                the trigger refers to (e.g. which records were imported,
+                which file was edited). When None, a generic placeholder is
+                used.
             _from_drain: Internal flag — True when called from the deferred
                 queue drain path.
         """
@@ -859,6 +1027,7 @@ class ZdrowskitDaemon:
             recent_nudges=self._state.get("recent_nudges", []),
             last_coach_summary=self._state.get("last_coach_summary", ""),
             last_coach_summary_date=self._state.get("last_coach_summary_date", ""),
+            trigger_context=trigger_context or "",
         )
         try:
             logger.info("Running nudge (trigger: %s)", trigger)
@@ -894,7 +1063,20 @@ class ZdrowskitDaemon:
             len(queue),
             best["trigger"],
         )
-        self._run_nudge(best["trigger"], _from_drain=True)
+        # Compose a consolidated trigger_context from every queued event so
+        # the nudge has the full picture of what accumulated during quiet hours.
+        parts = [
+            f"- {e['trigger']} at {e['ts'][:16]}" for e in queue if e.get("trigger")
+        ]
+        trigger_context = (
+            "Multiple triggers accumulated during quiet hours; choosing the "
+            "highest-priority one to drive the message:\n" + "\n".join(parts)
+            if len(queue) > 1
+            else None
+        )
+        self._run_nudge(
+            best["trigger"], trigger_context=trigger_context, _from_drain=True
+        )
 
     def _run_coach(
         self,
@@ -2680,7 +2862,15 @@ class ZdrowskitDaemon:
                         )
                         self._state["last_missed_session_date"] = today_str
                         _save_state(self._state)
-                        self._run_nudge("missed_session")
+                        self._run_nudge(
+                            "missed_session",
+                            trigger_context=(
+                                f"No workout has been logged today ({today_str}, "
+                                f"{date.today().strftime('%A')}), and the evening "
+                                "check is firing because today is a scheduled "
+                                "training day."
+                            ),
+                        )
                 except Exception as exc:
                     logger.error("Evening check DB query failed: %s", exc)
 

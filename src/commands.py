@@ -1237,6 +1237,8 @@ def cmd_nudge(
     else:
         context["recent_nudges"] = "(none yet)"
     context["trigger_type"] = _trigger
+    trigger_context_text = (getattr(args, "trigger_context", "") or "").strip()
+    context["trigger_context"] = trigger_context_text or "(no additional detail)"
 
     # Cross-message awareness: inject last coach review
     coach_summary = getattr(args, "last_coach_summary", "")

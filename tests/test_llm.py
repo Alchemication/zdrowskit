@@ -137,14 +137,19 @@ class TestRepoPrompts:
     def test_nudge_prompt_states_event_driven_purpose_and_boundaries(self) -> None:
         prompt = (PROMPTS_DIR / "nudge_prompt.md").read_text(encoding="utf-8")
         normalized = " ".join(prompt.split())
-        assert "A nudge is not a summary of the latest sync." in prompt
-        assert "does not revise long-term goals or the training plan" in prompt
+        assert "It is not a summary of the latest sync." in normalized
+        assert "does not revise long-term goals or the training plan" in normalized
         # The redundancy check now lives in the ordered SKIP checklist.
         assert "Recent Nudges Sent section already" in normalized
         assert "## Recent Nudges Sent" in prompt
         assert "## Recent Coach Recommendation" in prompt
         assert "## Recent User Notes" in prompt
         assert "## Recent Coaching History" in prompt
+        # Trigger context placeholder must be present so the daemon's
+        # delta description actually reaches the LLM.
+        assert "{trigger_context}" in prompt
+        # Output-rules block must lead the prompt — recency bias matters.
+        assert prompt.index("Output rules") < prompt.index("Instructions")
 
     def test_nudge_prompt_has_ordered_skip_checklist(self) -> None:
         """The SKIP/write decision must be a single ordered checklist, not
