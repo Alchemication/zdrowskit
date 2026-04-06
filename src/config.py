@@ -69,8 +69,21 @@ AUTO_ACCEPT_CONTEXT_EDITS: bool = (
 CHART_THEME: str = os.environ.get("ZDROWSKIT_CHART_THEME", "plotly_dark")
 """Plotly template for chart rendering (e.g. 'plotly_dark', 'plotly_white')."""
 
-MAX_TOOL_ITERATIONS: int = 5
-"""Maximum tool-call loop iterations in a single chat turn."""
+MAX_TOOL_ITERATIONS: int = 6
+"""Maximum tool-call loop iterations for the chat path. Chat is conversational
+and often needs a few drill-down queries in a single turn."""
+
+MAX_TOOL_ITERATIONS_INSIGHTS: int = 8
+"""Maximum tool-call loop iterations for the weekly insights report. Multi-step
+analysis (per-day pulls + cross-checks) legitimately needs more headroom."""
+
+MAX_TOOL_ITERATIONS_COACH: int = 8
+"""Maximum tool-call loop iterations for the coaching review. Same multi-step
+analysis pattern as insights — pull data, spot outlier, verify."""
+
+MAX_TOOL_ITERATIONS_NUDGE: int = 3
+"""Maximum tool-call loop iterations for nudges. Kept tight on purpose — nudges
+must be quick and a single targeted query is usually enough."""
 
 
 def resolve_data_dir(arg: str | None, source: str = "autoexport") -> Path:

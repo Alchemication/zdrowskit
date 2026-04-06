@@ -23,7 +23,7 @@ that have not happened yet.
 ## Shared Review Facts
 {review_facts}
 
-## Their Notes This Week
+## Recent User Notes
 {log}
 
 ## Recent Coaching History
@@ -57,6 +57,23 @@ sleep quality), performance trends, and the user's own notes.
 Decide whether the plan or goals need adjusting. **Not every week warrants a
 change** — if the plan is working and the data supports it, say so and propose
 nothing. Only suggest changes backed by specific data points.
+
+### Read Recent Coaching Feedback first
+
+The **Recent Coaching Feedback** section above contains the user's thumbs-down
+reactions to your prior coach reviews. This is the strongest signal you have
+about what was wrong with your previous reasoning. Before drafting anything:
+
+- Read each feedback entry and identify the underlying concern (was the review
+  too long, too verbose, missed the point, ignored a constraint, gave bad
+  advice, restated obvious data?).
+- If a feedback item contradicts what you would otherwise produce this week,
+  change your approach. Do not repeat a mistake the user already corrected.
+- If a feedback item points at a pattern (e.g. "always too long when no
+  changes are needed"), apply that lesson here even if this week looks
+  different.
+- Do not mention the feedback in your response. Just internalize it and
+  produce a better review.
 
 ### Decide first: changes or no changes
 

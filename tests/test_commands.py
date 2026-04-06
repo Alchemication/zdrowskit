@@ -272,14 +272,112 @@ class TestCmdInsights:
 
         captured = capsys.readouterr()
         assert "W14 Review: solid week" in captured.out
-        # 3 in-loop iterations + 1 forced synthesis call = 4.
-        assert len(seen_kwargs) == 4
+        # MAX_TOOL_ITERATIONS_INSIGHTS in-loop iterations + 1 forced synthesis.
+        from config import MAX_TOOL_ITERATIONS_INSIGHTS
+
+        assert len(seen_kwargs) == MAX_TOOL_ITERATIONS_INSIGHTS + 1
         # Final call must have tools disabled.
         assert seen_kwargs[-1].get("tools") is None
         # Final-call metadata flags the synthesis fallback.
         assert seen_kwargs[-1]["metadata"]["iteration"] == "final_synthesis"
         # The returned CommandResult carries the synthesised text, not blank.
         assert "W14 Review" in result.text
+
+
+class TestCmdCoachEmptyResponseFallback:
+    def test_forces_synthesis_when_loop_exits_with_empty_text(
+        self,
+        in_memory_db,
+        capsys,
+    ) -> None:
+        """Coach loop must force a tool-less synthesis call when iteration cap
+        is reached with empty text + pending tool calls."""
+        args = SimpleNamespace(
+            db="ignored.db", model="test-model", week="last", months=3
+        )
+
+        tool_call = SimpleNamespace(
+            id="call_1",
+            function=SimpleNamespace(
+                name="run_sql",
+                arguments='{"query": "SELECT 1"}',
+            ),
+        )
+        empty_with_tool = LLMResult(
+            text="",
+            model="test-model",
+            input_tokens=1,
+            output_tokens=1,
+            total_tokens=2,
+            latency_s=0.1,
+            tool_calls=[tool_call],
+            raw_message={
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "function": {
+                            "name": "run_sql",
+                            "arguments": '{"query": "SELECT 1"}',
+                        },
+                    }
+                ],
+            },
+        )
+        synthesis_result = LLMResult(
+            text="No changes — plan is working. HRV stable, runs on target.",
+            model="test-model",
+            input_tokens=1,
+            output_tokens=1,
+            total_tokens=2,
+            latency_s=0.1,
+        )
+
+        seen_kwargs: list[dict] = []
+
+        def fake_call_llm(messages, **kwargs):
+            seen_kwargs.append(kwargs)
+            if kwargs.get("tools") is None:
+                return synthesis_result
+            return empty_with_tool
+
+        with (
+            patch("commands.load_context", return_value={"prompt": "x", "soul": "y"}),
+            patch("commands.open_db", return_value=in_memory_db),
+            patch("commands.compute_baselines", return_value="baseline md"),
+            patch("commands._save_baselines"),
+            patch(
+                "commands.build_llm_data",
+                return_value={
+                    "current_week": {
+                        "summary": {"week_label": "2026-W14"},
+                        "days": [],
+                    },
+                    "history": [],
+                    "week_complete": True,
+                    "week_label": "2026-W14",
+                },
+            ),
+            patch(
+                "commands.build_messages",
+                return_value=[
+                    {"role": "system", "content": "s"},
+                    {"role": "user", "content": "u"},
+                ],
+            ),
+            patch("commands.call_llm", side_effect=fake_call_llm),
+        ):
+            cmd_result, edits = cmd_coach(args)
+
+        captured = capsys.readouterr()
+        from config import MAX_TOOL_ITERATIONS_COACH
+
+        assert len(seen_kwargs) == MAX_TOOL_ITERATIONS_COACH + 1
+        assert seen_kwargs[-1].get("tools") is None
+        assert seen_kwargs[-1]["metadata"]["iteration"] == "final_synthesis"
+        assert "No changes" in captured.out
+        assert edits == []
 
 
 class TestCmdLlmLog:

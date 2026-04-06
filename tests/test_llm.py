@@ -136,17 +136,31 @@ class TestRepoPrompts:
 
     def test_nudge_prompt_states_event_driven_purpose_and_boundaries(self) -> None:
         prompt = (PROMPTS_DIR / "nudge_prompt.md").read_text(encoding="utf-8")
+        normalized = " ".join(prompt.split())
         assert "A nudge is not a summary of the latest sync." in prompt
-        assert "If the trigger does not materially change the next action" in prompt
         assert "does not revise long-term goals or the training plan" in prompt
-        assert (
-            "Treat the Recent Nudges Already Sent section as high-priority context"
-            in prompt
-        )
-        assert "## Recent Nudges Already Sent" in prompt
+        # The redundancy check now lives in the ordered SKIP checklist.
+        assert "Recent Nudges Sent section already" in normalized
+        assert "## Recent Nudges Sent" in prompt
         assert "## Recent Coach Recommendation" in prompt
         assert "## Recent User Notes" in prompt
-        assert "## Recent Durable Coaching Context" in prompt
+        assert "## Recent Coaching History" in prompt
+
+    def test_nudge_prompt_has_ordered_skip_checklist(self) -> None:
+        """The SKIP/write decision must be a single ordered checklist, not
+        scattered overlapping rules that bias toward over-skipping."""
+        prompt = (PROMPTS_DIR / "nudge_prompt.md").read_text(encoding="utf-8")
+        normalized = " ".join(prompt.split())
+        assert "Decide whether to SKIP or write (ordered checklist)" in normalized
+        # Ordered checklist items in expected order.
+        carveout_pos = normalized.index("Carve-out check")
+        redundancy_pos = normalized.index("Redundancy check")
+        coach_pos = normalized.index("Coach overlap check")
+        trigger_pos = normalized.index("Trigger-specific skip rules")
+        materiality_pos = normalized.index("Materiality check")
+        assert (
+            carveout_pos < redundancy_pos < coach_pos < trigger_pos < materiality_pos
+        ), "SKIP checklist must run carve-out first, materiality last"
 
     def test_coach_prompt_states_plan_goal_review_role(self) -> None:
         prompt = (PROMPTS_DIR / "coach_prompt.md").read_text(encoding="utf-8")
@@ -170,7 +184,7 @@ class TestRepoPrompts:
         assert "Purpose: answer the user's current question or message" in prompt
         assert "Stay focused on the current conversation turn." in prompt
         assert "## Recent User Notes" in prompt
-        assert "## Recent Durable Coaching Context" in prompt
+        assert "## Recent Coaching History" in prompt
         assert "## Recent Coach Recommendation" in prompt
 
     def test_chat_prompt_shows_plan_from_context_not_sql(self) -> None:
@@ -223,8 +237,26 @@ class TestRepoPrompts:
             "Purpose: this is a weekly report that interprets what happened" in prompt
         )
         assert "help the user understand what happened and what to do next." in prompt
-        assert "## Recent User Notes This Week" in prompt
-        assert "## Recent Durable Coaching Context" in prompt
+        assert "## Recent User Notes" in prompt
+        assert "## Recent Coaching History" in prompt
+
+    def test_weekly_report_prompt_requires_run_sql_before_training_review(self) -> None:
+        """The Training Review template needs per-workout fields the summary
+        JSON does not contain. The prompt must say so explicitly."""
+        prompt = (PROMPTS_DIR / "prompt.md").read_text(encoding="utf-8")
+        normalized = " ".join(prompt.split())
+        assert "MUST call `run_sql` before drafting the Training Review" in normalized
+        assert "weekly summaries only" in prompt
+
+    def test_coach_prompt_uses_recent_coaching_feedback(self) -> None:
+        """Coach must read the Recent Coaching Feedback section before
+        producing a review, so prior thumbs-down items inform the next one."""
+        prompt = (PROMPTS_DIR / "coach_prompt.md").read_text(encoding="utf-8")
+        normalized = " ".join(prompt.split())
+        assert "Read Recent Coaching Feedback first" in normalized
+        assert "thumbs-down" in normalized
+        assert "Do not mention the feedback in your response" in normalized
+        assert "## Recent Coaching Feedback" in prompt
 
 
 class TestBuildMessages:

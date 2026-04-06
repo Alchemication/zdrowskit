@@ -20,10 +20,10 @@ make the reply more accurate, personal, and useful.
 ## Recent User Notes
 {log}
 
-## Recent Durable Coaching Context
+## Recent Coaching History
 {history}
 
-## Recent Nudges You Sent
+## Recent Nudges Sent
 {recent_nudges}
 
 ## Recent Coach Recommendation

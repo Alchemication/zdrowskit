@@ -23,10 +23,10 @@ week clearly and help the user understand what happened and what to do next.
 ## Shared Review Facts
 {review_facts}
 
-## Recent User Notes This Week
+## Recent User Notes
 {log}
 
-## Recent Durable Coaching Context
+## Recent Coaching History
 {history}
 
 ## Health Data (JSON)
@@ -62,9 +62,20 @@ when the summary is insufficient for your analysis.
 
 ## Instructions
 
-Use `run_sql` to pull per-day details needed for the Training Review section
-and to verify metric trends. The summary JSON gives you the high-level picture;
-SQL gives you the detail.
+**You MUST call `run_sql` before drafting the Training Review section.** The
+health data JSON above contains weekly summaries only — it does NOT include
+per-workout pace, per-workout HR, per-day distance, or workout type. The
+Training Review template below requires all of those fields, so you cannot
+fill it from the summary alone.
+
+A typical opening sequence:
+1. Query `workout_all` for the current week's sessions (date, type, category,
+   duration_min, hr_avg, gpx_distance_km, gpx_elevation_gain_m).
+2. Query `daily` for the current week's HRV, resting_hr, recovery_index.
+3. (Optional) Query `sleep_all` for the current week if sleep is part of
+   the story.
+4. Then draft the report. Make additional `run_sql` calls only if a specific
+   observation needs verification or longer history.
 
 Analyze the health data above in context of the user's profile, goals, plan,
 and their own notes. Produce a report with these sections:
