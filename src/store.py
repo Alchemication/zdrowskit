@@ -527,3 +527,176 @@ def load_feedback_entries(
         """,
         (limit,),
     ).fetchall()
+
+
+# ---------------------------------------------------------------------------
+# Manual activity helpers
+# ---------------------------------------------------------------------------
+
+# Column names shared between workout and manual_workout (excluding PKs and
+# metadata columns like imported_at / created_at).
+_WORKOUT_CLONE_COLUMNS = (
+    "type",
+    "category",
+    "counts_as_lift",
+    "duration_min",
+    "hr_min",
+    "hr_avg",
+    "hr_max",
+    "active_energy_kj",
+    "intensity_kcal_per_hr_kg",
+    "temperature_c",
+    "humidity_pct",
+    "gpx_distance_km",
+    "gpx_elevation_gain_m",
+    "gpx_avg_speed_ms",
+    "gpx_max_speed_p95_ms",
+)
+
+
+def insert_manual_workout(
+    conn: sqlite3.Connection,
+    clone_row: dict,
+    date: str,
+    source_note: str | None = None,
+) -> int:
+    """Insert a manually-logged workout cloned from a historical entry.
+
+    Args:
+        conn: Open database connection.
+        clone_row: Dict with workout column values (keys matching
+            ``_WORKOUT_CLONE_COLUMNS``).  Missing keys default to ``None``.
+        date: ISO date for the new entry (e.g. "2026-04-04").
+        source_note: Free-text provenance note (e.g. "cloned from Apr 1 run").
+
+    Returns:
+        The ``id`` of the inserted ``manual_workout`` row.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    # Generate a synthetic start_utc — noon UTC on the target date, with a
+    # fractional-second suffix derived from current time to avoid collisions.
+    micro = datetime.now(timezone.utc).strftime("%f")
+    start_utc = f"{date}T12:00:00.{micro}Z"
+
+    values = {col: clone_row.get(col) for col in _WORKOUT_CLONE_COLUMNS}
+    # Ensure NOT NULL columns have safe defaults.
+    if values.get("counts_as_lift") is None:
+        values["counts_as_lift"] = 0
+    if values.get("duration_min") is None:
+        values["duration_min"] = 0
+    values["start_utc"] = start_utc
+    values["date"] = date
+    values["source_note"] = source_note
+    values["created_at"] = now
+
+    cols = ", ".join(values.keys())
+    placeholders = ", ".join("?" * len(values))
+    cursor = conn.execute(
+        f"INSERT INTO manual_workout ({cols}) VALUES ({placeholders})",
+        tuple(values.values()),
+    )
+    conn.commit()
+    logger.info(
+        "Inserted manual workout id=%d type=%s date=%s",
+        cursor.lastrowid,
+        clone_row.get("type"),
+        date,
+    )
+    return cursor.lastrowid
+
+
+def insert_manual_sleep(
+    conn: sqlite3.Connection,
+    date: str,
+    sleep_total_h: float,
+    sleep_in_bed_h: float | None = None,
+) -> int:
+    """Insert or replace a manually-logged sleep entry.
+
+    Args:
+        conn: Open database connection.
+        date: ISO date (the morning date, i.e. when the user woke up).
+        sleep_total_h: Total sleep hours (excluding awake time).
+        sleep_in_bed_h: Total time in bed (including awake). Estimated from
+            sleep_total_h if not provided.
+
+    Returns:
+        The ``id`` of the inserted ``manual_sleep`` row.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    if sleep_in_bed_h is None:
+        sleep_in_bed_h = round(sleep_total_h * 1.08, 2)
+    cursor = conn.execute(
+        """
+        INSERT OR REPLACE INTO manual_sleep (date, sleep_total_h, sleep_in_bed_h, created_at)
+        VALUES (?, ?, ?, ?)
+        """,
+        (date, sleep_total_h, sleep_in_bed_h, now),
+    )
+    conn.commit()
+    logger.info("Inserted manual sleep date=%s total_h=%.1f", date, sleep_total_h)
+    return cursor.lastrowid
+
+
+def delete_manual_workout(conn: sqlite3.Connection, workout_id: int) -> bool:
+    """Delete a manual workout by id.
+
+    Args:
+        conn: Open database connection.
+        workout_id: The ``manual_workout.id`` to delete.
+
+    Returns:
+        True if a row was deleted, False otherwise.
+    """
+    cursor = conn.execute("DELETE FROM manual_workout WHERE id = ?", (workout_id,))
+    conn.commit()
+    deleted = cursor.rowcount > 0
+    logger.debug("Deleted manual workout id=%d deleted=%s", workout_id, deleted)
+    return deleted
+
+
+def delete_manual_sleep(conn: sqlite3.Connection, date: str) -> bool:
+    """Delete a manual sleep entry by date.
+
+    Args:
+        conn: Open database connection.
+        date: ISO date of the sleep entry to delete.
+
+    Returns:
+        True if a row was deleted, False otherwise.
+    """
+    cursor = conn.execute("DELETE FROM manual_sleep WHERE date = ?", (date,))
+    conn.commit()
+    deleted = cursor.rowcount > 0
+    logger.debug("Deleted manual sleep date=%s deleted=%s", date, deleted)
+    return deleted
+
+
+def get_frequent_workout_types(
+    conn: sqlite3.Connection,
+    limit: int = 4,
+) -> list[dict]:
+    """Return the most frequent workout types across imported and manual data.
+
+    Args:
+        conn: Open database connection.
+        limit: Maximum number of types to return.
+
+    Returns:
+        List of dicts with ``type``, ``category``, and ``count`` keys,
+        ordered by frequency descending.
+    """
+    rows = conn.execute(
+        """
+        SELECT type, category, COUNT(*) AS count
+        FROM workout_all
+        GROUP BY type, category
+        ORDER BY count DESC
+        LIMIT ?
+        """,
+        (limit,),
+    ).fetchall()
+    return [
+        {"type": r["type"], "category": r["category"], "count": r["count"]}
+        for r in rows
+    ]

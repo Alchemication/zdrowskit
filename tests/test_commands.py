@@ -25,6 +25,7 @@ class TestTelegramBotCommands:
         assert TELEGRAM_BOT_COMMANDS == [
             {"command": "review", "description": "Weekly report"},
             {"command": "coach", "description": "Coaching review"},
+            {"command": "add", "description": "Log a workout or sleep"},
             {"command": "status", "description": "Bot and data status"},
             {"command": "notify", "description": "Notification settings"},
             {"command": "context", "description": "View context files"},

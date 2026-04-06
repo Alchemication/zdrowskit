@@ -45,10 +45,12 @@ def run_sql_tool() -> list[dict]:
                 "name": "run_sql",
                 "description": (
                     "Execute a read-only SQL query against the health database "
-                    "and return results as JSON. The database has two tables: "
-                    "'daily' (one row per day with health metrics) and 'workout' "
-                    "(one row per workout session). See the schema reference in "
-                    "your system prompt for column details and units."
+                    "and return results as JSON. Key tables: 'daily' (one row "
+                    "per day with health metrics), 'workout_all' (all workouts "
+                    "including manual entries), 'sleep_all' (all sleep data "
+                    "including manual entries). Both '_all' views have a "
+                    "'source' column. See the schema reference in your system "
+                    "prompt for column details and units."
                 ),
                 "parameters": {
                     "type": "object",

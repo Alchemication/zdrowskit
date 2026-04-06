@@ -41,10 +41,9 @@ when the summary is insufficient.
 
 - Activity: `steps`, `distance_km`, `active_energy_kj`, `exercise_min`, `stand_hours`, `flights_climbed`
 - Cardiac: `resting_hr` (bpm), `hrv_ms` (SDNN ms), `walking_hr_avg` (bpm), `hr_day_min`, `hr_day_max`, `vo2max` (ml/kg/min, sparse), `recovery_index` (= hrv_ms / resting_hr)
-- Sleep: `sleep_total_h`, `sleep_in_bed_h`, `sleep_efficiency_pct`, `sleep_deep_h`, `sleep_core_h` (= light), `sleep_rem_h`, `sleep_awake_h` — stored under **night-start date** (Mon row = Mon night's sleep, which affected Tue's recovery). NULL = not tracked.
 - Mobility: `walking_speed_kmh`, `walking_step_length_cm`, `walking_asymmetry_pct`, `walking_double_support_pct`, `running_stride_length_m`, `running_power_w`, `running_speed_kmh` (all sparse)
 
-**workout** — one row per session, PK: `start_utc`, FK: `date`
+**workout_all** — one row per session, FK: `date`. Has a `source` column (`'import'` or `'manual'`).
 
 - `type`, `category` (run/lift/walk/cycle/other), `duration_min`
 - `hr_min`/`hr_avg`/`hr_max`, `active_energy_kj`, `intensity_kcal_per_hr_kg`
@@ -52,6 +51,8 @@ when the summary is insufficient.
 - `gpx_distance_km`, `gpx_elevation_gain_m`, `gpx_avg_speed_ms`, `gpx_max_speed_p95_ms`
 - Pace: `duration_min / gpx_distance_km` = min/km (only when `gpx_distance_km IS NOT NULL`)
 - Speed: `gpx_avg_speed_ms * 3.6` = km/h
+
+**sleep_all** — one row per night, keyed by `date`. Has a `source` column (`'import'` or `'manual'`). Columns: `sleep_total_h`, `sleep_in_bed_h`, `sleep_efficiency_pct`, `sleep_deep_h`, `sleep_core_h`, `sleep_rem_h`, `sleep_awake_h`. Stored under **night-start date**. Stage columns are NULL for manual entries.
 
 ---
 

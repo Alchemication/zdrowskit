@@ -334,7 +334,7 @@ class TestMigrations:
 
         applied = apply_migrations(conn)
 
-        assert len(applied) == 4
+        assert len(applied) == 5
         statuses = list_migrations(conn)
         assert all(status.status == "applied" for status in statuses)
         schema = get_live_schema(conn)
@@ -342,6 +342,8 @@ class TestMigrations:
         assert "CREATE TABLE workout" in schema
         assert "CREATE TABLE llm_call" in schema
         assert "CREATE TABLE schema_migrations" in schema
+        assert "CREATE TABLE manual_workout" in schema
+        assert "CREATE TABLE manual_sleep" in schema
 
     def test_adopts_legacy_schema_and_applies_missing(self) -> None:
         conn = sqlite3.connect(":memory:")

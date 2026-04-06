@@ -115,9 +115,7 @@ insufficient to support a specific observation or recommendation.
 - Activity: `steps`, `distance_km`, `active_energy_kj`, `exercise_min`, `stand_hours`, `flights_climbed`
 - Cardiac: `resting_hr` (bpm), `hrv_ms` (SDNN ms), `walking_hr_avg` (bpm), `hr_day_min` (bpm), `hr_day_max` (bpm), `vo2max` (ml/kg/min — sparse, only on run days), `recovery_index` (= hrv_ms / resting_hr, higher = better recovered)
 - Mobility: `walking_speed_kmh`, `walking_step_length_cm`, `walking_asymmetry_pct`, `walking_double_support_pct`, `stair_speed_up_ms`, `stair_speed_down_ms`, `running_stride_length_m`, `running_power_w`, `running_speed_kmh` (all sparse)
-- Sleep: `sleep_total_h`, `sleep_in_bed_h`, `sleep_efficiency_pct`, `sleep_deep_h`, `sleep_core_h` (= light), `sleep_rem_h`, `sleep_awake_h` — each day's sleep = the night before. NULL means not tracked.
-
-**workout** — one row per session, PK: `start_utc` (ISO 8601), FK: `date`
+**workout_all** — one row per session, FK: `date`. Has a `source` column (`'import'` or `'manual'`).
 
 - `type` (original name), `category` (normalised: run / lift / walk / cycle / other)
 - `duration_min`, `hr_min` / `hr_avg` / `hr_max` (bpm), `active_energy_kj`
@@ -126,3 +124,5 @@ insufficient to support a specific observation or recommendation.
 - `gpx_distance_km`, `gpx_elevation_gain_m`, `gpx_avg_speed_ms`, `gpx_max_speed_p95_ms`
 
 Pace tip: `duration_min / gpx_distance_km` = min/km. Only meaningful when `gpx_distance_km IS NOT NULL`.
+
+**sleep_all** — one row per night, keyed by `date`. Has a `source` column (`'import'` or `'manual'`). Columns: `sleep_total_h`, `sleep_in_bed_h`, `sleep_efficiency_pct`, `sleep_deep_h`, `sleep_core_h`, `sleep_rem_h`, `sleep_awake_h`. Each day's sleep = the night before. Stage columns are NULL for manual entries.

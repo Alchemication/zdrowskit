@@ -1926,6 +1926,7 @@ def cmd_daemon_stop(args: argparse.Namespace) -> None:  # noqa: ARG001
 TELEGRAM_BOT_COMMANDS: list[dict[str, str]] = [
     {"command": "review", "description": "Weekly report"},
     {"command": "coach", "description": "Coaching review"},
+    {"command": "add", "description": "Log a workout or sleep"},
     {"command": "status", "description": "Bot and data status"},
     {"command": "notify", "description": "Notification settings"},
     {"command": "context", "description": "View context files"},

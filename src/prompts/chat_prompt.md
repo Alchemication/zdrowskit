@@ -121,9 +121,8 @@ Chart rules:
 - Activity: `steps`, `distance_km`, `active_energy_kj`, `exercise_min` (Apple ring), `stand_hours` (Apple ring), `flights_climbed`
 - Cardiac: `resting_hr` (bpm), `hrv_ms` (SDNN ms), `walking_hr_avg` (bpm), `hr_day_min` (bpm), `hr_day_max` (bpm), `vo2max` (ml/kg/min — sparse, only on run days), `recovery_index` (= hrv_ms / resting_hr, higher = better recovered)
 - Mobility: `walking_speed_kmh`, `walking_step_length_cm`, `walking_asymmetry_pct` (0 = symmetric), `walking_double_support_pct` (% time both feet on ground), `stair_speed_up_ms`, `stair_speed_down_ms` (m/s), `running_stride_length_m`, `running_power_w`, `running_speed_kmh` (all sparse)
-- Sleep: `sleep_total_h` (excl. awake), `sleep_in_bed_h` (incl. awake), `sleep_efficiency_pct` (= total/in_bed × 100), `sleep_deep_h`, `sleep_core_h` (= light sleep), `sleep_rem_h`, `sleep_awake_h` — each day's sleep = the night before (see sleep rules above). NULL / `"not_tracked"` means watch wasn't worn.
 
-**workout** — one row per session, PK: `start_utc` (ISO 8601), FK: `date`
+**workout_all** — one row per session, FK: `date`. Has a `source` column (`'import'` or `'manual'`).
 
 - `type` (original name, e.g. "Outdoor Run"), `category` (normalised: run / lift / walk / cycle / other)
 - `duration_min`, `hr_min` / `hr_avg` / `hr_max` (bpm), `active_energy_kj`
@@ -133,6 +132,8 @@ Chart rules:
 - `gpx_avg_speed_ms`, `gpx_max_speed_p95_ms` (95th-pct speed, filters GPS spikes)
 
 Pace tip: compute as `duration_min / gpx_distance_km` (min/km). Only meaningful when `gpx_distance_km IS NOT NULL`.
+
+**sleep_all** — one row per night, keyed by `date`. Has a `source` column (`'import'` or `'manual'`). Columns: `sleep_total_h`, `sleep_in_bed_h`, `sleep_efficiency_pct`, `sleep_deep_h`, `sleep_core_h`, `sleep_rem_h`, `sleep_awake_h` (stage columns are NULL for manual entries).
 
 ## Context File Updates
 
