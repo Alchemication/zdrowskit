@@ -107,6 +107,18 @@ _NUDGE_NONFINAL_RETRY = (
 NOTIFY_MODEL = "anthropic/claude-haiku-4-5"
 
 
+def _normalize_reasoning_effort(value: str | None) -> str | None:
+    """Normalize a CLI reasoning-effort value to what call_llm expects.
+
+    The CLI accepts 'none' as a sentinel for "disable reasoning"; the LLM
+    layer expects ``None`` for that case. Any other truthy value is passed
+    through unchanged.
+    """
+    if value is None or value == "none":
+        return None
+    return value
+
+
 @dataclass
 class CommandResult:
     """Return value from LLM-powered commands that send via Telegram.
@@ -1039,20 +1051,25 @@ def cmd_insights(
 
     tools = run_sql_tool()
     max_iterations = MAX_TOOL_ITERATIONS_INSIGHTS
+    reasoning_effort = _normalize_reasoning_effort(
+        getattr(args, "reasoning_effort", "medium")
+    )
 
-    logger.info("Calling %s ...", args.model)
+    logger.info("Calling %s (reasoning=%s) ...", args.model, reasoning_effort or "off")
     for iteration in range(max_iterations):
         try:
             result = call_llm(
                 messages,
                 model=args.model,
                 tools=tools,
+                reasoning_effort=reasoning_effort,
                 conn=conn,
                 request_type="insights",
                 metadata={
                     "week": args.week,
                     "months": args.months,
                     "iteration": iteration,
+                    "reasoning_effort": reasoning_effort,
                 },
             )
         except Exception as e:
@@ -1114,12 +1131,14 @@ def cmd_insights(
                 messages,
                 model=args.model,
                 tools=None,
+                reasoning_effort=reasoning_effort,
                 conn=conn,
                 request_type="insights",
                 metadata={
                     "week": args.week,
                     "months": args.months,
                     "iteration": "final_synthesis",
+                    "reasoning_effort": reasoning_effort,
                 },
             )
         except Exception as e:
@@ -1486,17 +1505,29 @@ def cmd_coach(
     tools = run_sql_tool() + context_update_tool(allowed_files=["plan", "goals"])
     edits: list[ContextEdit] = []
     max_iterations = MAX_TOOL_ITERATIONS_COACH
+    reasoning_effort = _normalize_reasoning_effort(
+        getattr(args, "reasoning_effort", "medium")
+    )
 
-    logger.info("Calling %s for coaching review ...", model)
+    logger.info(
+        "Calling %s for coaching review (reasoning=%s) ...",
+        model,
+        reasoning_effort or "off",
+    )
     for iteration in range(max_iterations):
         try:
             result = call_llm(
                 messages,
                 model=model,
                 tools=tools,
+                reasoning_effort=reasoning_effort,
                 conn=conn,
                 request_type="coach",
-                metadata={"week": week, "iteration": iteration},
+                metadata={
+                    "week": week,
+                    "iteration": iteration,
+                    "reasoning_effort": reasoning_effort,
+                },
             )
         except Exception as e:
             err_name = type(e).__name__
@@ -1565,9 +1596,14 @@ def cmd_coach(
                 messages,
                 model=model,
                 tools=None,
+                reasoning_effort=reasoning_effort,
                 conn=conn,
                 request_type="coach",
-                metadata={"week": week, "iteration": "final_synthesis"},
+                metadata={
+                    "week": week,
+                    "iteration": "final_synthesis",
+                    "reasoning_effort": reasoning_effort,
+                },
             )
         except Exception as e:
             logger.error("Coach final synthesis call failed: %s", e)

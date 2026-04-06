@@ -696,3 +696,116 @@ class TestTelegramCommands:
         assert "/context [name] — View context files" in sent
         assert "Available context files:" in sent
         assert "me" in sent
+
+
+class TestFailureCapture:
+    """Tests for _capture_last_error and _notify_user_failure.
+
+    These exist because background command runs (review, nudge, coach) used
+    to fail silently — only the daemon log recorded the error. We now
+    forward the most recent ERROR-level log message to Telegram so the user
+    knows what broke without reading daemon logs.
+    """
+
+    def test_capture_records_last_error_message(self) -> None:
+        import logging
+
+        test_logger = logging.getLogger("commands")
+        with daemon_module._capture_last_error() as cap:
+            test_logger.info("not captured")
+            test_logger.error("first error")
+            test_logger.error("second error")
+        # Only the most recent ERROR should be retained.
+        assert cap.last_message == "second error"
+
+    def test_capture_ignores_non_error_levels(self) -> None:
+        import logging
+
+        test_logger = logging.getLogger("commands")
+        with daemon_module._capture_last_error() as cap:
+            test_logger.info("info")
+            test_logger.warning("warn")
+            test_logger.debug("debug")
+        assert cap.last_message is None
+
+    def test_capture_snapshot_pattern_isolates_underlying_error(self) -> None:
+        """Regression: the daemon's own ``logger.error`` inside the except
+        block must not clobber the captured underlying error. The fix is to
+        snapshot ``cap.last_message`` *before* the daemon logs its own
+        wrapper line — without the snapshot, the wrapper message overwrites
+        the real one and the user only sees a useless 'X failed' line."""
+        import logging
+
+        cmd_logger = logging.getLogger("commands")
+        wrapper_logger = logging.getLogger("daemon")
+        captured: str | None = None
+        with daemon_module._capture_last_error() as cap:
+            try:
+                cmd_logger.error("LLM call failed: BadRequestError details")
+                raise SystemExit(1)
+            except SystemExit:
+                # MUST snapshot before the daemon's own error log line.
+                captured = cap.last_message
+                wrapper_logger.error("Manual review report failed (last)")
+        # The snapshot preserves the real underlying error, not the
+        # daemon's wrapper message.
+        assert captured == "LLM call failed: BadRequestError details"
+        # Sanity check: without the snapshot, cap.last_message would now
+        # hold the wrapper message instead.
+        assert cap.last_message == "Manual review report failed (last)"
+
+    def test_capture_handler_removed_on_exception(self) -> None:
+        import logging
+
+        root = logging.getLogger()
+        before = len(root.handlers)
+        try:
+            with daemon_module._capture_last_error():
+                raise RuntimeError("boom")
+        except RuntimeError:
+            pass
+        # The handler must be removed even when the wrapped block raises.
+        assert len(root.handlers) == before
+
+    def test_notify_user_failure_sends_truncated_error(self, tmp_path: Path) -> None:
+        daemon = _make_daemon(tmp_path)
+        daemon._poller = MagicMock()
+
+        daemon._notify_user_failure("Weekly review", "LLM call failed: details")
+
+        daemon._poller.send_message_with_keyboard.assert_called_once()
+        sent_text = daemon._poller.send_message_with_keyboard.call_args.args[0]
+        assert "Weekly review failed" in sent_text
+        assert "LLM call failed: details" in sent_text
+
+    def test_notify_user_failure_truncates_long_errors(self, tmp_path: Path) -> None:
+        daemon = _make_daemon(tmp_path)
+        daemon._poller = MagicMock()
+
+        long_error = "x" * 1000
+        daemon._notify_user_failure("Nudge", long_error)
+
+        sent_text = daemon._poller.send_message_with_keyboard.call_args.args[0]
+        # Should be truncated, not fully expanded.
+        assert len(sent_text) < 700
+        assert sent_text.endswith("...")
+
+    def test_notify_user_failure_falls_back_when_no_error_text(
+        self, tmp_path: Path
+    ) -> None:
+        daemon = _make_daemon(tmp_path)
+        daemon._poller = MagicMock()
+
+        daemon._notify_user_failure("Coaching review", None)
+
+        sent_text = daemon._poller.send_message_with_keyboard.call_args.args[0]
+        assert "Coaching review failed" in sent_text
+        assert "check daemon logs" in sent_text
+
+    def test_notify_user_failure_no_op_without_poller(self, tmp_path: Path) -> None:
+        """If Telegram isn't configured, _poller is unset — the helper
+        must do nothing rather than raising AttributeError."""
+        daemon = _make_daemon(tmp_path)
+        # Do not set daemon._poller — simulate no Telegram configured.
+        # Should not raise.
+        daemon._notify_user_failure("Manual review", "some error")

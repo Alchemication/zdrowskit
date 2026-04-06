@@ -538,11 +538,17 @@ def call_llm(
         litellm.AuthenticationError: If the API key is missing or invalid.
         litellm.APIError: On network or API failures.
     """
+    # Anthropic's extended thinking requires temperature=1; any other value
+    # is rejected with a BadRequestError. Force it here so callers can keep
+    # passing their preferred sampling temperature without having to know
+    # about this constraint.
+    effective_temperature = 1.0 if reasoning_effort is not None else temperature
+
     kwargs: dict = {
         "model": model,
         "messages": messages,
         "max_tokens": max_tokens,
-        "temperature": temperature,
+        "temperature": effective_temperature,
     }
     if reasoning_effort is not None:
         kwargs["reasoning_effort"] = reasoning_effort
@@ -590,7 +596,7 @@ def call_llm(
     )
 
     if conn and request_type:
-        params = {"max_tokens": max_tokens, "temperature": temperature}
+        params = {"max_tokens": max_tokens, "temperature": effective_temperature}
         if reasoning_effort is not None:
             params["reasoning_effort"] = reasoning_effort
         try:

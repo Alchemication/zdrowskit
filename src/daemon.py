@@ -24,10 +24,11 @@ import sys
 import threading
 import time
 import types
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Iterator
 
 if TYPE_CHECKING:
     from commands import CommandResult
@@ -211,6 +212,50 @@ def _make_context_handler(on_file_changed):  # type: ignore[no-untyped-def]
 
 
 # ---------------------------------------------------------------------------
+# Failure capture
+# ---------------------------------------------------------------------------
+
+
+class _LastErrorCapture(logging.Handler):
+    """Logging handler that remembers the most recent ERROR-level message.
+
+    Used by the daemon to forward command-side error messages to Telegram.
+    Subcommands like ``cmd_insights`` log the offending exception with
+    ``logger.error(...)`` and then call ``sys.exit(1)``; by the time the
+    daemon's ``except SystemExit`` runs, the exception object is gone but
+    the log message is still useful for telling the user what broke.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(level=logging.ERROR)
+        self.last_message: str | None = None
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            self.last_message = record.getMessage()
+        except Exception:
+            # Never let logging-side failures break command execution.
+            pass
+
+
+@contextmanager
+def _capture_last_error() -> Iterator[_LastErrorCapture]:
+    """Capture the last ERROR-level log message during the wrapped block.
+
+    The handler is attached to the root logger so it sees errors emitted
+    by any module the wrapped command touches (commands, llm, store, ...).
+    It is removed unconditionally on exit, even if the block raises.
+    """
+    capture = _LastErrorCapture()
+    root = logging.getLogger()
+    root.addHandler(capture)
+    try:
+        yield capture
+    finally:
+        root.removeHandler(capture)
+
+
+# ---------------------------------------------------------------------------
 # Daemon
 # ---------------------------------------------------------------------------
 
@@ -373,16 +418,21 @@ class ZdrowskitDaemon:
             no_update_history=False,
             explain=False,
             data_dir=None,
+            reasoning_effort="medium",
         )
-        try:
-            logger.info("Running manual review report (%s)", week)
-            result = cmd_insights(args)
-            self._attach_feedback_button(result, "insights")
-            self._record_report("review" if week == "last" else "progress")
-            self._state["last_report_ts"] = datetime.now().isoformat()
-            _save_state(self._state)
-        except SystemExit:
-            logger.error("Manual review report failed (%s)", week)
+        with _capture_last_error() as cap:
+            try:
+                logger.info("Running manual review report (%s)", week)
+                result = cmd_insights(args)
+                self._attach_feedback_button(result, "insights")
+                self._record_report("review" if week == "last" else "progress")
+                self._state["last_report_ts"] = datetime.now().isoformat()
+                _save_state(self._state)
+            except SystemExit:
+                # Snapshot before our own logger.error overwrites the capture.
+                captured = cap.last_message
+                logger.error("Manual review report failed (%s)", week)
+                self._notify_user_failure(f"Manual review ({week})", captured)
 
     @staticmethod
     def _restore_pending_reason_map(
@@ -911,17 +961,21 @@ class ZdrowskitDaemon:
             no_update_history=False,
             explain=False,
             data_dir=None,
+            reasoning_effort="medium",
         )
-        try:
-            logger.info("Running weekly review report")
-            result = cmd_insights(args)
-            self._attach_feedback_button(result, "insights")
-            self._record_report("review")
-            self._state["last_report_ts"] = datetime.now().isoformat()
-            _save_state(self._state)
-            self._run_coach(week="last", skip_import=True)
-        except SystemExit:
-            logger.error("Weekly review report failed")
+        with _capture_last_error() as cap:
+            try:
+                logger.info("Running weekly review report")
+                result = cmd_insights(args)
+                self._attach_feedback_button(result, "insights")
+                self._record_report("review")
+                self._state["last_report_ts"] = datetime.now().isoformat()
+                _save_state(self._state)
+                self._run_coach(week="last", skip_import=True)
+            except SystemExit:
+                captured = cap.last_message
+                logger.error("Weekly review report failed")
+                self._notify_user_failure("Weekly review", captured)
 
     def _run_midweek_report(self) -> None:
         """Run a mid-week progress report and send via Telegram."""
@@ -956,16 +1010,20 @@ class ZdrowskitDaemon:
             no_update_history=False,
             explain=False,
             data_dir=None,
+            reasoning_effort="medium",
         )
-        try:
-            logger.info("Running mid-week progress report")
-            result = cmd_insights(args)
-            self._attach_feedback_button(result, "insights")
-            self._record_report("progress")
-            self._state["last_report_ts"] = datetime.now().isoformat()
-            _save_state(self._state)
-        except SystemExit:
-            logger.error("Mid-week progress report failed")
+        with _capture_last_error() as cap:
+            try:
+                logger.info("Running mid-week progress report")
+                result = cmd_insights(args)
+                self._attach_feedback_button(result, "insights")
+                self._record_report("progress")
+                self._state["last_report_ts"] = datetime.now().isoformat()
+                _save_state(self._state)
+            except SystemExit:
+                captured = cap.last_message
+                logger.error("Mid-week progress report failed")
+                self._notify_user_failure("Mid-week progress", captured)
 
     def _run_nudge(
         self,
@@ -1029,14 +1087,17 @@ class ZdrowskitDaemon:
             last_coach_summary_date=self._state.get("last_coach_summary_date", ""),
             trigger_context=trigger_context or "",
         )
-        try:
-            logger.info("Running nudge (trigger: %s)", trigger)
-            result = cmd_nudge(args)
-            if result.text:
-                self._record_nudge(result.text, trigger)
-                self._attach_feedback_button(result, "nudge")
-        except SystemExit:
-            logger.error("Nudge failed (trigger: %s)", trigger)
+        with _capture_last_error() as cap:
+            try:
+                logger.info("Running nudge (trigger: %s)", trigger)
+                result = cmd_nudge(args)
+                if result.text:
+                    self._record_nudge(result.text, trigger)
+                    self._attach_feedback_button(result, "nudge")
+            except SystemExit:
+                captured = cap.last_message
+                logger.error("Nudge failed (trigger: %s)", trigger)
+                self._notify_user_failure(f"Nudge ({trigger})", captured)
 
     def _drain_quiet_queue(self) -> None:
         """Process deferred triggers as a single consolidated nudge."""
@@ -1111,20 +1172,24 @@ class ZdrowskitDaemon:
             week=week,
             months=3,
             recent_nudges=self._state.get("recent_nudges", []),
+            reasoning_effort="medium",
         )
-        try:
-            logger.info("Running coaching review")
-            cmd_result, edits = cmd_coach(args)
-            self._attach_feedback_button(cmd_result, "coach")
-            for edit in edits:
-                self._propose_context_edit(edit, source="coach")
-            self._state["last_coach_date"] = today_str
-            if cmd_result.text:
-                self._state["last_coach_summary"] = cmd_result.text[:500]
-                self._state["last_coach_summary_date"] = today_str
-            _save_state(self._state)
-        except SystemExit:
-            logger.error("Coaching review failed")
+        with _capture_last_error() as cap:
+            try:
+                logger.info("Running coaching review")
+                cmd_result, edits = cmd_coach(args)
+                self._attach_feedback_button(cmd_result, "coach")
+                for edit in edits:
+                    self._propose_context_edit(edit, source="coach")
+                self._state["last_coach_date"] = today_str
+                if cmd_result.text:
+                    self._state["last_coach_summary"] = cmd_result.text[:500]
+                    self._state["last_coach_summary_date"] = today_str
+                _save_state(self._state)
+            except SystemExit:
+                captured = cap.last_message
+                logger.error("Coaching review failed")
+                self._notify_user_failure("Coaching review", captured)
 
     # ------------------------------------------------------------------
     # Telegram interactive chat
@@ -1164,6 +1229,37 @@ class ZdrowskitDaemon:
         )
         thread.start()
         logger.info("Telegram chat listener started")
+
+    def _notify_user_failure(self, operation: str, error_text: str | None) -> None:
+        """Send a brief failure notice to Telegram so the user knows.
+
+        Background runs (scheduled reports, manual /review, nudges, coach)
+        used to fail silently — only the daemon log recorded the error. This
+        forwards the most recent ERROR-level log message to Telegram so the
+        user sees what broke without having to read daemon logs.
+
+        Args:
+            operation: Short human-readable label, e.g. "Weekly review".
+            error_text: The captured error message, or None if nothing was
+                captured (rare — falls back to a generic notice).
+        """
+        poller = getattr(self, "_poller", None)
+        if poller is None:
+            # Telegram not configured — nothing to notify.
+            return
+
+        if error_text:
+            truncated = (
+                error_text if len(error_text) <= 600 else error_text[:597] + "..."
+            )
+            text = f"**{operation} failed**\n\n{truncated}"
+        else:
+            text = f"**{operation} failed** — check daemon logs"
+
+        try:
+            poller.send_message_with_keyboard(text, [])
+        except Exception:
+            logger.warning("Failed to send failure notice to Telegram", exc_info=True)
 
     def _attach_feedback_button(
         self,

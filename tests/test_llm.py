@@ -170,7 +170,10 @@ class TestRepoPrompts:
     def test_coach_prompt_states_plan_goal_review_role(self) -> None:
         prompt = (PROMPTS_DIR / "coach_prompt.md").read_text(encoding="utf-8")
         normalized = " ".join(prompt.split())
-        assert "weekly review of whether the user's current training plan and" in normalized
+        assert (
+            "weekly review of whether the user's current training plan and"
+            in normalized
+        )
         assert "not a short reactive notification" in normalized
         assert "Do not propose edits to any other files." in prompt
         assert "## Recent Coaching History" in prompt
@@ -438,6 +441,40 @@ class TestCallLlm:
         call_llm([{"role": "user", "content": "test"}])
         kwargs = mock_litellm.completion.call_args[1]
         assert "reasoning_effort" not in kwargs
+
+    @patch("llm.litellm")
+    def test_reasoning_effort_forces_temperature_to_one(
+        self, mock_litellm: MagicMock
+    ) -> None:
+        """Anthropic extended thinking rejects any temperature != 1, so the
+        caller's temperature must be overridden when reasoning is enabled."""
+        mock_litellm.completion.return_value = self._mock_response()
+        mock_litellm.completion_cost.return_value = None
+
+        call_llm(
+            [{"role": "user", "content": "test"}],
+            temperature=0.7,
+            reasoning_effort="medium",
+        )
+        kwargs = mock_litellm.completion.call_args[1]
+        assert kwargs["temperature"] == 1.0
+        assert kwargs["reasoning_effort"] == "medium"
+
+    @patch("llm.litellm")
+    def test_temperature_preserved_without_reasoning(
+        self, mock_litellm: MagicMock
+    ) -> None:
+        """When reasoning is off, the caller's temperature must pass through
+        unchanged — the override only kicks in for extended thinking."""
+        mock_litellm.completion.return_value = self._mock_response()
+        mock_litellm.completion_cost.return_value = None
+
+        call_llm(
+            [{"role": "user", "content": "test"}],
+            temperature=0.7,
+        )
+        kwargs = mock_litellm.completion.call_args[1]
+        assert kwargs["temperature"] == 0.7
 
     @patch("llm.litellm")
     def test_logs_to_db(

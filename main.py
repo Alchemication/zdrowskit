@@ -251,6 +251,15 @@ def main() -> None:
         help="Show context, prompt, and LLM call diagnostics on stderr",
     )
     p_insights.add_argument(
+        "--reasoning-effort",
+        choices=["none", "low", "medium", "high"],
+        default="medium",
+        help=(
+            "Extended thinking budget for the model (default: medium). "
+            "Use 'none' to disable, 'high' for the deepest analysis."
+        ),
+    )
+    p_insights.add_argument(
         "--email",
         action="store_true",
         help="Send report via email (requires RESEND_API_KEY and EMAIL_TO in .env)",
@@ -338,6 +347,15 @@ def main() -> None:
         default=DEFAULT_MODEL,
         metavar="MODEL",
         help=f"litellm model string (default: {DEFAULT_MODEL})",
+    )
+    p_coach.add_argument(
+        "--reasoning-effort",
+        choices=["none", "low", "medium", "high"],
+        default="medium",
+        help=(
+            "Extended thinking budget for the model (default: medium). "
+            "Use 'none' to disable, 'high' for the deepest analysis."
+        ),
     )
     p_coach.add_argument(
         "--email",
