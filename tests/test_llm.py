@@ -201,7 +201,10 @@ class TestRepoPrompts:
         normalized = " ".join(prompt.split())
         assert "show me my goals" in normalized or "what is my plan" in normalized
         assert "Do NOT run SQL" in normalized
-        assert 'Never begin a reply with "Wait"' in normalized
+        # Forbidden self-correction openings must be called out explicitly.
+        assert "Never begin a reply with" in normalized
+        assert "Wait" in normalized
+        assert "Looking at" in normalized
 
     def test_nudge_prompt_has_scheduled_session_carveout(self) -> None:
         """Nudge must restate today's scheduled session even when SKIP would otherwise apply."""
