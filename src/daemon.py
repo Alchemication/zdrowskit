@@ -1194,6 +1194,26 @@ class ZdrowskitDaemon:
                 if cmd_result.text:
                     self._state["last_coach_summary"] = cmd_result.text[:500]
                     self._state["last_coach_summary_date"] = today_str
+                elif force and self._poller is not None:
+                    # Manual /coach trigger returned SKIP (cmd_coach signals
+                    # SKIP with text=None; any LLM failure would have raised
+                    # SystemExit instead). Scheduled weekly runs stay silent
+                    # on SKIP to avoid noise after the insights report, but a
+                    # user-initiated /coach needs an explicit acknowledgment
+                    # so the "Running coaching review…" placeholder doesn't
+                    # dangle forever.
+                    skip_text = (
+                        "Coach reviewed the week — no plan or goal changes "
+                        "warranted. Current plan is working."
+                    )
+                    skip_msg_id = self._poller.send_reply(skip_text)
+                    if skip_msg_id is not None and cmd_result.llm_call_id is not None:
+                        from telegram_bot import feedback_keyboard
+
+                        self._poller.edit_message_reply_markup(
+                            skip_msg_id,
+                            feedback_keyboard(cmd_result.llm_call_id, "coach"),
+                        )
                 _save_state(self._state)
             except SystemExit:
                 captured = cap.last_message
