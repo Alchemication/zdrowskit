@@ -958,7 +958,13 @@ class TestBuildLlmData:
         assert today["hrv_ms"] is not None
         assert today["steps"] is not None
         assert today["sleep_status"] in ("tracked", "pending", "not_tracked")
-        assert "counts_as_lift" in today["workouts"][0]
+        run_workout = today["workouts"][0]
+        assert "counts_as_lift" in run_workout
+        # Run-identifying fields needed for the LLM to recognise tempo efforts.
+        assert run_workout["distance_km"] == 5.2
+        assert run_workout["pace_min_per_km"] == round(35.0 / 5.2, 2)
+        assert run_workout["avg_hr"] == 155.0
+        assert run_workout["elevation_gain_m"] == 45.0
 
     @patch("llm.datetime")
     @patch("llm.date")

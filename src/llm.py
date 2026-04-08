@@ -862,12 +862,21 @@ def _build_today_snapshot(days: list[dict], today_iso: str) -> dict | None:
 
     workouts = []
     for w in today_day.get("workouts", []):
+        distance_km = w.get("gpx_distance_km")
+        duration_min = w.get("duration_min")
+        pace_min_per_km: float | None = None
+        if distance_km and duration_min and distance_km > 0:
+            pace_min_per_km = round(duration_min / distance_km, 2)
         workouts.append(
             {
                 "type": w.get("type"),
                 "category": w.get("category"),
                 "counts_as_lift": w.get("counts_as_lift"),
-                "duration_min": w.get("duration_min"),
+                "duration_min": duration_min,
+                "distance_km": distance_km,
+                "pace_min_per_km": pace_min_per_km,
+                "avg_hr": w.get("hr_avg"),
+                "elevation_gain_m": w.get("gpx_elevation_gain_m"),
             }
         )
 
