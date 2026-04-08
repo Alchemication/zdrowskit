@@ -2980,8 +2980,9 @@ class ZdrowskitDaemon:
             build_llm_data,
             build_messages,
             call_llm,
+            format_recent_nudges,
             load_context,
-            slim_for_prompt,
+            render_health_data,
         )
         from tools import all_chat_tools, execute_tool
 
@@ -2989,11 +2990,7 @@ class ZdrowskitDaemon:
 
         # Inject recent nudge history so the LLM knows what it recently sent.
         recent = self._state.get("recent_nudges", [])
-        if recent:
-            ctx["recent_nudges"] = "\n".join(
-                f"{i + 1}. [{e['ts'][:16]} / {e['trigger']}] {e['text']}"
-                for i, e in enumerate(recent)
-            )
+        ctx["recent_nudges"] = format_recent_nudges(recent, empty_text="(none yet)")
 
         # Inject last coach review for cross-message awareness.
         coach_summary = self._state.get("last_coach_summary", "")
@@ -3015,7 +3012,7 @@ class ZdrowskitDaemon:
 
         messages = build_messages(
             ctx,
-            health_data_json=_json.dumps(slim_for_prompt(health_data), default=str),
+            health_data_text=render_health_data(health_data, prompt_kind="chat"),
             baselines=baselines,
         )
 

@@ -691,7 +691,7 @@ def run_case(
     Returns:
         Aggregated result for the case/model pair.
     """
-    from llm import build_messages, call_llm
+    from llm import build_messages, call_llm, render_health_data
 
     from evals.data.scenarios import ALL_SCENARIOS
 
@@ -725,9 +725,20 @@ def run_case(
     # Build messages using the production build_messages with pinned date.
     pinned_date = date.fromisoformat(metadata["extracted_at"])
     wc = config.get("week_complete", metadata.get("week_complete", False))
+    prompt_kind = {
+        "prompt": "report",
+        "chat_prompt": "chat",
+        "coach_prompt": "coach",
+        "nudge_prompt": "nudge",
+    }.get(prompt_file, "report")
     messages = build_messages(
         ctx,
-        health_data_json=json.dumps(hd, indent=2, default=str),
+        health_data_text=render_health_data(
+            hd,
+            prompt_kind=prompt_kind,
+            week=config.get("week", "current"),
+            today=pinned_date,
+        ),
         baselines=ctx.get("baselines", "(not computed)"),
         week_complete=wc,
         today=pinned_date,

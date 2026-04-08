@@ -60,8 +60,9 @@ from llm import (
     build_review_facts,
     call_llm,
     extract_memory,
+    format_recent_nudges,
     load_context,
-    slim_for_prompt,
+    render_health_data,
 )
 from charts import ChartResult, extract_charts, render_chart, strip_charts
 from context_edit import ContextEdit, EditPreviewError, build_edit_preview
@@ -328,7 +329,7 @@ def interpret_notify_request(
 
     messages = build_messages(
         context,
-        health_data_json="{}",
+        health_data_text="{}",
         baselines=None,
         week_complete=False,
         today=now.date(),
@@ -1072,15 +1073,16 @@ def cmd_insights(
         context,
         week_complete=week_complete,
     )
-    prompt_data = slim_for_prompt(health_data)
-    prompt_data.pop("week_complete", None)
-    prompt_data.pop("week_label", None)
-    health_data_json = json.dumps(prompt_data, indent=2)
+    health_data_text = render_health_data(
+        health_data,
+        prompt_kind="report",
+        week=args.week,
+    )
 
     try:
         messages = build_messages(
             context,
-            health_data_json,
+            health_data_text,
             baselines=baselines,
             week_complete=week_complete,
         )
@@ -1285,16 +1287,13 @@ def cmd_nudge(
 
     conn = open_db(Path(args.db))
     health_data = build_llm_data(conn, getattr(args, "months", 1))
-    health_data_json = json.dumps(slim_for_prompt(health_data), indent=2)
+    health_data_text = render_health_data(health_data, prompt_kind="nudge")
 
     recent_nudge_entries: list[dict] = getattr(args, "recent_nudges", [])
-    if recent_nudge_entries:
-        context["recent_nudges"] = "\n".join(
-            f"{i + 1}. [{e['ts'][:16]} / {e['trigger']}] {e['text']}"
-            for i, e in enumerate(recent_nudge_entries)
-        )
-    else:
-        context["recent_nudges"] = "(none yet)"
+    context["recent_nudges"] = format_recent_nudges(
+        recent_nudge_entries,
+        empty_text="(none yet)",
+    )
     context["trigger_type"] = _trigger
     trigger_context_text = (getattr(args, "trigger_context", "") or "").strip()
     context["trigger_context"] = trigger_context_text or "(no additional detail)"
@@ -1307,7 +1306,7 @@ def cmd_nudge(
     else:
         context["last_coach_summary"] = "(no recent coach review)"
 
-    messages = build_messages(context, health_data_json)
+    messages = build_messages(context, health_data_text)
 
     from tools import execute_run_sql, run_sql_tool
 
@@ -1539,23 +1538,21 @@ def cmd_coach(
 
     # Cross-message awareness: inject recent nudges
     recent_nudge_entries: list[dict] = getattr(args, "recent_nudges", [])
-    if recent_nudge_entries:
-        context["recent_nudges"] = "\n".join(
-            f"- [{e['ts'][:16]} / {e['trigger']}] {e['text']}"
-            for e in recent_nudge_entries
-        )
-    else:
-        context["recent_nudges"] = "(none)"
+    context["recent_nudges"] = format_recent_nudges(
+        recent_nudge_entries,
+        empty_text="(none)",
+    )
 
-    prompt_data = slim_for_prompt(health_data)
-    prompt_data.pop("week_complete", None)
-    prompt_data.pop("week_label", None)
-    health_data_json = json.dumps(prompt_data, indent=2)
+    health_data_text = render_health_data(
+        health_data,
+        prompt_kind="coach",
+        week=week,
+    )
 
     try:
         messages = build_messages(
             context,
-            health_data_json,
+            health_data_text,
             baselines=baselines,
             week_complete=week_complete,
         )

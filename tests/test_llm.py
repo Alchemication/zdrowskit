@@ -22,7 +22,9 @@ from llm import (
     build_review_facts,
     call_llm,
     extract_memory,
+    format_recent_nudges,
     load_context,
+    render_health_data,
     slim_for_prompt,
 )
 from models import DailySnapshot
@@ -142,9 +144,11 @@ class TestRepoPrompts:
         # The redundancy check now lives in the ordered SKIP checklist.
         assert "Recent Nudges Sent section already" in normalized
         assert "## Recent Nudges Sent" in prompt
-        assert "## Recent Coach Recommendation" in prompt
+        assert "## Latest Coach Session" in prompt
         assert "## Recent User Notes" in prompt
         assert "## Recent Coaching History" in prompt
+        assert "compact markdown rendering" in normalized
+        assert "{schema_reference}" in prompt
         # Trigger context placeholder must be present so the daemon's
         # delta description actually reaches the LLM.
         assert "{trigger_context}" in prompt
@@ -193,7 +197,17 @@ class TestRepoPrompts:
         assert "Stay focused on the current conversation turn." in prompt
         assert "## Recent User Notes" in prompt
         assert "## Recent Coaching History" in prompt
-        assert "## Recent Coach Recommendation" in prompt
+        assert "## Latest Coach Session" in prompt
+        assert "{schema_reference}" in prompt
+
+    def test_chat_prompt_defines_status_first_week_recap_shape(self) -> None:
+        prompt = (PROMPTS_DIR / "chat_prompt.md").read_text(encoding="utf-8")
+        normalized = " ".join(prompt.split())
+        assert "Simple Current-Week Status Questions" in prompt
+        assert "status-first" in normalized
+        assert "chronological order" in normalized
+        assert "Do **not** use target fractions" in prompt
+        assert "not a full strength workout" in normalized
 
     def test_chat_prompt_shows_plan_from_context_not_sql(self) -> None:
         """Asking 'what is my plan' should be answered from injected context."""
@@ -271,11 +285,12 @@ class TestRepoPrompts:
 
     def test_weekly_report_prompt_requires_run_sql_before_training_review(self) -> None:
         """The Training Review template needs per-workout fields the summary
-        JSON does not contain. The prompt must say so explicitly."""
+        layer does not contain. The prompt must say so explicitly."""
         prompt = (PROMPTS_DIR / "prompt.md").read_text(encoding="utf-8")
         normalized = " ".join(prompt.split())
         assert "MUST call `run_sql` before drafting the Training Review" in normalized
-        assert "weekly summaries only" in prompt
+        assert "compact summary view" in normalized
+        assert "{schema_reference}" in prompt
 
     def test_coach_prompt_uses_recent_coaching_feedback(self) -> None:
         """Coach must read the Recent Coaching Feedback section before
@@ -352,6 +367,182 @@ class TestBuildMessages:
         assert "Facts: (not provided)" in msgs[1]["content"]
 
 
+class TestPromptRenderers:
+    def _health_data(self) -> dict:
+        return {
+            "current_week": {
+                "summary": {
+                    "week_label": "2026-W15 (2026-04-06 – 2026-04-08)",
+                    "run_count": 1,
+                    "lift_count": 0,
+                    "walk_count": 0,
+                    "total_run_km": 5.27,
+                    "best_pace_min_per_km": 5.66,
+                    "avg_run_hr": 152.2,
+                    "avg_elevation_gain_m": 12.4,
+                    "avg_steps": 5754,
+                    "avg_active_energy_kj": 2101.1,
+                    "avg_exercise_min": 25.5,
+                    "avg_resting_hr": 53,
+                    "avg_hrv_ms": 44.3,
+                    "avg_recovery_index": 0.837,
+                    "hrv_trend": None,
+                    "avg_sleep_total_h": 6.47,
+                    "avg_sleep_efficiency_pct": 77.9,
+                    "avg_sleep_deep_h": 0.51,
+                    "avg_sleep_core_h": 4.47,
+                    "avg_sleep_rem_h": 1.49,
+                    "avg_sleep_awake_h": 1.83,
+                    "sleep_nights_tracked": 2,
+                    "sleep_nights_total": 2,
+                },
+                "days": [
+                    {
+                        "date": "2026-04-06",
+                        "steps": 9295,
+                        "exercise_min": 46,
+                        "hrv_ms": 45.7,
+                        "resting_hr": 52,
+                        "recovery_index": 0.879,
+                        "sleep_status": "tracked",
+                        "sleep_total_h": 8.1,
+                        "sleep_efficiency_pct": 95.6,
+                        "workouts": [
+                            {
+                                "type": "Outdoor Run",
+                                "category": "run",
+                                "duration_min": 29.8,
+                                "gpx_distance_km": 5.27,
+                                "gpx_elevation_gain_m": 12.4,
+                                "hr_avg": 152.2,
+                            }
+                        ],
+                    },
+                    {
+                        "date": "2026-04-07",
+                        "steps": 2213,
+                        "exercise_min": 5,
+                        "hrv_ms": 42.91133476457976,
+                        "resting_hr": 55,
+                        "recovery_index": 0.7802,
+                        "sleep_status": "tracked",
+                        "sleep_total_h": 6.47,
+                        "sleep_efficiency_pct": 77.9,
+                        "workouts": [],
+                    },
+                    {
+                        "date": "2026-04-08",
+                        "steps": 1200,
+                        "exercise_min": 0,
+                        "hrv_ms": None,
+                        "resting_hr": None,
+                        "recovery_index": None,
+                        "sleep_status": "pending",
+                        "workouts": [],
+                    },
+                ],
+            },
+            "history": [
+                {
+                    "summary": {
+                        "week_label": "2026-W14 (2026-03-30 – 2026-04-05)",
+                        "run_count": 2,
+                        "lift_count": 3,
+                        "walk_count": 0,
+                        "total_run_km": 11.4,
+                        "avg_hrv_ms": 48.4,
+                        "avg_resting_hr": 53.0,
+                        "avg_sleep_total_h": None,
+                    }
+                }
+            ],
+        }
+
+    def test_render_health_data_for_nudge_uses_compact_markdown(self) -> None:
+        rendered = render_health_data(
+            self._health_data(),
+            prompt_kind="nudge",
+            today=date(2026, 4, 8),
+        )
+
+        assert "### Today" in rendered
+        assert "### Recent Days" in rendered
+        assert "### Previous Weeks" in rendered
+        assert "2026-W14" in rendered
+        assert "42.9 ms" in rendered
+        assert "0.78" in rendered
+        assert "pending sync" in rendered
+        assert "null" not in rendered
+        assert "```json" not in rendered
+
+    def test_render_health_data_for_chat_is_chronological_and_hides_targets(
+        self,
+    ) -> None:
+        rendered = render_health_data(
+            self._health_data(),
+            prompt_kind="chat",
+            today=date(2026, 4, 8),
+        )
+
+        assert "### This Week So Far" in rendered
+        assert "### This Week Days (Mon to today)" in rendered
+        assert "### Today" not in rendered
+        assert "### Recent Days" not in rendered
+        assert "/2 runs" not in rendered
+        assert "/2 lifts" not in rendered
+        monday_idx = rendered.index("#### Monday 6 Apr")
+        tuesday_idx = rendered.index("#### Tuesday 7 Apr")
+        wednesday_idx = rendered.index("#### Wednesday 8 Apr")
+        assert monday_idx < tuesday_idx < wednesday_idx
+
+    def test_render_health_data_for_report_hides_target_fractions(self) -> None:
+        rendered = render_health_data(
+            self._health_data(),
+            prompt_kind="report",
+            week="current",
+            today=date(2026, 4, 8),
+        )
+
+        assert "### Target Week Summary" in rendered
+        assert "/2 runs" not in rendered
+        assert "/2 lifts" not in rendered
+        assert "- Logged so far: 1 run, 0 lifts, 0 walks." in rendered
+
+    def test_render_health_data_for_report_last_renders_full_target_week(self) -> None:
+        rendered = render_health_data(
+            self._health_data(),
+            prompt_kind="report",
+            week="last",
+            today=date(2026, 4, 8),
+        )
+
+        assert "### Target Week Days (Mon to Sun)" in rendered
+        assert "#### Monday 6 Apr" in rendered
+        assert "#### Tuesday 7 Apr" in rendered
+        assert "#### Wednesday 8 Apr" in rendered
+
+    def test_format_recent_nudges_strips_saved_nudge_chrome(self) -> None:
+        rendered = format_recent_nudges(
+            [
+                {
+                    "ts": "2026-04-07T10:25:00",
+                    "trigger": "new_data",
+                    "text": (
+                        "**📊 Data Sync**\n\n"
+                        "Easy 5 km tomorrow.\n\n"
+                        "---\n"
+                        "_Generated by anthropic/claude-opus-4-6_"
+                    ),
+                }
+            ]
+        )
+
+        assert "Data Sync" not in rendered
+        assert "_Generated by" not in rendered
+        assert "---" not in rendered
+        assert "Easy 5 km tomorrow." in rendered
+
+
 class TestBuildReviewFacts:
     def test_includes_shared_signals_and_feedback_hint(self) -> None:
         health_data = {
@@ -361,8 +552,6 @@ class TestBuildReviewFacts:
                     "week_label": "2026-W12",
                     "run_count": 2,
                     "lift_count": 1,
-                    "run_consistency_pct": 100.0,
-                    "lift_consistency_pct": 50.0,
                     "total_run_km": 18.4,
                     "avg_hrv_ms": 54.2,
                     "avg_resting_hr": 51.1,
@@ -391,7 +580,7 @@ class TestBuildReviewFacts:
 
         assert "Shared Review Facts" in result
         assert "2026-W12" in result
-        assert "Training adherence" in result
+        assert "Training snapshot" in result
         assert "Recovery verdict" in result
         assert "coach_feedback.md" in result
 
@@ -933,8 +1122,6 @@ class TestBuildLlmData:
         assert "2026-03-09" in summary["sleep_not_tracked_dates"]
         assert "2026-03-12" in summary["sleep_not_tracked_dates"]
         assert len(summary["sleep_not_tracked_dates"]) == 5
-        assert summary["run_target"] == 2
-        assert summary["lift_target"] == 2
 
     @patch("llm.datetime")
     @patch("llm.date")

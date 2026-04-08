@@ -1,817 +1,644 @@
 [
-  {
-    "id": "nudge_rest_day_skip",
-    "suite": "core",
-    "category": "nudge_contract",
-    "blueprint": "baseline",
-    "scenario_fn": "rest_day",
-    "config": {
-      "prompt_file": "nudge_prompt",
-      "trigger_type": "missed_session",
-      "max_tokens": 512
+    {
+        "id": "nudge_rest_day_skip",
+        "suite": "core",
+        "category": "nudge_contract",
+        "blueprint": "baseline",
+        "scenario_fn": "rest_day",
+        "config": {
+            "prompt_file": "nudge_prompt",
+            "trigger_type": "missed_session",
+            "max_tokens": 512
+        },
+        "assertions": [
+            {"type": "response_is_skip"},
+            {"type": "word_count_max", "max_words": 1}
+        ],
+        "notes": "Rest day plus missed_session should hard-skip."
     },
-    "assertions": [
-      {
-        "type": "response_is_skip"
-      },
-      {
-        "type": "word_count_max",
-        "max_words": 1
-      }
-    ],
-    "notes": "Rest day plus missed_session should hard-skip."
-  },
-  {
-    "id": "nudge_training_day_missed",
-    "suite": "core",
-    "category": "nudge_contract",
-    "blueprint": "baseline",
-    "scenario_fn": "training_day_missed",
-    "config": {
-      "prompt_file": "nudge_prompt",
-      "trigger_type": "missed_session",
-      "max_tokens": 512
+    {
+        "id": "nudge_training_day_missed",
+        "suite": "core",
+        "category": "nudge_contract",
+        "blueprint": "baseline",
+        "scenario_fn": "training_day_missed",
+        "config": {
+            "prompt_file": "nudge_prompt",
+            "trigger_type": "missed_session",
+            "max_tokens": 512
+        },
+        "assertions": [
+            {"type": "response_is_not_skip"},
+            {"type": "word_count_max", "max_words": 80},
+            {
+                "type": "text_present",
+                "patterns": [
+                    "re:(?i)(shift|move|lighter|short|easy|tomorrow|today|skip it)"
+                ]
+            }
+        ],
+        "notes": "A real missed session should produce one concrete next step."
     },
-    "assertions": [
-      {
-        "type": "response_is_not_skip"
-      },
-      {
-        "type": "word_count_max",
-        "max_words": 80
-      },
-      {
-        "type": "text_present",
-        "patterns": [
-          "re:(?i)(shift|move|lighter|short|easy|tomorrow|today|skip it)"
-        ]
-      }
-    ],
-    "notes": "A real missed session should produce one concrete next step."
-  },
-  {
-    "id": "nudge_redundant",
-    "suite": "core",
-    "category": "nudge_contract",
-    "blueprint": "baseline",
-    "scenario_fn": "redundant_nudge",
-    "config": {
-      "prompt_file": "nudge_prompt",
-      "trigger_type": "new_data",
-      "recent_nudges": "(2026-03-28 08:15) new_data: HRV bounced back nicely to **65ms** after dipping to 33 on Wednesday. Recovery index hit **1.35** — your best this week. Good sign after that hilly run. **Easy day today** — a walk or light mobility is plenty. Save the legs for Monday's run.",
-      "max_tokens": 512
+    {
+        "id": "nudge_redundant",
+        "suite": "core",
+        "category": "nudge_contract",
+        "blueprint": "baseline",
+        "scenario_fn": "redundant_nudge",
+        "config": {
+            "prompt_file": "nudge_prompt",
+            "trigger_type": "new_data",
+            "recent_nudges": "(2026-03-28 08:15) new_data: HRV bounced back nicely to **65ms** after dipping to 33 on Wednesday. Recovery index hit **1.35** — your best this week. Good sign after that hilly run. **Easy day today** — a walk or light mobility is plenty. Save the legs for Monday's run.",
+            "max_tokens": 512
+        },
+        "assertions": [
+            {"type": "response_is_skip"},
+            {"type": "word_count_max", "max_words": 1}
+        ],
+        "notes": "A nudge that repeats an already-covered observation should skip."
     },
-    "assertions": [
-      {
-        "type": "response_is_skip"
-      },
-      {
-        "type": "word_count_max",
-        "max_words": 1
-      }
-    ],
-    "notes": "A nudge that repeats an already-covered observation should skip."
-  },
-  {
-    "id": "nudge_boring_new_data",
-    "suite": "benchmark",
-    "category": "nudge_contract",
-    "blueprint": "baseline",
-    "scenario_fn": "boring_new_data",
-    "config": {
-      "prompt_file": "nudge_prompt",
-      "trigger_type": "new_data",
-      "max_tokens": 512
+    {
+        "id": "nudge_boring_new_data",
+        "suite": "benchmark",
+        "category": "nudge_contract",
+        "blueprint": "baseline",
+        "scenario_fn": "boring_new_data",
+        "config": {
+            "prompt_file": "nudge_prompt",
+            "trigger_type": "new_data",
+            "max_tokens": 512
+        },
+        "assertions": [
+            {"type": "response_is_skip"},
+            {"type": "word_count_max", "max_words": 1}
+        ],
+        "notes": "Unremarkable new data should not generate filler."
     },
-    "assertions": [
-      {
-        "type": "response_is_skip"
-      },
-      {
-        "type": "word_count_max",
-        "max_words": 1
-      }
-    ],
-    "notes": "Unremarkable new data should not generate filler."
-  },
-  {
-    "id": "nudge_log_update",
-    "suite": "benchmark",
-    "category": "nudge_contract",
-    "blueprint": "baseline",
-    "scenario_fn": "log_update_meaningful",
-    "config": {
-      "prompt_file": "nudge_prompt",
-      "trigger_type": "log_update",
-      "max_tokens": 512
+    {
+        "id": "nudge_log_update",
+        "suite": "benchmark",
+        "category": "nudge_contract",
+        "blueprint": "baseline",
+        "scenario_fn": "log_update_meaningful",
+        "config": {
+            "prompt_file": "nudge_prompt",
+            "trigger_type": "log_update",
+            "max_tokens": 512
+        },
+        "assertions": [
+            {"type": "response_is_not_skip"},
+            {"type": "word_count_max", "max_words": 80},
+            {
+                "type": "text_present",
+                "patterns": ["re:(?i)(back|stiff|deadlift|recover|ease|careful|rest)"]
+            }
+        ],
+        "notes": "The nudge should respond directly to a meaningful log entry."
     },
-    "assertions": [
-      {
-        "type": "response_is_not_skip"
-      },
-      {
-        "type": "word_count_max",
-        "max_words": 80
-      },
-      {
-        "type": "text_present",
-        "patterns": [
-          "re:(?i)(back|stiff|deadlift|recover|ease|careful|rest)"
-        ]
-      }
-    ],
-    "notes": "The nudge should respond directly to a meaningful log entry."
-  },
-  {
-    "id": "sleep_last_night_chat",
-    "suite": "benchmark",
-    "category": "sleep_markers",
-    "blueprint": "baseline",
-    "scenario_fn": "sleep_last_night_query",
-    "config": {
-      "prompt_file": "chat_prompt",
-      "max_tokens": 1024,
-      "tools": true
+    {
+        "id": "sleep_last_night_chat",
+        "suite": "benchmark",
+        "category": "sleep_markers",
+        "blueprint": "baseline",
+        "scenario_fn": "sleep_last_night_query",
+        "config": {"prompt_file": "chat_prompt", "max_tokens": 1024, "tools": true},
+        "question": "How was my sleep last night?",
+        "assertions": [
+            {"type": "no_tool_called", "tool": "run_sql", "name": "no_run_sql"},
+            {
+                "type": "text_present",
+                "patterns": ["re:(?i)(7\\.6|7 hours|91\\.?9|efficiency)"]
+            },
+            {
+                "type": "answer_does_not_contradict_data",
+                "patterns": [
+                    "re:(?i)(null|no\\s+sleep\\s+data|hasn'?t\\s+synced|pending|not\\s+available|can'?t\\s+see)"
+                ]
+            },
+            {"type": "chart_count", "count": 0}
+        ],
+        "notes": "Last night should resolve to yesterday's row and not be treated as missing."
     },
-    "question": "How was my sleep last night?",
-    "assertions": [
-      {
-        "type": "no_tool_called",
-        "tool": "run_sql",
-        "name": "no_run_sql"
-      },
-      {
-        "type": "text_present",
-        "patterns": [
-          "re:(?i)(7\\.6|7 hours|91\\.?9|efficiency)"
-        ]
-      },
-      {
-        "type": "answer_does_not_contradict_data",
-        "patterns": [
-          "re:(?i)(null|no\\s+sleep\\s+data|hasn'?t\\s+synced|pending|not\\s+available|can'?t\\s+see)"
-        ]
-      },
-      {
-        "type": "chart_count",
-        "count": 0
-      }
-    ],
-    "notes": "Last night should resolve to yesterday's row and not be treated as missing."
-  },
-  {
-    "id": "sleep_pending_today",
-    "suite": "benchmark",
-    "category": "sleep_markers",
-    "blueprint": "baseline",
-    "scenario_fn": "baseline",
-    "config": {
-      "prompt_file": "prompt",
-      "week_complete": false
+    {
+        "id": "sleep_pending_today",
+        "suite": "benchmark",
+        "category": "sleep_markers",
+        "blueprint": "baseline",
+        "scenario_fn": "baseline",
+        "config": {"prompt_file": "prompt", "week_complete": false},
+        "assertions": [
+            {
+                "type": "text_absent",
+                "patterns": [
+                    "re:(?i)missing\\s+sleep",
+                    "re:(?i)no\\s+sleep\\s+data",
+                    "re:(?i)didn'?t\\s+(track|log|record)\\s+sleep",
+                    "re:(?i)sleep\\s+(data\\s+)?(is\\s+)?missing",
+                    "re:(?i)(wear|wore)\\s+(your\\s+)?watch",
+                    "re:(?i)sleep\\s+tracking\\s+(issue|gap|problem)",
+                    "re:(?i)no\\s+sleep\\s+(recorded|logged|tracked)"
+                ]
+            }
+        ],
+        "notes": "Today's pending sleep should not be flagged in a report."
     },
-    "assertions": [
-      {
-        "type": "text_absent",
-        "patterns": [
-          "re:(?i)missing\\s+sleep",
-          "re:(?i)no\\s+sleep\\s+data",
-          "re:(?i)didn'?t\\s+(track|log|record)\\s+sleep",
-          "re:(?i)sleep\\s+(data\\s+)?(is\\s+)?missing",
-          "re:(?i)(wear|wore)\\s+(your\\s+)?watch",
-          "re:(?i)sleep\\s+tracking\\s+(issue|gap|problem)",
-          "re:(?i)no\\s+sleep\\s+(recorded|logged|tracked)"
-        ]
-      }
-    ],
-    "notes": "Today's pending sleep should not be flagged in a report."
-  },
-  {
-    "id": "sleep_sync_pending_yesterday",
-    "suite": "benchmark",
-    "category": "sleep_markers",
-    "blueprint": "baseline",
-    "scenario_fn": "sleep_sync_pending_yesterday",
-    "config": {
-      "prompt_file": "prompt",
-      "week_complete": false
+    {
+        "id": "sleep_sync_pending_yesterday",
+        "suite": "benchmark",
+        "category": "sleep_markers",
+        "blueprint": "baseline",
+        "scenario_fn": "sleep_sync_pending_yesterday",
+        "config": {"prompt_file": "prompt", "week_complete": false},
+        "assertions": [
+            {
+                "type": "text_absent",
+                "patterns": [
+                    "re:(?i)missing\\s+sleep",
+                    "re:(?i)no\\s+sleep\\s+data",
+                    "re:(?i)didn'?t\\s+(track|log|record)\\s+sleep",
+                    "re:(?i)sleep\\s+(data\\s+)?(is\\s+)?missing",
+                    "re:(?i)(wear|wore)\\s+(your\\s+)?watch",
+                    "re:(?i)sleep\\s+tracking\\s+(issue|gap|problem)",
+                    "re:(?i)no\\s+sleep\\s+(recorded|logged|tracked)"
+                ]
+            }
+        ],
+        "notes": "Yesterday's sleep is absent (watch hasn't synced yet) — should not be flagged."
     },
-    "assertions": [
-      {
-        "type": "text_absent",
-        "patterns": [
-          "re:(?i)missing\\s+sleep",
-          "re:(?i)no\\s+sleep\\s+data",
-          "re:(?i)didn'?t\\s+(track|log|record)\\s+sleep",
-          "re:(?i)sleep\\s+(data\\s+)?(is\\s+)?missing",
-          "re:(?i)(wear|wore)\\s+(your\\s+)?watch",
-          "re:(?i)sleep\\s+tracking\\s+(issue|gap|problem)",
-          "re:(?i)no\\s+sleep\\s+(recorded|logged|tracked)"
-        ]
-      }
-    ],
-    "notes": "Yesterday's sleep is absent (watch hasn't synced yet) — should not be flagged."
-  },
-  {
-    "id": "sleep_not_tracked_single",
-    "suite": "benchmark",
-    "category": "sleep_markers",
-    "blueprint": "baseline",
-    "scenario_fn": "sleep_not_tracked_single",
-    "config": {
-      "prompt_file": "prompt",
-      "week_complete": false
+    {
+        "id": "sleep_not_tracked_single",
+        "suite": "benchmark",
+        "category": "sleep_markers",
+        "blueprint": "baseline",
+        "scenario_fn": "sleep_not_tracked_single",
+        "config": {"prompt_file": "prompt", "week_complete": false},
+        "assertions": [
+            {
+                "type": "text_absent",
+                "patterns": [
+                    "re:(?i)missing\\s+sleep",
+                    "re:(?i)no\\s+sleep\\s+data",
+                    "re:(?i)didn'?t\\s+(track|log|record)\\s+sleep",
+                    "re:(?i)sleep\\s+(data\\s+)?(is\\s+)?missing",
+                    "re:(?i)(wear|wore)\\s+(your\\s+)?watch",
+                    "re:(?i)sleep\\s+tracking\\s+(issue|gap|problem)",
+                    "re:(?i)no\\s+sleep\\s+(recorded|logged|tracked)"
+                ]
+            }
+        ],
+        "notes": "A single not_tracked day should not trigger commentary."
     },
-    "assertions": [
-      {
-        "type": "text_absent",
-        "patterns": [
-          "re:(?i)missing\\s+sleep",
-          "re:(?i)no\\s+sleep\\s+data",
-          "re:(?i)didn'?t\\s+(track|log|record)\\s+sleep",
-          "re:(?i)sleep\\s+(data\\s+)?(is\\s+)?missing",
-          "re:(?i)(wear|wore)\\s+(your\\s+)?watch",
-          "re:(?i)sleep\\s+tracking\\s+(issue|gap|problem)",
-          "re:(?i)no\\s+sleep\\s+(recorded|logged|tracked)"
-        ]
-      }
-    ],
-    "notes": "A single not_tracked day should not trigger commentary."
-  },
-  {
-    "id": "sleep_not_tracked_3_consecutive",
-    "suite": "benchmark",
-    "category": "sleep_markers",
-    "blueprint": "baseline",
-    "scenario_fn": "sleep_not_tracked_3_consecutive",
-    "config": {
-      "prompt_file": "prompt",
-      "week_complete": false
+    {
+        "id": "sleep_not_tracked_3_consecutive",
+        "suite": "benchmark",
+        "category": "sleep_markers",
+        "blueprint": "baseline",
+        "scenario_fn": "sleep_not_tracked_3_consecutive",
+        "config": {"prompt_file": "prompt", "week_complete": false},
+        "assertions": [
+            {
+                "type": "text_present",
+                "patterns": [
+                    "re:(?i)(sleep.{0,30}track|track.{0,30}sleep|watch.{0,20}(worn|wear)|not\\s+track)"
+                ]
+            }
+        ],
+        "notes": "Three consecutive not_tracked days should be called out."
     },
-    "assertions": [
-      {
-        "type": "text_present",
-        "patterns": [
-          "re:(?i)(sleep.{0,30}track|track.{0,30}sleep|watch.{0,20}(worn|wear)|not\\s+track)"
-        ]
-      }
-    ],
-    "notes": "Three consecutive not_tracked days should be called out."
-  },
-  {
-    "id": "report_midweek_no_premature_judgment",
-    "suite": "core",
-    "category": "weekly_report",
-    "blueprint": "baseline",
-    "scenario_fn": "midweek_wednesday",
-    "config": {
-      "prompt_file": "prompt",
-      "week_complete": false
+    {
+        "id": "report_midweek_no_premature_judgment",
+        "suite": "core",
+        "category": "weekly_report",
+        "blueprint": "baseline",
+        "scenario_fn": "midweek_wednesday",
+        "config": {"prompt_file": "prompt", "week_complete": false},
+        "assertions": [
+            {
+                "type": "required_sections",
+                "sections": [
+                    "Week at a Glance",
+                    "Training Review",
+                    "Key Metrics",
+                    "Recovery Status",
+                    "This Week's Priorities"
+                ]
+            },
+            {
+                "type": "text_absent",
+                "patterns": [
+                    "re:(?i)only\\s+(ran|run|did|completed|logged)\\s+(once|one|twice|two|\\d)",
+                    "re:(?i)missed\\s+\\d+\\s+(session|workout|run|lift)",
+                    "re:(?i)fell\\s+short",
+                    "re:(?i)behind\\s+(on\\s+)?(your|the)\\s+(plan|schedule|target)",
+                    "re:(?i)need\\s+to\\s+(catch|make)\\s+up",
+                    "re:(?i)should\\s+have\\s+(done|completed|run|trained)"
+                ]
+            },
+            {"type": "no_markdown_table"},
+            {"type": "pace_format_valid"},
+            {"type": "word_count_max", "max_words": 650}
+        ],
+        "notes": "Mid-week checks must not judge sessions that have not happened yet."
     },
-    "assertions": [
-      {
-        "type": "required_sections",
-        "sections": [
-          "Week at a Glance",
-          "Training Review",
-          "Key Metrics",
-          "Recovery Status",
-          "This Week's Priorities"
-        ]
-      },
-      {
-        "type": "text_absent",
-        "patterns": [
-          "re:(?i)only\\s+(ran|run|did|completed|logged)\\s+(once|one|twice|two|\\d)",
-          "re:(?i)missed\\s+\\d+\\s+(session|workout|run|lift)",
-          "re:(?i)fell\\s+short",
-          "re:(?i)behind\\s+(on\\s+)?(your|the)\\s+(plan|schedule|target)",
-          "re:(?i)need\\s+to\\s+(catch|make)\\s+up",
-          "re:(?i)should\\s+have\\s+(done|completed|run|trained)"
-        ]
-      },
-      {
-        "type": "no_markdown_table"
-      },
-      {
-        "type": "pace_format_valid"
-      },
-      {
-        "type": "word_count_max",
-        "max_words": 650
-      }
-    ],
-    "notes": "Mid-week checks must not judge sessions that have not happened yet."
-  },
-  {
-    "id": "report_full_week_has_memory",
-    "suite": "core",
-    "category": "weekly_report",
-    "blueprint": "completed_week",
-    "scenario_fn": "baseline",
-    "config": {
-      "prompt_file": "prompt",
-      "week_complete": true
+    {
+        "id": "report_full_week_has_memory",
+        "suite": "core",
+        "category": "weekly_report",
+        "blueprint": "completed_week",
+        "scenario_fn": "baseline",
+        "config": {"prompt_file": "prompt", "week_complete": true},
+        "assertions": [
+            {
+                "type": "required_sections",
+                "sections": [
+                    "Week at a Glance",
+                    "Training Review",
+                    "Key Metrics",
+                    "Recovery Status",
+                    "Next Week"
+                ]
+            },
+            {"type": "contains_memory_block", "min_bullets": 2},
+            {"type": "no_markdown_table"},
+            {"type": "pace_format_valid"},
+            {"type": "word_count_max", "max_words": 650}
+        ],
+        "notes": "A full review must produce the required report structure and a memory block."
     },
-    "assertions": [
-      {
-        "type": "required_sections",
-        "sections": [
-          "Week at a Glance",
-          "Training Review",
-          "Key Metrics",
-          "Recovery Status",
-          "Next Week"
-        ]
-      },
-      {
-        "type": "contains_memory_block",
-        "min_bullets": 2
-      },
-      {
-        "type": "no_markdown_table"
-      },
-      {
-        "type": "pace_format_valid"
-      },
-      {
-        "type": "word_count_max",
-        "max_words": 650
-      }
-    ],
-    "notes": "A full review must produce the required report structure and a memory block."
-  },
-  {
-    "id": "recovery_crashed",
-    "suite": "core",
-    "category": "recovery_verdict",
-    "blueprint": "baseline",
-    "scenario_fn": "recovery_crashed",
-    "config": {
-      "prompt_file": "prompt",
-      "week_complete": false
+    {
+        "id": "recovery_crashed",
+        "suite": "core",
+        "category": "recovery_verdict",
+        "blueprint": "baseline",
+        "scenario_fn": "recovery_crashed",
+        "config": {"prompt_file": "prompt", "week_complete": false},
+        "assertions": [
+            {
+                "type": "text_present",
+                "patterns": [
+                    "re:(?i)(back\\s*off|ease\\s*(off|up)|recover|rest|dial\\s*(it\\s+)?back|take\\s+it\\s+easy|lighter|reduce|scale\\s+back|deload)"
+                ]
+            },
+            {
+                "type": "text_absent",
+                "patterns": [
+                    "re:(?i)(push\\s*(harder|forward|through)|ramp\\s+up|increase\\s+(volume|intensity|load))"
+                ]
+            }
+        ],
+        "notes": "Strong red recovery signals should lead to back-off guidance."
     },
-    "assertions": [
-      {
-        "type": "text_present",
-        "patterns": [
-          "re:(?i)(back\\s*off|ease\\s*(off|up)|recover|rest|dial\\s*(it\\s+)?back|take\\s+it\\s+easy|lighter|reduce|scale\\s+back|deload)"
-        ]
-      },
-      {
-        "type": "text_absent",
-        "patterns": [
-          "re:(?i)(push\\s*(harder|forward|through)|ramp\\s+up|increase\\s+(volume|intensity|load))"
-        ]
-      }
-    ],
-    "notes": "Strong red recovery signals should lead to back-off guidance."
-  },
-  {
-    "id": "recovery_green",
-    "suite": "benchmark",
-    "category": "recovery_verdict",
-    "blueprint": "baseline",
-    "scenario_fn": "recovery_green",
-    "config": {
-      "prompt_file": "prompt",
-      "week_complete": false
+    {
+        "id": "recovery_green",
+        "suite": "benchmark",
+        "category": "recovery_verdict",
+        "blueprint": "baseline",
+        "scenario_fn": "recovery_green",
+        "config": {"prompt_file": "prompt", "week_complete": false},
+        "assertions": [
+            {
+                "type": "text_present",
+                "patterns": [
+                    "re:(?i)(push|progress|increase|ramp|ready\\s+to|green\\s+light|step\\s+up|add|harder|more\\s+(volume|intensity))"
+                ]
+            },
+            {
+                "type": "text_absent",
+                "patterns": [
+                    "re:(?i)(back\\s*off|ease\\s*(off|up)|deload|scale\\s+back|reduce)"
+                ]
+            }
+        ],
+        "notes": "Strong green recovery signals should lead to progression advice."
     },
-    "assertions": [
-      {
-        "type": "text_present",
-        "patterns": [
-          "re:(?i)(push|progress|increase|ramp|ready\\s+to|green\\s+light|step\\s+up|add|harder|more\\s+(volume|intensity))"
-        ]
-      },
-      {
-        "type": "text_absent",
-        "patterns": [
-          "re:(?i)(back\\s*off|ease\\s*(off|up)|deload|scale\\s+back|reduce)"
-        ]
-      }
-    ],
-    "notes": "Strong green recovery signals should lead to progression advice."
-  },
-  {
-    "id": "recovery_mixed",
-    "suite": "benchmark",
-    "category": "recovery_verdict",
-    "blueprint": "baseline",
-    "scenario_fn": "recovery_mixed",
-    "config": {
-      "prompt_file": "prompt",
-      "week_complete": false
+    {
+        "id": "recovery_mixed",
+        "suite": "benchmark",
+        "category": "recovery_verdict",
+        "blueprint": "baseline",
+        "scenario_fn": "recovery_mixed",
+        "config": {"prompt_file": "prompt", "week_complete": false},
+        "assertions": [
+            {
+                "type": "text_present",
+                "patterns": [
+                    "re:(?i)(maintain|steady|status\\s+quo|keep\\s+(current|things|doing)|hold|moderate|same\\s+(level|intensity|volume)|don'?t\\s+(push|increase)|stick\\s+(with|to)|as\\s+planned|no\\s+need\\s+to\\s+(add|change|increase)|stay\\s+(the\\s+course|consistent)|continue|planned\\s+sessions|not\\s+the\\s+time\\s+to)"
+                ]
+            }
+        ],
+        "notes": "Mixed recovery should lead to a maintain/steady recommendation."
     },
-    "assertions": [
-      {
-        "type": "text_present",
-        "patterns": [
-          "re:(?i)(maintain|steady|status\\s+quo|keep\\s+(current|things|doing)|hold|moderate|same\\s+(level|intensity|volume)|don'?t\\s+(push|increase)|stick\\s+(with|to)|as\\s+planned|no\\s+need\\s+to\\s+(add|change|increase)|stay\\s+(the\\s+course|consistent)|continue|planned\\s+sessions|not\\s+the\\s+time\\s+to)"
-        ]
-      }
-    ],
-    "notes": "Mixed recovery should lead to a maintain/steady recommendation."
-  },
-  {
-    "id": "chat_current_week_run_count_no_sql",
-    "suite": "core",
-    "category": "chat_data",
-    "blueprint": "baseline",
-    "scenario_fn": "baseline",
-    "config": {
-      "prompt_file": "chat_prompt",
-      "max_tokens": 1024,
-      "tools": true
+    {
+        "id": "chat_current_week_run_count_no_sql",
+        "suite": "core",
+        "category": "chat_data",
+        "blueprint": "baseline",
+        "scenario_fn": "baseline",
+        "config": {"prompt_file": "chat_prompt", "max_tokens": 1024, "tools": true},
+        "question": "How many runs did I do this week?",
+        "assertions": [
+            {"type": "no_tool_called", "tool": "run_sql", "name": "no_run_sql"},
+            {
+                "type": "no_tool_called",
+                "tool": "update_context",
+                "name": "no_update_context"
+            },
+            {"type": "answer_uses_expected_value", "expected": 3, "tolerance": 0},
+            {"type": "chart_count", "count": 0}
+        ],
+        "notes": "Current-week answers should come from the prompt context, not SQL."
     },
-    "question": "How many runs did I do this week?",
-    "assertions": [
-      {
-        "type": "no_tool_called",
-        "tool": "run_sql",
-        "name": "no_run_sql"
-      },
-      {
-        "type": "no_tool_called",
-        "tool": "update_context",
-        "name": "no_update_context"
-      },
-      {
-        "type": "answer_uses_expected_value",
-        "expected": 3,
-        "tolerance": 0
-      },
-      {
-        "type": "chart_count",
-        "count": 0
-      }
-    ],
-    "notes": "Current-week answers should come from the prompt context, not SQL."
-  },
-  {
-    "id": "chat_historical_lowest_resting_hr",
-    "suite": "core",
-    "category": "chat_data",
-    "blueprint": "baseline",
-    "scenario_fn": "baseline",
-    "config": {
-      "prompt_file": "chat_prompt",
-      "max_tokens": 1024,
-      "tools": true
+    {
+        "id": "chat_historical_lowest_resting_hr",
+        "suite": "core",
+        "category": "chat_data",
+        "blueprint": "baseline",
+        "scenario_fn": "baseline",
+        "config": {"prompt_file": "chat_prompt", "max_tokens": 1024, "tools": true},
+        "question": "What was my lowest resting HR day across the 4 completed weeks before this one?",
+        "assertions": [
+            {
+                "type": "tool_called",
+                "tool": "run_sql",
+                "min_count": 1,
+                "name": "has_run_sql"
+            },
+            {
+                "type": "no_tool_called",
+                "tool": "update_context",
+                "name": "no_update_context"
+            },
+            {"type": "answer_uses_expected_value", "expected": 50, "tolerance": 0.1},
+            {"type": "sql_valid"}
+        ],
+        "notes": "Historical daily-detail questions should use SQL and return the right value."
     },
-    "question": "What was my lowest resting HR day across the 4 completed weeks before this one?",
-    "assertions": [
-      {
-        "type": "tool_called",
-        "tool": "run_sql",
-        "min_count": 1,
-        "name": "has_run_sql"
-      },
-      {
-        "type": "no_tool_called",
-        "tool": "update_context",
-        "name": "no_update_context"
-      },
-      {
-        "type": "answer_uses_expected_value",
-        "expected": 50,
-        "tolerance": 0.1
-      },
-      {
-        "type": "sql_valid"
-      }
-    ],
-    "notes": "Historical daily-detail questions should use SQL and return the right value."
-  },
-  {
-    "id": "chat_historical_resting_hr_chart",
-    "suite": "core",
-    "category": "chart_generation",
-    "blueprint": "baseline",
-    "scenario_fn": "baseline",
-    "config": {
-      "prompt_file": "chat_prompt",
-      "max_tokens": 1536,
-      "tools": true
+    {
+        "id": "chat_historical_resting_hr_chart",
+        "suite": "core",
+        "category": "chart_generation",
+        "blueprint": "baseline",
+        "scenario_fn": "baseline",
+        "config": {"prompt_file": "chat_prompt", "max_tokens": 1536, "tools": true},
+        "question": "Show my resting HR day by day across the 4 completed weeks before this one.",
+        "assertions": [
+            {
+                "type": "tool_called",
+                "tool": "run_sql",
+                "min_count": 1,
+                "name": "has_run_sql"
+            },
+            {"type": "chart_count", "count": 1},
+            {"type": "chart_renders"},
+            {"type": "sql_valid"},
+            {
+                "type": "no_tool_called",
+                "tool": "update_context",
+                "name": "no_update_context"
+            }
+        ],
+        "notes": "Historical trend questions should use SQL and produce a valid chart."
     },
-    "question": "Show my resting HR day by day across the 4 completed weeks before this one.",
-    "assertions": [
-      {
-        "type": "tool_called",
-        "tool": "run_sql",
-        "min_count": 1,
-        "name": "has_run_sql"
-      },
-      {
-        "type": "chart_count",
-        "count": 1
-      },
-      {
-        "type": "chart_renders"
-      },
-      {
-        "type": "sql_valid"
-      },
-      {
-        "type": "no_tool_called",
-        "tool": "update_context",
-        "name": "no_update_context"
-      }
-    ],
-    "notes": "Historical trend questions should use SQL and produce a valid chart."
-  },
-  {
-    "id": "chart_not_for_single_value",
-    "suite": "core",
-    "category": "chart_generation",
-    "blueprint": "baseline",
-    "scenario_fn": "baseline",
-    "config": {
-      "prompt_file": "chat_prompt",
-      "max_tokens": 1024,
-      "tools": true
+    {
+        "id": "chart_not_for_single_value",
+        "suite": "core",
+        "category": "chart_generation",
+        "blueprint": "baseline",
+        "scenario_fn": "baseline",
+        "config": {"prompt_file": "chat_prompt", "max_tokens": 1024, "tools": true},
+        "question": "What's my resting HR today?",
+        "assertions": [
+            {"type": "chart_count", "count": 0},
+            {"type": "no_tool_called", "tool": "run_sql", "name": "no_run_sql"},
+            {
+                "type": "no_tool_called",
+                "tool": "update_context",
+                "name": "no_update_context"
+            }
+        ],
+        "notes": "Single-value questions should not produce charts or unnecessary SQL."
     },
-    "question": "What's my resting HR today?",
-    "assertions": [
-      {
-        "type": "chart_count",
-        "count": 0
-      },
-      {
-        "type": "no_tool_called",
-        "tool": "run_sql",
-        "name": "no_run_sql"
-      },
-      {
-        "type": "no_tool_called",
-        "tool": "update_context",
-        "name": "no_update_context"
-      }
-    ],
-    "notes": "Single-value questions should not produce charts or unnecessary SQL."
-  },
-  {
-    "id": "chat_unknown_2024_data",
-    "suite": "core",
-    "category": "chat_data",
-    "blueprint": "baseline",
-    "scenario_fn": "baseline",
-    "config": {
-      "prompt_file": "chat_prompt",
-      "max_tokens": 1024,
-      "tools": true
+    {
+        "id": "chat_unknown_2024_data",
+        "suite": "core",
+        "category": "chat_data",
+        "blueprint": "baseline",
+        "scenario_fn": "baseline",
+        "config": {"prompt_file": "chat_prompt", "max_tokens": 1024, "tools": true},
+        "question": "Do I have any workout data from 2024?",
+        "assertions": [
+            {
+                "type": "tool_called",
+                "tool": "run_sql",
+                "min_count": 1,
+                "name": "has_run_sql"
+            },
+            {"type": "honest_when_unknown"},
+            {"type": "sql_valid"},
+            {"type": "chart_count", "count": 0},
+            {
+                "type": "no_tool_called",
+                "tool": "update_context",
+                "name": "no_update_context"
+            }
+        ],
+        "notes": "Out-of-range questions should lead to honest limitation handling, not hallucination."
     },
-    "question": "Do I have any workout data from 2024?",
-    "assertions": [
-      {
-        "type": "tool_called",
-        "tool": "run_sql",
-        "min_count": 1,
-        "name": "has_run_sql"
-      },
-      {
-        "type": "honest_when_unknown"
-      },
-      {
-        "type": "sql_valid"
-      },
-      {
-        "type": "chart_count",
-        "count": 0
-      },
-      {
-        "type": "no_tool_called",
-        "tool": "update_context",
-        "name": "no_update_context"
-      }
-    ],
-    "notes": "Out-of-range questions should lead to honest limitation handling, not hallucination."
-  },
-  {
-    "id": "context_update_goal_change",
-    "suite": "core",
-    "category": "context_update",
-    "blueprint": "baseline",
-    "scenario_fn": "baseline",
-    "config": {
-      "prompt_file": "chat_prompt",
-      "max_tokens": 1024,
-      "tools": true
+    {
+        "id": "context_update_goal_change",
+        "suite": "core",
+        "category": "context_update",
+        "blueprint": "baseline",
+        "scenario_fn": "baseline",
+        "config": {"prompt_file": "chat_prompt", "max_tokens": 1024, "tools": true},
+        "question": "I want to drop the 5K time goal for now and focus purely on consistency — 3 runs and 2 lifts per week, no pace pressure.",
+        "assertions": [
+            {
+                "type": "tool_called",
+                "tool": "update_context",
+                "min_count": 1,
+                "name": "has_update_context"
+            },
+            {
+                "type": "tool_arg_matches",
+                "tool": "update_context",
+                "matches": {"file": "strategy"}
+            },
+            {
+                "type": "text_present",
+                "patterns": [
+                    "re:(?i)(goal|consistency|updated|noted|adjust|got\\s+it|done|changed|focus|propos|modify|set|switch)"
+                ]
+            }
+        ],
+        "notes": "Durable goal changes should propose a goals update."
     },
-    "question": "I want to drop the 5K time goal for now and focus purely on consistency — 3 runs and 2 lifts per week, no pace pressure.",
-    "assertions": [
-      {
-        "type": "tool_called",
-        "tool": "update_context",
-        "min_count": 1,
-        "name": "has_update_context"
-      },
-      {
-        "type": "tool_arg_matches",
-        "tool": "update_context",
-        "matches": {
-          "file": "strategy"
-        }
-      },
-      {
-        "type": "text_present",
-        "patterns": [
-          "re:(?i)(goal|consistency|updated|noted|adjust|got\\s+it|done|changed|focus|propos|modify|set|switch)"
-        ]
-      }
-    ],
-    "notes": "Durable goal changes should propose a goals update."
-  },
-  {
-    "id": "context_update_plan_sleep_target",
-    "suite": "core",
-    "category": "context_update",
-    "blueprint": "sparse_week",
-    "scenario_fn": "baseline",
-    "config": {
-      "prompt_file": "chat_prompt",
-      "max_tokens": 1024,
-      "tools": true
+    {
+        "id": "context_update_plan_sleep_target",
+        "suite": "core",
+        "category": "context_update",
+        "blueprint": "sparse_week",
+        "scenario_fn": "baseline",
+        "config": {"prompt_file": "chat_prompt", "max_tokens": 1024, "tools": true},
+        "question": "Update my sleep target to 7.5 hours a night.",
+        "assertions": [
+            {
+                "type": "tool_called",
+                "tool": "update_context",
+                "min_count": 1,
+                "name": "has_update_context"
+            },
+            {
+                "type": "tool_arg_matches",
+                "tool": "update_context",
+                "matches": {
+                    "file": "strategy",
+                    "action": "replace_section",
+                    "section": "## Sleep"
+                }
+            },
+            {"type": "no_tool_called", "tool": "run_sql", "name": "no_run_sql"}
+        ],
+        "notes": "At least one core case should validate action and section, not just file."
     },
-    "question": "Update my sleep target to 7.5 hours a night.",
-    "assertions": [
-      {
-        "type": "tool_called",
-        "tool": "update_context",
-        "min_count": 1,
-        "name": "has_update_context"
-      },
-      {
-        "type": "tool_arg_matches",
-        "tool": "update_context",
-        "matches": {
-          "file": "strategy",
-          "action": "replace_section",
-          "section": "## Sleep"
-        }
-      },
-      {
-        "type": "no_tool_called",
-        "tool": "run_sql",
-        "name": "no_run_sql"
-      }
-    ],
-    "notes": "At least one core case should validate action and section, not just file."
-  },
-  {
-    "id": "context_update_casual_question",
-    "suite": "core",
-    "category": "context_update",
-    "blueprint": "baseline",
-    "scenario_fn": "baseline",
-    "config": {
-      "prompt_file": "chat_prompt",
-      "max_tokens": 1024,
-      "tools": true
+    {
+        "id": "context_update_casual_question",
+        "suite": "core",
+        "category": "context_update",
+        "blueprint": "baseline",
+        "scenario_fn": "baseline",
+        "config": {"prompt_file": "chat_prompt", "max_tokens": 1024, "tools": true},
+        "question": "What was my HRV like on Monday?",
+        "assertions": [
+            {
+                "type": "no_tool_called",
+                "tool": "update_context",
+                "name": "no_update_context"
+            },
+            {"type": "no_tool_called", "tool": "run_sql", "name": "no_run_sql"}
+        ],
+        "notes": "Casual questions should not trigger durable context edits."
     },
-    "question": "What was my HRV like on Monday?",
-    "assertions": [
-      {
-        "type": "no_tool_called",
-        "tool": "update_context",
-        "name": "no_update_context"
-      },
-      {
-        "type": "no_tool_called",
-        "tool": "run_sql",
-        "name": "no_run_sql"
-      }
-    ],
-    "notes": "Casual questions should not trigger durable context edits."
-  },
-  {
-    "id": "context_update_injury",
-    "suite": "benchmark",
-    "category": "context_update",
-    "blueprint": "baseline",
-    "scenario_fn": "baseline",
-    "config": {
-      "prompt_file": "chat_prompt",
-      "max_tokens": 1024,
-      "tools": true
+    {
+        "id": "context_update_injury",
+        "suite": "benchmark",
+        "category": "context_update",
+        "blueprint": "baseline",
+        "scenario_fn": "baseline",
+        "config": {"prompt_file": "chat_prompt", "max_tokens": 1024, "tools": true},
+        "question": "I tweaked my right knee on that Wednesday run. It's a bit sore on the outside, especially going downstairs. Probably just IT band irritation.",
+        "assertions": [
+            {
+                "type": "tool_called",
+                "tool": "update_context",
+                "min_count": 1,
+                "name": "has_update_context"
+            },
+            {
+                "type": "tool_arg_matches",
+                "tool": "update_context",
+                "matches": {"file": ["me", "log"]}
+            },
+            {
+                "type": "text_present",
+                "patterns": [
+                    "re:(?i)(knee|IT\\s*band|injur|sore|careful|ease|rest|avoid|modify)"
+                ]
+            }
+        ],
+        "notes": "Injury updates should propose a durable context edit and give injury-aware advice."
     },
-    "question": "I tweaked my right knee on that Wednesday run. It's a bit sore on the outside, especially going downstairs. Probably just IT band irritation.",
-    "assertions": [
-      {
-        "type": "tool_called",
-        "tool": "update_context",
-        "min_count": 1,
-        "name": "has_update_context"
-      },
-      {
-        "type": "tool_arg_matches",
-        "tool": "update_context",
-        "matches": {
-          "file": [
-            "me",
-            "log"
-          ]
-        }
-      },
-      {
-        "type": "text_present",
-        "patterns": [
-          "re:(?i)(knee|IT\\s*band|injur|sore|careful|ease|rest|avoid|modify)"
-        ]
-      }
-    ],
-    "notes": "Injury updates should propose a durable context edit and give injury-aware advice."
-  },
-  {
-    "id": "chart_hrv_followup_turns",
-    "suite": "benchmark",
-    "category": "chart_generation",
-    "blueprint": "baseline",
-    "scenario_fn": "baseline",
-    "config": {
-      "prompt_file": "chat_prompt",
-      "max_tokens": 1536,
-      "tools": true
+    {
+        "id": "chart_hrv_followup_turns",
+        "suite": "benchmark",
+        "category": "chart_generation",
+        "blueprint": "baseline",
+        "scenario_fn": "baseline",
+        "config": {"prompt_file": "chat_prompt", "max_tokens": 1536, "tools": true},
+        "turns": [
+            {"role": "user", "content": "How has my HRV trended this week?"},
+            {
+                "role": "assistant",
+                "content": "It dipped mid-week and then bounced back by Saturday."
+            },
+            {"role": "user", "content": "Show me that as a chart."}
+        ],
+        "assertions": [
+            {"type": "chart_count", "count": 1},
+            {"type": "chart_renders"},
+            {"type": "no_tool_called", "tool": "run_sql", "name": "no_run_sql"},
+            {
+                "type": "no_tool_called",
+                "tool": "update_context",
+                "name": "no_update_context"
+            }
+        ],
+        "notes": "Turn-based follow-ups should work without losing reference resolution."
     },
-    "turns": [
-      {
-        "role": "user",
-        "content": "How has my HRV trended this week?"
-      },
-      {
-        "role": "assistant",
-        "content": "It dipped mid-week and then bounced back by Saturday."
-      },
-      {
-        "role": "user",
-        "content": "Show me that as a chart."
-      }
-    ],
-    "assertions": [
-      {
-        "type": "chart_count",
-        "count": 1
-      },
-      {
-        "type": "chart_renders"
-      },
-      {
-        "type": "no_tool_called",
-        "tool": "run_sql",
-        "name": "no_run_sql"
-      },
-      {
-        "type": "no_tool_called",
-        "tool": "update_context",
-        "name": "no_update_context"
-      }
-    ],
-    "notes": "Turn-based follow-ups should work without losing reference resolution."
-  },
-  {
-    "id": "context_update_conversational_filler",
-    "suite": "core",
-    "category": "context_update",
-    "blueprint": "baseline",
-    "scenario_fn": "baseline",
-    "config": {
-      "prompt_file": "chat_prompt",
-      "max_tokens": 1024,
-      "tools": true
+    {
+        "id": "context_update_conversational_filler",
+        "suite": "core",
+        "category": "context_update",
+        "blueprint": "baseline",
+        "scenario_fn": "baseline",
+        "config": {"prompt_file": "chat_prompt", "max_tokens": 1024, "tools": true},
+        "question": "That's interesting, thanks for the breakdown.",
+        "assertions": [
+            {
+                "type": "no_tool_called",
+                "tool": "update_context",
+                "name": "no_update_context"
+            },
+            {"type": "no_tool_called", "tool": "run_sql", "name": "no_run_sql"}
+        ],
+        "notes": "Conversational filler should not trigger any tool calls."
     },
-    "question": "That's interesting, thanks for the breakdown.",
-    "assertions": [
-      {
-        "type": "no_tool_called",
-        "tool": "update_context",
-        "name": "no_update_context"
-      },
-      {
-        "type": "no_tool_called",
-        "tool": "run_sql",
-        "name": "no_run_sql"
-      }
-    ],
-    "notes": "Conversational filler should not trigger any tool calls."
-  },
-  {
-    "id": "context_update_factual_statement",
-    "suite": "benchmark",
-    "category": "context_update",
-    "blueprint": "baseline",
-    "scenario_fn": "baseline",
-    "config": {
-      "prompt_file": "chat_prompt",
-      "max_tokens": 1024,
-      "tools": true
+    {
+        "id": "context_update_factual_statement",
+        "suite": "benchmark",
+        "category": "context_update",
+        "blueprint": "baseline",
+        "scenario_fn": "baseline",
+        "config": {"prompt_file": "chat_prompt", "max_tokens": 1024, "tools": true},
+        "question": "I ran 5K this morning, felt pretty good.",
+        "assertions": [
+            {
+                "type": "no_tool_called",
+                "tool": "update_context",
+                "name": "no_update_context"
+            }
+        ],
+        "notes": "A casual status update should not trigger a durable context edit."
     },
-    "question": "I ran 5K this morning, felt pretty good.",
-    "assertions": [
-      {
-        "type": "no_tool_called",
-        "tool": "update_context",
-        "name": "no_update_context"
-      }
-    ],
-    "notes": "A casual status update should not trigger a durable context edit."
-  }
+    {
+        "id": "chat_current_week_status_recap",
+        "suite": "benchmark",
+        "category": "chat_contract",
+        "blueprint": "baseline",
+        "scenario_fn": "baseline",
+        "config": {"prompt_file": "chat_prompt", "max_tokens": 1024, "tools": true},
+        "question": "How does my workout data look this week?",
+        "assertions": [
+            {"type": "no_tool_called", "tool": "run_sql", "name": "no_run_sql"},
+            {
+                "type": "no_tool_called",
+                "tool": "update_context",
+                "name": "no_update_context"
+            },
+            {"type": "word_count_max", "max_words": 150},
+            {
+                "type": "text_present",
+                "patterns": ["re:(?i)(this week|week so far|so far)"]
+            },
+            {
+                "type": "text_absent",
+                "patterns": [
+                    "re:\\b\\d+\\s*/\\s*\\d+\\s+runs?\\b",
+                    "re:\\b\\d+\\s*/\\s*\\d+\\s+lifts?\\b",
+                    "re:(?i)(compared to|better than|improvement over|back-loading|w1[0-9])"
+                ]
+            }
+        ],
+        "notes": "Simple current-week status questions should stay factual, tool-free, and avoid stale target fractions or unsolicited prior-week comparison."
+    }
 ]

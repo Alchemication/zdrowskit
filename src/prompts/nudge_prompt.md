@@ -39,7 +39,7 @@ not been told.
 
 {recent_nudges}
 
-## Recent Coach Recommendation
+## Latest Coach Session
 
 The most recent full `/coach` session, if any. This is the user's last
 explicit coaching touchpoint — distinct from the auto-generated
@@ -62,55 +62,29 @@ explicit coaching touchpoint — distinct from the auto-generated
 ## Recent Coaching History
 
 This is an auto-generated weekly digest of past coaching activity, separate
-from the `Recent Coach Recommendation` above (which is the latest single
+from the `Latest Coach Session` above (which is the latest single
 coach session).
 
 {history}
 
-## Health Data (JSON)
+## Health Data
 
-The JSON below contains **weekly summaries only** — no per-day breakdown.
-Use `run_sql` to query daily details, workout specifics, or historical data
-when the summary is insufficient.
+The section below is a compact markdown rendering of the current target
+week plus recent history. It is optimized for readability, not raw schema
+coverage.
 
-The summary contains these top-level keys:
+It includes:
 
-- `current_week.summary` — weekly aggregates plus a `today` snapshot with
-  `hrv_ms`, `resting_hr`, `recovery_index`, `steps`, `exercise_min`,
-  `sleep_status` (`tracked` / `not_tracked` / `pending`), and `workouts`
-  (only if logged today). Sleep totals appear only when `sleep_status ==
-  "tracked"`.
-- `current_week.summary.sleep_nights_tracked` /
-  `current_week.summary.sleep_nights_total` — compliance counts.
-- `current_week.summary.run_target` / `lift_target` — weekly targets.
-- `history` — list of prior weeks' summaries.
-- `week_complete` / `week_label` — flags for the current week.
+- a target-week summary with logged training counts and recovery/sleep context
+- a `Today` block plus recent day cards
+- short prior-week summaries for continuity
 
-If you need anything not in the summary (per-day details, specific workouts,
-historical comparisons), call `run_sql`.
+Use `run_sql` when you need exact workout rows, older daily detail, or
+historical comparisons beyond this compact view.
 
-```json
 {health_data}
-```
 
-### Database schema (for run_sql)
-
-**daily** — one row per calendar day, PK: `date` (YYYY-MM-DD)
-
-- Activity: `steps`, `distance_km`, `active_energy_kj`, `exercise_min`, `stand_hours`, `flights_climbed`
-- Cardiac: `resting_hr` (bpm), `hrv_ms` (SDNN ms), `walking_hr_avg` (bpm), `hr_day_min`, `hr_day_max`, `vo2max` (ml/kg/min, sparse), `recovery_index` (= hrv_ms / resting_hr)
-- Mobility: `walking_speed_kmh`, `walking_step_length_cm`, `walking_asymmetry_pct`, `walking_double_support_pct`, `running_stride_length_m`, `running_power_w`, `running_speed_kmh` (all sparse)
-
-**workout_all** — one row per session, FK: `date`. Has a `source` column (`'import'` or `'manual'`).
-
-- `type`, `category` (run/lift/walk/cycle/other), `duration_min`
-- `hr_min`/`hr_avg`/`hr_max`, `active_energy_kj`, `intensity_kcal_per_hr_kg`
-- `temperature_c`, `humidity_pct`
-- `gpx_distance_km`, `gpx_elevation_gain_m`, `gpx_avg_speed_ms`, `gpx_max_speed_p95_ms`
-- Pace: `duration_min / gpx_distance_km` = min/km (only when `gpx_distance_km IS NOT NULL`)
-- Speed: `gpx_avg_speed_ms * 3.6` = km/h
-
-**sleep_all** — one row per night, keyed by `date`. Has a `source` column (`'import'` or `'manual'`). Columns: `sleep_total_h`, `sleep_in_bed_h`, `sleep_efficiency_pct`, `sleep_deep_h`, `sleep_core_h`, `sleep_rem_h`, `sleep_awake_h`. Stored under **night-start date**. Stage columns are NULL for manual entries.
+{schema_reference}
 
 ---
 
@@ -192,7 +166,7 @@ mention a tracking gap if 3+ consecutive nights were missed.
 
 - **new_data**: New health data just synced. The "What actually changed"
   section above tells you exactly which records arrived — use that, don't
-  re-derive it from the JSON. Give one data-driven observation and one
+  re-derive it from the compact health-data section. Give one data-driven observation and one
   concrete suggestion for the rest of the day or tomorrow. Skip the obvious.
   If the new event is a completed prescribed session, focus on what that
   completion means now (recovery implications, what tomorrow should look
@@ -240,8 +214,8 @@ mention a tracking gap if 3+ consecutive nights were missed.
 
 Most nudges need no chart. Only include one when it genuinely helps make
 your point clearer than words alone. The `data` dict in chart code includes
-per-day data at `data["current_week"]["days"]` (richer than the summary JSON
-above).
+per-day data at `data["current_week"]["days"]` (richer than the compact
+health-data section above).
 
 <chart title="HRV This Week">
 import plotly.graph_objects as go

@@ -32,52 +32,24 @@ coach sessions; it is a long-term rolling summary.
 
 {history}
 
-## Health Data (JSON)
+## Health Data
 
-The JSON below contains **weekly summaries only** — no per-day breakdown.
-Use `run_sql` to query daily details, workout specifics, or historical data
-when the summary is insufficient for your analysis.
+The section below is a compact markdown rendering of the target week plus
+prior-week summaries. It includes weekly rollups and day cards, but it is
+still a summary layer rather than raw workout rows.
 
-The summary contains these top-level keys:
+It includes:
 
-- `current_week.summary` — weekly aggregates plus a `today` snapshot with
-  `hrv_ms`, `resting_hr`, `recovery_index`, `steps`, `exercise_min`,
-  `sleep_status` (`tracked` / `not_tracked` / `pending`), and `workouts`
-  (only if logged today). Sleep totals appear only when `sleep_status ==
-  "tracked"`.
-- `current_week.summary.sleep_nights_tracked` /
-  `current_week.summary.sleep_nights_total` — pre-computed compliance
-  counts; use these directly, do not recompute.
-- `current_week.summary.run_target` / `lift_target` — weekly targets.
-- `history` — list of prior weeks' summaries (use these for multi-week
-  trends without needing run_sql).
-- `week_complete` / `week_label` — flags for the current week.
+- a target-week summary with logged training counts and recovery/sleep context
+- day cards for the requested week window
+- prior-week summaries for multi-week context
 
-If you need anything not in the summary (per-day details, specific workouts,
-historical comparisons beyond `history`), call `run_sql`.
+Use `run_sql` when you need exact workout rows, precise day-level
+verification, or longer-history analysis beyond this compact view.
 
-```json
 {health_data}
-```
 
-### Database schema (for run_sql)
-
-**daily** — one row per calendar day, PK: `date` (YYYY-MM-DD)
-
-- Activity: `steps`, `distance_km`, `active_energy_kj`, `exercise_min`, `stand_hours`, `flights_climbed`
-- Cardiac: `resting_hr` (bpm), `hrv_ms` (SDNN ms), `walking_hr_avg` (bpm), `hr_day_min`, `hr_day_max`, `vo2max` (ml/kg/min, sparse), `recovery_index` (= hrv_ms / resting_hr)
-- Mobility: `walking_speed_kmh`, `walking_step_length_cm`, `walking_asymmetry_pct`, `walking_double_support_pct`, `running_stride_length_m`, `running_power_w`, `running_speed_kmh` (all sparse)
-
-**workout_all** — one row per session, FK: `date`. Has a `source` column (`'import'` or `'manual'`).
-
-- `type`, `category` (run/lift/walk/cycle/other), `duration_min`
-- `hr_min`/`hr_avg`/`hr_max`, `active_energy_kj`, `intensity_kcal_per_hr_kg`
-- `temperature_c`, `humidity_pct`
-- `gpx_distance_km`, `gpx_elevation_gain_m`, `gpx_avg_speed_ms`, `gpx_max_speed_p95_ms`
-- Pace: `duration_min / gpx_distance_km` = min/km (only when `gpx_distance_km IS NOT NULL`)
-- Speed: `gpx_avg_speed_ms * 3.6` = km/h
-
-**sleep_all** — one row per night, keyed by `date`. Has a `source` column (`'import'` or `'manual'`). Columns: `sleep_total_h`, `sleep_in_bed_h`, `sleep_efficiency_pct`, `sleep_deep_h`, `sleep_core_h`, `sleep_rem_h`, `sleep_awake_h`. Stored under **night-start date** (Mon row = Mon night's sleep). Stage columns are NULL for manual entries.
+{schema_reference}
 
 ---
 
@@ -86,10 +58,9 @@ historical comparisons beyond `history`), call `run_sql`.
 ### Tool-call discipline
 
 **You MUST call `run_sql` before drafting the Training Review section.** The
-health data JSON above contains weekly summaries only — it does NOT include
-per-workout pace, per-workout HR, per-day distance, or workout type. The
-Training Review template below requires all of those fields, so you cannot
-fill it from the summary alone.
+health data section above is a compact summary view — it does NOT provide
+the full per-workout rows and exact fields needed for the Training Review
+template below. You cannot fill that section safely from the summary alone.
 
 **When calling tools, emit only the tool call.** Do not narrate what you are
 about to query, why, or what you expect to find. The very next assistant
@@ -178,7 +149,7 @@ above for the Training Review and bulleted lists everywhere else.**
 Most reports need no chart. Include one only when a visual genuinely
 clarifies a trend or comparison better than words. The `data` dict in chart
 code includes per-day data at `data["current_week"]["days"]` (richer than
-the summary JSON) and `data["history"]` (weekly summary dicts).
+the compact health-data section) and `data["history"]` (weekly summary dicts).
 
 <chart title="HRV This Week">
 import plotly.graph_objects as go

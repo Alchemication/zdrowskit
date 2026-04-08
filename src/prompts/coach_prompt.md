@@ -106,33 +106,23 @@ assume the user has not been told.
 
 {recent_nudges}
 
-## Health Data (JSON)
+## Health Data
 
-The JSON below contains **weekly summaries only** — no per-day breakdown.
-Use `run_sql` to query daily details, workout specifics, or historical data
-when the summary is insufficient.
+The section below is a compact markdown rendering of the target week plus
+prior weeks. It includes summary-level day cards, not raw database rows.
 
-The summary contains these top-level keys:
+It includes:
 
-- `current_week.summary` — weekly aggregates plus a `today` snapshot with
-  `hrv_ms`, `resting_hr`, `recovery_index`, `steps`, `exercise_min`,
-  `sleep_status` (`tracked` / `not_tracked` / `pending`), and `workouts`
-  (only if logged today). Sleep totals appear only when `sleep_status ==
-  "tracked"`.
-- `current_week.summary.sleep_nights_tracked` /
-  `current_week.summary.sleep_nights_total` — pre-computed compliance
-  counts; use these directly, do not recompute.
-- `current_week.summary.run_target` / `lift_target` — weekly targets.
-- `history` — list of prior weeks' summaries (use these for multi-week
-  trends without needing run_sql).
-- `week_complete` / `week_label` — flags for the current week.
+- a target-week summary with logged training counts and recovery/sleep context
+- day cards for the requested week window
+- prior-week summaries for continuity
 
-If you need anything not in the summary (per-day details, specific workouts,
-historical comparisons beyond `history`), call `run_sql`.
+Use `run_sql` when you need longer-history verification, raw workout rows,
+or exact detail beyond this compact view.
 
-```json
 {health_data}
-```
+
+{schema_reference}
 
 ---
 
@@ -233,30 +223,11 @@ months of weekly summaries above — for example:
 - Personal records or milestones ("fastest 5K ever", "longest run streak")
 - Verifying a superlative claim before citing it
 
-Do NOT use `run_sql` for current-week data — it is already in the health
-data JSON above. Most reviews will NOT need SQL — only reach for it when
-the data above is insufficient to support a specific observation or
-proposed adjustment. Keep queries focused: use date filters and LIMIT.
-
-### Database Schema
-
-**daily** — one row per calendar day, PK: `date` (YYYY-MM-DD)
-
-- Activity: `steps`, `distance_km`, `active_energy_kj`, `exercise_min`, `stand_hours`, `flights_climbed`
-- Cardiac: `resting_hr` (bpm), `hrv_ms` (SDNN ms), `walking_hr_avg` (bpm), `hr_day_min` (bpm), `hr_day_max` (bpm), `vo2max` (ml/kg/min — sparse, only on run days), `recovery_index` (= hrv_ms / resting_hr, higher = better recovered)
-- Mobility: `walking_speed_kmh`, `walking_step_length_cm`, `walking_asymmetry_pct`, `walking_double_support_pct`, `stair_speed_up_ms`, `stair_speed_down_ms`, `running_stride_length_m`, `running_power_w`, `running_speed_kmh` (all sparse)
-
-**workout_all** — one row per session, FK: `date`. Has a `source` column (`'import'` or `'manual'`).
-
-- `type` (original name), `category` (normalised: run / lift / walk / cycle / other)
-- `duration_min`, `hr_min` / `hr_avg` / `hr_max` (bpm), `active_energy_kj`
-- `intensity_kcal_per_hr_kg`
-- `temperature_c`, `humidity_pct`
-- `gpx_distance_km`, `gpx_elevation_gain_m`, `gpx_avg_speed_ms`, `gpx_max_speed_p95_ms`
-
-Pace tip: `duration_min / gpx_distance_km` = min/km. Only meaningful when `gpx_distance_km IS NOT NULL`.
-
-**sleep_all** — one row per night, keyed by `date`. Has a `source` column (`'import'` or `'manual'`). Columns: `sleep_total_h`, `sleep_in_bed_h`, `sleep_efficiency_pct`, `sleep_deep_h`, `sleep_core_h`, `sleep_rem_h`, `sleep_awake_h`. Each day's sleep = the night before. Stage columns are NULL for manual entries.
+Do NOT use `run_sql` for a routine target-week recap — that context is
+already in the health data section above. Most reviews will NOT need SQL.
+Only reach for it when the compact view is insufficient to support a
+specific observation or proposed adjustment. Keep queries focused: use date
+filters and LIMIT.
 
 ---
 
