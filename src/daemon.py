@@ -1457,8 +1457,16 @@ class ZdrowskitDaemon:
 
         self._conversation.add("user", text)
 
-        # Send a placeholder so the user sees immediate feedback.
-        placeholder_id = self._poller.send_placeholder(reply_to_message_id=message_id)
+        # Send a placeholder so the user sees immediate feedback, and
+        # animate the trailing dots so they know the bot is alive while
+        # the LLM call is in flight.
+        typing_prefix = "Typing "
+        placeholder_id = self._poller.send_reply(
+            f"{typing_prefix}.", reply_to_message_id=message_id
+        )
+        stop_anim, anim_thread = self._start_placeholder_animation(
+            placeholder_id, prefix=typing_prefix
+        )
 
         try:
             from store import open_db
@@ -1469,6 +1477,7 @@ class ZdrowskitDaemon:
             finally:
                 conn.close()
         except Exception:
+            self._stop_placeholder_animation(stop_anim, anim_thread)
             logger.error("Chat LLM call failed", exc_info=True)
             if placeholder_id:
                 self._poller.edit_message(
@@ -1480,6 +1489,8 @@ class ZdrowskitDaemon:
                     reply_to_message_id=message_id,
                 )
             return
+
+        self._stop_placeholder_animation(stop_anim, anim_thread)
 
         reply = result.text
 
@@ -1523,6 +1534,51 @@ class ZdrowskitDaemon:
             self._propose_context_edit(edit, source="chat")
             break  # At most one context update per response
 
+    def _start_placeholder_animation(
+        self,
+        message_id: int | None,
+        *,
+        prefix: str = "",
+        frames: tuple[str, ...] = (".", "..", "..."),
+    ) -> tuple[threading.Event | None, threading.Thread | None]:
+        """Start a daemon thread that animates a placeholder message.
+
+        The thread cycles a small set of frames so the user knows a
+        long-running task is still alive. Safe to call with a None
+        message_id (no-op).
+
+        Args:
+            message_id: ID of the placeholder, or None to skip animation.
+            prefix: Optional text shown before the animated frame.
+            frames: Sequence of strings to cycle through. Defaults to
+                ``.``, ``..``, ``...``.
+
+        Returns:
+            ``(stop_event, thread)`` — pass both to
+            :meth:`_stop_placeholder_animation` once the task is done.
+        """
+        if message_id is None:
+            return None, None
+        stop = threading.Event()
+        thread = threading.Thread(
+            target=self._poller.animate_message,
+            args=(message_id, stop),
+            kwargs={"prefix": prefix, "frames": frames},
+            daemon=True,
+        )
+        thread.start()
+        return stop, thread
+
+    @staticmethod
+    def _stop_placeholder_animation(
+        stop: threading.Event | None, thread: threading.Thread | None
+    ) -> None:
+        """Signal the animation thread to stop and wait briefly for it."""
+        if stop is not None:
+            stop.set()
+        if thread is not None:
+            thread.join(timeout=1.5)
+
     def _handle_command(self, text: str, message_id: int) -> None:
         """Handle a Telegram bot /command.
 
@@ -1550,10 +1606,21 @@ class ZdrowskitDaemon:
                     return
                 week = raw_week
             label = "this week so far" if week == "current" else "last week"
-            self._poller.send_reply(
-                f"Running review for {label}…", reply_to_message_id=message_id
+            status_prefix = f"Running review for {label} "
+            status_id = self._poller.send_reply(
+                f"{status_prefix}.", reply_to_message_id=message_id
             )
-            self._run_review(week=week, skip_import=False)
+            stop_anim, anim_thread = self._start_placeholder_animation(
+                status_id, prefix=status_prefix
+            )
+            try:
+                self._run_review(week=week, skip_import=False)
+            finally:
+                self._stop_placeholder_animation(stop_anim, anim_thread)
+                if status_id is not None:
+                    self._poller.edit_message(
+                        status_id, f"\u2713 Review for {label} done."
+                    )
         elif cmd == "/coach":
             parts = text.split()
             week = "last"
@@ -1567,14 +1634,24 @@ class ZdrowskitDaemon:
                     return
                 week = raw_week
             label = "this week so far" if week == "current" else "last week"
-            self._poller.send_reply(
-                f"Running coaching review for {label}…",
-                reply_to_message_id=message_id,
+            status_prefix = f"Running coaching review for {label} "
+            status_id = self._poller.send_reply(
+                f"{status_prefix}.", reply_to_message_id=message_id
             )
-            # force=True so the user can retrigger on demand (e.g. if the
-            # Monday scheduled run was missed or silent-SKIPped and they
-            # want to try again).
-            self._run_coach(week=week, skip_import=False, force=True)
+            stop_anim, anim_thread = self._start_placeholder_animation(
+                status_id, prefix=status_prefix
+            )
+            try:
+                # force=True so the user can retrigger on demand (e.g. if the
+                # Monday scheduled run was missed or silent-SKIPped and they
+                # want to try again).
+                self._run_coach(week=week, skip_import=False, force=True)
+            finally:
+                self._stop_placeholder_animation(stop_anim, anim_thread)
+                if status_id is not None:
+                    self._poller.edit_message(
+                        status_id, f"\u2713 Coaching review for {label} done."
+                    )
         elif cmd == "/notify":
             args = text.split(maxsplit=1)
             request_text = args[1].strip() if len(args) > 1 else ""

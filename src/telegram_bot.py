@@ -193,6 +193,51 @@ class TelegramPoller:
             self.send_typing()
             stop.wait(4)
 
+    def animate_message(
+        self,
+        message_id: int,
+        stop: threading.Event,
+        *,
+        prefix: str = "",
+        frames: tuple[str, ...] = (".", "..", "..."),
+        interval: float = 0.9,
+    ) -> None:
+        """Animate a message by cycling frames after an optional prefix.
+
+        Edits the message every *interval* seconds, cycling through the
+        given *frames*. Stops when *stop* is set. Designed to run in a
+        daemon thread alongside a long-running task so the user sees the
+        placeholder is alive instead of a static character.
+
+        Args:
+            message_id: ID of the message to animate.
+            stop: Event that signals the loop to stop.
+            prefix: Optional text shown before the animated frame.
+            frames: Sequence of strings to cycle through. Defaults to
+                ``.``, ``..``, ``...``.
+            interval: Seconds between frames. Kept ≥ ~0.7s to respect
+                Telegram's per-chat edit rate limits.
+        """
+        url = f"{self._base_url}/editMessageText"
+        i = 0
+        while not stop.is_set():
+            text = f"{prefix}{frames[i % len(frames)]}"
+            payload = {
+                "chat_id": self._chat_id,
+                "message_id": message_id,
+                "text": text,
+            }
+            data = json.dumps(payload).encode("utf-8")
+            req = urllib.request.Request(
+                url, data=data, headers={"Content-Type": "application/json"}
+            )
+            try:
+                urllib.request.urlopen(req)  # noqa: S310
+            except Exception:
+                logger.debug("Animation edit failed", exc_info=True)
+            i += 1
+            stop.wait(interval)
+
     def get_updates(self, offset: int, timeout: int = 30) -> list[dict]:
         """Fetch new updates via long polling.
 
@@ -220,38 +265,6 @@ class TelegramPoller:
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             logger.debug("Telegram polling error: %s", exc)
             return []
-
-    def send_placeholder(self, reply_to_message_id: int | None = None) -> int | None:
-        """Send a '...' placeholder message and return its message ID.
-
-        The caller can later replace it with the real response via
-        :meth:`edit_message`.
-
-        Args:
-            reply_to_message_id: Optional message ID to reply to.
-
-        Returns:
-            The message_id of the placeholder, or None on failure.
-        """
-        url = f"{self._base_url}/sendMessage"
-        payload: dict = {
-            "chat_id": self._chat_id,
-            "text": "\u2026",  # ellipsis character
-        }
-        if reply_to_message_id is not None:
-            payload["reply_to_message_id"] = reply_to_message_id
-        data = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(
-            url, data=data, headers={"Content-Type": "application/json"}
-        )
-        try:
-            with urllib.request.urlopen(req) as resp:  # noqa: S310
-                body = json.loads(resp.read().decode("utf-8"))
-            if body.get("ok"):
-                return body["result"]["message_id"]
-        except Exception:
-            logger.debug("Failed to send placeholder", exc_info=True)
-        return None
 
     def edit_message(self, message_id: int, text: str) -> None:
         """Edit an existing message's text with HTML formatting.

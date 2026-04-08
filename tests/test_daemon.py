@@ -580,7 +580,7 @@ class TestTelegramCommands:
             daemon._handle_command("/review", 42)
 
         daemon._poller.send_reply.assert_called_once_with(
-            "Running review for last week…",
+            "Running review for last week .",
             reply_to_message_id=42,
         )
         args = cmd_insights.call_args.args[0]
@@ -603,7 +603,7 @@ class TestTelegramCommands:
             daemon._handle_command("/review current", 24)
 
         daemon._poller.send_reply.assert_called_once_with(
-            "Running review for this week so far…",
+            "Running review for this week so far .",
             reply_to_message_id=24,
         )
         args = cmd_insights.call_args.args[0]
