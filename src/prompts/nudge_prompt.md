@@ -226,26 +226,41 @@ your point clearer than words alone. The `data` dict in chart code includes
 per-day data at `data["current_week"]["days"]` (richer than the compact
 health-data section above).
 
-<chart title="HRV This Week">
+**Compute before you plot.** `np` is in scope and you are encouraged to
+use it. For noisy daily metrics like HRV or resting HR, a short rolling
+mean overlay reads better than raw points alone. Use
+`np.convolve(arr, np.ones(w)/w, mode="valid")` for a smoothed line, or
+`np.polyfit(x, y, 1)` for a linear trend. Skip the smoothing if you have
+fewer than 5 points; window size must be smaller than the data length.
+
+<chart title="HRV — Recent Days with 3d Trend">
+import numpy as np
 import plotly.graph_objects as go
 from datetime import datetime
-days = data["current_week"]["days"]
-dates = [datetime.strptime(d["date"], "%Y-%m-%d").strftime("%a %d") for d in days if d.get("hrv_ms")]
-hrv = [d.get("hrv_ms") for d in days if d.get("hrv_ms")]
-colors = ["#e74c3c" if v and v < 40 else "#2ecc71" if v and v > 55 else "#3498db" for v in hrv]
-fig = go.Figure(go.Scatter(x=dates, y=hrv, mode="lines+markers",
-    marker=dict(size=10, color=colors), line=dict(color="#3498db", width=2)))
+days = [d for d in data["current_week"]["days"] if d.get("hrv_ms")]
+dates = [datetime.strptime(d["date"], "%Y-%m-%d").strftime("%a %d") for d in days]
+hrv = np.array([d["hrv_ms"] for d in days], dtype=float)
+window = min(3, len(hrv))
+trend = np.convolve(hrv, np.ones(window)/window, mode="valid")
+trend_dates = dates[window-1:]
+fig = go.Figure([
+    go.Scatter(x=dates, y=hrv, mode="lines+markers",
+        marker=dict(size=10, color="#3498db"), name="daily"),
+    go.Scatter(x=trend_dates, y=trend, mode="lines",
+        line=dict(color="#e74c3c", width=2, dash="dash"), name="trend"),
+])
 fig.add_annotation(x=dates[-1], y=hrv[-1], text="Today",
     arrowhead=2, ax=0, ay=-30)
 fig.update_layout(template="{chart_theme}", title="HRV This Week",
     xaxis_title="", yaxis_title="ms", margin=dict(l=50, r=30, t=50, b=40))
 </chart>
 
-Chart rules: use `go` or `px`; produce a `fig` variable; `{chart_theme}`
-template; tight margins; color-code markers (red `#e74c3c` concerning, green
-`#2ecc71` good, blue `#3498db` neutral); use `fig.add_hline(line_dash="dash")`
-for baselines; `fig.add_annotation(arrowhead=2)` for callouts. X-axis labels
-short (`"Mon 23"` daily, `"W10"` weekly).
+Chart rules: use `go`, `px`, and `np` as needed; produce a `fig` variable;
+`{chart_theme}` template; tight margins; color-code markers (red `#e74c3c`
+concerning, green `#2ecc71` good, blue `#3498db` neutral); use
+`fig.add_hline(line_dash="dash")` for baselines;
+`fig.add_annotation(arrowhead=2)` for callouts. X-axis labels short
+(`"Mon 23"` daily, `"W10"` weekly).
 
 ---
 

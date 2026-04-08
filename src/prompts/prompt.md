@@ -158,7 +158,27 @@ above for the Training Review and bulleted lists everywhere else.**
 Most reports need no chart. Include one only when a visual genuinely
 clarifies a trend or comparison better than words. The `data` dict in chart
 code includes per-day data at `data["current_week"]["days"]` (richer than
-the compact health-data section) and `data["history"]` (weekly summary dicts).
+the compact health-data section) and `data["history"]` — a list of
+`{{"summary": <weekly summary dict>}}` items with fields like
+`week_label`, `total_run_km`, `run_count`, `lift_count`, `avg_hrv_ms`,
+`avg_resting_hr`, `avg_sleep_total_h`. The `week_label` is verbose
+(e.g. `"2026-W11 (2026-03-09 – 2026-03-15)"`) — use `.split()[0]` for a
+short axis tick.
+
+**Compute before you plot.** `np` is in scope and you are encouraged to
+use it. Weekly volume, HRV drift, and sleep duration almost always read
+better with a fitted trend or a smoothed overlay than raw bars/points
+alone. Reach for:
+
+- `np.polyfit(x, y, 1)` for a linear trend line on weekly volume or HRV
+- `np.convolve(arr, np.ones(w)/w, mode="valid")` for rolling means
+- z-scores against the user's baseline you cite in the prose
+- simple projections from a fit when calling out a trajectory
+
+Guard the math: skip the trend line if you have fewer than 5 points.
+Window size must be smaller than the data length.
+
+Simple example (raw daily HRV):
 
 <chart title="HRV This Week">
 import plotly.graph_objects as go
@@ -175,11 +195,32 @@ fig.update_layout(template="{chart_theme}", title="HRV This Week",
     xaxis_title="", yaxis_title="ms", margin=dict(l=50, r=30, t=50, b=40))
 </chart>
 
-Chart rules: produce a `fig` variable; use `go` or `px`; `{chart_theme}`
-template; tight margins; color-code markers (red `#e74c3c` concerning, green
-`#2ecc71` good, blue `#3498db` neutral); use `fig.add_hline(line_dash="dash")`
-for baselines/targets; `fig.add_annotation(arrowhead=2)` for callouts;
-short x-axis labels (`"Mon 23"` daily, `"W10"` weekly).
+With a fitted trend on multi-week run volume:
+
+<chart title="Weekly Run Volume — 8 Weeks with Trend">
+import numpy as np
+import plotly.graph_objects as go
+weeks = data["history"][-8:]
+labels = [w["summary"]["week_label"].split()[0] for w in weeks]
+km = np.array([w["summary"].get("total_run_km", 0) or 0 for w in weeks], dtype=float)
+x = np.arange(len(km))
+slope, intercept = np.polyfit(x, km, 1)
+fit = slope * x + intercept
+fig = go.Figure([
+    go.Bar(x=labels, y=km, marker_color="#3498db", name="km"),
+    go.Scatter(x=labels, y=fit, mode="lines",
+        line=dict(color="#e74c3c", width=2, dash="dash"), name="trend"),
+])
+fig.update_layout(template="{chart_theme}", title="Weekly Run Volume",
+    xaxis_title="", yaxis_title="km", margin=dict(l=50, r=30, t=50, b=40))
+</chart>
+
+Chart rules: produce a `fig` variable; use `go`, `px`, and `np` as needed;
+`{chart_theme}` template; tight margins; color-code markers (red `#e74c3c`
+concerning, green `#2ecc71` good, blue `#3498db` neutral); use
+`fig.add_hline(line_dash="dash")` for baselines/targets;
+`fig.add_annotation(arrowhead=2)` for callouts; short x-axis labels
+(`"Mon 23"` daily, `"W10"` weekly).
 
 ### Memory block
 

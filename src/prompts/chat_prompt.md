@@ -219,7 +219,21 @@ block is removed and rendered separately. So:
   inline.
 
 Use the `rows` variable — it contains all query results from this
-conversation turn as a list of dicts. Example:
+conversation turn as a list of dicts.
+
+**Compute before you plot.** `np` is in scope and you are encouraged to
+use it. Noisy daily series (HRV, resting HR, sleep, weight) almost always
+read better with a smoothed overlay than raw points alone. Reach for:
+
+- `np.convolve(arr, np.ones(w)/w, mode="valid")` for rolling means
+- `np.polyfit(x, y, 1)` for a linear trend line
+- z-scores against a baseline you cite in the prose
+- simple projections from a fit when the user asks "where am I heading"
+
+Guard the math: if you have fewer than 5 points, skip the trend line and
+plot raw markers. Window size must be smaller than the data length.
+
+Simple example (raw markers):
 
 <chart title="Resting HR — Last 4 Weeks">
 import plotly.graph_objects as go
@@ -234,10 +248,32 @@ fig.update_layout(template="{chart_theme}", title="Resting HR",
     xaxis_title="", yaxis_title="bpm", margin=dict(l=50, r=30, t=50, b=40))
 </chart>
 
-Chart rules: produce a `fig` variable; use `go` or `px` (`np` also
-available); `{chart_theme}` template; tight margins; color-code markers
-(red `#e74c3c` concerning, green `#2ecc71` good, blue `#3498db` neutral);
-use `fig.add_hline(line_dash="dash")` for baselines/targets;
+With a 7-day rolling overlay (preferred for noisy daily metrics):
+
+<chart title="Resting HR — 4 Weeks with 7d Trend">
+import numpy as np
+import plotly.graph_objects as go
+dates = [r["date"] for r in rows]
+hr = np.array([r["resting_hr"] for r in rows], dtype=float)
+window = 7
+trend = np.convolve(hr, np.ones(window)/window, mode="valid")
+trend_dates = dates[window-1:]
+fig = go.Figure([
+    go.Scatter(x=dates, y=hr, mode="markers",
+        marker=dict(size=8, color="#3498db"), name="daily"),
+    go.Scatter(x=trend_dates, y=trend, mode="lines",
+        line=dict(color="#e74c3c", width=2), name="7d avg"),
+])
+fig.add_hline(y=52, line_dash="dash", line_color="#aaa",
+    annotation_text="baseline", annotation_position="top left")
+fig.update_layout(template="{chart_theme}", title="Resting HR",
+    xaxis_title="", yaxis_title="bpm", margin=dict(l=50, r=30, t=50, b=40))
+</chart>
+
+Chart rules: produce a `fig` variable; use `go`, `px`, and `np` as needed;
+`{chart_theme}` template; tight margins; color-code markers (red
+`#e74c3c` concerning, green `#2ecc71` good, blue `#3498db` neutral); use
+`fig.add_hline(line_dash="dash")` for baselines/targets;
 `fig.add_annotation(arrowhead=2)` for callouts; short x-axis labels
 (`"Mon 23"` daily, `"W10"` weekly).
 
