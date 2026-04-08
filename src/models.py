@@ -187,8 +187,6 @@ class WeeklySummary:
         avg_sleep_core_h: Mean nightly Core/light sleep (hours).
         avg_sleep_rem_h: Mean nightly REM sleep (hours).
         avg_sleep_awake_h: Mean nightly awake time during sleep (hours).
-        run_consistency_pct: run_count / WEEKLY_RUN_TARGET * 100, capped at 100.
-        lift_consistency_pct: lift_count / WEEKLY_LIFT_TARGET * 100, capped at 100.
     """
 
     week_label: str  # "2026-W11 (2026-03-09 – 2026-03-15)"
@@ -230,6 +228,3 @@ class WeeklySummary:
     avg_sleep_core_h: float | None = None
     avg_sleep_rem_h: float | None = None
     avg_sleep_awake_h: float | None = None
-    # Consistency
-    run_consistency_pct: float = 0.0  # run_count / target * 100, capped at 100
-    lift_consistency_pct: float = 0.0

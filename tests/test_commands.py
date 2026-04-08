@@ -50,7 +50,7 @@ class TestCmdCoach:
         seen: dict[str, object] = {}
 
         def fake_build_messages(
-            context, health_data_json, baselines=None, week_complete=True
+            context, health_data_text, baselines=None, week_complete=True
         ):
             seen["week_complete"] = week_complete
             seen["review_facts"] = context["review_facts"]

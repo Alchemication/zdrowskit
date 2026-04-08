@@ -17,13 +17,9 @@
       "hrv_trend": "declining",
       "avg_sleep_total_h": 6.15,
       "avg_sleep_efficiency_pct": 88.6,
-      "run_consistency_pct": 33.3,
-      "lift_consistency_pct": 0.0,
       "sleep_nights_tracked": 4,
       "sleep_nights_total": 4,
       "sleep_not_tracked_dates": [],
-      "run_target": 2,
-      "lift_target": 2,
       "today": {
         "date": "2026-04-10",
         "hrv_ms": 41.5,

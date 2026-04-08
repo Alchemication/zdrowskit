@@ -1,9 +1,5 @@
 """Aggregate a list of DailySnapshots into a WeeklySummary.
 
-Targets (used for consistency % calculation):
-  WEEKLY_RUN_TARGET  = 2 runs/week
-  WEEKLY_LIFT_TARGET = 2 lifts/week
-
 Public API:
     summarise(snapshots) -- compute a WeeklySummary from a list of DailySnapshots
 
@@ -19,9 +15,6 @@ import statistics
 from datetime import date
 
 from models import DailySnapshot, WeeklySummary, WorkoutSnapshot
-
-WEEKLY_RUN_TARGET = 2
-WEEKLY_LIFT_TARGET = 2
 
 
 def _nonnull(values: list) -> list:
@@ -210,9 +203,6 @@ def summarise(snapshots: list[DailySnapshot]) -> WeeklySummary:
     avg_sleep_rem = _safe_mean([s.sleep_rem_h for s in snapshots])
     avg_sleep_awake = _safe_mean([s.sleep_awake_h for s in snapshots])
 
-    run_consistency = min(100.0, (len(runs) / WEEKLY_RUN_TARGET) * 100)
-    lift_consistency = min(100.0, (len(lifts) / WEEKLY_LIFT_TARGET) * 100)
-
     return WeeklySummary(
         week_label=_week_label(snapshots),
         run_count=len(runs),
@@ -266,6 +256,4 @@ def summarise(snapshots: list[DailySnapshot]) -> WeeklySummary:
         avg_sleep_awake_h=round(avg_sleep_awake, 2)
         if avg_sleep_awake is not None
         else None,
-        run_consistency_pct=round(run_consistency, 1),
-        lift_consistency_pct=round(lift_consistency, 1),
     )

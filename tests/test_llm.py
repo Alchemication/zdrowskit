@@ -25,7 +25,6 @@ from llm import (
     format_recent_nudges,
     load_context,
     render_health_data,
-    slim_for_prompt,
 )
 from models import DailySnapshot
 from store import store_snapshots
@@ -218,7 +217,9 @@ class TestRepoPrompts:
         soul = (PROMPTS_DIR / "soul.md").read_text(encoding="utf-8")
 
         assert "tool-call turn itself should be tool-only" in normalized
-        assert "final reply after the tool result must still answer the user" in normalized
+        assert (
+            "final reply after the tool result must still answer the user" in normalized
+        )
         assert "here's the chart" in normalized
         assert "here's the picture" in normalized
         assert "Good timing" in prompt
@@ -300,7 +301,7 @@ class TestRepoPrompts:
 
         msgs = build_messages(
             ctx,
-            health_data_json="{}",
+            health_data_text="{}",
             week_complete=False,
             today=date(2026, 4, 4),
         )
@@ -345,7 +346,7 @@ class TestBuildMessages:
             "me": "Adam",
             "strategy": "Run more",
         }
-        msgs = build_messages(ctx, health_data_json='{"data": 1}')
+        msgs = build_messages(ctx, health_data_text='{"data": 1}')
         assert len(msgs) == 2
         assert msgs[0]["role"] == "system"
         assert msgs[0]["content"] == "Be a coach."
@@ -355,27 +356,27 @@ class TestBuildMessages:
 
     def test_soul_not_provided_uses_default(self) -> None:
         ctx = {"soul": "(not provided)", "prompt": "Hello"}
-        msgs = build_messages(ctx, health_data_json="{}")
+        msgs = build_messages(ctx, health_data_text="{}")
         assert "no-nonsense" in msgs[0]["content"]
 
     def test_missing_soul_uses_default(self) -> None:
         ctx = {"prompt": "Hello"}
-        msgs = build_messages(ctx, health_data_json="{}")
+        msgs = build_messages(ctx, health_data_text="{}")
         assert "no-nonsense" in msgs[0]["content"]
 
     def test_unknown_placeholder_defaults(self) -> None:
         ctx = {"prompt": "Data: {health_data}, Unknown: {unknown_key}"}
-        msgs = build_messages(ctx, health_data_json='{"x":1}')
+        msgs = build_messages(ctx, health_data_text='{"x":1}')
         assert "(not provided)" in msgs[1]["content"]
 
     def test_baselines_injected(self) -> None:
         ctx = {"prompt": "Baselines: {baselines}"}
-        msgs = build_messages(ctx, health_data_json="{}", baselines="## HR: 52bpm")
+        msgs = build_messages(ctx, health_data_text="{}", baselines="## HR: 52bpm")
         assert "## HR: 52bpm" in msgs[1]["content"]
 
     def test_baselines_none_shows_not_computed(self) -> None:
         ctx = {"prompt": "Baselines: {baselines}"}
-        msgs = build_messages(ctx, health_data_json="{}", baselines=None)
+        msgs = build_messages(ctx, health_data_text="{}", baselines=None)
         assert "(not computed)" in msgs[1]["content"]
 
     def test_explicit_today_override_is_used(self) -> None:
@@ -384,7 +385,7 @@ class TestBuildMessages:
         }
         msgs = build_messages(
             ctx,
-            health_data_json="{}",
+            health_data_text="{}",
             week_complete=False,
             today=date(2026, 3, 25),
         )
@@ -396,7 +397,7 @@ class TestBuildMessages:
         ctx = {"prompt": "Facts: {review_facts}"}
         msgs = build_messages(
             ctx,
-            health_data_json="{}",
+            health_data_text="{}",
         )
         assert "Facts: (not provided)" in msgs[1]["content"]
 
@@ -1186,30 +1187,3 @@ class TestBuildLlmData:
         assert run_workout["pace_min_per_km"] == round(35.0 / 5.2, 2)
         assert run_workout["avg_hr"] == 155.0
         assert run_workout["elevation_gain_m"] == 45.0
-
-    @patch("llm.datetime")
-    @patch("llm.date")
-    def test_slim_for_prompt_strips_days(
-        self,
-        mock_date: MagicMock,
-        mock_datetime: MagicMock,
-        in_memory_db: sqlite3.Connection,
-        sample_snapshots: list[DailySnapshot],
-    ) -> None:
-        """slim_for_prompt removes per-day arrays but keeps summary."""
-        mock_date.today.return_value = date(2026, 3, 11)
-        mock_date.fromisoformat = date.fromisoformat
-        mock_datetime.now.return_value = datetime(2026, 3, 11, 14, 0)
-        store_snapshots(in_memory_db, sample_snapshots)
-        result = build_llm_data(in_memory_db, months=3)
-
-        # Full result has days
-        assert "days" in result["current_week"]
-
-        # Slim version does not
-        slim = slim_for_prompt(result)
-        assert "days" not in slim["current_week"]
-        assert slim["current_week"]["summary"] is not None
-
-        # Original is not mutated
-        assert "days" in result["current_week"]

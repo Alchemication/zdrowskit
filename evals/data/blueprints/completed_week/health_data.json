@@ -25,13 +25,9 @@
       "avg_sleep_core_h": 4.46,
       "avg_sleep_rem_h": 1.76,
       "avg_sleep_awake_h": 0.42,
-      "run_consistency_pct": 100.0,
-      "lift_consistency_pct": 100.0,
       "sleep_nights_tracked": 7,
       "sleep_nights_total": 7,
-      "sleep_not_tracked_dates": [],
-      "run_target": 2,
-      "lift_target": 2
+      "sleep_not_tracked_dates": []
     },
     "days": [
       {

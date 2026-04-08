@@ -87,8 +87,6 @@ def print_summary(snapshots: list[DailySnapshot], summary: WeeklySummary) -> Non
     print(
         f"\nWorkouts ({summary.run_count} runs / {summary.lift_count} lifts / {summary.walk_count} walks)"
     )
-    print(f"  Run consistency:   {fmt(summary.run_consistency_pct, '%', 0)}")
-    print(f"  Lift consistency:  {fmt(summary.lift_consistency_pct, '%', 0)}")
     print(f"  Total run km:      {fmt(summary.total_run_km, ' km')}")
     print(f"  Best pace:         {fmt(summary.best_pace_min_per_km, ' min/km')}")
     print(f"  Avg run HR:        {fmt(summary.avg_run_hr, ' bpm')}")

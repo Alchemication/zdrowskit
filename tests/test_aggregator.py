@@ -176,8 +176,6 @@ class TestSummarise:
         assert summary.avg_resting_hr is not None
         assert summary.avg_hrv_ms is not None
         assert summary.hrv_trend is not None
-        assert summary.run_consistency_pct == 50.0  # 1/2 * 100
-        assert summary.lift_consistency_pct == 50.0
 
     def test_empty_snapshots(self) -> None:
         summary = summarise([])
@@ -186,67 +184,6 @@ class TestSummarise:
         assert summary.avg_resting_hr is None
         assert summary.avg_hrv_ms is None
         assert summary.week_label == "unknown"
-
-    def test_consistency_caps_at_100(self) -> None:
-        """Exceeding weekly targets should cap at 100%, not go higher."""
-        snaps = [
-            DailySnapshot(
-                date="2026-03-09",
-                workouts=[
-                    WorkoutSnapshot(
-                        type="Outdoor Run",
-                        category="run",
-                        start_utc="2026-03-09T07:00:00Z",
-                        duration_min=30.0,
-                    ),
-                    WorkoutSnapshot(
-                        type="Traditional Strength Training",
-                        category="lift",
-                        start_utc="2026-03-09T17:00:00Z",
-                        duration_min=45.0,
-                    ),
-                ],
-            ),
-            DailySnapshot(
-                date="2026-03-10",
-                workouts=[
-                    WorkoutSnapshot(
-                        type="Outdoor Run",
-                        category="run",
-                        start_utc="2026-03-10T07:00:00Z",
-                        duration_min=30.0,
-                    ),
-                    WorkoutSnapshot(
-                        type="Traditional Strength Training",
-                        category="lift",
-                        start_utc="2026-03-10T17:00:00Z",
-                        duration_min=45.0,
-                    ),
-                ],
-            ),
-            DailySnapshot(
-                date="2026-03-11",
-                workouts=[
-                    WorkoutSnapshot(
-                        type="Outdoor Run",
-                        category="run",
-                        start_utc="2026-03-11T07:00:00Z",
-                        duration_min=30.0,
-                    ),
-                    WorkoutSnapshot(
-                        type="Traditional Strength Training",
-                        category="lift",
-                        start_utc="2026-03-11T17:00:00Z",
-                        duration_min=45.0,
-                    ),
-                ],
-            ),
-        ]
-        summary = summarise(snaps)
-        assert summary.run_count == 3
-        assert summary.lift_count == 3
-        assert summary.run_consistency_pct == 100.0
-        assert summary.lift_consistency_pct == 100.0
 
     def test_sleep_averages(self, sample_snapshots: list[DailySnapshot]) -> None:
         """Sleep averages should be computed from days that have sleep data."""

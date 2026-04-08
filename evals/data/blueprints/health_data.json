@@ -33,15 +33,11 @@
       "avg_sleep_core_h": 4.69,
       "avg_sleep_rem_h": 1.95,
       "avg_sleep_awake_h": 0.31,
-      "run_consistency_pct": 100.0,
-      "lift_consistency_pct": 100.0,
       "sleep_nights_tracked": 4,
       "sleep_nights_total": 5,
       "sleep_not_tracked_dates": [
         "2026-03-27"
       ],
-      "run_target": 2,
-      "lift_target": 2,
       "today": {
         "date": "2026-03-28",
         "hrv_ms": 64.70298292472671,
@@ -369,9 +365,7 @@
         "avg_sleep_deep_h": null,
         "avg_sleep_core_h": null,
         "avg_sleep_rem_h": null,
-        "avg_sleep_awake_h": null,
-        "run_consistency_pct": 0.0,
-        "lift_consistency_pct": 0.0
+        "avg_sleep_awake_h": null
       }
     },
     {
@@ -407,9 +401,7 @@
         "avg_sleep_deep_h": null,
         "avg_sleep_core_h": null,
         "avg_sleep_rem_h": null,
-        "avg_sleep_awake_h": null,
-        "run_consistency_pct": 100.0,
-        "lift_consistency_pct": 100.0
+        "avg_sleep_awake_h": null
       }
     },
     {
@@ -445,9 +437,7 @@
         "avg_sleep_deep_h": null,
         "avg_sleep_core_h": null,
         "avg_sleep_rem_h": null,
-        "avg_sleep_awake_h": null,
-        "run_consistency_pct": 50.0,
-        "lift_consistency_pct": 100.0
+        "avg_sleep_awake_h": null
       }
     },
     {
@@ -483,9 +473,7 @@
         "avg_sleep_deep_h": null,
         "avg_sleep_core_h": null,
         "avg_sleep_rem_h": null,
-        "avg_sleep_awake_h": null,
-        "run_consistency_pct": 0.0,
-        "lift_consistency_pct": 50.0
+        "avg_sleep_awake_h": null
       }
     },
     {
@@ -521,9 +509,7 @@
         "avg_sleep_deep_h": null,
         "avg_sleep_core_h": null,
         "avg_sleep_rem_h": null,
-        "avg_sleep_awake_h": null,
-        "run_consistency_pct": 50.0,
-        "lift_consistency_pct": 100.0
+        "avg_sleep_awake_h": null
       }
     },
     {
@@ -559,9 +545,7 @@
         "avg_sleep_deep_h": null,
         "avg_sleep_core_h": null,
         "avg_sleep_rem_h": null,
-        "avg_sleep_awake_h": null,
-        "run_consistency_pct": 50.0,
-        "lift_consistency_pct": 100.0
+        "avg_sleep_awake_h": null
       }
     },
     {
@@ -597,9 +581,7 @@
         "avg_sleep_deep_h": 0.0,
         "avg_sleep_core_h": 0.0,
         "avg_sleep_rem_h": 0.0,
-        "avg_sleep_awake_h": 0.12,
-        "run_consistency_pct": 100.0,
-        "lift_consistency_pct": 100.0
+        "avg_sleep_awake_h": 0.12
       }
     },
     {
@@ -635,9 +617,7 @@
         "avg_sleep_deep_h": null,
         "avg_sleep_core_h": null,
         "avg_sleep_rem_h": null,
-        "avg_sleep_awake_h": null,
-        "run_consistency_pct": 100.0,
-        "lift_consistency_pct": 100.0
+        "avg_sleep_awake_h": null
       }
     },
     {
@@ -673,9 +653,7 @@
         "avg_sleep_deep_h": null,
         "avg_sleep_core_h": null,
         "avg_sleep_rem_h": null,
-        "avg_sleep_awake_h": null,
-        "run_consistency_pct": 100.0,
-        "lift_consistency_pct": 100.0
+        "avg_sleep_awake_h": null
       }
     },
     {
@@ -711,9 +689,7 @@
         "avg_sleep_deep_h": null,
         "avg_sleep_core_h": null,
         "avg_sleep_rem_h": null,
-        "avg_sleep_awake_h": null,
-        "run_consistency_pct": 100.0,
-        "lift_consistency_pct": 100.0
+        "avg_sleep_awake_h": null
       }
     },
     {
@@ -749,9 +725,7 @@
         "avg_sleep_deep_h": 0.61,
         "avg_sleep_core_h": 4.33,
         "avg_sleep_rem_h": 1.24,
-        "avg_sleep_awake_h": 0.58,
-        "run_consistency_pct": 100.0,
-        "lift_consistency_pct": 100.0
+        "avg_sleep_awake_h": 0.58
       }
     },
     {
@@ -787,9 +761,7 @@
         "avg_sleep_deep_h": 0.67,
         "avg_sleep_core_h": 4.94,
         "avg_sleep_rem_h": 1.76,
-        "avg_sleep_awake_h": 0.36,
-        "run_consistency_pct": 100.0,
-        "lift_consistency_pct": 100.0
+        "avg_sleep_awake_h": 0.36
       }
     }
   ],

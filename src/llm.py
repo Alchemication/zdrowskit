@@ -17,7 +17,7 @@ Public API:
 Example:
     ctx = load_context(CONTEXT_DIR)
     rendered = render_health_data(health_data, prompt_kind="report")
-    msgs = build_messages(ctx, health_data_text=rendered)
+    msgs = build_messages(ctx, rendered)
     result = call_llm(msgs)
 """
 
@@ -211,9 +211,7 @@ def load_context(
 
 def build_messages(
     context: dict[str, str],
-    health_data_text: str | None = None,
-    *,
-    health_data_json: str | None = None,
+    health_data_text: str,
     baselines: str | None = None,
     week_complete: bool = True,
     today: date | None = None,
@@ -227,7 +225,6 @@ def build_messages(
     Args:
         context: Dict from load_context() with file stems as keys.
         health_data_text: Rendered health-data markdown for the prompt.
-        health_data_json: Backward-compatible alias for ``health_data_text``.
         baselines: Auto-computed baselines markdown, or None to skip.
         week_complete: Whether the reported week has fully elapsed.
         today: Override for the current date (defaults to today).
@@ -236,9 +233,6 @@ def build_messages(
     Returns:
         A list of message dicts ready for litellm.completion().
     """
-    if health_data_text is None:
-        health_data_text = health_data_json or "(not provided)"
-
     system_content = context.get("soul", DEFAULT_SOUL)
     if system_content == "(not provided)":
         system_content = DEFAULT_SOUL
@@ -348,7 +342,19 @@ def _format_metric(
     *,
     decimals: int = 1,
 ) -> str | None:
-    """Format a metric with units or return None when unavailable."""
+    """Format a metric with units, or return None when missing or zero.
+
+    Treats `None` and any value <= 0 as missing — weekly aggregates report
+    `0` for unlogged categories (e.g. `total_lift_min` on a no-lift week)
+    and we don't want to render them as `"0 min"`.
+    """
+    if value is None:
+        return None
+    try:
+        if float(value) <= 0:
+            return None
+    except (TypeError, ValueError):
+        return None
     rendered = _format_decimal(value, decimals=decimals)
     if rendered is None:
         return None
@@ -520,21 +526,12 @@ def _render_week_summary_block(summary: dict, *, prompt_kind: str) -> str:
     run_count = int(summary.get("run_count", 0) or 0)
     lift_count = int(summary.get("lift_count", 0) or 0)
     walk_count = int(summary.get("walk_count", 0) or 0)
-    if prompt_kind == "chat":
-        training_line = (
-            "- Logged so far: "
-            f"{run_count} {_pluralize(run_count, 'run')}, "
-            f"{lift_count} {_pluralize(lift_count, 'lift')}, "
-            f"{walk_count} {_pluralize(walk_count, 'walk')}."
-        )
-    else:
-        training_line = (
-            "- Logged so far: "
-            f"{run_count} {_pluralize(run_count, 'run')}, "
-            f"{lift_count} {_pluralize(lift_count, 'lift')}, "
-            f"{walk_count} {_pluralize(walk_count, 'walk')}."
-        )
-    lines.append(training_line)
+    lines.append(
+        "- Logged so far: "
+        f"{run_count} {_pluralize(run_count, 'run')}, "
+        f"{lift_count} {_pluralize(lift_count, 'lift')}, "
+        f"{walk_count} {_pluralize(walk_count, 'walk')}."
+    )
 
     running_parts: list[str] = []
     total_run_km = _format_metric(summary.get("total_run_km"), "km", decimals=1)
@@ -554,7 +551,7 @@ def _render_week_summary_block(summary: dict, *, prompt_kind: str) -> str:
 
     lift_parts: list[str] = []
     total_lift = _format_metric(summary.get("total_lift_min"), "min", decimals=0)
-    if total_lift and float(summary.get("total_lift_min", 0) or 0) > 0:
+    if total_lift:
         lift_parts.append(total_lift)
     avg_lift_hr = _format_metric(summary.get("avg_lift_hr"), "bpm", decimals=0)
     if avg_lift_hr:
@@ -564,13 +561,17 @@ def _render_week_summary_block(summary: dict, *, prompt_kind: str) -> str:
 
     activity_parts: list[str] = []
     avg_steps = _format_metric(summary.get("avg_steps"), "steps/day", decimals=0)
-    if avg_steps and int(summary.get("avg_steps", 0) or 0) > 0:
+    if avg_steps:
         activity_parts.append(avg_steps)
-    avg_exercise = _format_metric(summary.get("avg_exercise_min"), "exercise min/day")
-    if avg_exercise and float(summary.get("avg_exercise_min", 0) or 0) > 0:
+    avg_exercise = _format_metric(
+        summary.get("avg_exercise_min"), "exercise min/day", decimals=0
+    )
+    if avg_exercise:
         activity_parts.append(avg_exercise)
-    avg_energy = _format_metric(summary.get("avg_active_energy_kj"), "kJ/day")
-    if avg_energy and float(summary.get("avg_active_energy_kj", 0) or 0) > 0:
+    avg_energy = _format_metric(
+        summary.get("avg_active_energy_kj"), "kJ/day", decimals=0
+    )
+    if avg_energy:
         activity_parts.append(avg_energy)
     if activity_parts:
         lines.append(f"- Activity: {', '.join(activity_parts)}.")
@@ -642,7 +643,7 @@ def _render_history_week(summary: dict) -> str:
         parts.append(f"{walk_count} walk")
 
     total_run = _format_metric(summary.get("total_run_km"), "km", decimals=1)
-    if total_run and float(summary.get("total_run_km", 0) or 0) > 0:
+    if total_run:
         parts.append(total_run)
 
     avg_hrv = _format_metric(summary.get("avg_hrv_ms"), "ms")
@@ -662,33 +663,22 @@ def _render_history_week(summary: dict) -> str:
     return f"- {label}: {', '.join(parts)}."
 
 
-def _select_day_blocks(
+def _split_nudge_days(
     days: list[dict],
-    *,
-    prompt_kind: str,
-    week: str,
     today: date,
 ) -> tuple[list[dict], list[dict]]:
-    """Choose current and recent day blocks for prompt rendering."""
-    if not days:
-        return ([], [])
+    """Split days into (today, recent) for nudge rendering.
 
-    if prompt_kind == "nudge":
-        today_iso = today.isoformat()
-        today_blocks = [day for day in days if day.get("date") == today_iso]
-        if today_blocks:
-            recent = [day for day in days if day.get("date") != today_iso][-2:]
-        else:
-            today_blocks = []
-            recent = days[-3:]
-        return (today_blocks, recent)
-    if prompt_kind == "chat":
-        return (days, [])
-
-    # Report/coach views track the requested target week.
-    if week in {"current", "last"}:
-        return (days, [])
-    return (days, [])
+    If today has a row, show it on its own and surface the prior 2 days as
+    context. Otherwise, show the last 3 days as recent.
+    """
+    today_iso = today.isoformat()
+    today_blocks = [day for day in days if day.get("date") == today_iso]
+    if today_blocks:
+        recent = [day for day in days if day.get("date") != today_iso][-2:]
+    else:
+        recent = days[-3:]
+    return (today_blocks, recent)
 
 
 def render_health_data(
@@ -717,39 +707,25 @@ def render_health_data(
 
     sections = [_render_week_summary_block(summary, prompt_kind=prompt_kind)]
 
-    primary_days, secondary_days = _select_day_blocks(
-        days,
-        prompt_kind=prompt_kind,
-        week=week,
-        today=today,
-    )
+    def render_day_section(title: str, day_blocks: list[dict]) -> None:
+        if day_blocks:
+            sections.append(
+                f"{title}\n\n"
+                + "\n\n".join(_render_day_block(day) for day in day_blocks)
+            )
+
     if prompt_kind == "nudge":
-        if primary_days:
-            sections.append(
-                "### Today\n\n"
-                + "\n\n".join(_render_day_block(day) for day in primary_days)
-            )
-        if secondary_days:
-            sections.append(
-                "### Recent Days\n\n"
-                + "\n\n".join(_render_day_block(day) for day in secondary_days)
-            )
+        today_blocks, recent_blocks = _split_nudge_days(days, today)
+        render_day_section("### Today", today_blocks)
+        render_day_section("### Recent Days", recent_blocks)
     elif prompt_kind == "chat":
-        chat_days = primary_days + secondary_days
-        if chat_days:
-            sections.append(
-                "### This Week Days (Mon to today)\n\n"
-                + "\n\n".join(_render_day_block(day) for day in chat_days)
-            )
-    elif primary_days:
-        title = "### Target Week Days"
-        if week == "current":
-            title = "### Target Week Days (Mon to today)"
-        elif week == "last":
-            title = "### Target Week Days (Mon to Sun)"
-        sections.append(
-            title + "\n\n" + "\n\n".join(_render_day_block(day) for day in primary_days)
-        )
+        render_day_section("### This Week Days (Mon to today)", days)
+    else:
+        title = {
+            "current": "### Target Week Days (Mon to today)",
+            "last": "### Target Week Days (Mon to Sun)",
+        }.get(week, "### Target Week Days")
+        render_day_section(title, days)
 
     if history:
         history_lines = []
@@ -1335,25 +1311,6 @@ def build_llm_data(
         "week_complete": today > date.fromisoformat(week_end),
         "week_label": week_label,
     }
-
-
-def slim_for_prompt(health_data: dict) -> dict:
-    """Return a copy of health_data with per-day arrays stripped.
-
-    The compact version contains only weekly summaries, pre-computed
-    compliance stats, and the today snapshot. It is still useful for
-    charts, debugging, or tests that want a summary-only view.
-
-    The original dict (with ``days``) should still be passed to
-    ``render_chart()`` so chart code can access daily values.
-    """
-    import copy
-
-    slim = copy.deepcopy(health_data)
-    cw = slim.get("current_week")
-    if isinstance(cw, dict):
-        cw.pop("days", None)
-    return slim
 
 
 def _build_today_snapshot(days: list[dict], today_iso: str) -> dict | None:
