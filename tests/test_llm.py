@@ -209,6 +209,21 @@ class TestRepoPrompts:
         assert "Do **not** use target fractions" in prompt
         assert "not a full strength workout" in normalized
 
+    def test_chat_prompt_resolves_tool_turn_conflict_and_chart_scaffolding(
+        self,
+    ) -> None:
+        """Chat should require tool-only turns but non-empty final replies."""
+        prompt = (PROMPTS_DIR / "chat_prompt.md").read_text(encoding="utf-8")
+        normalized = " ".join(prompt.split())
+        soul = (PROMPTS_DIR / "soul.md").read_text(encoding="utf-8")
+
+        assert "tool-call turn itself should be tool-only" in normalized
+        assert "final reply after the tool result must still answer the user" in normalized
+        assert "here's the chart" in normalized
+        assert "here's the picture" in normalized
+        assert "Good timing" in prompt
+        assert "Respect the task-specific tool-turn protocol" in soul
+
     def test_chat_prompt_shows_plan_from_context_not_sql(self) -> None:
         """Asking 'what is my plan' should be answered from injected context."""
         prompt = (PROMPTS_DIR / "chat_prompt.md").read_text(encoding="utf-8")

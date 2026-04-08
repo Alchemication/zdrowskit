@@ -269,6 +269,11 @@ class TestTypedAssertions:
 
         assert result.passed is False
 
+    def test_pace_format_valid_rejects_invalid_seconds(self) -> None:
+        result = _assert_pace_format_valid("Easy runs have sat around 5:40-5:70/km.")
+
+        assert result.passed is False
+
     def test_no_markdown_table_rejects_pipe_rows(self) -> None:
         result = _assert_no_markdown_table("| Day | Sleep |\n| --- | --- |")
 

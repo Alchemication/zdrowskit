@@ -400,6 +400,42 @@
         "notes": "Historical trend questions should use SQL and produce a valid chart."
     },
     {
+        "id": "chat_running_speed_trend_chart_safe_text",
+        "suite": "benchmark",
+        "category": "chart_generation",
+        "blueprint": "baseline",
+        "scenario_fn": "baseline",
+        "config": {"prompt_file": "chat_prompt", "max_tokens": 1536, "tools": true},
+        "question": "Can you show me a trend for my running speed recently?",
+        "assertions": [
+            {
+                "type": "tool_called",
+                "tool": "run_sql",
+                "min_count": 1,
+                "name": "has_run_sql"
+            },
+            {"type": "chart_count", "count": 1},
+            {"type": "chart_renders"},
+            {"type": "pace_format_valid"},
+            {"type": "sql_valid"},
+            {
+                "type": "text_absent",
+                "patterns": [
+                    "re:(?i)here['’]?s\\s+the\\s+(chart|picture)",
+                    "re:(?i)chart\\s+(below|above)",
+                    "re:(?i)as\\s+you\\s+can\\s+see\\s+(below|above)"
+                ],
+                "name": "no_chart_scaffolding"
+            },
+            {
+                "type": "no_tool_called",
+                "tool": "update_context",
+                "name": "no_update_context"
+            }
+        ],
+        "notes": "Trend replies may include charts, but the prose must still stand alone after chart blocks are stripped."
+    },
+    {
         "id": "chart_not_for_single_value",
         "suite": "core",
         "category": "chart_generation",

@@ -1395,7 +1395,7 @@ def _assert_contains_memory_block(response: str, assertion: dict) -> AssertionRe
 
 
 def _assert_pace_format_valid(response: str) -> AssertionResult:
-    """Assert that pace is not expressed as decimal min/km.
+    """Assert that pace uses valid ``mm:ss/km`` formatting.
 
     Args:
         response: Final model response text.
@@ -1414,6 +1414,14 @@ def _assert_pace_format_valid(response: str) -> AssertionResult:
                 name="pace_format_valid",
                 passed=False,
                 detail=f"Matched bad pace format: {pattern}",
+            )
+    for match in re.finditer(r"\b(\d{1,2}):(\d{2})\s*/\s*km\b", response):
+        seconds = int(match.group(2))
+        if seconds >= 60:
+            return AssertionResult(
+                name="pace_format_valid",
+                passed=False,
+                detail=f"Invalid pace seconds in: {match.group(0)}",
             )
     return AssertionResult(name="pace_format_valid", passed=True)
 
