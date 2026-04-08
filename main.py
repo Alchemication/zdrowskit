@@ -84,6 +84,9 @@ Examples:
     uv run python main.py nudge --trigger log_update --email
         Send a nudge via email responding to a log.md update.
 
+    uv run python main.py nudge --trigger strategy_updated
+        Send a nudge via Telegram acknowledging a strategy.md edit.
+
     uv run python main.py nudge --trigger missed_session
         Send a missed-session reminder via Telegram.
 """
@@ -293,8 +296,7 @@ def main() -> None:
         choices=[
             "new_data",
             "log_update",
-            "goal_updated",
-            "plan_updated",
+            "strategy_updated",
             "missed_session",
         ],
         default="new_data",
@@ -402,17 +404,16 @@ def main() -> None:
     args = parser.parse_args()
 
     def _cli_coach(coach_args: argparse.Namespace) -> None:
-        """CLI wrapper for cmd_coach that surfaces proposed edits.
+        """CLI wrapper for cmd_coach.
 
-        The daemon consumes the returned edits as per-edit Approve/Reject
-        Telegram buttons. In CLI mode there is no such delivery path, so
-        we print a summary to stdout instead of silently dropping them.
+        cmd_coach already prints the bundled review (narrative + per-edit
+        diffs) to stdout. The daemon path consumes the returned proposals
+        as inline Accept/Reject buttons; in CLI mode there is no such
+        delivery, so we just append a footer reminding the user to run via
+        Telegram for actionable buttons.
         """
-        _, edits = cmd_coach(coach_args)
-        if edits:
-            print(f"\n---\nProposed context edits ({len(edits)}):")
-            for i, edit in enumerate(edits, start=1):
-                print(f"  {i}. [{edit.file}.md] {edit.action}: {edit.summary}")
+        _, proposals = cmd_coach(coach_args)
+        if proposals:
             print(
                 "\nNote: CLI mode only previews edits — run via the daemon "
                 "(/coach in Telegram) to get Approve/Reject buttons."

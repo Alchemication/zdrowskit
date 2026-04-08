@@ -48,7 +48,7 @@ class TestExtractContextUpdate:
         response = (
             "Updated.\n"
             "<context_update>"
-            '{"file": "goals", "action": "replace_section", '
+            '{"file": "strategy", "action": "replace_section", '
             '"section": "## Strength Goals", '
             '"content": "## Strength Goals\\n- Bench 100kg by June\\n", '
             '"summary": "Updated bench target"}'
@@ -96,7 +96,7 @@ class TestExtractContextUpdate:
     def test_replace_section_without_section_returns_none(self) -> None:
         response = (
             "<context_update>"
-            '{"file": "goals", "action": "replace_section", '
+            '{"file": "strategy", "action": "replace_section", '
             '"content": "x", "summary": "y"}'
             "</context_update>"
         )
@@ -185,12 +185,12 @@ class TestApplyEdit:
         assert (tmp_path / "log.md").read_text().strip() == "Brand new."
 
     def test_replace_section_found(self, tmp_path: Path) -> None:
-        md = tmp_path / "goals.md"
+        md = tmp_path / "strategy.md"
         md.write_text(
-            "# Goals\n\n## Running\n\nSub-50 10K\n\n## Strength\n\nBench 80kg\n"
+            "# Strategy\n\n## Running\n\nSub-50 10K\n\n## Strength\n\nBench 80kg\n"
         )
         edit = ContextEdit(
-            file="goals",
+            file="strategy",
             action="replace_section",
             section="## Strength",
             content="## Strength\n\nBench 100kg by June\n",
@@ -203,10 +203,10 @@ class TestApplyEdit:
         assert "Sub-50 10K" in result
 
     def test_replace_section_not_found_appends(self, tmp_path: Path) -> None:
-        md = tmp_path / "goals.md"
-        md.write_text("# Goals\n\n## Running\n\nSub-50 10K\n")
+        md = tmp_path / "strategy.md"
+        md.write_text("# Strategy\n\n## Running\n\nSub-50 10K\n")
         edit = ContextEdit(
-            file="goals",
+            file="strategy",
             action="replace_section",
             section="## Mobility",
             content="## Mobility\n\nDaily stretching\n",
@@ -219,10 +219,10 @@ class TestApplyEdit:
         assert "Daily stretching" in result
 
     def test_replace_section_not_found_strict_raises(self, tmp_path: Path) -> None:
-        md = tmp_path / "goals.md"
-        md.write_text("# Goals\n\n## Running\n\nSub-50 10K\n")
+        md = tmp_path / "strategy.md"
+        md.write_text("# Strategy\n\n## Running\n\nSub-50 10K\n")
         edit = ContextEdit(
-            file="goals",
+            file="strategy",
             action="replace_section",
             section="## Mobility",
             content="## Mobility\n\nDaily stretching\n",
@@ -264,9 +264,9 @@ class TestBuildEditPreview:
         assert "+## 2026-03-21" in preview
 
     def test_strict_preview_rejects_missing_section(self, tmp_path: Path) -> None:
-        (tmp_path / "plan.md").write_text("## Weekly Structure\n\nEasy week\n")
+        (tmp_path / "strategy.md").write_text("## Weekly Structure\n\nEasy week\n")
         edit = ContextEdit(
-            file="plan",
+            file="strategy",
             action="replace_section",
             section="## Sleep",
             content="## Sleep\n\n8 hours\n",
@@ -340,46 +340,45 @@ class TestExtractAllContextUpdates:
         response = (
             "Some reasoning.\n"
             "<context_update>"
-            '{"file": "plan", "action": "append", '
+            '{"file": "strategy", "action": "append", '
             '"content": "New rule.", "summary": "Added rule"}'
             "</context_update>"
         )
         edits = extract_all_context_updates(response)
         assert len(edits) == 1
-        assert edits[0].file == "plan"
+        assert edits[0].file == "strategy"
         assert edits[0].summary == "Added rule"
 
     def test_two_blocks(self) -> None:
         response = (
             "Reasoning for plan change.\n"
             "<context_update>"
-            '{"file": "plan", "action": "replace_section", '
+            '{"file": "strategy", "action": "replace_section", '
             '"section": "## Sleep", '
             '"content": "## Sleep\\n\\nTarget: 7 hours.\\n", '
             '"summary": "Increased sleep target to 7h"}'
             "</context_update>\n"
-            "Reasoning for goal change.\n"
+            "Reasoning for log entry.\n"
             "<context_update>"
-            '{"file": "goals", "action": "replace_section", '
-            '"section": "## Goals", '
-            '"content": "## Goals\\n\\n1. Sub-26 5K\\n", '
-            '"summary": "Adjusted 5K target to sub-26"}'
+            '{"file": "log", "action": "append", '
+            '"content": "## 2026-04-07\\n\\nFelt great today.\\n", '
+            '"summary": "Added log entry"}'
             "</context_update>"
         )
         edits = extract_all_context_updates(response)
         assert len(edits) == 2
-        assert edits[0].file == "plan"
-        assert edits[1].file == "goals"
+        assert edits[0].file == "strategy"
+        assert edits[1].file == "log"
 
     def test_mixed_valid_and_invalid(self) -> None:
         response = (
             "<context_update>"
-            '{"file": "plan", "action": "append", '
+            '{"file": "strategy", "action": "append", '
             '"content": "Valid.", "summary": "Good edit"}'
             "</context_update>\n"
             "<context_update>not valid json</context_update>\n"
             "<context_update>"
-            '{"file": "goals", "action": "append", '
+            '{"file": "log", "action": "append", '
             '"content": "Also valid.", "summary": "Another edit"}'
             "</context_update>"
         )
@@ -395,13 +394,13 @@ class TestExtractAllContextUpdates:
             '"content": "Nope.", "summary": "Bad"}'
             "</context_update>\n"
             "<context_update>"
-            '{"file": "plan", "action": "append", '
+            '{"file": "strategy", "action": "append", '
             '"content": "Yes.", "summary": "Good"}'
             "</context_update>"
         )
         edits = extract_all_context_updates(response)
         assert len(edits) == 1
-        assert edits[0].file == "plan"
+        assert edits[0].file == "strategy"
 
 
 # ---------------------------------------------------------------------------
@@ -435,7 +434,7 @@ class TestCoachFeedbackEntries:
         assert pending is None
 
         edit = ContextEdit(
-            file="plan",
+            file="strategy",
             action="replace_section",
             section="## Weekly Structure",
             content="## Weekly Structure\n\nLighter week\n",

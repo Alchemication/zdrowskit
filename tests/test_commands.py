@@ -27,7 +27,7 @@ class TestTelegramBotCommands:
             {"command": "review", "description": "Weekly report"},
             {
                 "command": "coach",
-                "description": "Coaching review (plan/goal proposals)",
+                "description": "Coaching review (strategy proposals)",
             },
             {"command": "add", "description": "Log a workout or sleep"},
             {"command": "status", "description": "Bot and data status"},
@@ -104,9 +104,9 @@ class TestCmdCoach:
             function=SimpleNamespace(
                 name="update_context",
                 arguments=(
-                    '{"file": "plan", "action": "replace_section", '
-                    '"section": "## Weekly Structure", '
-                    '"content": "## Weekly Structure\\n\\nOne lighter week.\\n", '
+                    '{"file": "strategy", "action": "replace_section", '
+                    '"section": "## Weekly Plan", '
+                    '"content": "## Weekly Plan\\n\\nOne lighter week.\\n", '
                     '"summary": "Lighten next week"}'
                 ),
             ),
@@ -162,15 +162,20 @@ class TestCmdCoach:
                 "commands.call_llm",
                 side_effect=[first_result, second_result],
             ),
+            patch(
+                "commands.build_edit_preview",
+                return_value="--- strategy.md\n+++ strategy.md (proposed)\n",
+            ),
         ):
-            visible_text, edits = cmd_coach(args)
+            cmd_result, proposals = cmd_coach(args)
 
         captured = capsys.readouterr()
         assert "Reduce run volume" in captured.out
-        assert len(edits) == 1
-        assert edits[0].summary == "Lighten next week"
-        assert edits[0].file == "plan"
-        assert edits[0].section == "## Weekly Structure"
+        assert len(proposals) == 1
+        assert proposals[0].edit.summary == "Lighten next week"
+        assert proposals[0].edit.file == "strategy"
+        assert proposals[0].edit.section == "## Weekly Plan"
+        assert "Reduce run volume" in (cmd_result.text or "")
 
 
 class TestCmdInsights:

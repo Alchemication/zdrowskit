@@ -51,7 +51,7 @@ DEFAULT_MODEL = "anthropic/claude-opus-4-6"
 # Blueprint loading
 # ---------------------------------------------------------------------------
 
-_CONTEXT_STEMS = ["me", "goals", "plan", "log", "history", "baselines"]
+_CONTEXT_STEMS = ["me", "strategy", "log", "history", "baselines"]
 
 
 def load_blueprints(

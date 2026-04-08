@@ -496,22 +496,45 @@ class TelegramPoller:
     ) -> int | None:
         """Send a message with an inline keyboard and HTML formatting.
 
+        Long text is automatically chunked: leading chunks are sent as
+        plain replies via :meth:`send_reply` and only the **final** chunk
+        carries the inline keyboard. This keeps the keyboard at the bottom
+        of the conversation where the user expects it. Returns the
+        message_id of the chunk that holds the keyboard so callers can
+        attach a feedback button via :meth:`edit_message_reply_markup`.
+
         Falls back to plain text if Telegram rejects the HTML.
 
         Args:
             text: Message text (markdown).
             buttons: Rows of inline keyboard buttons. Each button is a dict
                 with ``"text"`` and ``"callback_data"`` keys.
-            reply_to_message_id: Optional message ID to reply to.
+            reply_to_message_id: Optional message ID to reply to (applied
+                to the first chunk only).
 
         Returns:
-            The message_id of the sent message, or None on failure.
+            The message_id of the chunk holding the keyboard, or None on
+            failure.
         """
         html_text = md_to_telegram_html(text)
+        html_chunks = chunk_text(html_text)
+        plain_chunks = chunk_text(text)
+
+        # Send all but the last chunk as plain replies. send_reply already
+        # handles HTML/plain fallback and chunk reflow internally, so we hand
+        # it the original markdown for chunks 0..n-2 and let it convert.
+        if len(plain_chunks) > 1:
+            leading_plain = "\n\n".join(plain_chunks[:-1])
+            self.send_reply(leading_plain, reply_to_message_id=reply_to_message_id)
+            reply_to_message_id = None  # Only attach reply to the first chunk.
+
+        final_html = html_chunks[-1] if html_chunks else html_text
+        final_plain = plain_chunks[-1] if plain_chunks else text
+
         url = f"{self._base_url}/sendMessage"
         payload: dict = {
             "chat_id": self._chat_id,
-            "text": html_text,
+            "text": final_html,
             "parse_mode": "HTML",
             "disable_web_page_preview": True,
             "reply_markup": {"inline_keyboard": buttons},
@@ -529,7 +552,7 @@ class TelegramPoller:
                 return body["result"]["message_id"]
         except urllib.error.HTTPError:
             logger.warning("HTML keyboard message failed, retrying plain text")
-            payload["text"] = text
+            payload["text"] = final_plain
             del payload["parse_mode"]
             data = json.dumps(payload).encode("utf-8")
             req = urllib.request.Request(

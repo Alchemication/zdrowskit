@@ -29,8 +29,7 @@ _BLUEPRINTS_DIR = Path(__file__).resolve().parent / "blueprints"
 
 _CONTEXT_FILES = [
     "me.md",
-    "goals.md",
-    "plan.md",
+    "strategy.md",
     "log.md",
     "history.md",
     "baselines.md",

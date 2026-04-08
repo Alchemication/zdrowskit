@@ -11,11 +11,8 @@ week clearly and help the user understand what happened and what to do next.
 ## About the User
 {me}
 
-## Their Goals
-{goals}
-
-## Current Training Plan
-{plan}
+## Strategy (goals + weekly plan + diet + sleep)
+{strategy}
 
 ## Their Baselines (auto-computed from DB)
 {baselines}
@@ -112,8 +109,9 @@ A typical opening sequence:
 
 ### Report sections
 
-Analyze the health data above in context of the user's profile, goals, plan,
-and their own notes. Produce a report with these sections:
+Analyze the health data above in context of the user's profile, strategy
+(goals + weekly plan + diet + sleep), and their own notes. Produce a report
+with these sections:
 
 1. **Week at a Glance** — 2-3 sentence executive summary of the week.
 2. **Training Review** — did they hit the plan? What deviated and why?

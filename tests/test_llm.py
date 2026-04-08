@@ -84,7 +84,7 @@ class TestLoadContext:
     def test_optional_files_default(self, tmp_path: Path) -> None:
         (tmp_path / "prompt.md").write_text("template")
         ctx = load_context(tmp_path, prompts_dir=tmp_path)
-        assert ctx["goals"] == "(not provided)"
+        assert ctx["strategy"] == "(not provided)"
         assert ctx["log"] == "(not provided)"
 
     def test_history_trimmed(self, tmp_path: Path) -> None:
@@ -138,7 +138,7 @@ class TestRepoPrompts:
         prompt = (PROMPTS_DIR / "nudge_prompt.md").read_text(encoding="utf-8")
         normalized = " ".join(prompt.split())
         assert "It is not a summary of the latest sync." in normalized
-        assert "does not revise long-term goals or the training plan" in normalized
+        assert "does not revise the user's strategy" in normalized
         # The redundancy check now lives in the ordered SKIP checklist.
         assert "Recent Nudges Sent section already" in normalized
         assert "## Recent Nudges Sent" in prompt
@@ -167,15 +167,12 @@ class TestRepoPrompts:
             carveout_pos < redundancy_pos < coach_pos < trigger_pos < materiality_pos
         ), "SKIP checklist must run carve-out first, materiality last"
 
-    def test_coach_prompt_states_plan_goal_review_role(self) -> None:
+    def test_coach_prompt_states_strategy_review_role(self) -> None:
         prompt = (PROMPTS_DIR / "coach_prompt.md").read_text(encoding="utf-8")
         normalized = " ".join(prompt.split())
-        assert (
-            "weekly review of whether the user's current training plan and"
-            in normalized
-        )
+        assert "weekly review of whether the user's current strategy" in normalized
         assert "not a short reactive notification" in normalized
-        assert "Do not propose edits to any other files." in prompt
+        assert "Do not propose edits to any other files." in normalized
         assert "## Recent Coaching History" in prompt
 
     def test_coach_prompt_has_skip_branch_for_no_change_weeks(self) -> None:
@@ -216,6 +213,24 @@ class TestRepoPrompts:
         assert "Scheduled-session carve-out" in normalized
         assert "session scheduled for today" in normalized
         assert "MUST restate today's session" in normalized
+
+    def test_nudge_prompt_strategy_updated_blocks_cheerleader_acknowledgment(
+        self,
+    ) -> None:
+        """The strategy_updated branch must SKIP on positive-only acks.
+
+        Regression guard: previously the prompt told the model to "confirm
+        it looks solid", which led to a celebratory follow-up after every
+        coach accept. Manual edits should get the same silent treatment as
+        accept-side coach edits unless there's concrete tension or a
+        next-action correction to surface.
+        """
+        prompt = (PROMPTS_DIR / "nudge_prompt.md").read_text(encoding="utf-8")
+        normalized = " ".join(prompt.split())
+        assert "**strategy_updated**" in normalized
+        assert "not** to congratulate the change" in normalized
+        assert '"looks solid"' in normalized
+        assert "If the only thing you would say is positive" in normalized
 
     def test_notify_prompt_requires_json_only_output(self) -> None:
         prompt = (PROMPTS_DIR / "notify_prompt.md").read_text(encoding="utf-8")
@@ -277,9 +292,9 @@ class TestBuildMessages:
     def test_basic_structure(self) -> None:
         ctx = {
             "soul": "Be a coach.",
-            "prompt": "Report for {me} on {today}. Goals: {goals}",
+            "prompt": "Report for {me} on {today}. Strategy: {strategy}",
             "me": "Adam",
-            "goals": "Run more",
+            "strategy": "Run more",
         }
         msgs = build_messages(ctx, health_data_json='{"data": 1}')
         assert len(msgs) == 2

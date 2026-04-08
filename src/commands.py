@@ -10,7 +10,7 @@ Public API:
     cmd_llm_log  — query LLM call history from the database.
     cmd_daemon_restart — restart the launchd daemon service.
     cmd_daemon_stop    — stop the launchd daemon service.
-    cmd_coach  — generate coaching proposals for plan/goal updates.
+    cmd_coach  — generate coaching proposals for strategy updates.
     cmd_telegram_setup — register bot commands for Telegram autocomplete.
 
 Example:
@@ -64,7 +64,7 @@ from llm import (
     slim_for_prompt,
 )
 from charts import ChartResult, extract_charts, render_chart, strip_charts
-from context_edit import ContextEdit
+from context_edit import ContextEdit, EditPreviewError, build_edit_preview
 from notify import send_email, send_telegram, send_telegram_photo, send_telegram_report
 from notification_prefs import (
     DEFAULT_NOTIFICATION_PREFS,
@@ -134,6 +134,19 @@ class CommandResult:
     telegram_message_id: int | None = None
 
 
+@dataclass
+class CoachProposal:
+    """A validated coach edit ready to be presented to the user.
+
+    Attributes:
+        edit: The proposed ContextEdit.
+        preview: Pre-rendered unified-diff preview string for the edit.
+    """
+
+    edit: ContextEdit
+    preview: str
+
+
 # ---------------------------------------------------------------------------
 # Private helpers
 # ---------------------------------------------------------------------------
@@ -169,8 +182,7 @@ def _print_explain(
     all_names = [
         "soul",
         "me",
-        "goals",
-        "plan",
+        "strategy",
         "log",
         "history",
         "coach_feedback",
@@ -395,6 +407,32 @@ def _looks_like_nonfinal_nudge(text: str) -> bool:
         r"\bwhat(?:'s| is) actually new\b",
     )
     return any(re.search(pattern, normalized) for pattern in meta_patterns)
+
+
+def _extract_strategy_sections(strategy_md: str) -> list[str]:
+    """Return the ordered list of `## ` headings inside strategy.md.
+
+    The coach prompt injects this list so the model only proposes
+    `replace_section` edits against headings that actually exist, eliminating
+    the section-name hallucination failure mode that surfaced when plan.md and
+    goals.md were separate files.
+
+    Args:
+        strategy_md: Raw text of strategy.md (or "(not provided)").
+
+    Returns:
+        Ordered list of full heading lines, e.g. ["## Goals — Current focus",
+        "## Weekly Plan", ...]. Empty if the file is missing or has no
+        level-2 headings.
+    """
+    if not strategy_md or strategy_md == "(not provided)":
+        return []
+    headings: list[str] = []
+    for line in strategy_md.splitlines():
+        stripped = line.rstrip()
+        if stripped.startswith("## ") and not stripped.startswith("### "):
+            headings.append(stripped)
+    return headings
 
 
 def _save_baselines(context_dir: Path, baselines: str) -> None:
@@ -939,8 +977,11 @@ def cmd_context(args: argparse.Namespace) -> None:
     # owner: "you" = user-edited, "auto" = system-managed, "you + auto" = both
     context_files = [
         ("me.md", "you", "Your physical profile — age, weight, injuries, pace zones"),
-        ("goals.md", "you", "Your fitness goals with timelines"),
-        ("plan.md", "you", "Weekly training schedule, diet, sleep targets"),
+        (
+            "strategy.md",
+            "you",
+            "Goals, weekly training plan, diet, and sleep targets in one file",
+        ),
         ("log.md", "you", "Weekly journal — why things happened"),
         ("baselines.md", "auto", "Auto-computed rolling averages from DB"),
         ("history.md", "auto", "LLM memory — appended after each insights run"),
@@ -1225,8 +1266,7 @@ def cmd_nudge(
               months, and optional recent_nudges attributes.
         trigger_type: What triggered the nudge — overrides args.trigger when
             called programmatically (e.g. from the daemon). One of:
-            "new_data", "log_update", "goal_updated", "plan_updated",
-            "missed_session".
+            "new_data", "log_update", "strategy_updated", "missed_session".
         reply_markup: Optional Telegram reply markup (e.g. feedback keyboard)
             attached to the last message chunk.
 
@@ -1393,8 +1433,7 @@ def cmd_nudge(
         "new_data": "\U0001f4ca Data Sync",
         "missed_session": "\U0001f3cb\ufe0f Missed Session",
         "log_update": "\U0001f4dd Log Update",
-        "goal_updated": "\U0001f3af Goal Update",
-        "plan_updated": "\U0001f4cb Plan Update",
+        "strategy_updated": "\U0001f9ed Strategy Update",
     }
     header = _TRIGGER_HEADERS.get(
         _trigger, f"\U0001f514 {_trigger.replace('_', ' ').title()}"
@@ -1429,23 +1468,38 @@ def cmd_nudge(
 
 def cmd_coach(
     args: argparse.Namespace,
-    reply_markup: dict | None = None,
-) -> tuple[CommandResult, list[ContextEdit]]:
-    """Generate coaching proposals for plan/goal updates.
+) -> tuple[CommandResult, list[CoachProposal]]:
+    """Generate coaching proposals for strategy.md updates.
 
-    Reviews the week's data against current plan and goals, and proposes
-    concrete edits via the ``update_context`` tool. Proposals are returned
-    so the daemon can present them as Approve/Reject buttons in Telegram.
+    Reviews the week's data against the current strategy (goals + weekly plan
+    + diet + sleep) and proposes concrete edits via the ``update_context``
+    tool. Returns the validated proposals so the daemon can present them as
+    Approve/Reject buttons inside a single bundled Telegram message.
+
+    Behavior notes:
+        - Narrative text is accumulated across **all** tool-loop iterations
+          (not just the last one), so multi-iteration reviews don't strand
+          their reasoning. The bundled `CommandResult.text` is the full
+          narrative followed by per-edit summaries and diff previews — the
+          same content is what gets `print()`ed for CLI use.
+        - Edits are validated against the current strategy.md via
+          `build_edit_preview` immediately, and any edit whose section
+          heading does not exist (the "## Weekly Plan" hallucination case)
+          is dropped with a logger.warning rather than surfaced as an ugly
+          "Skipped invalid suggestion…" message to the user.
+        - Email + telegram delivery is the daemon's responsibility now;
+          this function only builds the bundled text and returns the
+          validated proposals.
 
     Args:
-        args: Parsed CLI arguments with db, model, email, telegram,
-              and months attributes.
-        reply_markup: Optional Telegram reply markup (e.g. feedback keyboard)
-            attached to the last message chunk.
+        args: Parsed CLI arguments with db, model, week, months, and
+            (optionally) recent_nudges and reasoning_effort.
 
     Returns:
-        A tuple of (CommandResult, list_of_edits). The CommandResult contains
-        the coaching text, llm_call_id, and telegram_message_id.
+        A tuple of (CommandResult, list_of_proposals). For SKIP, text is
+        None and proposals is empty. Otherwise text holds the bundled
+        narrative + proposal summaries (also `print()`ed to stdout) and
+        proposals contains one CoachProposal per validated edit.
     """
     from context_edit import context_edit_from_tool_call
     from llm import context_update_tool
@@ -1475,6 +1529,14 @@ def cmd_coach(
         week_complete=week_complete,
     )
 
+    # Inject the live list of strategy.md section headings so the model only
+    # proposes replace_section edits against headings that actually exist.
+    strategy_sections = _extract_strategy_sections(context.get("strategy", ""))
+    if strategy_sections:
+        context["strategy_sections"] = "\n".join(f"- `{h}`" for h in strategy_sections)
+    else:
+        context["strategy_sections"] = "(strategy.md has no level-2 sections)"
+
     # Cross-message awareness: inject recent nudges
     recent_nudge_entries: list[dict] = getattr(args, "recent_nudges", [])
     if recent_nudge_entries:
@@ -1502,8 +1564,9 @@ def cmd_coach(
         sys.exit(1)
 
     model = getattr(args, "model", DEFAULT_MODEL)
-    tools = run_sql_tool() + context_update_tool(allowed_files=["plan", "goals"])
-    edits: list[ContextEdit] = []
+    tools = run_sql_tool() + context_update_tool(allowed_files=["strategy"])
+    raw_edits: list[ContextEdit] = []
+    narrative_parts: list[str] = []
     max_iterations = MAX_TOOL_ITERATIONS_COACH
     reasoning_effort = _normalize_reasoning_effort(
         getattr(args, "reasoning_effort", "medium")
@@ -1539,6 +1602,15 @@ def cmd_coach(
                 logger.error("LLM call failed: %s: %s", err_name, e)
             sys.exit(1)
 
+        # Capture this iteration's narrative text before we move on. Without
+        # this accumulation the closing paragraph of a multi-iteration review
+        # would be the only thing presented to the user — earlier rationale
+        # paragraphs (which sit on iterations that triggered tool calls) would
+        # be silently dropped.
+        iter_text = (result.text or "").strip()
+        if iter_text and iter_text != "SKIP":
+            narrative_parts.append(iter_text)
+
         if not result.tool_calls:
             break
 
@@ -1556,7 +1628,7 @@ def cmd_coach(
             if fn_name == "update_context":
                 edit = context_edit_from_tool_call(tc)
                 if edit:
-                    edits.append(edit)
+                    raw_edits.append(edit)
                 tool_result = "Proposed. User will be asked to confirm."
             elif fn_name == "run_sql":
                 logger.info("Coach SQL: %s", args_dict.get("query", "")[:200])
@@ -1608,62 +1680,100 @@ def cmd_coach(
         except Exception as e:
             logger.error("Coach final synthesis call failed: %s", e)
             sys.exit(1)
+        synthesis_text = (result.text or "").strip()
+        if synthesis_text and synthesis_text != "SKIP":
+            narrative_parts.append(synthesis_text)
 
-    raw_text = (result.text or "").strip()
+    narrative = "\n\n".join(part for part in narrative_parts if part).strip()
 
-    # SKIP short-circuit: when no plan/goal changes are warranted, the model
-    # responds with the single token "SKIP" (mirroring the nudge SKIP path).
-    # Nothing is sent to the user and no edits are emitted — the coach is
-    # silent on no-change weeks. The weekly insights report already covered
-    # the week's analysis, so a redundant "plan is working" message would be
-    # noise. The same holds for an empty final text with no edits — nothing
-    # to say, nothing to send.
-    if (raw_text == "SKIP" or not raw_text) and not edits:
-        logger.info("Coach returned SKIP — no plan/goal changes warranted")
+    # Validate edits against the current strategy.md. Drop any edit that
+    # cannot preview cleanly (e.g. hallucinated section headings) — log a
+    # warning but do not surface to the user. The tightened coach prompt
+    # injects the live section list so this should be rare; this is a
+    # defense-in-depth backstop.
+    proposals: list[CoachProposal] = []
+    for edit in raw_edits:
+        try:
+            preview = build_edit_preview(CONTEXT_DIR, edit, strict=True)
+        except EditPreviewError as exc:
+            logger.warning(
+                "Dropping invalid coach edit for %s.md (section=%r): %s",
+                edit.file,
+                edit.section,
+                exc,
+            )
+            continue
+        proposals.append(CoachProposal(edit=edit, preview=preview))
+
+    # SKIP short-circuit: when no usable proposals exist and the narrative is
+    # empty (or the literal "SKIP"), the coach is silent. The weekly insights
+    # report already covered the week; a "no changes warranted" message would
+    # be redundant noise. The /coach Telegram trigger handles its own
+    # acknowledgment for manual runs.
+    if not proposals and not narrative:
+        logger.info("Coach returned SKIP — no strategy changes warranted")
         return (
             CommandResult(text=None, llm_call_id=result.llm_call_id),
             [],
         )
 
     # Protocol violation fallback: the model proposed edits but returned no
-    # narrative. The prompt forbids this — the rationale is how the user
-    # decides approve/reject — but if it still happens we must not send a
-    # footer-only message and must not silently drop the edits. Log a warning
-    # so prompt drift is visible in llm-log, and generate a minimal wrapper
-    # that lets the per-edit buttons still be presented meaningfully.
-    if not raw_text and edits:
+    # narrative across any iteration. The prompt forbids this — the
+    # rationale is how the user decides approve/reject — but if it still
+    # happens we must not send a footer-only message and must not silently
+    # drop the edits. Log a warning so prompt drift is visible in llm-log,
+    # and generate a minimal wrapper.
+    if not narrative and proposals:
         logger.warning(
             "Coach returned %d edit(s) with empty narrative — "
             "prompt compliance failure; sending fallback wrapper",
-            len(edits),
+            len(proposals),
         )
-        raw_text = (
-            f"Proposing {len(edits)} plan/goal update"
-            f"{'s' if len(edits) != 1 else ''} from last week's data "
+        narrative = (
+            f"Proposing {len(proposals)} strategy update"
+            f"{'s' if len(proposals) != 1 else ''} from this week's data "
             "(rationale missing — review the diffs carefully)."
         )
 
-    visible_text = raw_text
-
-    print(visible_text)
-
-    use_email = getattr(args, "email", False)
-    use_telegram = getattr(args, "telegram", False)
-
-    telegram_message_id: int | None = None
-    if use_email:
-        send_email(visible_text, "Coaching Review")
-    if use_telegram:
-        telegram_message_id = send_telegram(
-            visible_text, "Coaching Review", reply_markup
-        )
+    bundled_text = _format_coach_bundle(narrative, proposals)
+    print(bundled_text)
 
     cmd_result = CommandResult(
-        text=visible_text,
+        text=bundled_text,
         llm_call_id=result.llm_call_id,
-        telegram_message_id=telegram_message_id,
     )
-    return cmd_result, edits
+    return cmd_result, proposals
+
+
+def _format_coach_bundle(narrative: str, proposals: list[CoachProposal]) -> str:
+    """Render the consolidated coach review for stdout / Telegram.
+
+    Combines the (already-trimmed) narrative with one block per proposed
+    edit. Used by both the CLI codepath (printed to stdout) and the daemon
+    (sent as one Telegram message with inline Accept/Reject buttons).
+
+    Args:
+        narrative: Joined narrative across coach LLM iterations.
+        proposals: Validated CoachProposal list (preview already rendered).
+
+    Returns:
+        A single markdown string ready for display.
+    """
+    if not proposals:
+        return narrative
+    parts: list[str] = []
+    if narrative:
+        parts.append(narrative)
+    parts.append("──────────────")
+    for i, proposal in enumerate(proposals, start=1):
+        block = (
+            f"📋 **Proposed change {i}** — {proposal.edit.file}.md "
+            f"_({proposal.edit.section or proposal.edit.action})_\n"
+            f"{proposal.edit.summary}\n\n"
+            f"```diff\n{proposal.preview}\n```"
+        )
+        parts.append(block)
+    return "\n\n".join(parts)
 
 
 def cmd_llm_log(args: argparse.Namespace) -> None:
@@ -2102,7 +2212,7 @@ def cmd_daemon_stop(args: argparse.Namespace) -> None:  # noqa: ARG001
 # Bot commands registered with Telegram for / autocomplete and menu button.
 TELEGRAM_BOT_COMMANDS: list[dict[str, str]] = [
     {"command": "review", "description": "Weekly report"},
-    {"command": "coach", "description": "Coaching review (plan/goal proposals)"},
+    {"command": "coach", "description": "Coaching review (strategy proposals)"},
     {"command": "add", "description": "Log a workout or sleep"},
     {"command": "status", "description": "Bot and data status"},
     {"command": "notify", "description": "Notification settings"},

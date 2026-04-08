@@ -75,4 +75,4 @@ Run with `uv run pytest`. Fixtures in `tests/fixtures/` and `tests/conftest.py`.
 - `src/tools.py` — LLM tools (`run_sql`, `update_context`)
 - `evals/` — AI eval harness (pinned blueprints, scenario perturbations, structural assertions)
 
-User context files: `~/Documents/zdrowskit/ContextFiles/` (`me.md`, `goals.md`, `plan.md`, `log.md` — user-edited; `baselines.md`, `history.md` — auto-generated).
+User context files: `~/Documents/zdrowskit/ContextFiles/` (`me.md`, `strategy.md`, `log.md` — user-edited; `baselines.md`, `history.md` — auto-generated). `strategy.md` is the merged goals + weekly plan + diet + sleep file (formerly `goals.md` + `plan.md`).

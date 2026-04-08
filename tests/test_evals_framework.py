@@ -66,7 +66,7 @@ class TestCaseDataset:
             prompt_file="chat_prompt",
             blueprint="sparse_week",
         )
-        assert "## Sleep" in context["plan"]
+        assert "## Sleep" in context["strategy"]
         assert "# Profile" in context["me"]
         assert metadata["week_complete"] is False
         assert db_seed is None
@@ -240,10 +240,10 @@ class TestEvalCache:
 class TestTypedAssertions:
     def test_tool_arg_matches_checks_expected_fields(self) -> None:
         result = _assert_tool_arg_matches(
-            [_tool_call("update_context", {"file": "goals", "action": "append"})],
+            [_tool_call("update_context", {"file": "strategy", "action": "append"})],
             {
                 "tool": "update_context",
-                "matches": {"file": ["goals", "plan"], "action": "append"},
+                "matches": {"file": ["strategy", "log"], "action": "append"},
             },
         )
 

@@ -50,7 +50,7 @@ FALLBACK_MODEL = "anthropic/claude-sonnet-4-6"
 # Exponential backoff delays (seconds) between retries on overloaded errors.
 _RETRY_DELAYS = [10, 30, 90]
 
-CONTEXT_FILES = ["me", "goals", "plan", "log", "history", "coach_feedback"]
+CONTEXT_FILES = ["me", "strategy", "log", "history", "coach_feedback"]
 
 # Before this hour, yesterday's null sleep is marked "sync_pending" instead of
 # "not_tracked" — the data likely hasn't synced from the watch yet.
@@ -124,7 +124,7 @@ def load_context(
 
     Prompt templates (prompt.md, nudge_prompt.md, chat_prompt.md, soul.md)
     are loaded from *prompts_dir* (shipped with the repo in ``src/prompts/``).
-    User context files (me.md, goals.md, plan.md, log.md, history.md) are
+    User context files (me.md, strategy.md, log.md, history.md) are
     loaded from *context_dir*.
 
     Args:
@@ -227,8 +227,7 @@ def build_messages(
     placeholders.update(
         {
             "me": context.get("me", "(not provided)"),
-            "goals": context.get("goals", "(not provided)"),
-            "plan": context.get("plan", "(not provided)"),
+            "strategy": context.get("strategy", "(not provided)"),
             "log": context.get("log", "(not provided)"),
             "history": context.get("history", "(not provided)"),
             "coach_feedback": context.get("coach_feedback", "(not provided)"),
@@ -394,7 +393,7 @@ def context_update_tool(
     Returns:
         A list with a single tool definition dict for litellm.
     """
-    files = allowed_files or ["me", "goals", "plan", "log"]
+    files = allowed_files or ["me", "strategy", "log"]
     return [
         {
             "type": "function",

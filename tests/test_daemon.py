@@ -204,7 +204,7 @@ class TestCoachFeedbackFlow:
     def test_reject_records_feedback_and_prompts_for_reason(
         self, tmp_path: Path
     ) -> None:
-        (tmp_path / "plan.md").write_text(
+        (tmp_path / "strategy.md").write_text(
             "## Weekly Structure\n\nKeep volume steady\n", encoding="utf-8"
         )
         daemon = _make_daemon(tmp_path)
@@ -213,7 +213,7 @@ class TestCoachFeedbackFlow:
         daemon._pending_edits = PendingEdits()
 
         edit = ContextEdit(
-            file="plan",
+            file="strategy",
             action="replace_section",
             section="## Weekly Structure",
             content="## Weekly Structure\n\nCut volume by 20%\n",
@@ -244,7 +244,7 @@ class TestCoachFeedbackFlow:
     def test_reason_reply_updates_matching_feedback_entry(self, tmp_path: Path) -> None:
         daemon = _make_daemon(tmp_path)
         edit = ContextEdit(
-            file="plan",
+            file="strategy",
             action="replace_section",
             section="## Weekly Structure",
             content="## Weekly Structure\n\nCut volume by 20%\n",
@@ -267,7 +267,7 @@ class TestCoachFeedbackFlow:
     def test_chat_proposal_keeps_chat_source_in_pending_edit(
         self, tmp_path: Path
     ) -> None:
-        (tmp_path / "plan.md").write_text(
+        (tmp_path / "strategy.md").write_text(
             "## Weekly Structure\n\nKeep volume steady\n", encoding="utf-8"
         )
         daemon = _make_daemon(tmp_path)
@@ -275,7 +275,7 @@ class TestCoachFeedbackFlow:
         daemon._pending_edits = PendingEdits()
 
         edit = ContextEdit(
-            file="plan",
+            file="strategy",
             action="replace_section",
             section="## Weekly Structure",
             content="## Weekly Structure\n\nAdd a recovery day\n",
@@ -286,7 +286,7 @@ class TestCoachFeedbackFlow:
 
         stored = next(iter(daemon._pending_edits._edits.values()))[0]
         assert stored.source == "chat"
-        assert "+++ plan.md (proposed)" in stored.preview
+        assert "+++ strategy.md (proposed)" in stored.preview
 
 
 class TestTelegramFeedbackFlow:

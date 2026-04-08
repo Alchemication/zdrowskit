@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Iterator
 
 if TYPE_CHECKING:
-    from commands import CommandResult
+    from commands import CoachProposal, CommandResult
     from context_edit import ContextEdit
     from context_edit import PendingContextEdit
     from llm import LLMResult
@@ -180,23 +180,29 @@ def _make_health_handler(on_json_modified, on_xml_created):  # type: ignore[no-u
     return _Handler()
 
 
-def _make_context_handler(on_file_changed):  # type: ignore[no-untyped-def]
+def _make_context_handler(on_file_changed, self_originated):  # type: ignore[no-untyped-def]
     """Build a watchdog FileSystemEventHandler for the context .md files dir.
 
     Triggers on modifications to user-editable context files: me.md,
-    log.md, goals.md, and plan.md. Ignores auto-managed files
+    log.md, and strategy.md. Ignores auto-managed files
     (baselines.md, history.md) and prompt templates.
 
     Args:
         on_file_changed: Callable(stem: str) called with the file stem
-            (e.g. "log", "goals", "plan", "me").
+            (e.g. "log", "strategy", "me").
+        self_originated: Mutable set of resolved paths the daemon has just
+            written itself. When an event matches a path in this set, the
+            entry is removed and the event is swallowed — no `*_updated`
+            nudge fires for the daemon's own writes (accepted coach edits,
+            auto-applied chat edits). Genuine user edits never appear in
+            this set and still trigger nudges normally.
 
     Returns:
         A watchdog FileSystemEventHandler instance.
     """
     from watchdog.events import FileSystemEventHandler
 
-    WATCHED_STEMS = {"me", "log", "goals", "plan"}
+    WATCHED_STEMS = {"me", "log", "strategy"}
 
     class _Handler(FileSystemEventHandler):
         def on_modified(self, event) -> None:  # type: ignore[override]
@@ -205,8 +211,21 @@ def _make_context_handler(on_file_changed):  # type: ignore[no-untyped-def]
             path = Path(event.src_path)
             if path.suffix != ".md":
                 return
-            if path.stem in WATCHED_STEMS:
-                on_file_changed(path.stem)
+            if path.stem not in WATCHED_STEMS:
+                return
+            # Swallow events that originated from the daemon's own
+            # apply_edit calls. macOS FSEvents can fire multiple events per
+            # save, so we discard once and rely on the existing
+            # CONTEXT_DEBOUNCE_S window in _fire_context to absorb any
+            # duplicate that arrives just after.
+            try:
+                resolved = path.resolve()
+            except OSError:
+                resolved = path
+            if resolved in self_originated:
+                self_originated.discard(resolved)
+                return
+            on_file_changed(path.stem)
 
     return _Handler()
 
@@ -302,6 +321,12 @@ class ZdrowskitDaemon:
         )
         self._pending_adds: dict[str, PendingAdd] = {}
         self._add_counter: int = 0
+        # Paths the daemon is about to write itself (e.g. accepted coach
+        # edits). The watchdog handler consults this set to suppress the
+        # follow-up `*_updated` nudge that would otherwise fire from the
+        # daemon's own apply_edit call. Genuine user edits to the same file
+        # in a separate editor are not in the set and still trigger nudges.
+        self._self_originated_writes: set[Path] = set()
 
     def _format_status_timestamp(self, value: str | None) -> str:
         """Return a compact local timestamp label for daemon status output."""
@@ -555,7 +580,7 @@ class ZdrowskitDaemon:
         """Schedule a context file trigger with per-stem debounce.
 
         Args:
-            stem: File stem that changed (e.g. "log", "goals", "plan").
+            stem: File stem that changed (e.g. "log", "strategy").
         """
         with self._lock:
             if stem in self._context_timers:
@@ -609,8 +634,7 @@ class ZdrowskitDaemon:
         trigger_map = {
             "me": "profile_updated",
             "log": "log_update",
-            "goals": "goal_updated",
-            "plan": "plan_updated",
+            "strategy": "strategy_updated",
         }
         trigger = trigger_map.get(stem, "log_update")
         logger.info("Context trigger fired: %s.md → %s", stem, trigger)
@@ -893,8 +917,7 @@ class ZdrowskitDaemon:
         """Describe a context-file edit so the LLM knows where to look.
 
         Args:
-            stem: File stem that was edited (``log``, ``goals``, ``plan``,
-                ``me``).
+            stem: File stem that was edited (``log``, ``strategy``, ``me``).
             trigger: The mapped trigger type string.
 
         Returns:
@@ -902,8 +925,7 @@ class ZdrowskitDaemon:
         """
         section_map = {
             "log": ("Recent User Notes", "log.md"),
-            "goals": ("Their Goals", "goals.md"),
-            "plan": ("Current Training Plan", "plan.md"),
+            "strategy": ("Strategy", "strategy.md"),
             "me": ("About the User", "me.md"),
         }
         section, filename = section_map.get(stem, ("Recent User Notes", f"{stem}.md"))
@@ -1111,8 +1133,7 @@ class ZdrowskitDaemon:
 
         # Pick the most "interesting" trigger (user-initiated > system)
         priority = {
-            "goal_updated": 4,
-            "plan_updated": 3,
+            "strategy_updated": 4,
             "log_update": 2,
             "profile_updated": 1,
             "new_data": 0,
@@ -1148,9 +1169,9 @@ class ZdrowskitDaemon:
     ) -> None:
         """Run a coaching review and send proposals via Telegram.
 
-        Proposes concrete edits to plan.md / goals.md based on the
+        Proposes concrete edits to strategy.md based on the
         week's data. Each proposal is sent as an inline Approve/Reject
-        button. When the model returns SKIP (no plan/goal changes
+        button. When the model returns SKIP (no strategy changes
         warranted), nothing is sent — the coach is silent on no-change
         weeks, mirroring the nudge SKIP behavior.
 
@@ -1176,8 +1197,6 @@ class ZdrowskitDaemon:
         args = types.SimpleNamespace(
             db=str(self.db),
             model=self.model,
-            email=False,
-            telegram=True,
             week=week,
             months=3,
             recent_nudges=self._state.get("recent_nudges", []),
@@ -1186,39 +1205,112 @@ class ZdrowskitDaemon:
         with _capture_last_error() as cap:
             try:
                 logger.info("Running coaching review")
-                cmd_result, edits = cmd_coach(args)
-                self._attach_feedback_button(cmd_result, "coach")
-                for edit in edits:
-                    self._propose_context_edit(edit, source="coach")
+                cmd_result, proposals = cmd_coach(args)
+                self._send_coach_bundle(cmd_result, proposals, force=force)
                 self._state["last_coach_date"] = today_str
                 if cmd_result.text:
                     self._state["last_coach_summary"] = cmd_result.text[:500]
                     self._state["last_coach_summary_date"] = today_str
-                elif force and self._poller is not None:
-                    # Manual /coach trigger returned SKIP (cmd_coach signals
-                    # SKIP with text=None; any LLM failure would have raised
-                    # SystemExit instead). Scheduled weekly runs stay silent
-                    # on SKIP to avoid noise after the insights report, but a
-                    # user-initiated /coach needs an explicit acknowledgment
-                    # so the "Running coaching review…" placeholder doesn't
-                    # dangle forever.
-                    skip_text = (
-                        "Coach reviewed the week — no plan or goal changes "
-                        "warranted. Current plan is working."
-                    )
-                    skip_msg_id = self._poller.send_reply(skip_text)
-                    if skip_msg_id is not None and cmd_result.llm_call_id is not None:
-                        from telegram_bot import feedback_keyboard
-
-                        self._poller.edit_message_reply_markup(
-                            skip_msg_id,
-                            feedback_keyboard(cmd_result.llm_call_id, "coach"),
-                        )
                 _save_state(self._state)
             except SystemExit:
                 captured = cap.last_message
                 logger.error("Coaching review failed")
                 self._notify_user_failure("Coaching review", captured)
+
+    def _send_coach_bundle(
+        self,
+        cmd_result: "CommandResult",
+        proposals: list["CoachProposal"],
+        *,
+        force: bool,
+    ) -> None:
+        """Deliver a coach review as one bundled Telegram message.
+
+        Composes the narrative + per-edit diff blocks (already in
+        ``cmd_result.text``) and an inline keyboard with one Accept / Reject
+        / Diff row per proposal plus a final feedback row. Long bundles are
+        chunked by :meth:`TelegramPoller.send_message_with_keyboard`, which
+        attaches the keyboard to the final chunk so the user always sees
+        the buttons at the bottom of the conversation.
+
+        SKIP handling: when ``cmd_result.text`` is None and ``force`` is
+        True (manual ``/coach``), send a short acknowledgment so the
+        "Running coaching review…" placeholder doesn't dangle. Scheduled
+        weekly runs stay silent on SKIP to avoid noise after the insights
+        report.
+
+        Args:
+            cmd_result: Result returned by :func:`commands.cmd_coach`.
+            proposals: Validated proposals returned alongside it.
+            force: Whether this run was user-initiated (``/coach``) and
+                therefore deserves a SKIP acknowledgment.
+        """
+        from telegram_bot import feedback_keyboard
+
+        if self._poller is None:
+            return
+
+        # SKIP path.
+        if not cmd_result.text:
+            if not force:
+                return
+            skip_text = (
+                "Coach reviewed the week — no strategy changes warranted. "
+                "Current strategy is working."
+            )
+            skip_msg_id = self._poller.send_reply(skip_text)
+            if skip_msg_id is not None and cmd_result.llm_call_id is not None:
+                self._poller.edit_message_reply_markup(
+                    skip_msg_id,
+                    feedback_keyboard(cmd_result.llm_call_id, "coach"),
+                )
+            return
+
+        # No proposals, but coach still has narrative to deliver — rare
+        # (the prompt forces SKIP otherwise) but possible from the
+        # iteration-cap synthesis path. Send as a regular reply with the
+        # feedback keyboard attached.
+        if not proposals:
+            msg_id = self._poller.send_reply(cmd_result.text)
+            if msg_id is not None and cmd_result.llm_call_id is not None:
+                self._poller.edit_message_reply_markup(
+                    msg_id,
+                    feedback_keyboard(cmd_result.llm_call_id, "coach"),
+                )
+            return
+
+        # Bundled path. Mint one PendingEdit per proposal so the inline
+        # buttons can route accept/reject callbacks back to the right edit.
+        accept_rows: list[list[dict[str, str]]] = []
+        for i, proposal in enumerate(proposals, start=1):
+            edit_id = self._pending_edits.store(
+                proposal.edit, source="coach", preview=proposal.preview
+            )
+            accept_rows.append(
+                [
+                    {
+                        "text": f"\u2705 Accept #{i}",
+                        "callback_data": f"ctx_accept:{edit_id}",
+                    },
+                    {
+                        "text": f"\u274c Reject #{i}",
+                        "callback_data": f"ctx_reject:{edit_id}",
+                    },
+                    {
+                        "text": f"\U0001f50d Diff #{i}",
+                        "callback_data": f"ctx_diff:{edit_id}",
+                    },
+                ]
+            )
+
+        # Append a feedback row reusing the existing thumbs-down keyboard
+        # so the user can flag the whole review without losing the per-edit
+        # buttons. feedback_keyboard returns rows (list[list[button]]).
+        keyboard_rows = list(accept_rows)
+        if cmd_result.llm_call_id is not None:
+            keyboard_rows.extend(feedback_keyboard(cmd_result.llm_call_id, "coach"))
+
+        self._poller.send_message_with_keyboard(cmd_result.text, keyboard_rows)
 
     # ------------------------------------------------------------------
     # Telegram interactive chat
@@ -1891,14 +1983,24 @@ class ZdrowskitDaemon:
         try:
             preview = build_edit_preview(self.context_dir, edit, strict=True)
         except EditPreviewError as exc:
-            logger.warning("Rejected invalid %s proposal: %s", source, exc)
-            self._poller.send_reply(
-                f"Skipped invalid {source} suggestion for {edit.file}.md: {exc}"
+            # Drop silently. Surfacing "Skipped invalid suggestion…" was
+            # uglier than the missing edit, and the user still sees the
+            # main chat reply that was sent in the same turn. The warning
+            # in llm-log is the place to look when prompts drift.
+            logger.warning(
+                "Dropping invalid %s proposal for %s.md (section=%r): %s",
+                source,
+                edit.file,
+                edit.section,
+                exc,
             )
             return
 
         if AUTO_ACCEPT_CONTEXT_EDITS:
             try:
+                self._self_originated_writes.add(
+                    (self.context_dir / f"{edit.file}.md").resolve()
+                )
                 apply_edit(self.context_dir, edit, strict=True)
                 pending = PendingContextEdit(edit=edit, source=source, preview=preview)
                 self._record_context_feedback(pending, "accepted")
@@ -1944,6 +2046,9 @@ class ZdrowskitDaemon:
             pending = self._pending_edits.pop(edit_id)
             if pending:
                 try:
+                    self._self_originated_writes.add(
+                        (self.context_dir / f"{pending.edit.file}.md").resolve()
+                    )
                     apply_edit(self.context_dir, pending.edit, strict=True)
                     self._record_context_feedback(pending, "accepted")
                     self._poller.answer_callback_query(cb_id, "Applied!")
@@ -3058,7 +3163,9 @@ class ZdrowskitDaemon:
 
         if self.context_dir.exists():
             observer.schedule(
-                _make_context_handler(self._schedule_context),
+                _make_context_handler(
+                    self._schedule_context, self._self_originated_writes
+                ),
                 str(self.context_dir),
                 recursive=False,
             )

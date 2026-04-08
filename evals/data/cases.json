@@ -609,7 +609,7 @@
         "type": "tool_arg_matches",
         "tool": "update_context",
         "matches": {
-          "file": "goals"
+          "file": "strategy"
         }
       },
       {
@@ -644,7 +644,7 @@
         "type": "tool_arg_matches",
         "tool": "update_context",
         "matches": {
-          "file": "plan",
+          "file": "strategy",
           "action": "replace_section",
           "section": "## Sleep"
         }

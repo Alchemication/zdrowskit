@@ -123,7 +123,7 @@ Normal CLI usage auto-applies pending SQLite migrations when the database is ope
    mkdir -p ~/Documents/zdrowskit/ContextFiles
    cp examples/context/*.md ~/Documents/zdrowskit/ContextFiles/
    ```
-2. Edit them with your real data — at minimum `me.md`, `goals.md`, and `plan.md`
+2. Edit them with your real data — at minimum `me.md` and `strategy.md`
 3. Add your API key to `.env` (plus Telegram credentials — see [Notifications](#notifications)):
    ```
    ANTHROPIC_API_KEY=sk-ant-...
@@ -241,8 +241,7 @@ The `insights`, `coach`, `nudge`, and `chat` commands use markdown files from `~
 | File | Who edits | Purpose |
 |------|-----------|---------|
 | `me.md` | you (or chat) | Your profile — age, weight, injuries, pace zones |
-| `goals.md` | you (or chat) | Health and fitness goals with timelines |
-| `plan.md` | you (or chat) | Weekly training schedule, diet approach, sleep targets |
+| `strategy.md` | you (or chat or coach) | Goals + weekly training schedule + diet + sleep targets, all in one file |
 | `log.md` | you (or chat) | Freeform weekly journal — *why* things happened (travel, illness, life) |
 | `baselines.md` | auto | Rolling averages computed from DB (updated on each `insights` run) |
 | `history.md` | auto | LLM's own memory — appended after each weekly report |
@@ -259,7 +258,7 @@ Each notification type is a distinct LLM call with its own prompt, context, tool
 | Channel | Purpose | Trigger | Frequency | Length | Tools | Special output |
 |---------|---------|---------|-----------|--------|-------|----------------|
 | **Insights** | Full weekly report | Scheduled (default: Mon 8am) or manual `/review` | 1×/week | ~600 words | `run_sql` | `<chart>` (0+), `<memory>` (always 1, appended to `history.md`) |
-| **Coach** | Weekly plan/goals review, only when proposals exist | After insights (silent on no-change weeks) | 1×/week | ~300 words | `run_sql`, `update_context` (plan, goals only) | `SKIP` if no changes warranted; `update_context` tool calls (1–2) |
+| **Coach** | Weekly strategy review, only when proposals exist | After insights (silent on no-change weeks) | 1×/week | ~300 words | `run_sql`, `update_context` (`strategy` only) | `SKIP` if no changes warranted; bundled message with inline Accept/Reject buttons per edit |
 | **Nudge** | Short reactive next-action nudge | Data sync, file edit, missed session | Up to 3/day by default | 80 words | `run_sql` | `SKIP` if nothing changes; `<chart>` (0–1) |
 | **Chat** | Interactive conversation — answer the current message, ask anything, get charts | Your Telegram message | On demand | 150 words | `run_sql` (up to 5/turn), `update_context` (any file) | `<chart>` (optional), `update_context` (at most 1) |
 
@@ -297,7 +296,7 @@ What can be changed:
 | Event | Debounce | What it does |
 |-------|----------|-------------|
 | Health data synced via iCloud | 3 min | One data observation + suggestion for today/tomorrow |
-| `log.md` / `goals.md` / `plan.md` / `me.md` edited | 60 sec | Responds to the change — acknowledges, flags tension, or confirms |
+| `log.md` / `strategy.md` / `me.md` edited | 60 sec | Responds to the change — acknowledges, flags tension, or confirms |
 | 8–9 PM, no workout on a training day | — | Factual note + one suggestion (skip, shift, lighter alternative) |
 | Monday 8–9 AM | scheduled | Full weekly report, then coaching review |
 | Thursday 9–10 AM | scheduled | Mid-week progress report |

@@ -3,7 +3,7 @@
 Public API:
     SHORTCUTS_DATA_DIR    — iCloud path for iOS Shortcuts health exports.
     AUTOEXPORT_DATA_DIR   — iCloud path for Auto Export app automation exports.
-    CONTEXT_DIR           — directory containing user context files (me, goals, etc.).
+    CONTEXT_DIR           — directory containing user context files (me, strategy, log).
     NOTIFICATION_PREFS_PATH — JSON file storing notification preference overrides.
     PROMPTS_DIR           — directory containing prompt templates (prompt.md, soul.md, etc.).
     REPORTS_DIR           — directory where generated reports are saved.
@@ -58,7 +58,7 @@ MAX_COACH_FEEDBACK_ENTRIES: int = 8
 MAX_CONVERSATION_MESSAGES: int = 20
 """Maximum number of messages to keep in the in-memory chat conversation buffer."""
 
-EDITABLE_CONTEXT_FILES: set[str] = {"me", "goals", "plan", "log"}
+EDITABLE_CONTEXT_FILES: set[str] = {"me", "strategy", "log"}
 """Context file stems that may be updated via chat."""
 
 AUTO_ACCEPT_CONTEXT_EDITS: bool = (
