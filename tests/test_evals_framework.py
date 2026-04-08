@@ -249,6 +249,22 @@ class TestTypedAssertions:
 
         assert result.passed is True
 
+    def test_tool_arg_matches_supports_regex_patterns(self) -> None:
+        result = _assert_tool_arg_matches(
+            [
+                _tool_call(
+                    "run_sql",
+                    {"query": "SELECT date FROM workout_all WHERE category = 'run'"},
+                )
+            ],
+            {
+                "tool": "run_sql",
+                "matches": {"query": "re:(?i)\\bfrom\\s+workout_all\\b"},
+            },
+        )
+
+        assert result.passed is True
+
     def test_contains_memory_block_requires_bullets(self) -> None:
         response = """
         ## Summary

@@ -49,8 +49,12 @@ def run_sql_tool() -> list[dict]:
                     "per day with health metrics), 'workout_all' (all workouts "
                     "including manual entries), 'sleep_all' (all sleep data "
                     "including manual entries). Both '_all' views have a "
-                    "'source' column. See the schema reference in your system "
-                    "prompt for column details and units."
+                    "'source' column. Prefer 'workout_all' for workout/session "
+                    "questions (runs, pace, distance, elevation, workout HR, "
+                    "session trends) and 'daily' for day-level health metrics "
+                    "(HRV, resting HR, steps, recovery, mobility). See the "
+                    "schema reference in your system prompt for column details "
+                    "and units."
                 ),
                 "parameters": {
                     "type": "object",

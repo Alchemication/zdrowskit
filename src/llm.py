@@ -104,6 +104,7 @@ SCHEMA_REFERENCE = """### Database schema (for run_sql)
 - Activity: `steps`, `distance_km`, `active_energy_kj`, `exercise_min`, `stand_hours`, `flights_climbed`
 - Cardiac: `resting_hr`, `hrv_ms`, `walking_hr_avg`, `hr_day_min`, `hr_day_max`, `vo2max`, `recovery_index`
 - Mobility: `walking_speed_kmh`, `walking_step_length_cm`, `walking_asymmetry_pct`, `walking_double_support_pct`, `stair_speed_up_ms`, `stair_speed_down_ms`, `running_stride_length_m`, `running_power_w`, `running_speed_kmh`
+- Note: `daily.running_speed_kmh` is a day-level Apple mobility metric. It is useful for broad daily movement context, but for run-session pace, distance, elevation, or running trends, prefer `workout_all`.
 
 **workout_all** — one row per session, FK: `date`, with `source` (`'import'` or `'manual'`)
 
@@ -112,6 +113,7 @@ SCHEMA_REFERENCE = """### Database schema (for run_sql)
 - Environment: `temperature_c`, `humidity_pct`
 - GPX fields: `gpx_distance_km`, `gpx_elevation_gain_m`, `gpx_avg_speed_ms`, `gpx_max_speed_p95_ms`
 - Pace tip: `duration_min / gpx_distance_km` = min/km when `gpx_distance_km IS NOT NULL`
+- Use `workout_all` as the canonical source for workout questions: runs, pace, splits/proxies, distance, elevation, workout HR, and session trends.
 
 **sleep_all** — one row per night, keyed by `date`, with `source` (`'import'` or `'manual'`)
 

@@ -194,6 +194,15 @@ Do **NOT** use `run_sql` when:
 
 When querying, keep result sets focused — use date filters and LIMIT.
 
+Query routing:
+
+- Use `workout_all` for workout/session questions: runs, pace, distance,
+  elevation, workout HR, and run trends.
+- Use `daily` for day-level health questions: HRV, resting HR, steps,
+  recovery, VO2max, and mobility metrics.
+- If the user says "running speed" but means recent runs, treat that as a
+  run-session question and prefer `workout_all`, not `daily.running_speed_kmh`.
+
 ### Charts (optional)
 
 Include a chart when the result is a trend over time (3+ data points),

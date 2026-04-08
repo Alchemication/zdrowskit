@@ -1323,6 +1323,10 @@ def _arg_matches(actual: Any, expected: Any) -> bool:
     """
     if isinstance(expected, list):
         return actual in expected
+    if isinstance(expected, str) and expected.startswith("re:"):
+        if not isinstance(actual, str):
+            return False
+        return re.search(expected[3:], actual) is not None
     return actual == expected
 
 

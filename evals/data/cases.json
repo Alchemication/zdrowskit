@@ -414,6 +414,14 @@
                 "min_count": 1,
                 "name": "has_run_sql"
             },
+            {
+                "type": "tool_arg_matches",
+                "tool": "run_sql",
+                "matches": {
+                    "query": "re:(?i)\\bfrom\\s+workout_all\\b"
+                },
+                "name": "uses_workout_rows"
+            },
             {"type": "chart_count", "count": 1},
             {"type": "chart_renders"},
             {"type": "pace_format_valid"},
@@ -423,7 +431,8 @@
                 "patterns": [
                     "re:(?i)here['’]?s\\s+the\\s+(chart|picture)",
                     "re:(?i)chart\\s+(below|above)",
-                    "re:(?i)as\\s+you\\s+can\\s+see\\s+(below|above)"
+                    "re:(?i)as\\s+you\\s+can\\s+see\\s+(below|above)",
+                    "re:(?i)daily\\.running_speed_kmh"
                 ],
                 "name": "no_chart_scaffolding"
             },

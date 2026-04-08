@@ -224,6 +224,16 @@ class TestRepoPrompts:
         assert "Good timing" in prompt
         assert "Respect the task-specific tool-turn protocol" in soul
 
+    def test_chat_prompt_routes_run_questions_to_workout_all(self) -> None:
+        """Run/session queries should prefer workout_all over daily metrics."""
+        prompt = (PROMPTS_DIR / "chat_prompt.md").read_text(encoding="utf-8")
+        normalized = " ".join(prompt.split())
+
+        assert "Query routing:" in prompt
+        assert "Use `workout_all` for workout/session questions" in prompt
+        assert "running speed" in normalized
+        assert "prefer `workout_all`, not `daily.running_speed_kmh`" in prompt
+
     def test_chat_prompt_shows_plan_from_context_not_sql(self) -> None:
         """Asking 'what is my plan' should be answered from injected context."""
         prompt = (PROMPTS_DIR / "chat_prompt.md").read_text(encoding="utf-8")
