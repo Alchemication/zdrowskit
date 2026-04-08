@@ -229,6 +229,15 @@ Only reach for it when the compact view is insufficient to support a
 specific observation or proposed adjustment. Keep queries focused: use date
 filters and LIMIT.
 
+Query routing:
+
+- Use `workout_all` for workout/session questions: runs, pace, distance,
+  elevation, workout HR, and run trends.
+- Use `daily` for day-level health questions: HRV, resting HR, steps,
+  recovery, VO2max, and mobility metrics.
+- If the question sounds like "running speed recently", treat that as a
+  run-session question and prefer `workout_all`, not `daily.running_speed_kmh`.
+
 ---
 
 ## Final reminder

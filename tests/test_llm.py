@@ -234,6 +234,15 @@ class TestRepoPrompts:
         assert "running speed" in normalized
         assert "prefer `workout_all`, not `daily.running_speed_kmh`" in prompt
 
+    def test_other_tool_prompts_share_run_query_routing_note(self) -> None:
+        """Report/coach/nudge should reinforce the shared workout-vs-daily split."""
+        for prompt_name in ("prompt.md", "coach_prompt.md", "nudge_prompt.md"):
+            prompt = (PROMPTS_DIR / prompt_name).read_text(encoding="utf-8")
+            assert "Query routing:" in prompt
+            assert "Use `workout_all` for workout/session questions" in prompt
+            assert "Use `daily` for day-level health questions" in prompt
+            assert "prefer `workout_all`, not `daily.running_speed_kmh`" in prompt
+
     def test_chat_prompt_shows_plan_from_context_not_sql(self) -> None:
         """Asking 'what is my plan' should be answered from injected context."""
         prompt = (PROMPTS_DIR / "chat_prompt.md").read_text(encoding="utf-8")

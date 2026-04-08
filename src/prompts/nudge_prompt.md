@@ -82,6 +82,15 @@ It includes:
 Use `run_sql` when you need exact workout rows, older daily detail, or
 historical comparisons beyond this compact view.
 
+Query routing:
+
+- Use `workout_all` for workout/session questions: runs, pace, distance,
+  elevation, workout HR, and run trends.
+- Use `daily` for day-level health questions: HRV, resting HR, steps,
+  recovery, VO2max, and mobility metrics.
+- If the question sounds like "running speed recently", treat that as a
+  run-session question and prefer `workout_all`, not `daily.running_speed_kmh`.
+
 {health_data}
 
 {schema_reference}

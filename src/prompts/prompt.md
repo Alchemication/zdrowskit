@@ -78,6 +78,15 @@ A typical opening sequence:
 4. Then draft the report. Make additional `run_sql` calls only if a specific
    observation needs verification or longer history.
 
+Query routing:
+
+- Use `workout_all` for workout/session questions: runs, pace, distance,
+  elevation, workout HR, and run trends.
+- Use `daily` for day-level health questions: HRV, resting HR, steps,
+  recovery, VO2max, and mobility metrics.
+- If the question sounds like "running speed recently", treat that as a
+  run-session question and prefer `workout_all`, not `daily.running_speed_kmh`.
+
 ### Report sections
 
 Analyze the health data above in context of the user's profile, strategy
