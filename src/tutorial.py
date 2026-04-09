@@ -108,17 +108,16 @@ TUTORIAL_STEPS: list[tuple[str, str, str]] = [
         "Honest trade-offs",
         (
             "What you should know before trusting any of this:\n"
-            '- *"All local" is half-true.* SQLite stays on your machine, but '
-            "health data goes into LLM prompts that leave for Anthropic's API.\n"
+            "- *Your data goes to a third-party LLM.* Storage is local, but "
+            "every coaching call sends the relevant slice — metrics, workouts, "
+            "journal excerpts — to Anthropic's API. No way around that today.\n"
             "- *Context files are the intelligence ceiling.* `me.md`, "
             "`strategy.md`, `log.md` determine everything. Writing them well is "
             "harder than it looks.\n"
             "- *iOS export is fragile.* The phone must be unlocked for health "
             "data to sync. Gaps happen silently.\n"
             "- *LLM reliability isn't fully solved.* Even Opus 4.6 occasionally "
-            "ignores instructions. Sanity-check anything important.\n"
-            "- *Memory will fray over time.* History and feedback aren't pruned "
-            "yet — over months, signal turns to noise."
+            "ignores instructions. Sanity-check anything important."
         ),
     ),
     (
