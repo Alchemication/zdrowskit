@@ -407,7 +407,7 @@ def log_feedback(
     Args:
         conn: Open database connection.
         llm_call_id: The llm_call row this feedback refers to.
-        category: Feedback category (inaccurate, not_useful, too_verbose, wrong_tone).
+        category: Feedback category (inaccurate, not_useful, too_verbose, wrong_tone, other).
         message_type: The LLM output type (insights, nudge, coach, chat).
         reason: Optional free-text explanation.
 

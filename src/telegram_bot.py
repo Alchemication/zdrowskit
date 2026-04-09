@@ -83,6 +83,7 @@ FEEDBACK_CATEGORIES: dict[str, str] = {
     "not_useful": "Not useful",
     "too_verbose": "Too verbose",
     "wrong_tone": "Wrong tone",
+    "other": "Other",
 }
 
 
@@ -105,30 +106,19 @@ def feedback_category_keyboard(
     llm_call_id: int,
     message_type: str,
 ) -> list[list[dict[str, str]]]:
-    """2×2 category picker shown after the user taps 👎."""
-    cats = list(FEEDBACK_CATEGORIES.items())
-    return [
-        [
-            {
-                "text": cats[0][1],
-                "callback_data": f"fb_cat:{llm_call_id}:{message_type}:{cats[0][0]}",
-            },
-            {
-                "text": cats[1][1],
-                "callback_data": f"fb_cat:{llm_call_id}:{message_type}:{cats[1][0]}",
-            },
-        ],
-        [
-            {
-                "text": cats[2][1],
-                "callback_data": f"fb_cat:{llm_call_id}:{message_type}:{cats[2][0]}",
-            },
-            {
-                "text": cats[3][1],
-                "callback_data": f"fb_cat:{llm_call_id}:{message_type}:{cats[3][0]}",
-            },
-        ],
+    """Category picker shown after the user taps 👎.
+
+    Laid out two-per-row with a trailing single-button row if the number of
+    categories is odd.
+    """
+    buttons = [
+        {
+            "text": label,
+            "callback_data": f"fb_cat:{llm_call_id}:{message_type}:{key}",
+        }
+        for key, label in FEEDBACK_CATEGORIES.items()
     ]
+    return [buttons[i : i + 2] for i in range(0, len(buttons), 2)]
 
 
 def feedback_undo_keyboard(
