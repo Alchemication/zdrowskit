@@ -2016,20 +2016,26 @@ def cmd_llm_log(args: argparse.Namespace) -> None:
 
         console = Console()
         table = Table(title=f"Recent Feedback (last {args.last})", show_lines=False)
+        table.add_column("Feedback", justify="right", style="dim")
+        table.add_column("When")
+        table.add_column("Message", style="dim")
+        table.add_column("Call", justify="right")
+        table.add_column("Type")
+        table.add_column("Model", style="dim")
         table.add_column("Category", style="cyan", no_wrap=True)
-        table.add_column("Reason", ratio=1)
-        table.add_column("Type", style="dim", no_wrap=True)
-        table.add_column("Call", justify="right", style="dim", no_wrap=True)
-        table.add_column("When", style="dim", no_wrap=True)
+        table.add_column("Reason")
 
         for row in rows:
             reason = row["reason"] or "—"
             table.add_row(
-                row["category"],
-                reason,
+                str(row["feedback_id"]),
+                row["created_at"][:16],
                 row["message_type"],
                 str(row["llm_call_id"]),
-                row["created_at"][:16],
+                row["request_type"],
+                row["model"].split("/")[-1],
+                row["category"],
+                reason,
             )
 
         console.print(table)
