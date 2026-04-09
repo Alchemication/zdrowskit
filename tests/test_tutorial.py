@@ -93,8 +93,8 @@ class TestRenderStep:
 
 class TestTutorialContent:
     def test_step_count_is_stable(self) -> None:
-        # If you change this, also update the "9 short steps" copy in step 0.
-        assert len(TUTORIAL_STEPS) == 9
+        # If you change this, also update the "N short steps" copy in step 0.
+        assert len(TUTORIAL_STEPS) == 8
 
     def test_each_step_has_emoji_title_body(self) -> None:
         for emoji, title, body in TUTORIAL_STEPS:

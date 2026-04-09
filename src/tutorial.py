@@ -27,20 +27,7 @@ TUTORIAL_STEPS: list[tuple[str, str, str]] = [
             "zdrowskit is the result — a 24/7 ultra-personal trainer built to "
             "help you actually *reach* your health and fitness goals. Not by "
             "counting closed circles. By knowing you.\n\n"
-            "This tour is 9 short steps. Tap *Next* to begin, *Exit* anytime."
-        ),
-    ),
-    (
-        "💾",
-        "What data lives here",
-        (
-            "Everything stays in a local SQLite database on your machine:\n"
-            "- Apple Health metrics (HRV, RHR, sleep, weight, …)\n"
-            "- Workouts and GPX route files\n"
-            "- Sleep stages and durations\n"
-            "- Your own journal in `me.md`, `strategy.md`, `log.md`\n\n"
-            "The journal is what makes the coaching personal — numbers say "
-            "*what* happened, the journal says *why*."
+            "This tour is 8 short steps. Tap *Next* to begin, *Exit* anytime."
         ),
     ),
     (
