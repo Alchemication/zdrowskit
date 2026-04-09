@@ -1667,6 +1667,8 @@ class ZdrowskitDaemon:
             self._send_context_overview(message_id, file_arg)
         elif cmd == "/add":
             self._handle_add_command(message_id)
+        elif cmd == "/tutorial":
+            self._handle_tutorial_start(message_id)
         elif cmd == "/help":
             from commands import TELEGRAM_BOT_COMMANDS
             from config import CONTEXT_DIR, PROMPTS_DIR
@@ -2318,8 +2320,76 @@ class ZdrowskitDaemon:
                 buttons = feedback_keyboard(llm_call_id, message_type)
                 self._poller.edit_message_with_keyboard(msg_id, restored, buttons)
 
+        elif data.startswith("tut:"):
+            self._handle_tutorial_callback(cb_id, data, msg_id)
+
         elif data.startswith("add_"):
             self._handle_add_callback(cb_id, data, msg_id)
+
+    # ------------------------------------------------------------------
+    # /tutorial — guided onboarding wizard
+    # ------------------------------------------------------------------
+
+    def _handle_tutorial_start(self, message_id: int | None) -> None:
+        """Send the first step of the tutorial wizard.
+
+        Args:
+            message_id: ID of the user's ``/tutorial`` message to reply to.
+        """
+        from tutorial import render_step
+
+        text, buttons = render_step(0)
+        self._poller.send_message_with_keyboard(
+            text, buttons, reply_to_message_id=message_id
+        )
+
+    def _handle_tutorial_callback(
+        self, cb_id: str, data: str, msg_id: int | None
+    ) -> None:
+        """Handle a Next/Back/Exit/Done button press from the tutorial.
+
+        The destination step lives entirely in ``data`` (``tut:<idx>``,
+        ``tut:exit``, or ``tut:done``), so no per-user state is needed.
+
+        Args:
+            cb_id: Telegram callback_query id (for the loading spinner).
+            data: Raw ``callback_data`` string starting with ``tut:``.
+            msg_id: ID of the message holding the wizard (to edit in place).
+        """
+        from tutorial import render_step
+
+        target = data.split(":", 1)[1] if ":" in data else ""
+
+        if target == "exit":
+            self._poller.answer_callback_query(cb_id, "Tutorial closed.")
+            if msg_id:
+                self._poller.edit_message(
+                    msg_id,
+                    "Tutorial closed. Type /tutorial to reopen, /help for commands.",
+                )
+            return
+
+        if target == "done":
+            self._poller.answer_callback_query(cb_id, "All set!")
+            if msg_id:
+                self._poller.edit_message(
+                    msg_id,
+                    "\u2705 Tutorial complete. Now ask the bot something — "
+                    "or type /help to see every command.",
+                )
+            return
+
+        try:
+            idx = int(target)
+            text, buttons = render_step(idx)
+        except (ValueError, IndexError):
+            logger.warning("Invalid tutorial callback data: %r", data)
+            self._poller.answer_callback_query(cb_id, "Tutorial unavailable.")
+            return
+
+        self._poller.answer_callback_query(cb_id)
+        if msg_id:
+            self._poller.edit_message_with_keyboard(msg_id, text, buttons)
 
     # ------------------------------------------------------------------
     # /add — manual activity entry

@@ -11,7 +11,7 @@ Your watch collects thousands of data points a week. Apple shows you rings. zdro
 - **Ask anything about your data** — "What's my fastest 1km pace?", "How's my HRV trending since January?", "Do I sleep worse after evening runs?" — if the data exists, it'll find the answer and chart it
 - **Two-way conversation** — reply to a report, update your goals mid-chat, get a chart on demand. It's a Telegram conversation, not a dashboard
 
-All local. Your data stays in a SQLite database on your machine. The only external calls are the LLM API and Telegram.
+Your raw data lives in a SQLite database on your machine — no third-party sync, no analytics, no telemetry. Be aware though: every coaching call sends the relevant slice of that data (metrics, workouts, journal excerpts) to the LLM provider and the responses go through Telegram. Storage is local; the intelligence is not.
 
 Built by Adam Napora (adamsky). *Zdrowie* is Polish for health. *Kit* is the tool.
 
@@ -43,7 +43,7 @@ Auto Export iOS app (iCloud Drive, on a schedule)
                                     + generates on-demand Plotly charts
 ```
 
-zdrowskit is a local pipeline. Your data stays on your machine in a SQLite database. The only external calls are the LLM API and Telegram.
+zdrowskit's storage is local — SQLite on your machine, no third-party sync. The processing isn't: every coaching call sends the relevant slice of your data (metrics, workouts, journal excerpts) to the LLM provider, and the responses are delivered through Telegram. If your health data leaving the machine for an LLM API is a dealbreaker, this isn't the tool for you.
 
 ## Getting your data out of Apple Health
 
@@ -309,7 +309,8 @@ The daemon runs a Telegram long-polling listener alongside the file watcher. Sen
 - Reply to a nudge or report — the bot knows which message you're responding to
 - Share updates naturally ("my weight is 76kg now") — the LLM proposes context file edits with Accept/Reject buttons
 - Thumbs down a bad output, pick a category, optionally reply with more detail, and undo it if you tapped it during testing or a demo
-- Commands: `/review [current|last]`, `/coach [current|last]`, `/notify`, `/clear`, `/status`, `/context [name]`, `/help`
+- Commands: `/review [current|last]`, `/coach [current|last]`, `/add`, `/notify`, `/clear`, `/status`, `/context [name]`, `/tutorial`, `/help`
+- `/tutorial` opens a 9-step guided tour of the system (what it does, key metrics, features, honest trade-offs) with Next/Back/Exit buttons
 - `/status` shows bot state, data coverage, recent activity, and notification state
 - Conversation buffer: last 20 messages in memory, resets on daemon restart
 
@@ -375,7 +376,7 @@ uv run python -m evals.data.extract                                 # refresh bl
 ## Stack
 
 - Python + [uv](https://github.com/astral-sh/uv)
-- SQLite (local, no cloud)
+- SQLite (local storage; LLM API calls still send data slices off-machine)
 - [litellm](https://github.com/BerriAI/litellm) for LLM calls (provider-agnostic)
 - [Plotly](https://plotly.com/python/) for chart rendering (PNG via Kaleido)
 - [watchdog](https://github.com/gorakhargosh/watchdog) for filesystem monitoring

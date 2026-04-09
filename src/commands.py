@@ -2215,6 +2215,7 @@ TELEGRAM_BOT_COMMANDS: list[dict[str, str]] = [
     {"command": "notify", "description": "Notification settings"},
     {"command": "context", "description": "View context files"},
     {"command": "clear", "description": "Reset chat memory"},
+    {"command": "tutorial", "description": "Guided tour of zdrowskit"},
     {"command": "help", "description": "Command list"},
 ]
 
