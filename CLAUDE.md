@@ -22,8 +22,7 @@ uv run python main.py telegram-setup  # register bot /commands for Telegram auto
 uv run python main.py daemon-restart  # restart the background launchd daemon
 uv run python main.py daemon-stop     # stop and unload the background daemon
 uv run python src/daemon.py --foreground  # run filesystem watcher + chat in foreground
-uv run python -m evals.run               # run all AI evals (add --model, --scenario, --reasoning-effort)
-uv run python -m evals.data.extract      # refresh eval blueprints from live data
+uv run python -m evals.run            # run feedback-derived LLM evals (real model; add case IDs, --feature, --details)
 ```
 
 Preferred LLM tracing path for debugging: use `uv run python main.py llm-log --id N` to inspect the full stored trace for one call, including messages, tool use, and final response.
@@ -64,6 +63,20 @@ Run with `uv run pytest`. Fixtures in `tests/fixtures/` and `tests/conftest.py`.
 - Test edge cases that would silently break (None, missing fields, empty inputs).
 - Run `uv run ruff check tests/ && uv run ruff format tests/` before committing.
 
+## LLM Evals
+
+LLM evals in `evals/` are feedback-derived regressions, not a generated benchmark suite. Do not add broad LLM-created scenarios, stale blueprint/cache machinery, or cases without provenance.
+
+When adding eval coverage:
+- Start from a real thumbs-down feedback item. Use `uv run python main.py llm-log --feedback` to find it and `uv run python main.py llm-log --id N` to inspect the trace.
+- Add the real failure first as `case_kind: "real_regression"`.
+- Add only the minimum synthetic controls needed to isolate the hypothesis or guard a false positive, using `case_kind: "synthetic_positive"` or `case_kind: "synthetic_negative"`.
+- Preserve provenance on every case with `source_feedback_id`, `source_llm_call_id`, and `derived_from.hypothesis`.
+- Prefer structured fixtures: pinned date, context snippets, conversation turns, and only the health data needed for the behavior under test.
+- Prefer deterministic assertions. Add LLM-as-judge only when a real feedback case cannot be checked with tool-call, argument, text, word-count, or forbidden-opening assertions.
+
+`uv run pytest` must stay mocked and must never call a real LLM. Manual evals are opt-in through `uv run python -m evals.run`, which uses the configured model and may spend API quota. For prompt/tool behavior changes, run the relevant mocked tests plus the specific eval cases that represent the affected feedback cluster.
+
 ## Key Modules
 
 - `src/models.py` — schema (start here when changing fields)
@@ -73,6 +86,6 @@ Run with `uv run pytest`. Fixtures in `tests/fixtures/` and `tests/conftest.py`.
 - `src/prompts/` — prompt templates (soul, report, nudge, chat, coach)
 - `src/charts.py` — Plotly chart rendering from `<chart>` blocks
 - `src/tools.py` — LLM tools (`run_sql`, `update_context`)
-- `evals/` — AI eval harness (pinned blueprints, scenario perturbations, structural assertions)
+- `evals/` — feedback-derived LLM eval cases and deterministic runner
 
 User context files: `~/Documents/zdrowskit/ContextFiles/` (`me.md`, `strategy.md`, `log.md` — user-edited; `baselines.md`, `history.md` — auto-generated). `strategy.md` is the merged goals + weekly plan + diet + sleep file (formerly `goals.md` + `plan.md`).

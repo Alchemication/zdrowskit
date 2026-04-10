@@ -82,6 +82,9 @@ It includes:
 Use `run_sql` when you need exact workout rows, older daily detail, or
 historical comparisons beyond this compact view.
 
+If you need `run_sql`, call it directly — no pre-tool sentence like "Let
+me check…". After the tool result, output only the final nudge or `SKIP`.
+
 Query routing:
 
 - Use `workout_all` for workout/session questions: runs, pace, distance,

@@ -1,0 +1,50 @@
+{
+  "id": "chat_plan_lookup_no_log",
+  "feature": "chat",
+  "case_kind": "synthetic_negative",
+  "source_feedback_id": 10,
+  "source_llm_call_id": 288,
+  "derived_from": {
+    "feedback_id": 10,
+    "llm_call_id": 288,
+    "hypothesis": "The prompt fix should not over-correct into proposing context updates for plan lookups."
+  },
+  "intent": "Synthetic negative control for feedback #10: asking to see the plan should not propose a context/log update.",
+  "fixture": {
+    "today": "2026-04-09",
+    "context": {
+      "me": "# Profile\n\n- Adam, 42M.\n",
+      "strategy": "# Strategy\n\n## Weekly Plan\n\n- Mon: easy run.\n- Wed: tempo or quality run if recovery is good.\n- Thu: Strength A if the day allows.\n- Fri: Strength B or easy run depending on the week.\n",
+      "log": "# Log\n\n## 2026-04-08\n\n- Completed a short tempo-style run in the morning.\n",
+      "history": "(not provided)",
+      "coach_feedback": "(not provided)",
+      "recent_nudges": "(none yet)",
+      "last_coach_summary": "(no recent coach review)"
+    },
+    "health_data": {
+      "current_week": {
+        "summary": {
+          "week_label": "W15",
+          "start_date": "2026-04-06",
+          "end_date": "2026-04-12"
+        },
+        "days": []
+      },
+      "history": []
+    },
+    "turns": [
+      {
+        "role": "user",
+        "content": "What is my plan today?"
+      }
+    ]
+  },
+  "assertions": [
+    {
+      "type": "tool_not_called",
+      "name": "does_not_update_context",
+      "tool": "update_context"
+    }
+  ],
+  "notes": "Synthetic negative control derived from feedback #10. It guards against over-correcting the log-update behavior into false-positive context updates."
+}

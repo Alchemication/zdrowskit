@@ -1,0 +1,126 @@
+{
+  "id": "chat_log_life_disruption",
+  "feature": "chat",
+  "case_kind": "real_regression",
+  "source_feedback_id": 10,
+  "source_llm_call_id": 288,
+  "derived_from": {
+    "feedback_id": 10,
+    "llm_call_id": 288,
+    "hypothesis": "A training-relevant same-day life disruption should be proposed as a log.md append even when the user does not explicitly say 'add to log'."
+  },
+  "intent": "When the user shares a same-day life disruption that can affect training, chat should propose appending it to log.md and still reply concisely.",
+  "fixture": {
+    "today": "2026-04-09",
+    "context": {
+      "me": "# Profile\n\n- Adam, 42M.\n- Has a young child and trains around family/work constraints.\n",
+      "strategy": "# Strategy\n\n## Weekly Plan\n\n- Mon: easy run.\n- Wed: tempo or quality run if recovery is good.\n- Thu: Strength A if the day allows.\n- Fri: Strength B or easy run depending on the week.\n\n## Goals - Current focus\n\n- Build consistency without overloading recovery.\n",
+      "log": "# Log\n\n## 2026-04-08\n\n- Completed a short tempo-style run in the morning.\n",
+      "history": "# History\n\n- W14 was disrupted by poor recovery; keep advice practical and context-aware.\n",
+      "coach_feedback": "(not provided)",
+      "recent_nudges": "(none yet)",
+      "last_coach_summary": "(no recent coach review)"
+    },
+    "health_data": {
+      "current_week": {
+        "summary": {
+          "week_label": "W15",
+          "start_date": "2026-04-06",
+          "end_date": "2026-04-12",
+          "run_count": 2,
+          "lift_count": 0,
+          "total_run_km": 8.3,
+          "total_lift_min": 0,
+          "avg_hrv_ms": 46.5,
+          "avg_resting_hr": 53.0,
+          "avg_sleep_total_h": 7.2,
+          "avg_sleep_efficiency_pct": 86.7,
+          "sleep_nights_tracked": 4,
+          "sleep_nights_total": 4
+        },
+        "days": [
+          {
+            "date": "2026-04-06",
+            "workouts": [
+              {
+                "type": "Outdoor Run",
+                "category": "run",
+                "duration_min": 30.0,
+                "gpx_distance_km": 5.2,
+                "hr_avg": 152
+              }
+            ],
+            "hrv_ms": 42.0,
+            "resting_hr": 54,
+            "sleep_total_h": 8.1,
+            "sleep_efficiency_pct": 95.6
+          },
+          {
+            "date": "2026-04-08",
+            "workouts": [
+              {
+                "type": "Outdoor Run",
+                "category": "run",
+                "duration_min": 16.0,
+                "gpx_distance_km": 3.1,
+                "hr_avg": 163
+              }
+            ],
+            "hrv_ms": 54.0,
+            "resting_hr": 52,
+            "sleep_total_h": 6.9,
+            "sleep_efficiency_pct": 66.4
+          },
+          {
+            "date": "2026-04-09",
+            "workouts": [],
+            "hrv_ms": 40.2,
+            "resting_hr": 55,
+            "sleep_total_h": 7.5,
+            "sleep_efficiency_pct": 91.8
+          }
+        ]
+      },
+      "history": []
+    },
+    "turns": [
+      {
+        "role": "user",
+        "content": "Small one is sick today and did not go to creche. Might be hard to do a strength session today, will see..."
+      }
+    ]
+  },
+  "assertions": [
+    {
+      "type": "tool_called",
+      "name": "proposes_log_append",
+      "tool": "update_context",
+      "count": 1
+    },
+    {
+      "type": "tool_arg_matches",
+      "name": "log_append_uses_pinned_date",
+      "tool": "update_context",
+      "matches": {
+        "file": "log",
+        "action": "append",
+        "content": {
+          "regex": "(?is)##\\s*2026-04-09\\b"
+        }
+      }
+    },
+    {
+      "type": "tool_arg_matches",
+      "name": "log_append_captures_disruption",
+      "tool": "update_context",
+      "matches": {
+        "file": "log",
+        "action": "append",
+        "content": {
+          "regex": "(?is)(?=.*\\b(small one|child)\\b)(?=.*\\b(sick|unwell|ill)\\b)(?=.*\\b(cr[eè]che|nursery|childcare)\\b)(?=.*\\b(strength|lift)\\b).+"
+        }
+      }
+    }
+  ],
+  "notes": "Real regression derived from thumbs-down feedback #10 / llm_call #288. The failed response was empathetic but did not propose a log.md append for a training-relevant same-day disruption. This case intentionally checks only the missing context-update behavior; reply length, tone, and openings should be covered by separate feedback-derived cases when they are the primary issue."
+}

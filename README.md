@@ -170,6 +170,11 @@ uv run python main.py llm-log --json                    # output as JSON
 uv run python main.py telegram-setup                    # register bot /commands for autocomplete + menu
 uv run python main.py daemon-stop                       # stop the background daemon
 uv run python main.py daemon-restart                    # restart (or re-load) the daemon
+
+uv run python -m evals.run                              # run all feedback-derived LLM evals (real model)
+uv run python -m evals.run --feature chat               # run only chat eval cases
+uv run python -m evals.run chat_log_life_disruption     # run one eval case
+uv run python -m evals.run --details                    # include failed-case text and captured tool calls
 ```
 
 Each source has its own default iCloud data directory. Override with `--data-dir` or the `HEALTH_DATA_DIR` env var. Run any command with `--help` for the full flag list.
@@ -352,18 +357,27 @@ uv run pytest tests/test_parsers_metrics.py      # single file
 
 Tests live in `tests/` with fixture data in `tests/fixtures/`. The suite covers parsers (metrics, workouts, GPX), aggregation logic, the SQLite store round-trip, report formatting, LLM utility functions, and the `run_sql` tool (SQL validation, read-only safety, row limits, query execution). Shared fixtures (sample snapshots, in-memory DB) are in `tests/conftest.py`.
 
-## Evals
+## LLM evals
 
-Data-driven eval harness (25 cases, 14 scenarios) that tests LLM behaviour using pinned blueprint data. Two suites: `core` (product-gating, must stay green) and `benchmark` (regression review, model comparison). See [`evals/README.md`](evals/README.md) for categories, scenarios, and architecture.
+LLM evals live in `evals/` and are feedback-derived regressions, not a broad generated benchmark. They are meant to preserve real product judgement: start with an actual thumbs-down Telegram feedback item, inspect the stored trace with `uv run python main.py llm-log --feedback` and `uv run python main.py llm-log --id N`, then encode the smallest case that would have caught the issue.
+
+The current philosophy:
+
+- Start every eval cluster with a `real_regression` case from one real failure.
+- Add only the minimum synthetic cases needed to broaden the surface around that failure, such as an explicit positive control or a false-positive guard.
+- Keep synthetic cases tied to the original feedback using `source_feedback_id`, `source_llm_call_id`, and `derived_from.hypothesis`.
+- Prefer structured fixtures over pasted raw transcripts: pinned date, context snippets, conversation turns, and only the health data needed for the case.
+- Use deterministic assertions first: tool called/not called, argument matching, text contains/does-not-contain, max word count, and forbidden openings.
+- Avoid LLM-as-judge unless a future real feedback case genuinely cannot be evaluated deterministically.
 
 ```bash
-uv run python -m evals.run                                          # all cases, default model
-uv run python -m evals.run --suite core                             # product-gating only
-uv run python -m evals.run --no-cache                               # bypass eval cache
-uv run python -m evals.run --model anthropic/claude-sonnet-4-6      # specific model
-uv run python -m evals.run --category sleep_markers                 # single category
-uv run python -m evals.data.extract                                 # refresh blueprints from live data
+uv run python -m evals.run                              # all feedback-derived eval cases
+uv run python -m evals.run chat_log_life_disruption     # one case
+uv run python -m evals.run --feature chat               # feature filter
+uv run python -m evals.run --details                    # debug failed cases
 ```
+
+These evals call the configured real model and may use network/API quota. Normal `uv run pytest` uses mocks and must never call a real LLM.
 
 ## Requirements
 

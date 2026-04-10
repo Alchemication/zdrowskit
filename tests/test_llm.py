@@ -153,6 +153,8 @@ class TestRepoPrompts:
         assert "{trigger_context}" in prompt
         # Output-rules block must lead the prompt — recency bias matters.
         assert prompt.index("Output rules") < prompt.index("Instructions")
+        assert "If you need `run_sql`, call it directly" in prompt
+        assert "output only the final nudge or `SKIP`" in prompt
 
     def test_nudge_prompt_has_ordered_skip_checklist(self) -> None:
         """The SKIP/write decision must be a single ordered checklist, not
@@ -189,6 +191,9 @@ class TestRepoPrompts:
         assert "structured review only when" in normalized
         # And every concrete change must be backed by an update_context call.
         assert "update_context" in prompt
+        assert "Correct flow:" in prompt
+        assert "Wrong flow:" in prompt
+        assert "Tool calls are not visible to the user" in prompt
 
     def test_chat_prompt_states_conversational_purpose_and_boundaries(self) -> None:
         prompt = (PROMPTS_DIR / "chat_prompt.md").read_text(encoding="utf-8")
@@ -222,7 +227,9 @@ class TestRepoPrompts:
         )
         assert "here's the chart" in normalized
         assert "here's the picture" in normalized
-        assert "Good timing" in prompt
+        assert "Correct flow:" in prompt
+        assert "Wrong flow:" in prompt
+        assert "I'll add that to your log" in prompt
         assert "Respect the task-specific tool-turn protocol" in soul
 
     def test_chat_prompt_routes_run_questions_to_workout_all(self) -> None:
@@ -326,6 +333,9 @@ class TestRepoPrompts:
         assert "MUST call `run_sql` before drafting the Training Review" in normalized
         assert "compact summary view" in normalized
         assert "{schema_reference}" in prompt
+        assert "Correct flow:" in prompt
+        assert "Wrong flow:" in prompt
+        assert "Tool calls are not visible to the user" in prompt
 
     def test_coach_prompt_uses_recent_coaching_feedback(self) -> None:
         """Coach must read the Recent Coaching Feedback section before
