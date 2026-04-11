@@ -175,6 +175,10 @@ uv run python -m evals.run                              # run all feedback-deriv
 uv run python -m evals.run --feature chat               # run only chat eval cases
 uv run python -m evals.run chat_log_life_disruption     # run one eval case
 uv run python -m evals.run --details                    # include failed-case text and captured tool calls
+uv run python -m evals.run --record                     # append this run to leaderboard history + regenerate markdown
+uv run python -m evals.run --record-duplicate --record  # intentionally keep a duplicate fingerprint run
+uv run python -m evals.leaderboard render               # rebuild leaderboard.md from recorded JSONL history
+uv run python -m evals.leaderboard render-html          # rebuild interactive leaderboard.html from recorded JSONL history
 ```
 
 Each source has its own default iCloud data directory. Override with `--data-dir` or the `HEALTH_DATA_DIR` env var. Run any command with `--help` for the full flag list.
@@ -375,9 +379,15 @@ uv run python -m evals.run                              # all feedback-derived e
 uv run python -m evals.run chat_log_life_disruption     # one case
 uv run python -m evals.run --feature chat               # feature filter
 uv run python -m evals.run --details                    # debug failed cases
+uv run python -m evals.run --record                     # persist a run to evals/leaderboard/runs.jsonl
+uv run python -m evals.leaderboard render               # rebuild evals/leaderboard.md from raw history
+uv run python -m evals.leaderboard render-html          # rebuild evals/leaderboard.html with filters and sortable views
 ```
 
 These evals call the configured real model and may use network/API quota. Normal `uv run pytest` uses mocks and must never call a real LLM.
+
+Recorded leaderboard runs live in `evals/leaderboard/runs.jsonl`. The generated Markdown snapshot lives in `evals/leaderboard.md`. Comparisons are scope-aware: runs over different case sets are rendered in separate sections rather than ranked together.
+The interactive HTML report lives in `evals/leaderboard.html` and is generated from the same raw JSONL history.
 
 ## Requirements
 

@@ -20,6 +20,7 @@ from rich.progress import (
     TimeElapsedColumn,
 )
 
+from evals import leaderboard
 from evals.framework import (
     DEFAULT_MODEL,
     EvalCache,
@@ -89,9 +90,21 @@ def main() -> None:
         action="store_true",
         help="Ignore cached eval responses and overwrite them with fresh ones.",
     )
+    parser.add_argument(
+        "--record",
+        action="store_true",
+        help="Record this eval run to the JSONL leaderboard history and regenerate markdown.",
+    )
+    parser.add_argument(
+        "--record-duplicate",
+        action="store_true",
+        help="Allow recording even if the same run fingerprint already exists.",
+    )
     args = parser.parse_args()
     if args.no_cache and args.refresh_cache:
         parser.error("--refresh-cache cannot be used with --no-cache")
+    if args.record_duplicate and not args.record:
+        parser.error("--record-duplicate requires --record")
 
     try:
         selected = select_cases(
@@ -103,18 +116,39 @@ def main() -> None:
         print(str(exc), file=sys.stderr)
         sys.exit(2)
 
+    reasoning_effort = _normalize_reasoning_effort(args.reasoning_effort)
     cache = None if args.no_cache else EvalCache()
     results = _run_selected_cases(
         selected,
         model=args.model,
         max_tool_iterations=args.max_tool_iterations,
-        reasoning_effort=_normalize_reasoning_effort(args.reasoning_effort),
+        reasoning_effort=reasoning_effort,
         cache=cache,
         refresh_cache=args.refresh_cache,
     )
     print_results(results)
     if args.details:
         print_result_details(results)
+    if args.record:
+        outcome = leaderboard.record_run(
+            results=results,
+            case_ids=[case.id for case in selected],
+            model=args.model,
+            reasoning_effort=reasoning_effort,
+            max_tool_iterations=args.max_tool_iterations,
+            feature_filter=args.feature,
+            allow_duplicate=args.record_duplicate,
+        )
+        if outcome.recorded:
+            print(
+                "Recorded leaderboard run "
+                f"{outcome.record['run_id']} and regenerated {leaderboard.MARKDOWN_PATH}"
+            )
+        else:
+            print(
+                "Matching leaderboard run already recorded "
+                f"(run_id={outcome.record['run_id']}); skipped append."
+            )
     if not all(result.passed for result in results):
         sys.exit(1)
 

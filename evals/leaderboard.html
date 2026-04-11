@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Feedback Eval Leaderboard</title>
+  <style>
+    :root {
+      --bg: #f5f1e8;
+      --panel: #fffdf8;
+      --panel-2: #f1e9da;
+      --ink: #1d2228;
+      --muted: #6a6f75;
+      --line: #d8ccba;
+      --accent: #0f766e;
+      --accent-soft: #d6efec;
+      --good: #2f855a;
+      --warn: #b7791f;
+      --bad: #c53030;
+      --shadow: 0 18px 40px rgba(36, 33, 29, 0.08);
+      --radius: 20px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Avenir Next", "Segoe UI", sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top right, rgba(15, 118, 110, 0.10), transparent 32%),
+        linear-gradient(180deg, #faf7f1, var(--bg));
+    }
+    code {
+      font-family: "SFMono-Regular", "Menlo", monospace;
+      background: #f3efe6;
+      padding: 0.12rem 0.32rem;
+      border-radius: 0.4rem;
+    }
+    .page {
+      max-width: 1480px;
+      margin: 0 auto;
+      padding: 40px 24px 56px;
+    }
+    .hero {
+      display: grid;
+      gap: 12px;
+      margin-bottom: 26px;
+    }
+    .eyebrow {
+      color: var(--accent);
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+      font-size: 0.78rem;
+      font-weight: 700;
+    }
+    h1 {
+      margin: 0;
+      font-size: clamp(2rem, 3.7vw, 3.6rem);
+      line-height: 0.95;
+      font-family: "Iowan Old Style", "Palatino Linotype", serif;
+      font-weight: 700;
+    }
+    .lede {
+      max-width: 900px;
+      color: var(--muted);
+      font-size: 1rem;
+      line-height: 1.6;
+    }
+    .layout {
+      display: grid;
+      grid-template-columns: 320px minmax(0, 1fr);
+      gap: 24px;
+      align-items: start;
+    }
+    .sidebar, .content-card {
+      background: color-mix(in srgb, var(--panel) 86%, white);
+      border: 1px solid rgba(216, 204, 186, 0.9);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+    .sidebar {
+      position: sticky;
+      top: 18px;
+      padding: 20px;
+      display: grid;
+      gap: 18px;
+    }
+    .sidebar h2, .content-card h2 {
+      margin: 0;
+      font-size: 1rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+    }
+    .filter-grid {
+      display: grid;
+      gap: 14px;
+    }
+    .field {
+      display: grid;
+      gap: 6px;
+    }
+    .field label, .toggle {
+      font-size: 0.86rem;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    select, input[type="search"] {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: white;
+      color: var(--ink);
+      padding: 12px 14px;
+      font: inherit;
+    }
+    .toggle-row {
+      display: grid;
+      gap: 10px;
+    }
+    .toggle {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .toggle input {
+      width: 18px;
+      height: 18px;
+      accent-color: var(--accent);
+    }
+    .scope-meta {
+      display: grid;
+      gap: 8px;
+      padding: 14px;
+      border-radius: 16px;
+      background: var(--panel-2);
+      border: 1px solid rgba(216, 204, 186, 0.9);
+    }
+    .scope-meta strong {
+      font-size: 1rem;
+    }
+    .scope-meta span {
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+    .case-list {
+      margin: 0;
+      padding-left: 18px;
+      max-height: 220px;
+      overflow: auto;
+      color: var(--muted);
+      font-size: 0.9rem;
+      line-height: 1.45;
+    }
+    .content {
+      display: grid;
+      gap: 20px;
+    }
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 16px;
+    }
+    .metric-card {
+      background: var(--panel);
+      border: 1px solid rgba(216, 204, 186, 0.9);
+      border-radius: 18px;
+      padding: 18px;
+      box-shadow: var(--shadow);
+    }
+    .metric-card h3 {
+      margin: 0 0 8px;
+      font-size: 0.82rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+    }
+    .metric-value {
+      margin: 0;
+      font-size: clamp(1.5rem, 2.6vw, 2.2rem);
+      font-weight: 700;
+    }
+    .metric-sub {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+    .content-card {
+      padding: 18px 18px 8px;
+    }
+    .table-wrap {
+      overflow: auto;
+      border-radius: 18px;
+      border: 1px solid rgba(216, 204, 186, 0.8);
+      background: white;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 1020px;
+    }
+    thead th {
+      position: sticky;
+      top: 0;
+      background: #f7f1e7;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      font-size: 0.74rem;
+      padding: 14px 16px;
+      text-align: left;
+      border-bottom: 1px solid var(--line);
+    }
+    tbody td {
+      padding: 14px 16px;
+      border-bottom: 1px solid rgba(216, 204, 186, 0.55);
+      vertical-align: top;
+      font-size: 0.94rem;
+    }
+    tbody tr:hover {
+      background: rgba(15, 118, 110, 0.04);
+    }
+    .model-cell {
+      display: grid;
+      gap: 2px;
+    }
+    .model-cell strong {
+      font-size: 0.98rem;
+    }
+    .muted {
+      color: var(--muted);
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      padding: 0.22rem 0.62rem;
+      border-radius: 999px;
+      font-size: 0.8rem;
+      font-weight: 700;
+      background: var(--panel-2);
+      color: var(--ink);
+      border: 1px solid rgba(216, 204, 186, 0.9);
+    }
+    .pill.good { background: rgba(47, 133, 90, 0.12); color: var(--good); border-color: rgba(47, 133, 90, 0.22); }
+    .pill.warn { background: rgba(183, 121, 31, 0.12); color: var(--warn); border-color: rgba(183, 121, 31, 0.22); }
+    .pill.bad { background: rgba(197, 48, 48, 0.12); color: var(--bad); border-color: rgba(197, 48, 48, 0.2); }
+    .accuracy-stack {
+      display: grid;
+      gap: 8px;
+      min-width: 130px;
+    }
+    .bar {
+      width: 100%;
+      height: 10px;
+      border-radius: 999px;
+      background: #eee5d7;
+      overflow: hidden;
+    }
+    .bar > span {
+      display: block;
+      height: 100%;
+      border-radius: inherit;
+    }
+    .failed-cases {
+      max-width: 260px;
+      white-space: normal;
+      line-height: 1.4;
+    }
+    .empty-state {
+      padding: 64px 24px;
+      text-align: center;
+      background: color-mix(in srgb, var(--panel) 88%, white);
+      border: 1px solid rgba(216, 204, 186, 0.9);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+    .empty-state h2 {
+      margin-top: 0;
+      font-family: "Iowan Old Style", "Palatino Linotype", serif;
+    }
+    .footnote {
+      margin-top: 12px;
+      color: var(--muted);
+      font-size: 0.83rem;
+    }
+    @media (max-width: 1040px) {
+      .layout {
+        grid-template-columns: 1fr;
+      }
+      .sidebar {
+        position: static;
+      }
+      .metrics {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+    @media (max-width: 720px) {
+      .page {
+        padding: 24px 16px 40px;
+      }
+      .metrics {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="hero">
+      <div class="eyebrow">Eval Leaderboard</div>
+      <h1>Feedback Eval Leaderboard</h1>
+      <div class="lede">Feedback-derived regression scorecard for zdrowskit evals. Sections compare only runs over the same recorded case set; this is not a general benchmark.</div>
+    </section>
+    <div id="app"></div>
+  </main>
+  <script id="leaderboard-data" type="application/json">{"sections": [{"case_count": 6, "case_ids": ["chat_explicit_add_to_log", "chat_log_life_disruption", "chat_plan_lookup_no_log", "chat_running_speed_trend_chart_text_independent", "chat_running_speed_trend_pace_format", "chat_strategy_change_updates_weekly_plan"], "case_set_id": "63288c9bf71dd45a177803f7512435a98ee3afa05ee27f81980d51340668ebb1", "feature_filter": null, "latest_created_at": "2026-04-11T16:04:09Z", "runs": [{"created_at": "2026-04-11T16:04:09Z", "dirty": true, "failed_cases": [], "git_sha_short": "afa64f5", "model": "anthropic/claude-opus-4-6", "model_display": "claude-opus-4-6", "reasoning_effort": null, "revision_label": "afa64f5*", "run_id": "09288516121043b798afdcea657cf405", "summary": {"accuracy": 100.0, "avg_cost": 0.07862000000000001, "avg_latency_s": 12.012322618121592, "cache_hits": 2, "cache_misses": 9, "failed": 0, "input_tokens": 79954, "output_tokens": 2878, "p95_latency_s": 18.560707333963364, "passed": 6, "total_cost": 0.47172000000000003, "total_tokens": 82832}}, {"created_at": "2026-04-11T16:03:04Z", "dirty": true, "failed_cases": [], "git_sha_short": "afa64f5", "model": "anthropic/claude-sonnet-4-6", "model_display": "claude-sonnet-4-6", "reasoning_effort": null, "revision_label": "afa64f5*", "run_id": "f408ddb45fd14d9f9f4b62da7b4122fe", "summary": {"accuracy": 100.0, "avg_cost": 0.053747500000000004, "avg_latency_s": 9.616488819456814, "cache_hits": 13, "cache_misses": 0, "failed": 0, "input_tokens": 94190, "output_tokens": 2661, "p95_latency_s": 16.35333916696254, "passed": 6, "total_cost": 0.322485, "total_tokens": 96851}}, {"created_at": "2026-04-11T16:02:00Z", "dirty": true, "failed_cases": ["chat_log_life_disruption", "chat_strategy_change_updates_weekly_plan"], "git_sha_short": "afa64f5", "model": "anthropic/claude-haiku-4-5", "model_display": "claude-haiku-4-5", "reasoning_effort": null, "revision_label": "afa64f5*", "run_id": "07110896a3cb44a89c5fb0873b6420dc", "summary": {"accuracy": 66.66666666666666, "avg_cost": 0.016486166666666666, "avg_latency_s": 5.260557340496841, "cache_hits": 12, "cache_misses": 0, "failed": 2, "input_tokens": 86302, "output_tokens": 2523, "p95_latency_s": 9.184963459032588, "passed": 4, "total_cost": 0.09891699999999999, "total_tokens": 88825}}]}]}</script>
+  <script>
+    const payload = JSON.parse(document.getElementById("leaderboard-data").textContent || "{}");
+    if (payload.sections && payload.sections.length) {
+      const app = document.getElementById("app");
+      const state = {
+        scopeId: payload.sections[0].case_set_id,
+        model: "all",
+        reasoning: "all",
+        sort: "accuracy",
+        latestOnly: true,
+        failedOnly: false,
+        dirtyOnly: false,
+        query: ""
+      };
+      app.innerHTML = `
+        <div class="layout">
+          <aside class="sidebar">
+            <h2>Filters</h2>
+            <div class="filter-grid">
+              <div class="field">
+                <label for="scope-filter">Scope</label>
+                <select id="scope-filter"></select>
+              </div>
+              <div class="field">
+                <label for="model-filter">Model</label>
+                <select id="model-filter"></select>
+              </div>
+              <div class="field">
+                <label for="reasoning-filter">Reasoning</label>
+                <select id="reasoning-filter"></select>
+              </div>
+              <div class="field">
+                <label for="sort-filter">Sort Rows</label>
+                <select id="sort-filter">
+                  <option value="accuracy">Accuracy</option>
+                  <option value="avg_cost">Avg Cost</option>
+                  <option value="avg_latency_s">Avg Latency</option>
+                  <option value="created_at">Newest</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="query-filter">Search</label>
+                <input id="query-filter" type="search" placeholder="Model, revision, failed case…" />
+              </div>
+              <div class="toggle-row">
+                <label class="toggle"><input id="latest-only" type="checkbox" checked />Latest row per model+reasoning</label>
+                <label class="toggle"><input id="failed-only" type="checkbox" />Failures only</label>
+                <label class="toggle"><input id="dirty-only" type="checkbox" />Dirty revisions only</label>
+              </div>
+            </div>
+            <div class="scope-meta">
+              <strong id="scope-title"></strong>
+              <span id="scope-meta"></span>
+              <ul id="scope-cases" class="case-list"></ul>
+            </div>
+          </aside>
+          <section class="content">
+            <div id="metric-grid" class="metrics"></div>
+            <section class="content-card">
+              <h2>Filtered Runs</h2>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Run</th>
+                      <th>Accuracy</th>
+                      <th>Passed</th>
+                      <th>Failed</th>
+                      <th>Avg Latency</th>
+                      <th>p95 Latency</th>
+                      <th>Total Cost</th>
+                      <th>Avg Cost</th>
+                      <th>Revision</th>
+                      <th>Failed Cases</th>
+                    </tr>
+                  </thead>
+                  <tbody id="results-body"></tbody>
+                </table>
+              </div>
+              <div class="footnote">
+                Latest-only mode is on by default so repeated reruns do not drown model comparisons.
+              </div>
+            </section>
+          </section>
+        </div>
+      `;
+
+      const els = {
+        scope: document.getElementById("scope-filter"),
+        model: document.getElementById("model-filter"),
+        reasoning: document.getElementById("reasoning-filter"),
+        sort: document.getElementById("sort-filter"),
+        latestOnly: document.getElementById("latest-only"),
+        failedOnly: document.getElementById("failed-only"),
+        dirtyOnly: document.getElementById("dirty-only"),
+        query: document.getElementById("query-filter"),
+        scopeTitle: document.getElementById("scope-title"),
+        scopeMeta: document.getElementById("scope-meta"),
+        scopeCases: document.getElementById("scope-cases"),
+        metricGrid: document.getElementById("metric-grid"),
+        body: document.getElementById("results-body")
+      };
+
+      function accuracyClass(value) {
+        if (value >= 80) return "good";
+        if (value >= 50) return "warn";
+        return "bad";
+      }
+
+      function fmtSeconds(value) {
+        return value == null ? "—" : `${Number(value).toFixed(2)}s`;
+      }
+
+      function fmtCost(value) {
+        return value == null ? "—" : `$${Number(value).toFixed(4)}`;
+      }
+
+      function getSection() {
+        return payload.sections.find((section) => section.case_set_id === state.scopeId) || payload.sections[0];
+      }
+
+      function scopeOptionLabel(section) {
+        const feature = section.feature_filter || "all";
+        return `${section.case_count} cases · ${feature} · ${section.case_set_id.slice(0, 10)}`;
+      }
+
+      function buildOptions(select, values, current) {
+        select.innerHTML = "";
+        for (const option of values) {
+          const node = document.createElement("option");
+          node.value = option.value;
+          node.textContent = option.label;
+          node.selected = option.value === current;
+          select.appendChild(node);
+        }
+      }
+
+      function sortRows(rows) {
+        const sorted = [...rows];
+        if (state.sort === "created_at") {
+          sorted.sort((a, b) => b.created_at.localeCompare(a.created_at));
+          return sorted;
+        }
+        sorted.sort((a, b) => {
+          const av = a.summary[state.sort];
+          const bv = b.summary[state.sort];
+          if (state.sort === "accuracy") return (bv ?? -1) - (av ?? -1);
+          return (av ?? Number.POSITIVE_INFINITY) - (bv ?? Number.POSITIVE_INFINITY);
+        });
+        return sorted;
+      }
+
+      function latestOnly(rows) {
+        if (!state.latestOnly) return rows;
+        const seen = new Set();
+        const kept = [];
+        for (const row of [...rows].sort((a, b) => b.created_at.localeCompare(a.created_at))) {
+          const key = `${row.model}::${row.reasoning_effort || "none"}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          kept.push(row);
+        }
+        return kept;
+      }
+
+      function applyFilters(section) {
+        const query = state.query.trim().toLowerCase();
+        let rows = latestOnly(section.runs);
+        rows = rows.filter((row) => state.model === "all" || row.model === state.model);
+        rows = rows.filter((row) => state.reasoning === "all" || (row.reasoning_effort || "none") === state.reasoning);
+        rows = rows.filter((row) => !state.failedOnly || row.summary.failed > 0);
+        rows = rows.filter((row) => !state.dirtyOnly || row.dirty);
+        rows = rows.filter((row) => {
+          if (!query) return true;
+          const haystack = [
+            row.model,
+            row.model_display,
+            row.reasoning_effort || "none",
+            row.git_sha_short,
+            row.failed_cases.join(" "),
+          ].join(" ").toLowerCase();
+          return haystack.includes(query);
+        });
+        return sortRows(rows);
+      }
+
+      function renderSummary(rows) {
+        const accuracies = rows.map((row) => row.summary.accuracy);
+        const costs = rows.map((row) => row.summary.avg_cost).filter((value) => value != null);
+        const best = accuracies.length ? Math.max(...accuracies) : null;
+        const avg = accuracies.length ? accuracies.reduce((sum, value) => sum + value, 0) / accuracies.length : null;
+        const avgCost = costs.length ? costs.reduce((sum, value) => sum + value, 0) / costs.length : null;
+        const failing = rows.filter((row) => row.summary.failed > 0).length;
+        const metrics = [
+          ["Visible Runs", String(rows.length), "Current rows after filters"],
+          ["Best Accuracy", best == null ? "—" : `${best.toFixed(1)}%`, "Strongest visible run"],
+          ["Average Accuracy", avg == null ? "—" : `${avg.toFixed(1)}%`, "Across filtered rows"],
+          ["Failing Rows", String(failing), avgCost == null ? "No avg cost yet" : `Avg row cost $${avgCost.toFixed(4)}`],
+        ];
+        els.metricGrid.innerHTML = "";
+        for (const [label, value, sub] of metrics) {
+          const card = document.createElement("article");
+          card.className = "metric-card";
+          card.innerHTML = `<h3>${label}</h3><p class="metric-value">${value}</p><div class="metric-sub">${sub}</div>`;
+          els.metricGrid.appendChild(card);
+        }
+      }
+
+      function renderTable(rows) {
+        els.body.innerHTML = "";
+        if (!rows.length) {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `<td colspan="10" class="muted">No runs match the current filters.</td>`;
+          els.body.appendChild(tr);
+          return;
+        }
+        for (const row of rows) {
+          const tr = document.createElement("tr");
+          const accuracy = Number(row.summary.accuracy);
+          tr.innerHTML = `
+            <td>
+              <div class="model-cell">
+                <strong>${row.model_display}</strong>
+                <span class="muted">${row.reasoning_effort || "none"} · ${row.created_at.slice(0, 16).replace("T", " ")}</span>
+              </div>
+            </td>
+            <td>
+              <div class="accuracy-stack">
+                <span class="pill ${accuracyClass(accuracy)}">${accuracy.toFixed(1)}%</span>
+                <div class="bar"><span style="width:${Math.max(0, Math.min(100, accuracy))}%; background:${accuracy >= 80 ? "var(--good)" : accuracy >= 50 ? "var(--warn)" : "var(--bad)"}"></span></div>
+              </div>
+            </td>
+            <td>${row.summary.passed}</td>
+            <td>${row.summary.failed}</td>
+            <td>${fmtSeconds(row.summary.avg_latency_s)}</td>
+            <td>${fmtSeconds(row.summary.p95_latency_s)}</td>
+            <td>${fmtCost(row.summary.total_cost)}</td>
+            <td>${fmtCost(row.summary.avg_cost)}</td>
+            <td><span class="pill">${row.revision_label}</span></td>
+            <td class="failed-cases">${row.failed_cases.length ? row.failed_cases.join(", ") : "—"}</td>
+          `;
+          els.body.appendChild(tr);
+        }
+      }
+
+      function renderScopeMeta(section) {
+        els.scopeTitle.textContent = `${section.case_count} cases · feature=${section.feature_filter || "all"}`;
+        els.scopeMeta.textContent = `Case set ${section.case_set_id.slice(0, 12)} · latest ${section.latest_created_at.replace("T", " ").slice(0, 16)}`;
+        els.scopeCases.innerHTML = "";
+        for (const caseId of section.case_ids) {
+          const li = document.createElement("li");
+          li.textContent = caseId;
+          els.scopeCases.appendChild(li);
+        }
+      }
+
+      function render() {
+        const section = getSection();
+        const rows = applyFilters(section);
+        renderScopeMeta(section);
+        renderSummary(rows);
+        renderTable(rows);
+      }
+
+      const scopeOptions = payload.sections.map((section) => ({
+        value: section.case_set_id,
+        label: scopeOptionLabel(section)
+      }));
+      buildOptions(els.scope, scopeOptions, state.scopeId);
+
+      function refreshDynamicOptions() {
+        const section = getSection();
+        const models = Array.from(new Set(section.runs.map((row) => row.model))).sort();
+        const reasoning = Array.from(new Set(section.runs.map((row) => row.reasoning_effort || "none"))).sort();
+        buildOptions(els.model, [{ value: "all", label: "All models" }, ...models.map((model) => ({ value: model, label: model.split("/").pop() }))], state.model);
+        buildOptions(els.reasoning, [{ value: "all", label: "All reasoning levels" }, ...reasoning.map((value) => ({ value, label: value }))], state.reasoning);
+      }
+
+      els.scope.addEventListener("change", (event) => {
+        state.scopeId = event.target.value;
+        state.model = "all";
+        state.reasoning = "all";
+        refreshDynamicOptions();
+        render();
+      });
+      els.model.addEventListener("change", (event) => { state.model = event.target.value; render(); });
+      els.reasoning.addEventListener("change", (event) => { state.reasoning = event.target.value; render(); });
+      els.sort.addEventListener("change", (event) => { state.sort = event.target.value; render(); });
+      els.latestOnly.addEventListener("change", (event) => { state.latestOnly = event.target.checked; render(); });
+      els.failedOnly.addEventListener("change", (event) => { state.failedOnly = event.target.checked; render(); });
+      els.dirtyOnly.addEventListener("change", (event) => { state.dirtyOnly = event.target.checked; render(); });
+      els.query.addEventListener("input", (event) => { state.query = event.target.value; render(); });
+      refreshDynamicOptions();
+      render();
+    }
+  </script>
+</body>
+</html>
