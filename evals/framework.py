@@ -7,6 +7,7 @@ runner captures tool calls, but never writes context files.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import sqlite3
@@ -30,6 +31,8 @@ from tools import all_chat_tools  # noqa: E402
 
 CASES_DIR = Path(__file__).resolve().parent / "cases"
 DEFAULT_MODEL = llm.DEFAULT_MODEL
+DEFAULT_CACHE_PATH = Path(__file__).resolve().parent / ".cache.sqlite"
+EVAL_CACHE_SCHEMA_VERSION = 1
 
 
 @dataclass(frozen=True)
@@ -107,6 +110,101 @@ class EvalResult:
         return [assertion for assertion in self.assertions if not assertion.passed]
 
 
+class EvalCache:
+    """SQLite-backed cache for eval-time LLM responses."""
+
+    def __init__(self, path: Path = DEFAULT_CACHE_PATH) -> None:
+        """Create a cache handle for the given SQLite file."""
+        self.path = path
+        self._ensure_schema()
+
+    def get(self, request: dict[str, Any]) -> llm.LLMResult | None:
+        """Return a cached LLM result for the normalized request payload."""
+        key = self._request_key(request)
+        with sqlite3.connect(self.path) as conn:
+            row = conn.execute(
+                "SELECT response_json FROM llm_eval_cache WHERE cache_key = ?",
+                (key,),
+            ).fetchone()
+        if row is None:
+            return None
+
+        cached = json.loads(str(row[0]))
+        raw_message = cached.get("raw_message")
+        tool_calls = None
+        if isinstance(raw_message, dict):
+            tool_calls = list(raw_message.get("tool_calls", []) or []) or None
+        return llm.LLMResult(
+            text=str(cached.get("text", "")),
+            model=str(cached.get("model", request["model"])),
+            input_tokens=int(cached.get("input_tokens", 0)),
+            output_tokens=int(cached.get("output_tokens", 0)),
+            total_tokens=int(cached.get("total_tokens", 0)),
+            latency_s=float(cached.get("latency_s", 0.0) or 0.0),
+            cost=(
+                float(cached["cost"]) if cached.get("cost", None) is not None else None
+            ),
+            tool_calls=tool_calls,
+            raw_message=raw_message if isinstance(raw_message, dict) else None,
+        )
+
+    def put(self, request: dict[str, Any], result: llm.LLMResult) -> None:
+        """Persist an LLM result for the normalized request payload."""
+        key = self._request_key(request)
+        request_json = json.dumps(request, sort_keys=True)
+        response_json = json.dumps(
+            {
+                "text": getattr(result, "text", ""),
+                "model": getattr(result, "model", request["model"]),
+                "input_tokens": getattr(result, "input_tokens", 0),
+                "output_tokens": getattr(result, "output_tokens", 0),
+                "total_tokens": getattr(result, "total_tokens", 0),
+                "latency_s": getattr(result, "latency_s", 0.0),
+                "cost": getattr(result, "cost", None),
+                "raw_message": getattr(result, "raw_message", None),
+            },
+            sort_keys=True,
+        )
+        with sqlite3.connect(self.path) as conn:
+            conn.execute(
+                """
+                INSERT INTO llm_eval_cache (cache_key, request_json, response_json)
+                VALUES (?, ?, ?)
+                ON CONFLICT(cache_key) DO UPDATE SET
+                    request_json = excluded.request_json,
+                    response_json = excluded.response_json,
+                    created_at = CURRENT_TIMESTAMP
+                """,
+                (key, request_json, response_json),
+            )
+            conn.commit()
+
+    def _ensure_schema(self) -> None:
+        """Create the cache table on first use."""
+        with sqlite3.connect(self.path) as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS llm_eval_cache (
+                    cache_key TEXT PRIMARY KEY,
+                    request_json TEXT NOT NULL,
+                    response_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            conn.commit()
+
+    @staticmethod
+    def _request_key(request: dict[str, Any]) -> str:
+        """Build a stable cache key for a normalized request payload."""
+        encoded = json.dumps(
+            request,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+
 def load_cases(cases_dir: Path = CASES_DIR) -> list[EvalCase]:
     """Load all curated feedback eval cases.
 
@@ -130,6 +228,9 @@ def run_case(
     *,
     model: str = DEFAULT_MODEL,
     max_tool_iterations: int = 5,
+    reasoning_effort: str | None = None,
+    cache: EvalCache | None = None,
+    refresh_cache: bool = False,
 ) -> EvalResult:
     """Run one eval case and evaluate its deterministic assertions."""
     result = EvalResult(
@@ -147,6 +248,9 @@ def run_case(
             case,
             model=model,
             max_tool_iterations=max_tool_iterations,
+            reasoning_effort=reasoning_effort,
+            cache=cache,
+            refresh_cache=refresh_cache,
         )
         result.execution = execution
         result.assertions = run_assertions(case.assertions, execution)
@@ -171,7 +275,11 @@ def print_results(results: list[EvalResult]) -> None:
     except ImportError:
         for result in results:
             status = "PASS" if result.passed else "FAIL"
-            print(f"{status} {result.case_id}")
+            execution = result.execution
+            print(
+                f"{status} {result.case_id} "
+                f"latency={_format_latency(execution)} cost={_format_cost(execution)}"
+            )
         return
 
     console = Console()
@@ -181,10 +289,13 @@ def print_results(results: list[EvalResult]) -> None:
     table.add_column("Kind")
     table.add_column("Model", style="dim")
     table.add_column("Source")
+    table.add_column("Latency", justify="right")
+    table.add_column("Cost", justify="right")
     table.add_column("Pass", justify="center")
     table.add_column("Failures")
 
     for result in results:
+        execution = result.execution
         if result.error:
             failures = result.error
         else:
@@ -198,6 +309,8 @@ def print_results(results: list[EvalResult]) -> None:
             result.case_kind,
             result.model.split("/")[-1],
             f"fb#{result.source_feedback_id}/call#{result.source_llm_call_id}",
+            _format_latency(execution),
+            _format_cost(execution),
             "[green]PASS[/green]" if result.passed else "[red]FAIL[/red]",
             failures or "-",
         )
@@ -228,6 +341,9 @@ def print_result_details(results: list[EvalResult]) -> None:
             continue
         parts = [f"Error: {result.error or '-'}"]
         if execution is not None:
+            parts.append(
+                f"Latency: {_format_latency(execution)} | Cost: {_format_cost(execution)}"
+            )
             parts.append(f"Final text:\n{execution.text or '(empty)'}")
             tools = [
                 {"name": call.name, "arguments": call.arguments}
@@ -256,6 +372,20 @@ def print_result_details(results: list[EvalResult]) -> None:
                     theme="ansi_dark",
                 )
             )
+
+
+def _format_latency(execution: EvalExecution | None) -> str:
+    """Format eval latency for compact display."""
+    if execution is None:
+        return "-"
+    return f"{execution.latency_s:.2f}s"
+
+
+def _format_cost(execution: EvalExecution | None) -> str:
+    """Format eval cost for compact display."""
+    if execution is None or execution.cost is None:
+        return "-"
+    return f"${execution.cost:.4f}"
 
 
 def _case_from_dict(raw: dict[str, Any], path: Path) -> EvalCase:
@@ -299,6 +429,9 @@ def _run_chat_case(
     *,
     model: str,
     max_tool_iterations: int,
+    reasoning_effort: str | None,
+    cache: EvalCache | None,
+    refresh_cache: bool,
 ) -> EvalExecution:
     fixture = case.fixture
     today = date.fromisoformat(str(fixture["today"]))
@@ -326,17 +459,19 @@ def _run_chat_case(
 
     last_result: Any = None
     for iteration in range(max_tool_iterations):
-        last_result = llm.call_llm(
-            messages,
+        last_result = _call_llm_for_eval(
+            messages=messages,
             model=model,
             max_tokens=int(fixture.get("max_tokens", 1024)),
+            reasoning_effort=reasoning_effort,
             tools=tools,
-            request_type="",
             metadata={
                 "eval_case_id": case.id,
                 "source_feedback_id": case.source_feedback_id,
                 "iteration": iteration,
             },
+            cache=cache,
+            refresh_cache=refresh_cache,
         )
         input_tokens += int(getattr(last_result, "input_tokens", 0) or 0)
         output_tokens += int(getattr(last_result, "output_tokens", 0) or 0)
@@ -371,17 +506,19 @@ def _run_chat_case(
             )
 
     if last_result is not None and _result_tool_calls(last_result):
-        last_result = llm.call_llm(
-            messages,
+        last_result = _call_llm_for_eval(
+            messages=messages,
             model=model,
             max_tokens=int(fixture.get("max_tokens", 1024)),
+            reasoning_effort=reasoning_effort,
             tools=None,
-            request_type="",
             metadata={
                 "eval_case_id": case.id,
                 "source_feedback_id": case.source_feedback_id,
                 "iteration": "final_synthesis",
             },
+            cache=cache,
+            refresh_cache=refresh_cache,
         )
         input_tokens += int(getattr(last_result, "input_tokens", 0) or 0)
         output_tokens += int(getattr(last_result, "output_tokens", 0) or 0)
@@ -400,6 +537,46 @@ def _run_chat_case(
         latency_s=latency_s,
         cost=cost or None,
     )
+
+
+def _call_llm_for_eval(
+    *,
+    messages: list[dict[str, Any]],
+    model: str,
+    max_tokens: int,
+    reasoning_effort: str | None,
+    tools: list[dict[str, Any]] | None,
+    metadata: dict[str, Any],
+    cache: EvalCache | None,
+    refresh_cache: bool,
+) -> llm.LLMResult:
+    """Call the LLM for an eval case with optional request caching."""
+    request = {
+        "cache_schema_version": EVAL_CACHE_SCHEMA_VERSION,
+        "model": model,
+        "messages": messages,
+        "max_tokens": max_tokens,
+        "temperature": 0.7,
+        "reasoning_effort": reasoning_effort,
+        "tools": tools,
+    }
+    if cache is not None and not refresh_cache:
+        cached = cache.get(request)
+        if cached is not None:
+            return cached
+
+    result = llm.call_llm(
+        messages,
+        model=model,
+        max_tokens=max_tokens,
+        reasoning_effort=reasoning_effort,
+        tools=tools,
+        request_type="",
+        metadata=metadata,
+    )
+    if cache is not None:
+        cache.put(request, result)
+    return result
 
 
 def _build_context(fixture: dict[str, Any]) -> dict[str, str]:
@@ -465,7 +642,10 @@ def _result_tool_calls(result: Any) -> list[Any]:
 def _capture_tool_call(raw_tool_call: Any) -> CapturedToolCall:
     name = _tool_name(raw_tool_call)
     arguments = _tool_arguments(raw_tool_call)
-    if name == "update_context" and arguments.get("action") in {"append", "replace_section"}:
+    if name == "update_context" and arguments.get("action") in {
+        "append",
+        "replace_section",
+    }:
         normalized_edit = context_edit_from_tool_call(
             _tool_call_namespace(raw_tool_call)
         )

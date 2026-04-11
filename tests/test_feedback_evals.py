@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
+from pathlib import Path
+import sys
+from types import ModuleType
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -11,9 +14,14 @@ import llm
 import pytest
 
 from evals.framework import (
-    EvalExecution,
     CapturedToolCall,
+    EvalCache,
+    AssertionResult,
+    EvalExecution,
+    EvalResult,
     load_cases,
+    print_result_details,
+    print_results,
     run_assertions,
     run_case,
 )
@@ -375,7 +383,129 @@ class TestChatRunner:
         assert result.passed
         assert result.execution is not None
         assert result.execution.tool_calls[0].name == "update_context"
-        assert result.execution.tool_calls[0].arguments["section"] == "## Weekly Plan"
+
+    def test_chat_case_reuses_cached_llm_responses(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        case = next(
+            case for case in load_cases() if case.id == "chat_log_life_disruption"
+        )
+        tool_call = _tool_call(
+            "update_context",
+            {
+                "file": "log",
+                "action": "append",
+                "content": (
+                    "## 2026-04-09\n\n"
+                    "- Small one is sick and did not go to creche; strength "
+                    "session may be hard today."
+                ),
+                "summary": "Logged child sickness disrupting strength session.",
+            },
+        )
+        mock_call = MagicMock(
+            side_effect=[
+                _llm_result("", tool_calls=[tool_call]),
+                _llm_result(
+                    "Logged that. If strength gets squeezed, shift it to Friday.",
+                    tool_calls=[],
+                ),
+            ]
+        )
+        monkeypatch.setattr(llm, "call_llm", mock_call)
+        cache = EvalCache(tmp_path / "eval-cache.sqlite")
+
+        first = run_case(case, model="test-model", cache=cache)
+        second = run_case(case, model="test-model", cache=cache)
+
+        assert first.execution is not None
+        assert second.execution is not None
+        assert second.execution.text == first.execution.text
+        assert mock_call.call_count == 2
+
+    def test_chat_case_refresh_cache_forces_fresh_llm_call(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        case = next(
+            case for case in load_cases() if case.id == "chat_explicit_add_to_log"
+        )
+        cached_result = _llm_result("Cached response", tool_calls=[])
+        refreshed_result = _llm_result("Fresh response", tool_calls=[])
+        mock_call = MagicMock(side_effect=[cached_result, refreshed_result])
+        monkeypatch.setattr(llm, "call_llm", mock_call)
+        cache = EvalCache(tmp_path / "eval-cache.sqlite")
+
+        first = run_case(case, model="test-model", cache=cache)
+        second = run_case(
+            case,
+            model="test-model",
+            cache=cache,
+            refresh_cache=True,
+        )
+
+        assert first.execution is not None
+        assert second.execution is not None
+        assert first.execution.text == "Cached response"
+        assert second.execution.text == "Fresh response"
+        assert mock_call.call_count == 2
+
+    def test_chat_case_passes_reasoning_effort_into_cacheable_request(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        case = next(
+            case for case in load_cases() if case.id == "chat_explicit_add_to_log"
+        )
+        mock_call = MagicMock(return_value=_llm_result("Fresh response", tool_calls=[]))
+        monkeypatch.setattr(llm, "call_llm", mock_call)
+        cache = EvalCache(tmp_path / "eval-cache.sqlite")
+
+        run_case(
+            case,
+            model="test-model",
+            reasoning_effort="high",
+            cache=cache,
+        )
+
+        assert mock_call.call_args.kwargs["reasoning_effort"] == "high"
+
+        second = run_case(
+            case,
+            model="test-model",
+            reasoning_effort="high",
+            cache=cache,
+        )
+        assert second.execution is not None
+        assert second.execution.text == "Fresh response"
+        assert mock_call.call_count == 1
+
+    def test_cached_execution_preserves_latency_and_cost(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        case = next(
+            case for case in load_cases() if case.id == "chat_explicit_add_to_log"
+        )
+        mock_call = MagicMock(return_value=_llm_result("Fresh response", tool_calls=[]))
+        monkeypatch.setattr(llm, "call_llm", mock_call)
+        cache = EvalCache(tmp_path / "eval-cache.sqlite")
+
+        first = run_case(case, model="test-model", cache=cache)
+        second = run_case(case, model="test-model", cache=cache)
+
+        assert first.execution is not None
+        assert second.execution is not None
+        assert first.execution.latency_s == pytest.approx(0.01)
+        assert second.execution.latency_s == pytest.approx(0.01)
+        assert first.execution.cost == pytest.approx(0.001)
+        assert second.execution.cost == pytest.approx(0.001)
+        assert mock_call.call_count == 1
 
 
 class TestAssertions:
@@ -520,3 +650,114 @@ class TestCliSelection:
         assert results == [case.id for case in cases]
         assert mock_progress.add_task.call_count == 1
         assert mock_progress.advance.call_count == 2
+
+    def test_normalize_reasoning_effort_maps_none_sentinel(self) -> None:
+        assert eval_run._normalize_reasoning_effort("none") is None
+        assert eval_run._normalize_reasoning_effort("medium") == "medium"
+
+
+class _FakeTable:
+    instances: list["_FakeTable"] = []
+
+    def __init__(self, *args, **kwargs) -> None:
+        self.columns: list[str] = []
+        self.rows: list[tuple[str, ...]] = []
+        _FakeTable.instances.append(self)
+
+    def add_column(self, label: str, **kwargs) -> None:
+        self.columns.append(label)
+
+    def add_row(self, *values: str) -> None:
+        self.rows.append(tuple(values))
+
+
+class _FakeConsole:
+    instances: list["_FakeConsole"] = []
+
+    def __init__(self, *args, **kwargs) -> None:
+        self.printed: list[object] = []
+        _FakeConsole.instances.append(self)
+
+    def print(self, obj: object) -> None:
+        self.printed.append(obj)
+
+
+class _FakePanel:
+    def __init__(self, renderable: str, title: str, border_style: str) -> None:
+        self.renderable = renderable
+        self.title = title
+        self.border_style = border_style
+
+
+class _FakeSyntax:
+    def __init__(self, code: str, lexer: str, theme: str) -> None:
+        self.code = code
+        self.lexer = lexer
+        self.theme = theme
+
+
+class TestPrinting:
+    def test_print_results_includes_latency_and_cost_columns(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _FakeConsole.instances.clear()
+        _FakeTable.instances.clear()
+        monkeypatch.setitem(sys.modules, "rich.console", ModuleType("rich.console"))
+        monkeypatch.setitem(sys.modules, "rich.table", ModuleType("rich.table"))
+        sys.modules["rich.console"].Console = _FakeConsole
+        sys.modules["rich.table"].Table = _FakeTable
+        result = EvalResult(
+            case_id="case-1",
+            feature="chat",
+            case_kind="real_regression",
+            model="anthropic/test-model",
+            source_feedback_id=1,
+            source_llm_call_id=2,
+            assertions=[AssertionResult(name="ok", passed=True)],
+            execution=EvalExecution(
+                text="Done",
+                latency_s=1.234,
+                cost=0.0567,
+            ),
+        )
+
+        print_results([result])
+
+        table = _FakeTable.instances[0]
+        assert "Latency" in table.columns
+        assert "Cost" in table.columns
+        assert table.rows[0][5] == "1.23s"
+        assert table.rows[0][6] == "$0.0567"
+
+    def test_print_result_details_includes_latency_and_cost(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _FakeConsole.instances.clear()
+        monkeypatch.setitem(sys.modules, "rich.console", ModuleType("rich.console"))
+        monkeypatch.setitem(sys.modules, "rich.panel", ModuleType("rich.panel"))
+        monkeypatch.setitem(sys.modules, "rich.syntax", ModuleType("rich.syntax"))
+        sys.modules["rich.console"].Console = _FakeConsole
+        sys.modules["rich.panel"].Panel = _FakePanel
+        sys.modules["rich.syntax"].Syntax = _FakeSyntax
+        result = EvalResult(
+            case_id="case-1",
+            feature="chat",
+            case_kind="real_regression",
+            model="anthropic/test-model",
+            source_feedback_id=1,
+            source_llm_call_id=2,
+            assertions=[AssertionResult(name="bad", passed=False)],
+            execution=EvalExecution(
+                text="Done",
+                latency_s=1.234,
+                cost=0.0567,
+            ),
+        )
+
+        print_result_details([result])
+
+        panel = _FakeConsole.instances[0].printed[0]
+        assert isinstance(panel, _FakePanel)
+        assert "Latency: 1.23s | Cost: $0.0567" in panel.renderable

@@ -22,6 +22,7 @@ from rich.progress import (
 
 from evals.framework import (
     DEFAULT_MODEL,
+    EvalCache,
     EvalCase,
     load_cases,
     print_result_details,
@@ -72,7 +73,25 @@ def main() -> None:
         default=5,
         help="Maximum tool loop iterations before final synthesis.",
     )
+    parser.add_argument(
+        "--reasoning-effort",
+        choices=["none", "low", "medium", "high"],
+        default="none",
+        help="Reasoning effort hint passed to the LLM for eval calls.",
+    )
+    parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="Disable the local SQLite cache for eval LLM responses.",
+    )
+    parser.add_argument(
+        "--refresh-cache",
+        action="store_true",
+        help="Ignore cached eval responses and overwrite them with fresh ones.",
+    )
     args = parser.parse_args()
+    if args.no_cache and args.refresh_cache:
+        parser.error("--refresh-cache cannot be used with --no-cache")
 
     try:
         selected = select_cases(
@@ -84,10 +103,14 @@ def main() -> None:
         print(str(exc), file=sys.stderr)
         sys.exit(2)
 
+    cache = None if args.no_cache else EvalCache()
     results = _run_selected_cases(
         selected,
         model=args.model,
         max_tool_iterations=args.max_tool_iterations,
+        reasoning_effort=_normalize_reasoning_effort(args.reasoning_effort),
+        cache=cache,
+        refresh_cache=args.refresh_cache,
     )
     print_results(results)
     if args.details:
@@ -101,6 +124,9 @@ def _run_selected_cases(
     *,
     model: str,
     max_tool_iterations: int,
+    reasoning_effort: str | None = None,
+    cache: EvalCache | None = None,
+    refresh_cache: bool = False,
 ):
     selected = list(cases)
     if len(selected) <= 1:
@@ -109,6 +135,9 @@ def _run_selected_cases(
                 case,
                 model=model,
                 max_tool_iterations=max_tool_iterations,
+                reasoning_effort=reasoning_effort,
+                cache=cache,
+                refresh_cache=refresh_cache,
             )
             for case in selected
         ]
@@ -129,10 +158,18 @@ def _run_selected_cases(
                     case,
                     model=model,
                     max_tool_iterations=max_tool_iterations,
+                    reasoning_effort=reasoning_effort,
+                    cache=cache,
+                    refresh_cache=refresh_cache,
                 )
             )
             progress.advance(task_id)
     return results
+
+
+def _normalize_reasoning_effort(value: str) -> str | None:
+    """Normalize CLI reasoning effort to the llm.call_llm convention."""
+    return None if value == "none" else value
 
 
 if __name__ == "__main__":
