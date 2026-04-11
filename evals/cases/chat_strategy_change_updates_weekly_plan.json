@@ -1,0 +1,98 @@
+{
+  "id": "chat_strategy_change_updates_weekly_plan",
+  "feature": "chat",
+  "case_kind": "real_regression",
+  "source_feedback_id": 12,
+  "source_llm_call_id": 304,
+  "derived_from": {
+    "feedback_id": 12,
+    "llm_call_id": 304,
+    "hypothesis": "A direct user command to change the weekly plan should trigger a strategy.md update_context call instead of a follow-up confirmation question."
+  },
+  "intent": "When the user explicitly changes weekly training volume in chat, the assistant should propose a strategy.md Weekly Plan edit and then reply briefly.",
+  "fixture": {
+    "today": "2026-04-10",
+    "context": {
+      "me": "# Profile\n\n- Adam, 42M, 81 kg.\n- Wife + 3-year-old; live in Crosshaven, Ireland.\n",
+      "strategy": "# Strategy\n\n## Goals \u2014 Current focus\n\n- Hold 3 runs + 2 lifts/week at 15+ km volume.\n- Build tempo capacity: extend tempo segments toward 3 km @ sub-5:10/km.\n\n## Weekly Plan\n\n**Week runs Monday \u2192 Sunday.** Target: 3 runs + 2 strength sessions per week (~15 km+ total running).\n\n- Run days: ~5 km each\n  - 1 tempo session/week when HRV is above personal baseline (~50 ms): tempo segments of 1.5\u20132.5 km @ 5:05\u20135:15/km pace\n  - Remaining runs at easy pace (5:30\u20136:00/km)\n- Strength A: Push + core\n- Strength B: Pull + core\n- Prefer not to stack run + strength on the same day\n",
+      "log": "# Log\n\n## 2026-04-09\n\n- Slept better and got strength done.\n",
+      "history": "(not provided)",
+      "coach_feedback": "(not provided)",
+      "recent_nudges": "(none yet)",
+      "last_coach_summary": "(no recent coach review)"
+    },
+    "health_data": {
+      "current_week": {
+        "summary": {
+          "week_label": "W15",
+          "start_date": "2026-04-06",
+          "end_date": "2026-04-12",
+          "run_count": 3,
+          "lift_count": 1,
+          "total_run_km": 13.9,
+          "total_lift_min": 41,
+          "avg_hrv_ms": 47.0,
+          "avg_resting_hr": 53.0,
+          "avg_sleep_total_h": 6.9,
+          "avg_sleep_efficiency_pct": 83.4,
+          "sleep_nights_tracked": 5,
+          "sleep_nights_total": 5
+        },
+        "days": []
+      },
+      "history": []
+    },
+    "turns": [
+      {
+        "role": "user",
+        "content": "How is my trend for running in last 2 months?"
+      },
+      {
+        "role": "assistant",
+        "content": "Your running over the last 2 months is trending clearly faster."
+      },
+      {
+        "role": "user",
+        "content": "Change my plan to 4 runs per week"
+      }
+    ]
+  },
+  "assertions": [
+    {
+      "type": "tool_called",
+      "name": "proposes_strategy_update",
+      "tool": "update_context",
+      "count": 1
+    },
+    {
+      "type": "tool_arg_matches",
+      "name": "updates_weekly_plan_section",
+      "tool": "update_context",
+      "matches": {
+        "file": "strategy",
+        "action": "replace_section",
+        "section": "## Weekly Plan"
+      }
+    },
+    {
+      "type": "tool_arg_matches",
+      "name": "weekly_plan_mentions_four_runs",
+      "tool": "update_context",
+      "matches": {
+        "file": "strategy",
+        "content": {
+          "regex": "(?is)\\b4\\s+runs?/week\\b|\\bTarget:\\s*4\\s+runs?\\b"
+        }
+      }
+    },
+    {
+      "type": "text_absent",
+      "name": "does_not_ask_to_lock_it_in",
+      "patterns": [
+        "Want me to lock this in",
+        "adjust anything first"
+      ]
+    }
+  ],
+  "notes": "Real regression derived from thumbs-down feedback #12 / llm_call #304. The failed reply proposed a new 4-run structure but did not call update_context, instead asking whether to lock it in. This case pins the missing strategy update behavior."
+}

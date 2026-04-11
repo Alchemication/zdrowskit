@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -111,6 +112,18 @@ class TestCaseLoading:
         assert case.fixture["today"] == "2026-04-08"
         assert "workout_all" in case.fixture["db_seed"]["tables"]
 
+    def test_load_cases_reads_strategy_update_feedback_case(self) -> None:
+        cases = {case.id: case for case in load_cases()}
+
+        case = cases["chat_strategy_change_updates_weekly_plan"]
+
+        assert case.case_kind == "real_regression"
+        assert case.source_feedback_id == 12
+        assert case.source_llm_call_id == 304
+        assert case.derived_from["feedback_id"] == 12
+        assert case.fixture["today"] == "2026-04-10"
+        assert "thumbs-down feedback #12" in case.notes
+
 
 class TestChatRunner:
     def test_chat_case_captures_context_update_without_mutating(
@@ -209,6 +222,161 @@ class TestChatRunner:
         assert result.execution is not None
         assert result.execution.tool_calls[0].name == "update_context"
 
+    def test_chat_case_normalizes_replace_section_heading_from_raw_tool_call(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        case = next(
+            case
+            for case in load_cases()
+            if case.id == "chat_strategy_change_updates_weekly_plan"
+        )
+        raw_tool_call = {
+            "id": "call_1",
+            "type": "function",
+            "function": {
+                "name": "update_context",
+                "arguments": json.dumps(
+                    {
+                        "file": "strategy",
+                        "action": "replace_section",
+                        "section": "Weekly Plan",
+                        "content": (
+                            "## Weekly Plan\n\n"
+                            "**Week runs Monday -> Sunday.** Target: 4 runs + 2 "
+                            "strength sessions per week (~20 km total running).\n"
+                        ),
+                        "summary": "Updated weekly plan.",
+                    }
+                ),
+            },
+        }
+        mock_call = MagicMock(
+            side_effect=[
+                SimpleNamespace(
+                    text="",
+                    tool_calls=None,
+                    input_tokens=10,
+                    output_tokens=5,
+                    total_tokens=15,
+                    latency_s=0.01,
+                    cost=0.001,
+                    raw_message={
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [raw_tool_call],
+                    },
+                ),
+                _llm_result("Done. Plan updated.", tool_calls=[]),
+            ]
+        )
+        monkeypatch.setattr(llm, "call_llm", mock_call)
+
+        result = run_case(case, model="test-model")
+
+        assert result.passed
+        assert result.execution is not None
+        assert result.execution.tool_calls[0].arguments["section"] == "## Weekly Plan"
+
+    def test_chat_case_does_not_log_normalization_warning_for_invalid_action(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        case = next(
+            case
+            for case in load_cases()
+            if case.id == "chat_strategy_change_updates_weekly_plan"
+        )
+        raw_tool_call = {
+            "id": "call_1",
+            "type": "function",
+            "function": {
+                "name": "update_context",
+                "arguments": json.dumps(
+                    {
+                        "file": "strategy",
+                        "section": "Weekly Plan",
+                        "content": "## Weekly Plan\n\n- 4 runs\n",
+                        "summary": "Updated weekly plan.",
+                    }
+                ),
+            },
+        }
+        mock_call = MagicMock(
+            side_effect=[
+                SimpleNamespace(
+                    text="",
+                    tool_calls=None,
+                    input_tokens=10,
+                    output_tokens=5,
+                    total_tokens=15,
+                    latency_s=0.01,
+                    cost=0.001,
+                    raw_message={
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [raw_tool_call],
+                    },
+                ),
+                _llm_result("Done. Plan updated.", tool_calls=[]),
+            ]
+        )
+        monkeypatch.setattr(llm, "call_llm", mock_call)
+
+        with caplog.at_level(logging.WARNING):
+            result = run_case(case, model="test-model")
+
+        assert not result.passed
+        assert "Unknown context edit action in tool call" not in caplog.text
+
+    def test_chat_case_captures_strategy_update_without_mutating(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        case = next(
+            case
+            for case in load_cases()
+            if case.id == "chat_strategy_change_updates_weekly_plan"
+        )
+        tool_call = _tool_call(
+            "update_context",
+            {
+                "file": "strategy",
+                "action": "replace_section",
+                "section": "## Weekly Plan",
+                "content": (
+                    "## Weekly Plan\n\n"
+                    "**Week runs Monday -> Sunday.** Target: 4 runs + 2 strength "
+                    "sessions per week (~20 km total running).\n\n"
+                    "- Run days: 4-5 km each\n"
+                    "- 1 tempo session/week when recovery supports it\n"
+                    "- Remaining runs at easy pace (5:30-6:00/km)\n"
+                    "- Strength A: Push + core\n"
+                    "- Strength B: Pull + core\n"
+                    "- One easy run may share a day with strength when needed\n"
+                ),
+                "summary": "Updated Weekly Plan target to 4 runs per week.",
+            },
+        )
+        mock_call = MagicMock(
+            side_effect=[
+                _llm_result("", tool_calls=[tool_call]),
+                _llm_result(
+                    "Changed it to **4 runs/week**. Keep the extra run easy so recovery stays manageable.",
+                    tool_calls=[],
+                ),
+            ]
+        )
+        monkeypatch.setattr(llm, "call_llm", mock_call)
+
+        result = run_case(case, model="test-model")
+
+        assert result.passed
+        assert result.execution is not None
+        assert result.execution.tool_calls[0].name == "update_context"
+        assert result.execution.tool_calls[0].arguments["section"] == "## Weekly Plan"
+
 
 class TestAssertions:
     def test_tool_arg_match_reports_missing_content(self) -> None:
@@ -288,7 +456,7 @@ class TestAssertions:
             EvalExecution(
                 text=(
                     "Clear downward trend. Here's the picture:\n\n"
-                    "<chart title=\"Running Pace Trend\">\n"
+                    '<chart title="Running Pace Trend">\n'
                     "fig = None\n"
                     "</chart>\n\n"
                     "The trend is real."

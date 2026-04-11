@@ -236,8 +236,7 @@ class TestRepoPrompts:
             in normalized
         )
         assert (
-            "Refer to it explicitly when it materially supports your answer"
-            in prompt
+            "Refer to it explicitly when it materially supports your answer" in prompt
         )
         assert "Correct flow:" in prompt
         assert "Wrong flow:" in prompt
@@ -292,6 +291,19 @@ class TestCharts:
         assert "Never begin a reply with" in normalized
         assert "Wait" in normalized
         assert "Looking at" in normalized
+
+    def test_chat_prompt_treats_direct_strategy_commands_as_explicit_updates(
+        self,
+    ) -> None:
+        """Direct durable edit commands should trigger update_context, not a bounce-back."""
+        prompt = (PROMPTS_DIR / "chat_prompt.md").read_text(encoding="utf-8")
+        normalized = " ".join(prompt.split())
+        assert "Direct change requests: update, don't negotiate" in prompt
+        assert "direct language to change durable context" in normalized
+        assert "illustrative, not exhaustive" in normalized
+        assert "explicit permission to call `update_context`" in prompt
+        assert "Want me to lock this in?" in prompt
+        assert "replace `## Weekly Plan`" in prompt
 
     def test_nudge_prompt_has_scheduled_session_carveout(self) -> None:
         """Nudge must restate today's scheduled session even when SKIP would otherwise apply."""

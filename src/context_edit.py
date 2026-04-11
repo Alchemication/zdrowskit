@@ -78,6 +78,32 @@ class EditPreviewError(ValueError):
     """Raised when a proposed edit cannot be previewed or applied safely."""
 
 
+def _normalize_section_heading(section: object) -> str | None:
+    """Normalize a replace_section heading without inventing new targets.
+
+    Bare section names like ``"Weekly Plan"`` are upgraded to
+    ``"## Weekly Plan"`` so smaller models can still hit the intended
+    section. Existence is still validated later by strict preview/apply
+    checks against the live file.
+    """
+    if not isinstance(section, str):
+        return None
+
+    normalized = section.strip()
+    if not normalized:
+        return None
+
+    heading_match = re.match(r"^(#{1,6})(.*)$", normalized)
+    if heading_match:
+        hashes = heading_match.group(1)
+        title = heading_match.group(2).strip()
+        if not title:
+            return None
+        return f"{hashes} {title}"
+
+    return f"## {normalized}"
+
+
 def _parse_context_update_block(raw: str) -> ContextEdit | None:
     """Parse a single raw JSON string into a ContextEdit.
 
@@ -109,7 +135,7 @@ def _parse_context_update_block(raw: str) -> ContextEdit | None:
         logger.warning("Missing content or summary in context update")
         return None
 
-    section = data.get("section")
+    section = _normalize_section_heading(data.get("section"))
     if action == "replace_section" and not section:
         logger.warning("replace_section requires a section heading")
         return None
@@ -195,7 +221,7 @@ def context_edit_from_tool_call(tool_call: object) -> ContextEdit | None:
         logger.warning("Missing content or summary in tool call")
         return None
 
-    section = data.get("section")
+    section = _normalize_section_heading(data.get("section"))
     if action == "replace_section" and not section:
         logger.warning("replace_section tool call requires a section heading")
         return None
@@ -395,20 +421,31 @@ def _apply_replace_section(
     *,
     strict: bool = False,
 ) -> str:
-    """Replace a ## heading section in the file.
+    """Replace a markdown heading section in the file.
 
-    Matches from the heading line to just before the next ## heading or EOF.
-    If the heading is not found, appends the new text instead.
+    Matches from the exact heading line to just before the next heading at the
+    same or higher level, or EOF. If the heading is not found, appends the new
+    text instead unless ``strict`` is enabled.
     """
+    heading_match = re.match(r"^(#{1,6})\s+", heading)
+    if heading_match is None:
+        raise EditPreviewError(f"Invalid section heading: {heading!r}")
+
+    level = len(heading_match.group(1))
     escaped = re.escape(heading)
-    pattern = rf"(?m)^{escaped}\s*\n.*?(?=^## |\Z)"
-    match = re.search(pattern, existing, re.DOTALL)
+    pattern = rf"(?m)^{escaped}\s*$"
+    match = re.search(pattern, existing)
     if match:
+        remainder = existing[match.end() :]
+        next_heading = re.search(rf"(?m)^#{{1,{level}}}\s+", remainder)
+        section_end = match.end() + (
+            next_heading.start() if next_heading else len(remainder)
+        )
         replacement = new_text.rstrip("\n") + "\n\n"
         return (
             existing[: match.start()]
             + replacement
-            + existing[match.end() :].lstrip("\n")
+            + existing[section_end:].lstrip("\n")
         )
     # Section not found — append.
     if strict:

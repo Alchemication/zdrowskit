@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 from context_edit import (
-    EditPreviewError,
     ContextEdit,
+    EditPreviewError,
     PendingEdits,
     apply_edit,
     build_edit_preview,
     append_coach_feedback,
+    context_edit_from_tool_call,
     extract_all_context_updates,
     extract_context_update,
     new_feedback_entry,
@@ -58,6 +60,20 @@ class TestExtractContextUpdate:
         assert edit is not None
         assert edit.action == "replace_section"
         assert edit.section == "## Strength Goals"
+
+    def test_replace_section_normalizes_bare_heading(self) -> None:
+        response = (
+            "Updated.\n"
+            "<context_update>"
+            '{"file": "strategy", "action": "replace_section", '
+            '"section": "Weekly Plan", '
+            '"content": "## Weekly Plan\\n- 4 runs\\n", '
+            '"summary": "Updated running frequency"}'
+            "</context_update>"
+        )
+        edit = extract_context_update(response)
+        assert edit is not None
+        assert edit.section == "## Weekly Plan"
 
     def test_no_block_returns_none(self) -> None:
         assert extract_context_update("Just a normal reply.") is None
@@ -202,6 +218,55 @@ class TestApplyEdit:
         assert "Bench 80kg" not in result
         assert "Sub-50 10K" in result
 
+    def test_replace_level3_section_found(self, tmp_path: Path) -> None:
+        md = tmp_path / "strategy.md"
+        md.write_text(
+            "# Strategy\n\n"
+            "## Weekly Plan\n\n"
+            "### Tempo\n\nOld tempo block\n\n"
+            "### Easy\n\nEasy run stays\n"
+        )
+        edit = ContextEdit(
+            file="strategy",
+            action="replace_section",
+            section="### Tempo",
+            content="### Tempo\n\nNew tempo block\n",
+            summary="Updated tempo subsection",
+        )
+
+        apply_edit(tmp_path, edit)
+
+        result = md.read_text()
+        assert "New tempo block" in result
+        assert "Old tempo block" not in result
+        assert "### Easy" in result
+        assert "Easy run stays" in result
+
+    def test_replace_level4_section_found(self, tmp_path: Path) -> None:
+        md = tmp_path / "strategy.md"
+        md.write_text(
+            "# Strategy\n\n"
+            "## Weekly Plan\n\n"
+            "### Tempo\n\n"
+            "#### Warm-up\n\nOld warm-up block\n\n"
+            "#### Main Set\n\nMain set stays\n"
+        )
+        edit = ContextEdit(
+            file="strategy",
+            action="replace_section",
+            section="#### Warm-up",
+            content="#### Warm-up\n\nNew warm-up block\n",
+            summary="Updated warm-up subsection",
+        )
+
+        apply_edit(tmp_path, edit)
+
+        result = md.read_text()
+        assert "New warm-up block" in result
+        assert "Old warm-up block" not in result
+        assert "#### Main Set" in result
+        assert "Main set stays" in result
+
     def test_replace_section_not_found_appends(self, tmp_path: Path) -> None:
         md = tmp_path / "strategy.md"
         md.write_text("# Strategy\n\n## Running\n\nSub-50 10K\n")
@@ -279,6 +344,48 @@ class TestBuildEditPreview:
             assert "Section not found" in str(exc)
         else:
             raise AssertionError("Expected EditPreviewError")
+
+    def test_strict_preview_normalized_heading_still_must_exist(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / "strategy.md").write_text("## Weekly Plan\n\nEasy week\n")
+        edit = ContextEdit(
+            file="strategy",
+            action="replace_section",
+            section="## Totally Hallucinated Section",
+            content="## Totally Hallucinated Section\n\nNope\n",
+            summary="Bad heading",
+        )
+
+        try:
+            build_edit_preview(tmp_path, edit, strict=True)
+        except EditPreviewError as exc:
+            assert "Section not found" in str(exc)
+        else:
+            raise AssertionError("Expected EditPreviewError")
+
+
+class TestContextEditFromToolCall:
+    def test_replace_section_normalizes_bare_heading(self) -> None:
+        tool_call = SimpleNamespace(
+            function=SimpleNamespace(
+                name="update_context",
+                arguments=json.dumps(
+                    {
+                        "file": "strategy",
+                        "action": "replace_section",
+                        "section": "Weekly Plan",
+                        "content": "## Weekly Plan\n\n- 4 runs\n",
+                        "summary": "Updated running frequency",
+                    }
+                ),
+            )
+        )
+
+        edit = context_edit_from_tool_call(tool_call)
+
+        assert edit is not None
+        assert edit.section == "## Weekly Plan"
 
 
 # ---------------------------------------------------------------------------

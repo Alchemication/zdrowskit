@@ -14,6 +14,7 @@ import sys
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 _ROOT = Path(__file__).resolve().parent.parent
@@ -24,6 +25,7 @@ if str(_SRC) not in sys.path:
 import llm  # noqa: E402
 from charts import strip_charts  # noqa: E402
 from config import PROMPTS_DIR  # noqa: E402
+from context_edit import context_edit_from_tool_call  # noqa: E402
 from tools import all_chat_tools  # noqa: E402
 
 CASES_DIR = Path(__file__).resolve().parent / "cases"
@@ -461,9 +463,24 @@ def _result_tool_calls(result: Any) -> list[Any]:
 
 
 def _capture_tool_call(raw_tool_call: Any) -> CapturedToolCall:
+    name = _tool_name(raw_tool_call)
+    arguments = _tool_arguments(raw_tool_call)
+    if name == "update_context" and arguments.get("action") in {"append", "replace_section"}:
+        normalized_edit = context_edit_from_tool_call(
+            _tool_call_namespace(raw_tool_call)
+        )
+        if normalized_edit is not None:
+            arguments = {
+                "file": normalized_edit.file,
+                "action": normalized_edit.action,
+                "content": normalized_edit.content,
+                "summary": normalized_edit.summary,
+            }
+            if normalized_edit.section is not None:
+                arguments["section"] = normalized_edit.section
     return CapturedToolCall(
-        name=_tool_name(raw_tool_call),
-        arguments=_tool_arguments(raw_tool_call),
+        name=name,
+        arguments=arguments,
         tool_call_id=_tool_call_id(raw_tool_call),
     )
 
@@ -501,6 +518,20 @@ def _tool_function(raw_tool_call: Any) -> Any:
     if isinstance(raw_tool_call, dict):
         return raw_tool_call.get("function", {})
     return getattr(raw_tool_call, "function", {})
+
+
+def _tool_call_namespace(raw_tool_call: Any) -> Any:
+    """Convert a raw tool-call payload into an attribute-access object."""
+    if not isinstance(raw_tool_call, dict):
+        return raw_tool_call
+    function = raw_tool_call.get("function", {})
+    return SimpleNamespace(
+        id=str(raw_tool_call.get("id", "call_unknown")),
+        function=SimpleNamespace(
+            name=str(function.get("name", "")),
+            arguments=function.get("arguments", "{}"),
+        ),
+    )
 
 
 def _eval_tool_result(tool_call: CapturedToolCall, fixture: dict[str, Any]) -> str:
