@@ -43,6 +43,23 @@ class ChartResult:
     image_bytes: bytes
 
 
+def chart_figure_caption(index: int, title: str) -> str:
+    """Build a stable Telegram caption for a chart attachment.
+
+    Args:
+        index: 1-based chart index in the current response.
+        title: Human-readable chart title.
+
+    Returns:
+        Markdown caption text such as ``"**Figure 1. Pace Trend**"``.
+    """
+    label = f"Figure {index}"
+    clean_title = title.strip()
+    if clean_title:
+        return f"**{label}. {clean_title}**"
+    return f"**{label}**"
+
+
 def extract_charts(response: str) -> list[ChartBlock]:
     """Extract all ``<chart>`` blocks from the LLM response.
 

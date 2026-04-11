@@ -64,7 +64,13 @@ from llm import (
     load_context,
     render_health_data,
 )
-from charts import ChartResult, extract_charts, render_chart, strip_charts
+from charts import (
+    ChartResult,
+    chart_figure_caption,
+    extract_charts,
+    render_chart,
+    strip_charts,
+)
 from context_edit import ContextEdit, EditPreviewError, build_edit_preview
 from notify import send_email, send_telegram, send_telegram_photo, send_telegram_report
 from notification_prefs import (
@@ -1454,8 +1460,11 @@ def cmd_nudge(
         send_email(nudge_text, subject)
     if use_telegram:
         # Send chart photos before the text nudge.
-        for chart in nudge_charts:
-            send_telegram_photo(chart.image_bytes, caption=f"**{chart.title}**")
+        for index, chart in enumerate(nudge_charts, start=1):
+            send_telegram_photo(
+                chart.image_bytes,
+                caption=chart_figure_caption(index, chart.title),
+            )
         telegram_message_id = send_telegram(nudge_text, subject, reply_markup)
 
     return CommandResult(

@@ -219,12 +219,25 @@ Include a chart when the result is a trend over time (3+ data points),
 compares categories or periods, or the user explicitly asks. Do NOT chart
 single values, counts, or yes/no answers.
 
-If you include a chart, the prose must still read cleanly after the chart
-block is removed and rendered separately. So:
+In Telegram chat, any chart you include will be rendered as a separate image
+attachment before your text reply. Treat it as `Figure 1` (and `Figure 2`,
+etc. only if multiple charts are truly necessary). In normal chat, prefer at
+most one chart unless the user explicitly asks for more.
+
+If you include a chart:
+
+- Refer to it explicitly when it materially supports your answer, e.g.
+  `Figure 1 shows the pace trend clearly.`
+- Do **not** use positional language like `below`, `above`, `here's the chart`,
+  or `here's the picture`.
+- Your text must still read cleanly if the chart image is not visible or is
+  viewed later.
+
+So:
 
 - Lead with the verdict, not a chart handoff.
 - Do **not** write `here's the chart`, `here's the picture`, `below`,
-  `above`, `as you can see`, or similar chart-referential scaffolding.
+  `above`, or similar chart-referential scaffolding.
 - Do **not** make the first sentence depend on the chart block being visible
   inline.
 

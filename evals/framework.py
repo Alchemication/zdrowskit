@@ -22,6 +22,7 @@ if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
 import llm  # noqa: E402
+from charts import strip_charts  # noqa: E402
 from config import PROMPTS_DIR  # noqa: E402
 from tools import all_chat_tools  # noqa: E402
 
@@ -568,6 +569,8 @@ def _evaluate_assertion(
         return _assert_text_contains(name, assertion, execution)
     if atype == "text_absent":
         return _assert_text_absent(name, assertion, execution)
+    if atype == "text_without_chart_absent":
+        return _assert_text_without_chart_absent(name, assertion, execution)
     if atype == "word_count_max":
         return _assert_word_count_max(name, assertion, execution)
     if atype == "forbidden_opening":
@@ -678,6 +681,24 @@ def _assert_word_count_max(
         name=name,
         passed=count <= max_words,
         detail=f"{count} words, max {max_words}",
+    )
+
+
+def _assert_text_without_chart_absent(
+    name: str,
+    assertion: dict[str, Any],
+    execution: EvalExecution,
+) -> AssertionResult:
+    visible_text = strip_charts(execution.text)
+    present = [
+        pattern
+        for pattern in assertion.get("patterns", [])
+        if _text_matches(visible_text, str(pattern))
+    ]
+    return AssertionResult(
+        name=name,
+        passed=not present,
+        detail="" if not present else f"Present after chart stripping: {present}",
     )
 
 

@@ -178,6 +178,19 @@ the compact health-data section) and `data["history"]` — a list of
 (e.g. `"2026-W11 (2026-03-09 – 2026-03-15)"`) — use `.split()[0]` for a
 short axis tick.
 
+If you include charts, assume they may be rendered as separate figures rather
+than inline in the report text. Treat them as `Figure 1`, `Figure 2`, etc.
+when you need to refer to them.
+
+If you include a chart:
+
+- Refer to it explicitly only when it materially supports your point, e.g.
+  `Figure 1 shows the HRV drift clearly.`
+- Do **not** use positional language like `below`, `above`, `here's the chart`,
+  or `here's the picture`.
+- The report prose must still read cleanly if chart blocks are removed and the
+  figures are viewed separately.
+
 **Compute before you plot.** `np` is in scope and you are encouraged to
 use it. Weekly volume, HRV drift, and sleep duration almost always read
 better with a fitted trend or a smoothed overlay than raw bars/points

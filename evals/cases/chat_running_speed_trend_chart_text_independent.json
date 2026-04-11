@@ -1,0 +1,174 @@
+{
+  "id": "chat_running_speed_trend_chart_text_independent",
+  "feature": "chat",
+  "case_kind": "real_regression",
+  "source_feedback_id": 9,
+  "source_llm_call_id": 272,
+  "derived_from": {
+    "feedback_id": 9,
+    "llm_call_id": 272,
+    "hypothesis": "When chat includes a chart, the Telegram-visible text should still read cleanly after chart blocks are stripped and rendered separately."
+  },
+  "intent": "When the user asks for a recent running-speed trend, chat may include a chart, but the remaining text must not depend on inline chart placement.",
+  "fixture": {
+    "today": "2026-04-08",
+    "context": {
+      "me": "# Profile\n\n- Adam, 42M.\n- Running since ~2018.\n- Pre-COVID 5K PR: sub-25 min; rebuilding toward that level.\n",
+      "strategy": "# Strategy\n\n## Goals - Current focus\n\n- Build tempo capacity toward 3 km @ sub-5:10/km.\n- Prefer not to stack run + strength on the same day.\n\n## Weekly Plan\n\n- Target: 3 runs + 2 strength sessions per week.\n- Tempo is the top-priority weekly run when recovery supports it.\n",
+      "log": "# Log\n\n## 2026-04-08\n\n- Completed a short tempo-style run in the morning.\n",
+      "history": "(not provided)",
+      "coach_feedback": "(not provided)",
+      "recent_nudges": "(none yet)",
+      "last_coach_summary": "(no recent coach review)"
+    },
+    "health_data": {
+      "current_week": {
+        "summary": {
+          "week_label": "W15",
+          "start_date": "2026-04-06",
+          "end_date": "2026-04-12"
+        },
+        "days": []
+      },
+      "history": []
+    },
+    "db_seed": {
+      "tables": {
+        "workout_all": [
+          {
+            "date": "2026-04-08",
+            "category": "run",
+            "type": "Outdoor Run",
+            "duration_min": 16.17976,
+            "gpx_distance_km": 3.076,
+            "hr_avg": 163.1,
+            "source": "auto_export"
+          },
+          {
+            "date": "2026-04-06",
+            "category": "run",
+            "type": "Outdoor Run",
+            "duration_min": 29.82486,
+            "gpx_distance_km": 5.271,
+            "hr_avg": 152.2,
+            "source": "auto_export"
+          },
+          {
+            "date": "2026-04-03",
+            "category": "run",
+            "type": "Outdoor Run",
+            "duration_min": 30.3012,
+            "gpx_distance_km": 5.316,
+            "hr_avg": 155.1,
+            "source": "auto_export"
+          },
+          {
+            "date": "2026-04-01",
+            "category": "run",
+            "type": "Outdoor Run",
+            "duration_min": 34.63212,
+            "gpx_distance_km": 6.044,
+            "hr_avg": 164.2,
+            "source": "auto_export"
+          },
+          {
+            "date": "2026-03-29",
+            "category": "run",
+            "type": "Outdoor Run",
+            "duration_min": 10.51115,
+            "gpx_distance_km": 2.041,
+            "hr_avg": 159.6,
+            "source": "auto_export"
+          },
+          {
+            "date": "2026-03-27",
+            "category": "run",
+            "type": "Outdoor Run",
+            "duration_min": 30.91336,
+            "gpx_distance_km": 5.276,
+            "hr_avg": 146.5,
+            "source": "auto_export"
+          },
+          {
+            "date": "2026-03-25",
+            "category": "run",
+            "type": "Outdoor Run",
+            "duration_min": 31.0516,
+            "gpx_distance_km": 5.21,
+            "hr_avg": 163.5,
+            "source": "auto_export"
+          },
+          {
+            "date": "2026-03-23",
+            "category": "run",
+            "type": "Outdoor Run",
+            "duration_min": 30.7501,
+            "gpx_distance_km": 5.041,
+            "hr_avg": 149.5,
+            "source": "auto_export"
+          },
+          {
+            "date": "2026-03-16",
+            "category": "run",
+            "type": "Outdoor Run",
+            "duration_min": 50.5548,
+            "gpx_distance_km": 8.154,
+            "hr_avg": 151.4,
+            "source": "auto_export"
+          },
+          {
+            "date": "2026-02-25",
+            "category": "run",
+            "type": "Outdoor Run",
+            "duration_min": 33.75477,
+            "gpx_distance_km": 5.437,
+            "hr_avg": 152.6,
+            "source": "auto_export"
+          },
+          {
+            "date": "2026-02-18",
+            "category": "run",
+            "type": "Outdoor Run",
+            "duration_min": 59.4666,
+            "gpx_distance_km": 8.773,
+            "hr_avg": 152.2,
+            "source": "auto_export"
+          }
+        ]
+      }
+    },
+    "turns": [
+      {
+        "role": "user",
+        "content": "Can you show me a trend for my running speed recently?"
+      }
+    ]
+  },
+  "assertions": [
+    {
+      "type": "tool_called",
+      "name": "queries_recent_runs",
+      "tool": "run_sql",
+      "min_count": 1
+    },
+    {
+      "type": "text_contains",
+      "name": "includes_chart_block",
+      "patterns": [
+        "<chart"
+      ]
+    },
+    {
+      "type": "text_without_chart_absent",
+      "name": "telegram_text_does_not_depend_on_inline_chart",
+      "patterns": [
+        "re:\\bhere(?:'s| is) (?:the )?(?:chart|picture|graph)\\b",
+        "re:\\b(?:chart|picture|graph)\\s+(?:below|above)\\b",
+        "re:\\bas\\s+(?:shown|seen)\\s+(?:below|above)\\b",
+        "re:\\b(?:below|above)\\s+you\\s+can\\s+see\\b",
+        "re:\\bshown\\s+(?:below|above)\\b"
+      ]
+    }
+  ],
+  "notes": "Real regression derived from thumbs-down feedback #9 / llm_call #272. The failed response said 'Here's the picture:' before a chart block, which became awkward once the chart was stripped and rendered separately in Telegram. This case checks the Telegram-visible text rather than trying to judge chart placement itself."
+}

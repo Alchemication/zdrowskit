@@ -87,6 +87,30 @@ class TestCaseLoading:
         assert "hypothesis" in positive.derived_from
         assert "hypothesis" in negative.derived_from
 
+    def test_load_cases_reads_pace_format_feedback_case(self) -> None:
+        cases = {case.id: case for case in load_cases()}
+
+        case = cases["chat_running_speed_trend_pace_format"]
+
+        assert case.case_kind == "real_regression"
+        assert case.source_feedback_id == 9
+        assert case.source_llm_call_id == 272
+        assert case.derived_from["feedback_id"] == 9
+        assert case.fixture["today"] == "2026-04-08"
+        assert "workout_all" in case.fixture["db_seed"]["tables"]
+
+    def test_load_cases_reads_chart_text_independence_feedback_case(self) -> None:
+        cases = {case.id: case for case in load_cases()}
+
+        case = cases["chat_running_speed_trend_chart_text_independent"]
+
+        assert case.case_kind == "real_regression"
+        assert case.source_feedback_id == 9
+        assert case.source_llm_call_id == 272
+        assert case.derived_from["feedback_id"] == 9
+        assert case.fixture["today"] == "2026-04-08"
+        assert "workout_all" in case.fixture["db_seed"]["tables"]
+
 
 class TestChatRunner:
     def test_chat_case_captures_context_update_without_mutating(
@@ -222,6 +246,71 @@ class TestAssertions:
 
         assert not results[0].passed
         assert "Wait" in results[0].detail
+
+    def test_text_absent_fails_on_invalid_pace_seconds(self) -> None:
+        case = next(
+            case
+            for case in load_cases()
+            if case.id == "chat_running_speed_trend_pace_format"
+        )
+
+        results = run_assertions(
+            case.assertions,
+            EvalExecution(
+                text="Easy pace improving too: ~6:00-6:20/km to ~5:40-5:70/km.",
+                tool_calls=[
+                    CapturedToolCall(
+                        name="run_sql",
+                        arguments={
+                            "query": "SELECT date FROM workout_all LIMIT 1",
+                        },
+                        tool_call_id="call_1",
+                    )
+                ],
+            ),
+        )
+
+        assert not all(result.passed for result in results)
+        assert any(
+            result.name == "does_not_emit_invalid_pace_seconds" and not result.passed
+            for result in results
+        )
+
+    def test_text_without_chart_absent_fails_on_chart_handoff_scaffolding(self) -> None:
+        case = next(
+            case
+            for case in load_cases()
+            if case.id == "chat_running_speed_trend_chart_text_independent"
+        )
+
+        results = run_assertions(
+            case.assertions,
+            EvalExecution(
+                text=(
+                    "Clear downward trend. Here's the picture:\n\n"
+                    "<chart title=\"Running Pace Trend\">\n"
+                    "fig = None\n"
+                    "</chart>\n\n"
+                    "The trend is real."
+                ),
+                tool_calls=[
+                    CapturedToolCall(
+                        name="run_sql",
+                        arguments={
+                            "query": "SELECT date FROM workout_all LIMIT 1",
+                        },
+                        tool_call_id="call_1",
+                    )
+                ],
+            ),
+        )
+
+        assert not all(result.passed for result in results)
+        assert any(
+            result.name == "telegram_text_does_not_depend_on_inline_chart"
+            and not result.passed
+            for result in results
+        )
 
 
 class TestCliSelection:

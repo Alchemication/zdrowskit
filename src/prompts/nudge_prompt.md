@@ -229,6 +229,18 @@ your point clearer than words alone. The `data` dict in chart code includes
 per-day data at `data["current_week"]["days"]` (richer than the compact
 health-data section above).
 
+If you include a chart, assume it may be rendered as a separate figure before
+the nudge text. Treat it as `Figure 1` if you need to refer to it.
+
+If you include a chart:
+
+- Refer to it explicitly only when it materially helps the nudge, e.g.
+  `Figure 1 shows the dip clearly.`
+- Do **not** use positional language like `below`, `above`, `here's the chart`,
+  or `here's the picture`.
+- The nudge text must still read cleanly if the chart block is removed and the
+  image is viewed separately.
+
 **Compute before you plot.** `np` is in scope and you are encouraged to
 use it. For noisy daily metrics like HRV or resting HR, a short rolling
 mean overlay reads better than raw points alone. Use

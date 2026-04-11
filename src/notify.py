@@ -511,10 +511,12 @@ def send_telegram_report(
     bot_token, chat_id = creds
 
     # Send chart photos first.
-    for chart in charts or []:
+    from charts import chart_figure_caption
+
+    for index, chart in enumerate(charts or [], start=1):
         send_telegram_photo(
             chart.image_bytes,
-            caption=f"**{chart.title}**",
+            caption=chart_figure_caption(index, chart.title),
             bot_token=bot_token,
             chat_id=chat_id,
         )

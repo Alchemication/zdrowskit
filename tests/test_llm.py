@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from config import PROMPTS_DIR
+from charts import chart_figure_caption
 from llm import (
     FALLBACK_MODEL,
     LLMResult,
@@ -155,6 +156,8 @@ class TestRepoPrompts:
         assert prompt.index("Output rules") < prompt.index("Instructions")
         assert "If you need `run_sql`, call it directly" in prompt
         assert "output only the final nudge or `SKIP`" in prompt
+        assert "Figure 1" in prompt
+        assert "rendered as a separate figure before the nudge text" in normalized
 
     def test_nudge_prompt_has_ordered_skip_checklist(self) -> None:
         """The SKIP/write decision must be a single ordered checklist, not
@@ -227,10 +230,30 @@ class TestRepoPrompts:
         )
         assert "here's the chart" in normalized
         assert "here's the picture" in normalized
+        assert "Figure 1" in prompt
+        assert (
+            "rendered as a separate image attachment before your text reply"
+            in normalized
+        )
+        assert (
+            "Refer to it explicitly when it materially supports your answer"
+            in prompt
+        )
         assert "Correct flow:" in prompt
         assert "Wrong flow:" in prompt
         assert "I'll add that to your log" in prompt
         assert "Respect the task-specific tool-turn protocol" in soul
+
+
+class TestCharts:
+    def test_chart_figure_caption_includes_index_and_title(self) -> None:
+        assert (
+            chart_figure_caption(1, "Running Pace Trend")
+            == "**Figure 1. Running Pace Trend**"
+        )
+
+    def test_chart_figure_caption_handles_missing_title(self) -> None:
+        assert chart_figure_caption(2, "") == "**Figure 2**"
 
     def test_chat_prompt_routes_run_questions_to_workout_all(self) -> None:
         """Run/session queries should prefer workout_all over daily metrics."""
@@ -250,6 +273,14 @@ class TestRepoPrompts:
             assert "Use `workout_all` for workout/session questions" in prompt
             assert "Use `daily` for day-level health questions" in prompt
             assert "prefer `workout_all`, not `daily.running_speed_kmh`" in prompt
+
+    def test_report_prompt_sets_non_inline_chart_contract(self) -> None:
+        prompt = (PROMPTS_DIR / "prompt.md").read_text(encoding="utf-8")
+        normalized = " ".join(prompt.split())
+
+        assert "Figure 1" in prompt
+        assert "rendered as separate figures rather than inline" in normalized
+        assert "Do **not** use positional language like `below`, `above`" in prompt
 
     def test_chat_prompt_shows_plan_from_context_not_sql(self) -> None:
         """Asking 'what is my plan' should be answered from injected context."""

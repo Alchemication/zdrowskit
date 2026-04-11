@@ -1495,16 +1495,18 @@ class ZdrowskitDaemon:
         reply = result.text
 
         # Extract and render any <chart> blocks from the response.
-        from charts import extract_charts, render_chart, strip_charts
+        from charts import chart_figure_caption, extract_charts, render_chart, strip_charts
 
         chart_blocks = extract_charts(reply)
         if chart_blocks:
             extra_ns = {"rows": query_rows} if query_rows else None
-            for block in chart_blocks:
+            for index, block in enumerate(chart_blocks, start=1):
                 try:
                     img = render_chart(block.code, {}, extra_namespace=extra_ns)
                     if img:
-                        self._poller.send_photo(img, caption=block.title)
+                        self._poller.send_photo(
+                            img, caption=chart_figure_caption(index, block.title)
+                        )
                 except Exception:
                     logger.warning(
                         "Chart render failed: %s", block.title, exc_info=True
