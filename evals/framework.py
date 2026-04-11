@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 import sqlite3
 import sys
@@ -81,6 +82,8 @@ class EvalExecution:
     total_tokens: int = 0
     latency_s: float = 0.0
     cost: float | None = None
+    cache_hits: int = 0
+    cache_misses: int = 0
 
 
 @dataclass
@@ -280,9 +283,15 @@ def print_results(results: list[EvalResult]) -> None:
                 f"{status} {result.case_id} "
                 f"latency={_format_latency(execution)} cost={_format_cost(execution)}"
             )
+        print(_format_pass_fail_summary(results))
+        failed_summary = _format_failed_case_summary(results)
+        if failed_summary is not None:
+            print(failed_summary)
+        if len(results) > 1:
+            print(_format_summary_metrics(results))
         return
 
-    console = Console()
+    console = Console(highlight=False)
     table = Table(title="Feedback Eval Results", show_lines=False)
     table.add_column("Case", style="bold")
     table.add_column("Feature")
@@ -315,8 +324,12 @@ def print_results(results: list[EvalResult]) -> None:
             failures or "-",
         )
     console.print(table)
-    passed = sum(1 for result in results if result.passed)
-    console.print(f"{passed}/{len(results)} passed")
+    summary_table = Table(title="Run Summary", show_header=False, box=None)
+    summary_table.add_column("Metric", style="dim", no_wrap=True)
+    summary_table.add_column("Value")
+    for label, value in _summary_rows(results):
+        summary_table.add_row(label, value)
+    console.print(summary_table)
 
 
 def print_result_details(results: list[EvalResult]) -> None:
@@ -334,7 +347,7 @@ def print_result_details(results: list[EvalResult]) -> None:
             print("tools:", execution.tool_calls if execution else [])
         return
 
-    console = Console()
+    console = Console(highlight=False)
     for result in results:
         execution = result.execution
         if result.passed and not result.error:
@@ -386,6 +399,124 @@ def _format_cost(execution: EvalExecution | None) -> str:
     if execution is None or execution.cost is None:
         return "-"
     return f"${execution.cost:.4f}"
+
+
+def _format_summary_metrics(results: list[EvalResult]) -> str:
+    """Build a compact aggregate metrics summary for multi-case runs."""
+    latencies = [
+        result.execution.latency_s for result in results if result.execution is not None
+    ]
+    costs = [
+        result.execution.cost
+        for result in results
+        if result.execution is not None and result.execution.cost is not None
+    ]
+    cache_hits = sum(
+        result.execution.cache_hits
+        for result in results
+        if result.execution is not None
+    )
+    cache_misses = sum(
+        result.execution.cache_misses
+        for result in results
+        if result.execution is not None
+    )
+    parts: list[str] = []
+    if latencies:
+        total_latency = sum(latencies)
+        avg_latency = total_latency / len(latencies)
+        p95_latency = _percentile_nearest_rank(latencies, 0.95)
+        parts.append(f"latency total {total_latency:.2f}s")
+        parts.append(f"avg {avg_latency:.2f}s")
+        parts.append(f"p95 {p95_latency:.2f}s")
+    if costs:
+        parts.append(f"estimated cost ${sum(costs):.4f}")
+    if cache_hits or cache_misses:
+        parts.append(f"cache hits {cache_hits}")
+        parts.append(f"misses {cache_misses}")
+    if not parts:
+        return "LLM summary: no execution metrics captured"
+    return "LLM summary: " + " | ".join(parts)
+
+
+def _format_pass_fail_summary(results: list[EvalResult]) -> str:
+    """Build a compact pass/fail summary for the result footer."""
+    passed = sum(1 for result in results if result.passed)
+    failed = len(results) - passed
+    accuracy = (passed / len(results) * 100.0) if results else 0.0
+    return f"Accuracy: {accuracy:.1f}% | Passed: {passed} | Failed: {failed}"
+
+
+def _format_failed_case_summary(results: list[EvalResult]) -> str | None:
+    """Build a compact failed-case list for the result footer."""
+    failed_case_ids = [result.case_id for result in results if not result.passed]
+    if not failed_case_ids:
+        return None
+    return "Failed cases: " + ", ".join(failed_case_ids)
+
+
+def _summary_rows(results: list[EvalResult]) -> list[tuple[str, str]]:
+    """Build rich-summary rows for the eval footer."""
+    passed = sum(1 for result in results if result.passed)
+    failed = len(results) - passed
+    accuracy = (passed / len(results) * 100.0) if results else 0.0
+    rows: list[tuple[str, str]] = [
+        ("Accuracy", f"{accuracy:.1f}%"),
+        ("Passed", str(passed)),
+        ("Failed", str(failed)),
+    ]
+    failed_summary = _format_failed_case_summary(results)
+    if failed_summary is not None:
+        rows.append(("Failed Cases", failed_summary.removeprefix("Failed cases: ")))
+    if len(results) <= 1:
+        return rows
+
+    latencies = [
+        result.execution.latency_s for result in results if result.execution is not None
+    ]
+    costs = [
+        result.execution.cost
+        for result in results
+        if result.execution is not None and result.execution.cost is not None
+    ]
+    cache_hits = sum(
+        result.execution.cache_hits
+        for result in results
+        if result.execution is not None
+    )
+    cache_misses = sum(
+        result.execution.cache_misses
+        for result in results
+        if result.execution is not None
+    )
+    if latencies:
+        avg_latency = sum(latencies) / len(latencies)
+        p95_latency = _percentile_nearest_rank(latencies, 0.95)
+        rows.extend(
+            [
+                ("Latency Avg", f"{avg_latency:.2f}s"),
+                ("Latency p95", f"{p95_latency:.2f}s"),
+            ]
+        )
+    if costs:
+        total_cost = sum(costs)
+        avg_cost = total_cost / len(costs)
+        rows.extend(
+            [
+                ("Estimated Cost", f"${total_cost:.4f}"),
+                ("Avg Cost", f"${avg_cost:.4f}"),
+            ]
+        )
+    if cache_hits or cache_misses:
+        rows.append(("Cache", f"{cache_hits} hits, {cache_misses} misses"))
+    return rows
+
+
+def _percentile_nearest_rank(values: list[float], percentile: float) -> float:
+    """Return the nearest-rank percentile for a non-empty numeric list."""
+    sorted_values = sorted(values)
+    rank = max(1, math.ceil(percentile * len(sorted_values)))
+    return sorted_values[rank - 1]
 
 
 def _case_from_dict(raw: dict[str, Any], path: Path) -> EvalCase:
@@ -456,10 +587,12 @@ def _run_chat_case(
     total_tokens = 0
     latency_s = 0.0
     cost = 0.0
+    cache_hits = 0
+    cache_misses = 0
 
     last_result: Any = None
     for iteration in range(max_tool_iterations):
-        last_result = _call_llm_for_eval(
+        last_result, cache_hit = _call_llm_for_eval(
             messages=messages,
             model=model,
             max_tokens=int(fixture.get("max_tokens", 1024)),
@@ -473,6 +606,10 @@ def _run_chat_case(
             cache=cache,
             refresh_cache=refresh_cache,
         )
+        if cache_hit:
+            cache_hits += 1
+        else:
+            cache_misses += 1
         input_tokens += int(getattr(last_result, "input_tokens", 0) or 0)
         output_tokens += int(getattr(last_result, "output_tokens", 0) or 0)
         total_tokens += int(getattr(last_result, "total_tokens", 0) or 0)
@@ -491,6 +628,8 @@ def _run_chat_case(
                 total_tokens=total_tokens,
                 latency_s=latency_s,
                 cost=cost or None,
+                cache_hits=cache_hits,
+                cache_misses=cache_misses,
             )
 
         messages.append(_assistant_message(last_result))
@@ -506,7 +645,7 @@ def _run_chat_case(
             )
 
     if last_result is not None and _result_tool_calls(last_result):
-        last_result = _call_llm_for_eval(
+        last_result, cache_hit = _call_llm_for_eval(
             messages=messages,
             model=model,
             max_tokens=int(fixture.get("max_tokens", 1024)),
@@ -520,6 +659,10 @@ def _run_chat_case(
             cache=cache,
             refresh_cache=refresh_cache,
         )
+        if cache_hit:
+            cache_hits += 1
+        else:
+            cache_misses += 1
         input_tokens += int(getattr(last_result, "input_tokens", 0) or 0)
         output_tokens += int(getattr(last_result, "output_tokens", 0) or 0)
         total_tokens += int(getattr(last_result, "total_tokens", 0) or 0)
@@ -536,6 +679,8 @@ def _run_chat_case(
         total_tokens=total_tokens,
         latency_s=latency_s,
         cost=cost or None,
+        cache_hits=cache_hits,
+        cache_misses=cache_misses,
     )
 
 
@@ -549,7 +694,7 @@ def _call_llm_for_eval(
     metadata: dict[str, Any],
     cache: EvalCache | None,
     refresh_cache: bool,
-) -> llm.LLMResult:
+) -> tuple[llm.LLMResult, bool]:
     """Call the LLM for an eval case with optional request caching."""
     request = {
         "cache_schema_version": EVAL_CACHE_SCHEMA_VERSION,
@@ -563,7 +708,7 @@ def _call_llm_for_eval(
     if cache is not None and not refresh_cache:
         cached = cache.get(request)
         if cached is not None:
-            return cached
+            return cached, True
 
     result = llm.call_llm(
         messages,
@@ -576,7 +721,7 @@ def _call_llm_for_eval(
     )
     if cache is not None:
         cache.put(request, result)
-    return result
+    return result, False
 
 
 def _build_context(fixture: dict[str, Any]) -> dict[str, str]:

@@ -505,6 +505,10 @@ class TestChatRunner:
         assert second.execution.latency_s == pytest.approx(0.01)
         assert first.execution.cost == pytest.approx(0.001)
         assert second.execution.cost == pytest.approx(0.001)
+        assert first.execution.cache_hits == 0
+        assert first.execution.cache_misses == 1
+        assert second.execution.cache_hits == 1
+        assert second.execution.cache_misses == 0
         assert mock_call.call_count == 1
 
 
@@ -660,6 +664,7 @@ class _FakeTable:
     instances: list["_FakeTable"] = []
 
     def __init__(self, *args, **kwargs) -> None:
+        self.title = kwargs.get("title")
         self.columns: list[str] = []
         self.rows: list[tuple[str, ...]] = []
         _FakeTable.instances.append(self)
@@ -725,10 +730,77 @@ class TestPrinting:
         print_results([result])
 
         table = _FakeTable.instances[0]
+        summary = _FakeTable.instances[1]
         assert "Latency" in table.columns
         assert "Cost" in table.columns
         assert table.rows[0][5] == "1.23s"
         assert table.rows[0][6] == "$0.0567"
+        assert summary.title == "Run Summary"
+        assert ("Accuracy", "100.0%") in summary.rows
+        assert ("Passed", "1") in summary.rows
+        assert ("Failed", "0") in summary.rows
+        assert len(_FakeConsole.instances[0].printed) == 2
+
+    def test_print_results_multi_case_includes_summary_metrics(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _FakeConsole.instances.clear()
+        _FakeTable.instances.clear()
+        monkeypatch.setitem(sys.modules, "rich.console", ModuleType("rich.console"))
+        monkeypatch.setitem(sys.modules, "rich.table", ModuleType("rich.table"))
+        sys.modules["rich.console"].Console = _FakeConsole
+        sys.modules["rich.table"].Table = _FakeTable
+        results = [
+            EvalResult(
+                case_id="case-1",
+                feature="chat",
+                case_kind="real_regression",
+                model="anthropic/test-model",
+                source_feedback_id=1,
+                source_llm_call_id=2,
+                assertions=[AssertionResult(name="ok", passed=True)],
+                execution=EvalExecution(
+                    text="Done",
+                    latency_s=1.0,
+                    cost=0.0100,
+                    cache_hits=1,
+                    cache_misses=0,
+                ),
+            ),
+            EvalResult(
+                case_id="case-2",
+                feature="chat",
+                case_kind="real_regression",
+                model="anthropic/test-model",
+                source_feedback_id=1,
+                source_llm_call_id=3,
+                assertions=[AssertionResult(name="bad", passed=False)],
+                execution=EvalExecution(
+                    text="Done",
+                    latency_s=3.0,
+                    cost=0.0200,
+                    cache_hits=0,
+                    cache_misses=1,
+                ),
+            ),
+        ]
+
+        print_results(results)
+
+        console = _FakeConsole.instances[0]
+        summary = _FakeTable.instances[1]
+        assert console.printed[1] is summary
+        assert summary.title == "Run Summary"
+        assert ("Accuracy", "50.0%") in summary.rows
+        assert ("Passed", "1") in summary.rows
+        assert ("Failed", "1") in summary.rows
+        assert ("Failed Cases", "case-2") in summary.rows
+        assert ("Latency Avg", "2.00s") in summary.rows
+        assert ("Latency p95", "3.00s") in summary.rows
+        assert ("Estimated Cost", "$0.0300") in summary.rows
+        assert ("Avg Cost", "$0.0150") in summary.rows
+        assert ("Cache", "1 hits, 1 misses") in summary.rows
 
     def test_print_result_details_includes_latency_and_cost(
         self,
