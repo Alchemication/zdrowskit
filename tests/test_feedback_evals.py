@@ -701,6 +701,12 @@ class _FakeSyntax:
         self.theme = theme
 
 
+class _FakeText:
+    def __init__(self, plain: str, style: str | None = None) -> None:
+        self.plain = plain
+        self.style = style
+
+
 class TestPrinting:
     def test_print_results_includes_latency_and_cost_columns(
         self,
@@ -710,8 +716,10 @@ class TestPrinting:
         _FakeTable.instances.clear()
         monkeypatch.setitem(sys.modules, "rich.console", ModuleType("rich.console"))
         monkeypatch.setitem(sys.modules, "rich.table", ModuleType("rich.table"))
+        monkeypatch.setitem(sys.modules, "rich.text", ModuleType("rich.text"))
         sys.modules["rich.console"].Console = _FakeConsole
         sys.modules["rich.table"].Table = _FakeTable
+        sys.modules["rich.text"].Text = _FakeText
         result = EvalResult(
             case_id="case-1",
             feature="chat",
@@ -736,7 +744,10 @@ class TestPrinting:
         assert table.rows[0][5] == "1.23s"
         assert table.rows[0][6] == "$0.0567"
         assert summary.title == "Run Summary"
-        assert ("Accuracy", "100.0%") in summary.rows
+        accuracy_row = next(row for row in summary.rows if row[0] == "Accuracy")
+        assert isinstance(accuracy_row[1], _FakeText)
+        assert accuracy_row[1].plain == "100.0%"
+        assert accuracy_row[1].style == "green"
         assert ("Passed", "1") in summary.rows
         assert ("Failed", "0") in summary.rows
         assert len(_FakeConsole.instances[0].printed) == 2
@@ -749,8 +760,10 @@ class TestPrinting:
         _FakeTable.instances.clear()
         monkeypatch.setitem(sys.modules, "rich.console", ModuleType("rich.console"))
         monkeypatch.setitem(sys.modules, "rich.table", ModuleType("rich.table"))
+        monkeypatch.setitem(sys.modules, "rich.text", ModuleType("rich.text"))
         sys.modules["rich.console"].Console = _FakeConsole
         sys.modules["rich.table"].Table = _FakeTable
+        sys.modules["rich.text"].Text = _FakeText
         results = [
             EvalResult(
                 case_id="case-1",
@@ -792,7 +805,10 @@ class TestPrinting:
         summary = _FakeTable.instances[1]
         assert console.printed[1] is summary
         assert summary.title == "Run Summary"
-        assert ("Accuracy", "50.0%") in summary.rows
+        accuracy_row = next(row for row in summary.rows if row[0] == "Accuracy")
+        assert isinstance(accuracy_row[1], _FakeText)
+        assert accuracy_row[1].plain == "50.0%"
+        assert accuracy_row[1].style == "yellow"
         assert ("Passed", "1") in summary.rows
         assert ("Failed", "1") in summary.rows
         assert ("Failed Cases", "case-2") in summary.rows
@@ -801,6 +817,49 @@ class TestPrinting:
         assert ("Estimated Cost", "$0.0300") in summary.rows
         assert ("Avg Cost", "$0.0150") in summary.rows
         assert ("Cache", "1 hits, 1 misses") in summary.rows
+
+    def test_print_results_low_accuracy_uses_red(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _FakeConsole.instances.clear()
+        _FakeTable.instances.clear()
+        monkeypatch.setitem(sys.modules, "rich.console", ModuleType("rich.console"))
+        monkeypatch.setitem(sys.modules, "rich.table", ModuleType("rich.table"))
+        monkeypatch.setitem(sys.modules, "rich.text", ModuleType("rich.text"))
+        sys.modules["rich.console"].Console = _FakeConsole
+        sys.modules["rich.table"].Table = _FakeTable
+        sys.modules["rich.text"].Text = _FakeText
+        results = [
+            EvalResult(
+                case_id="case-1",
+                feature="chat",
+                case_kind="real_regression",
+                model="anthropic/test-model",
+                source_feedback_id=1,
+                source_llm_call_id=2,
+                assertions=[AssertionResult(name="bad", passed=False)],
+                execution=EvalExecution(text="Done"),
+            ),
+            EvalResult(
+                case_id="case-2",
+                feature="chat",
+                case_kind="real_regression",
+                model="anthropic/test-model",
+                source_feedback_id=1,
+                source_llm_call_id=3,
+                assertions=[AssertionResult(name="bad", passed=False)],
+                execution=EvalExecution(text="Done"),
+            ),
+        ]
+
+        print_results(results)
+
+        summary = _FakeTable.instances[1]
+        accuracy_row = next(row for row in summary.rows if row[0] == "Accuracy")
+        assert isinstance(accuracy_row[1], _FakeText)
+        assert accuracy_row[1].plain == "0.0%"
+        assert accuracy_row[1].style == "red"
 
     def test_print_result_details_includes_latency_and_cost(
         self,

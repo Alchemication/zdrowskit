@@ -275,6 +275,7 @@ def print_results(results: list[EvalResult]) -> None:
     try:
         from rich.console import Console
         from rich.table import Table
+        from rich.text import Text
     except ImportError:
         for result in results:
             status = "PASS" if result.passed else "FAIL"
@@ -327,7 +328,7 @@ def print_results(results: list[EvalResult]) -> None:
     summary_table = Table(title="Run Summary", show_header=False, box=None)
     summary_table.add_column("Metric", style="dim", no_wrap=True)
     summary_table.add_column("Value")
-    for label, value in _summary_rows(results):
+    for label, value in _summary_rows(results, text_cls=Text):
         summary_table.add_row(label, value)
     console.print(summary_table)
 
@@ -455,13 +456,17 @@ def _format_failed_case_summary(results: list[EvalResult]) -> str | None:
     return "Failed cases: " + ", ".join(failed_case_ids)
 
 
-def _summary_rows(results: list[EvalResult]) -> list[tuple[str, str]]:
+def _summary_rows(
+    results: list[EvalResult],
+    *,
+    text_cls: type | None = None,
+) -> list[tuple[str, Any]]:
     """Build rich-summary rows for the eval footer."""
     passed = sum(1 for result in results if result.passed)
     failed = len(results) - passed
     accuracy = (passed / len(results) * 100.0) if results else 0.0
-    rows: list[tuple[str, str]] = [
-        ("Accuracy", f"{accuracy:.1f}%"),
+    rows: list[tuple[str, Any]] = [
+        ("Accuracy", _render_accuracy_value(accuracy, text_cls=text_cls)),
         ("Passed", str(passed)),
         ("Failed", str(failed)),
     ]
@@ -510,6 +515,24 @@ def _summary_rows(results: list[EvalResult]) -> list[tuple[str, str]]:
     if cache_hits or cache_misses:
         rows.append(("Cache", f"{cache_hits} hits, {cache_misses} misses"))
     return rows
+
+
+def _render_accuracy_value(
+    accuracy: float,
+    *,
+    text_cls: type | None = None,
+) -> Any:
+    """Render the accuracy value with a threshold-based color when available."""
+    label = f"{accuracy:.1f}%"
+    if text_cls is None:
+        return label
+    if accuracy >= 80.0:
+        style = "green"
+    elif accuracy >= 50.0:
+        style = "yellow"
+    else:
+        style = "red"
+    return text_cls(label, style=style)
 
 
 def _percentile_nearest_rank(values: list[float], percentile: float) -> float:
