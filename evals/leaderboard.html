@@ -21,6 +21,10 @@
       --radius: 20px;
     }
     * { box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      overflow-x: clip;
+    }
     body {
       margin: 0;
       font-family: "Avenir Next", "Segoe UI", sans-serif;
@@ -36,9 +40,10 @@
       border-radius: 0.4rem;
     }
     .page {
+      width: min(1480px, 100%);
       max-width: 1480px;
       margin: 0 auto;
-      padding: 40px 24px 56px;
+      padding: clamp(24px, 3vw, 40px) clamp(16px, 2vw, 24px) 56px;
     }
     .hero {
       display: grid;
@@ -67,15 +72,19 @@
     }
     .layout {
       display: grid;
-      grid-template-columns: 320px minmax(0, 1fr);
+      grid-template-columns: minmax(260px, 300px) minmax(0, 1fr);
       gap: 24px;
       align-items: start;
+      min-width: 0;
     }
     .sidebar, .content-card {
       background: color-mix(in srgb, var(--panel) 86%, white);
       border: 1px solid rgba(216, 204, 186, 0.9);
       border-radius: var(--radius);
       box-shadow: var(--shadow);
+    }
+    .sidebar, .content, .content-card, .table-wrap {
+      min-width: 0;
     }
     .sidebar {
       position: sticky;
@@ -157,7 +166,7 @@
     }
     .metrics {
       display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
       gap: 16px;
     }
     .metric-card {
@@ -196,7 +205,7 @@
     table {
       width: 100%;
       border-collapse: collapse;
-      min-width: 1020px;
+      min-width: 960px;
     }
     thead th {
       position: sticky;
@@ -261,9 +270,10 @@
       border-radius: inherit;
     }
     .failed-cases {
-      max-width: 260px;
+      max-width: 240px;
       white-space: normal;
       line-height: 1.4;
+      overflow-wrap: anywhere;
     }
     .empty-state {
       padding: 64px 24px;
@@ -288,9 +298,6 @@
       }
       .sidebar {
         position: static;
-      }
-      .metrics {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
       }
     }
     @media (max-width: 720px) {
