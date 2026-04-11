@@ -33,7 +33,8 @@ from tools import all_chat_tools  # noqa: E402
 CASES_DIR = Path(__file__).resolve().parent / "cases"
 DEFAULT_MODEL = llm.DEFAULT_MODEL
 DEFAULT_CACHE_PATH = Path(__file__).resolve().parent / ".cache.sqlite"
-EVAL_CACHE_SCHEMA_VERSION = 1
+EVAL_CACHE_SCHEMA_VERSION = 2
+EVAL_TEMPERATURE = 0.0
 
 
 @dataclass(frozen=True)
@@ -724,7 +725,7 @@ def _call_llm_for_eval(
         "model": model,
         "messages": messages,
         "max_tokens": max_tokens,
-        "temperature": 0.7,
+        "temperature": EVAL_TEMPERATURE,
         "reasoning_effort": reasoning_effort,
         "tools": tools,
     }
@@ -737,6 +738,7 @@ def _call_llm_for_eval(
         messages,
         model=model,
         max_tokens=max_tokens,
+        temperature=EVAL_TEMPERATURE,
         reasoning_effort=reasoning_effort,
         tools=tools,
         request_type="",
