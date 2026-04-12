@@ -49,7 +49,7 @@ from daemon_notify_flow import (  # noqa: F401
 )
 
 if TYPE_CHECKING:
-    from commands import CommandResult
+    from cmd_llm import CommandResult
     from context_edit import ContextEdit
     from context_edit import PendingContextEdit
 

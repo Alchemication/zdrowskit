@@ -102,16 +102,14 @@ from dotenv import load_dotenv
 # Ensure src/ is on the path when running from project root
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
+from cmd_db import cmd_db
+from cmd_llm import cmd_coach, cmd_insights, cmd_nudge
+from cmd_llm_log import cmd_llm_log
 from commands import (
-    cmd_coach,
     cmd_context,
-    cmd_db,
     cmd_daemon_restart,
     cmd_daemon_stop,
     cmd_import,
-    cmd_insights,
-    cmd_llm_log,
-    cmd_nudge,
     cmd_report,
     cmd_status,
     cmd_telegram_setup,

@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import daemon as daemon_module
-from commands import CommandResult
+from cmd_llm import CommandResult
 from context_edit import (
     ContextEdit,
     PendingContextEdit,
@@ -42,7 +42,7 @@ class TestWeeklyReportScheduling:
                 daemon, "_record_report", side_effect=lambda _: events.append("record")
             ),
             patch(
-                "commands.cmd_insights",
+                "cmd_llm.cmd_insights",
                 side_effect=_mock_insights,
             ),
             patch.object(daemon, "_attach_feedback_button"),
@@ -68,7 +68,7 @@ class TestNudgeScheduling:
 
         with (
             patch.object(daemon_module, "datetime", fake_datetime),
-            patch("commands.cmd_nudge") as cmd_nudge,
+            patch("cmd_llm.cmd_nudge") as cmd_nudge,
         ):
             daemon._run_nudge("new_data")
 
@@ -90,7 +90,7 @@ class TestNudgeScheduling:
             encoding="utf-8",
         )
 
-        with patch("commands.cmd_nudge") as cmd_nudge:
+        with patch("cmd_llm.cmd_nudge") as cmd_nudge:
             daemon._run_nudge("new_data")
 
         assert daemon._state.get("quiet_queue") is None
@@ -117,7 +117,7 @@ class TestNudgeScheduling:
             encoding="utf-8",
         )
 
-        with patch("commands.cmd_insights") as cmd_insights:
+        with patch("cmd_llm.cmd_insights") as cmd_insights:
             daemon._run_weekly_report()
 
         cmd_insights.assert_not_called()
@@ -527,7 +527,7 @@ class TestNotifyFlow:
         )
 
         with patch(
-            "commands.interpret_notify_request",
+            "cmd_llm.interpret_notify_request",
             return_value={
                 "status": "proposal",
                 "intent": "set",
@@ -575,7 +575,7 @@ class TestTelegramCommands:
         with (
             patch.object(daemon, "_run_import"),
             patch(
-                "commands.cmd_insights",
+                "cmd_llm.cmd_insights",
                 return_value=CommandResult(text="report"),
             ) as cmd_insights,
             patch.object(daemon, "_attach_feedback_button"),
@@ -598,7 +598,7 @@ class TestTelegramCommands:
         with (
             patch.object(daemon, "_run_import"),
             patch(
-                "commands.cmd_insights",
+                "cmd_llm.cmd_insights",
                 return_value=CommandResult(text="report"),
             ) as cmd_insights,
             patch.object(daemon, "_attach_feedback_button"),

@@ -8,15 +8,10 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from commands import (
-    TELEGRAM_BOT_COMMANDS,
-    cmd_coach,
-    cmd_db,
-    cmd_insights,
-    cmd_llm_log,
-    cmd_nudge,
-    interpret_notify_request,
-)
+from cmd_db import cmd_db
+from cmd_llm import cmd_coach, cmd_insights, cmd_nudge, interpret_notify_request
+from cmd_llm_log import cmd_llm_log
+from commands import TELEGRAM_BOT_COMMANDS
 from llm import LLMResult
 from store import log_feedback, log_llm_call, open_db
 
@@ -61,12 +56,12 @@ class TestCmdCoach:
             ]
 
         with (
-            patch("commands.load_context", return_value={"prompt": "x", "soul": "y"}),
-            patch("commands.open_db", return_value=in_memory_db),
-            patch("commands.compute_baselines", return_value="baseline md"),
-            patch("commands._save_baselines"),
+            patch("cmd_llm.load_context", return_value={"prompt": "x", "soul": "y"}),
+            patch("cmd_llm.open_db", return_value=in_memory_db),
+            patch("cmd_llm.compute_baselines", return_value="baseline md"),
+            patch("cmd_llm._save_baselines"),
             patch(
-                "commands.build_llm_data",
+                "cmd_llm.build_llm_data",
                 return_value={
                     "current_week": {"summary": {"week_label": "2026-W12"}, "days": []},
                     "history": [],
@@ -74,9 +69,9 @@ class TestCmdCoach:
                     "week_label": "2026-W12",
                 },
             ),
-            patch("commands.build_messages", side_effect=fake_build_messages),
+            patch("cmd_llm.build_messages", side_effect=fake_build_messages),
             patch(
-                "commands.call_llm",
+                "cmd_llm.call_llm",
                 return_value=LLMResult(
                     text="Plan looks fine.",
                     model="test-model",
@@ -139,12 +134,12 @@ class TestCmdCoach:
         )
 
         with (
-            patch("commands.load_context", return_value={"prompt": "x", "soul": "y"}),
-            patch("commands.open_db", return_value=in_memory_db),
-            patch("commands.compute_baselines", return_value="baseline md"),
-            patch("commands._save_baselines"),
+            patch("cmd_llm.load_context", return_value={"prompt": "x", "soul": "y"}),
+            patch("cmd_llm.open_db", return_value=in_memory_db),
+            patch("cmd_llm.compute_baselines", return_value="baseline md"),
+            patch("cmd_llm._save_baselines"),
             patch(
-                "commands.build_llm_data",
+                "cmd_llm.build_llm_data",
                 return_value={
                     "current_week": {"summary": {"week_label": "2026-W12"}, "days": []},
                     "history": [],
@@ -153,18 +148,18 @@ class TestCmdCoach:
                 },
             ),
             patch(
-                "commands.build_messages",
+                "cmd_llm.build_messages",
                 return_value=[
                     {"role": "system", "content": "s"},
                     {"role": "user", "content": "u"},
                 ],
             ),
             patch(
-                "commands.call_llm",
+                "cmd_llm.call_llm",
                 side_effect=[first_result, second_result],
             ),
             patch(
-                "commands.build_edit_preview",
+                "cmd_llm.build_edit_preview",
                 return_value="--- strategy.md\n+++ strategy.md (proposed)\n",
             ),
         ):
@@ -250,10 +245,10 @@ class TestCmdInsights:
             return empty_with_tool
 
         with (
-            patch("commands.load_context", return_value={"prompt": "x", "soul": "y"}),
-            patch("commands.open_db", return_value=in_memory_db),
+            patch("cmd_llm.load_context", return_value={"prompt": "x", "soul": "y"}),
+            patch("cmd_llm.open_db", return_value=in_memory_db),
             patch(
-                "commands.build_llm_data",
+                "cmd_llm.build_llm_data",
                 return_value={
                     "current_week": {
                         "summary": {"week_label": "2026-W14"},
@@ -264,18 +259,18 @@ class TestCmdInsights:
                     "week_label": "2026-W14",
                 },
             ),
-            patch("commands.build_review_facts", return_value="facts"),
+            patch("cmd_llm.build_review_facts", return_value="facts"),
             patch(
-                "commands.build_messages",
+                "cmd_llm.build_messages",
                 return_value=[
                     {"role": "system", "content": "s"},
                     {"role": "user", "content": "u"},
                 ],
             ),
-            patch("commands.call_llm", side_effect=fake_call_llm),
+            patch("cmd_llm.call_llm", side_effect=fake_call_llm),
             patch("tools.run_sql_tool", return_value=[{"type": "function"}]),
             patch("tools.execute_run_sql", return_value="[]"),
-            patch("commands._save_report", return_value=Path("/tmp/r.md")),
+            patch("cmd_llm._save_report", return_value=Path("/tmp/r.md")),
         ):
             result = cmd_insights(args)
 
@@ -354,12 +349,12 @@ class TestCmdCoachEmptyResponseFallback:
             return empty_with_tool
 
         with (
-            patch("commands.load_context", return_value={"prompt": "x", "soul": "y"}),
-            patch("commands.open_db", return_value=in_memory_db),
-            patch("commands.compute_baselines", return_value="baseline md"),
-            patch("commands._save_baselines"),
+            patch("cmd_llm.load_context", return_value={"prompt": "x", "soul": "y"}),
+            patch("cmd_llm.open_db", return_value=in_memory_db),
+            patch("cmd_llm.compute_baselines", return_value="baseline md"),
+            patch("cmd_llm._save_baselines"),
             patch(
-                "commands.build_llm_data",
+                "cmd_llm.build_llm_data",
                 return_value={
                     "current_week": {
                         "summary": {"week_label": "2026-W14"},
@@ -371,13 +366,13 @@ class TestCmdCoachEmptyResponseFallback:
                 },
             ),
             patch(
-                "commands.build_messages",
+                "cmd_llm.build_messages",
                 return_value=[
                     {"role": "system", "content": "s"},
                     {"role": "user", "content": "u"},
                 ],
             ),
-            patch("commands.call_llm", side_effect=fake_call_llm),
+            patch("cmd_llm.call_llm", side_effect=fake_call_llm),
         ):
             cmd_result, edits = cmd_coach(args)
 
@@ -416,7 +411,7 @@ class TestCmdLlmLog:
             json=True,
         )
 
-        with patch("commands.open_db", return_value=in_memory_db):
+        with patch("cmd_llm_log.open_db", return_value=in_memory_db):
             cmd_llm_log(args)
 
         payload = json.loads(capsys.readouterr().out)
@@ -442,7 +437,7 @@ class TestCmdLlmLog:
             json=True,
         )
 
-        with patch("commands.open_db", return_value=in_memory_db):
+        with patch("cmd_llm_log.open_db", return_value=in_memory_db):
             cmd_llm_log(args)
 
         payload = json.loads(capsys.readouterr().out)
@@ -536,7 +531,7 @@ class TestCmdLlmLog:
             json=True,
         )
 
-        with patch("commands.open_db", return_value=in_memory_db):
+        with patch("cmd_llm_log.open_db", return_value=in_memory_db):
             cmd_llm_log(args)
 
         payload = json.loads(capsys.readouterr().out)
@@ -645,10 +640,10 @@ class TestCmdNudge:
             return [first_result, second_result, third_result][len(seen_messages) - 1]
 
         with (
-            patch("commands.load_context", return_value={"prompt": "x", "soul": "y"}),
-            patch("commands.open_db", return_value=in_memory_db),
+            patch("cmd_llm.load_context", return_value={"prompt": "x", "soul": "y"}),
+            patch("cmd_llm.open_db", return_value=in_memory_db),
             patch(
-                "commands.build_llm_data",
+                "cmd_llm.build_llm_data",
                 return_value={
                     "current_week": {"summary": {"week_label": "2026-W14"}, "days": []},
                     "history": [],
@@ -657,17 +652,17 @@ class TestCmdNudge:
                 },
             ),
             patch(
-                "commands.build_messages",
+                "cmd_llm.build_messages",
                 return_value=[
                     {"role": "system", "content": "s"},
                     {"role": "user", "content": "u"},
                 ],
             ),
-            patch("commands.call_llm", side_effect=fake_call_llm),
+            patch("cmd_llm.call_llm", side_effect=fake_call_llm),
             patch("tools.run_sql_tool", return_value=[{"type": "function"}]),
             patch("tools.execute_run_sql", return_value="[]"),
-            patch("commands._save_nudge"),
-            patch("commands.send_telegram", return_value=123) as send_telegram,
+            patch("cmd_llm._save_nudge"),
+            patch("cmd_llm.send_telegram", return_value=123) as send_telegram,
         ):
             result = cmd_nudge(args)
 
@@ -714,16 +709,16 @@ class TestInterpretNotifyRequest:
         )
 
         with (
-            patch("commands.load_context", return_value={"prompt": "x", "soul": "y"}),
+            patch("cmd_llm.load_context", return_value={"prompt": "x", "soul": "y"}),
             patch(
-                "commands.build_messages",
+                "cmd_llm.build_messages",
                 return_value=[
                     {"role": "system", "content": "s"},
                     {"role": "user", "content": "u"},
                 ],
             ),
-            patch("commands.open_db", return_value=in_memory_db),
-            patch("commands.call_llm", return_value=result),
+            patch("cmd_llm.open_db", return_value=in_memory_db),
+            patch("cmd_llm.call_llm", return_value=result),
         ):
             payload = interpret_notify_request(
                 "no nudges before 11am",
@@ -755,16 +750,16 @@ class TestInterpretNotifyRequest:
         )
 
         with (
-            patch("commands.load_context", return_value={"prompt": "x", "soul": "y"}),
+            patch("cmd_llm.load_context", return_value={"prompt": "x", "soul": "y"}),
             patch(
-                "commands.build_messages",
+                "cmd_llm.build_messages",
                 return_value=[
                     {"role": "system", "content": "s"},
                     {"role": "user", "content": "u"},
                 ],
             ),
-            patch("commands.open_db", return_value=in_memory_db),
-            patch("commands.call_llm", return_value=result),
+            patch("cmd_llm.open_db", return_value=in_memory_db),
+            patch("cmd_llm.call_llm", return_value=result),
         ):
             payload = interpret_notify_request(
                 "move reports to Tuesday",
@@ -801,16 +796,16 @@ class TestInterpretNotifyRequest:
         )
 
         with (
-            patch("commands.load_context", return_value={"prompt": "x", "soul": "y"}),
+            patch("cmd_llm.load_context", return_value={"prompt": "x", "soul": "y"}),
             patch(
-                "commands.build_messages",
+                "cmd_llm.build_messages",
                 return_value=[
                     {"role": "system", "content": "s"},
                     {"role": "user", "content": "u"},
                 ],
             ),
-            patch("commands.open_db", return_value=in_memory_db),
-            patch("commands.call_llm", return_value=result),
+            patch("cmd_llm.open_db", return_value=in_memory_db),
+            patch("cmd_llm.call_llm", return_value=result),
         ):
             try:
                 interpret_notify_request(

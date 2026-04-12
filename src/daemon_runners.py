@@ -27,7 +27,7 @@ from config import (
 from config import AUTOEXPORT_DATA_DIR as ICLOUD_HEALTH_DIR
 
 if TYPE_CHECKING:
-    from commands import CoachProposal, CommandResult
+    from cmd_llm import CoachProposal, CommandResult
     from daemon import ZdrowskitDaemon
 
 logger = logging.getLogger(__name__)
@@ -384,7 +384,7 @@ class DaemonRunnerHandler:
         if not skip_import:
             self._d._run_import()
 
-        from commands import cmd_insights
+        from cmd_llm import cmd_insights
 
         args = types.SimpleNamespace(
             db=str(self._d.db),
@@ -434,7 +434,7 @@ class DaemonRunnerHandler:
 
         self._d._run_import()
 
-        from commands import cmd_insights
+        from cmd_llm import cmd_insights
 
         args = types.SimpleNamespace(
             db=str(self._d.db),
@@ -484,7 +484,7 @@ class DaemonRunnerHandler:
 
         self._d._run_import()
 
-        from commands import cmd_insights
+        from cmd_llm import cmd_insights
 
         args = types.SimpleNamespace(
             db=str(self._d.db),
@@ -565,7 +565,7 @@ class DaemonRunnerHandler:
         if not self._d._can_send_nudge():
             return
 
-        from commands import cmd_nudge
+        from cmd_llm import cmd_nudge
 
         args = types.SimpleNamespace(
             db=str(self._d.db),
@@ -670,7 +670,7 @@ class DaemonRunnerHandler:
         if not skip_import:
             self._d._run_import()
 
-        from commands import cmd_coach
+        from cmd_llm import cmd_coach
 
         args = types.SimpleNamespace(
             db=str(self._d.db),
