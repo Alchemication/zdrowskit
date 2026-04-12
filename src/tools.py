@@ -84,7 +84,7 @@ def all_chat_tools() -> list[dict]:
     Returns:
         A list of tool definition dicts for litellm.
     """
-    from llm import context_update_tool
+    from llm_context import context_update_tool
 
     return run_sql_tool() + context_update_tool()
 

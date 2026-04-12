@@ -34,17 +34,12 @@ from config import (
     REPORTS_DIR,
 )
 from context_edit import ContextEdit, EditPreviewError, build_edit_preview
-from llm import (
-    DEFAULT_MODEL,
-    LLMResult,
-    append_history,
+from llm import DEFAULT_MODEL, LLMResult, call_llm, extract_memory
+from llm_context import append_history, build_messages, load_context
+from llm_health import (
     build_llm_data,
-    build_messages,
     build_review_facts,
-    call_llm,
-    extract_memory,
     format_recent_nudges,
-    load_context,
     render_health_data,
 )
 from notification_prefs import (
@@ -859,7 +854,7 @@ def cmd_coach(
         proposals contains one CoachProposal per validated edit.
     """
     from context_edit import context_edit_from_tool_call
-    from llm import context_update_tool
+    from llm_context import context_update_tool
     from tools import execute_run_sql, run_sql_tool
 
     try:

@@ -29,10 +29,8 @@ from config import (
     CONTEXT_DIR,
     resolve_data_dir,
 )
-from llm import (
-    build_llm_data,
-    load_context,
-)
+from llm_context import load_context
+from llm_health import build_llm_data
 from report import (
     current_week_bounds,
     group_by_week,

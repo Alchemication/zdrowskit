@@ -25,6 +25,8 @@ if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
 import llm  # noqa: E402
+import llm_context  # noqa: E402
+import llm_health  # noqa: E402
 from charts import strip_charts  # noqa: E402
 from config import PROMPTS_DIR  # noqa: E402
 from context_edit import context_edit_from_tool_call  # noqa: E402
@@ -591,12 +593,12 @@ def _run_chat_case(
     fixture = case.fixture
     today = date.fromisoformat(str(fixture["today"]))
     context = _build_context(fixture)
-    health_data_text = llm.render_health_data(
+    health_data_text = llm_health.render_health_data(
         fixture.get("health_data", {}),
         prompt_kind="chat",
         today=today,
     )
-    messages: list[dict[str, Any]] = llm.build_messages(
+    messages: list[dict[str, Any]] = llm_context.build_messages(
         context,
         health_data_text=health_data_text,
         baselines=fixture.get("baselines"),
@@ -756,7 +758,7 @@ def _build_context(fixture: dict[str, Any]) -> dict[str, str]:
     context["soul"] = (
         soul_path.read_text(encoding="utf-8")
         if soul_path.exists()
-        else llm.DEFAULT_SOUL
+        else llm_context.DEFAULT_SOUL
     )
     return context
 

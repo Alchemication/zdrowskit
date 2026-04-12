@@ -16,15 +16,14 @@ from llm import (
     LLMResult,
     _call_with_retry,
     _is_overloaded,
-    _recent_history,
-    append_history,
-    build_llm_data,
-    build_messages,
-    build_review_facts,
     call_llm,
     extract_memory,
+)
+from llm_context import _recent_history, append_history, build_messages, load_context
+from llm_health import (
+    build_llm_data,
+    build_review_facts,
     format_recent_nudges,
-    load_context,
     render_health_data,
 )
 from models import DailySnapshot
@@ -964,7 +963,7 @@ class TestBuildLlmData:
         assert result["current_week"]["summary"] is None
         assert result["history"] == []
 
-    @patch("llm.date")
+    @patch("llm_health.date")
     def test_with_data(
         self,
         mock_date: MagicMock,
@@ -980,7 +979,7 @@ class TestBuildLlmData:
         # Should have some days in the result
         assert isinstance(result["current_week"]["days"], list)
 
-    @patch("llm.date")
+    @patch("llm_health.date")
     def test_last_week_mode(
         self,
         mock_date: MagicMock,
@@ -994,7 +993,7 @@ class TestBuildLlmData:
         assert "current_week" in result
         assert "history" in result
 
-    @patch("llm.date")
+    @patch("llm_health.date")
     def test_structure_has_expected_fields(
         self,
         mock_date: MagicMock,
@@ -1025,8 +1024,8 @@ class TestBuildLlmData:
         assert "recovery_index" in day
         assert "counts_as_lift" in day["workouts"][0]
 
-    @patch("llm.datetime")
-    @patch("llm.date")
+    @patch("llm_health.datetime")
+    @patch("llm_health.date")
     def test_sleep_shifted_forward_by_one_day(
         self,
         mock_date: MagicMock,
@@ -1066,8 +1065,8 @@ class TestBuildLlmData:
         assert days["2026-03-09"]["steps"] == 9500
         assert days["2026-03-10"]["steps"] == 12000
 
-    @patch("llm.datetime")
-    @patch("llm.date")
+    @patch("llm_health.datetime")
+    @patch("llm_health.date")
     def test_sleep_shift_with_pre_week_day(
         self,
         mock_date: MagicMock,
@@ -1138,8 +1137,8 @@ class TestBuildLlmData:
         # Monday's own metrics are still there
         assert days["2026-03-16"]["steps"] == 9000
 
-    @patch("llm.datetime")
-    @patch("llm.date")
+    @patch("llm_health.datetime")
+    @patch("llm_health.date")
     def test_today_unsynced_sleep_not_flagged(
         self,
         mock_date: MagicMock,
@@ -1161,8 +1160,8 @@ class TestBuildLlmData:
         # Today — sleep_status is "pending", not "not_tracked"
         assert days["2026-03-12"]["sleep_status"] == "pending"
 
-    @patch("llm.datetime")
-    @patch("llm.date")
+    @patch("llm_health.datetime")
+    @patch("llm_health.date")
     def test_last_week_sunday_sleep_shifted_off(
         self,
         mock_date: MagicMock,
@@ -1185,8 +1184,8 @@ class TestBuildLlmData:
         # The week still has 7 days
         assert len(result["current_week"]["days"]) == 7
 
-    @patch("llm.datetime")
-    @patch("llm.date")
+    @patch("llm_health.datetime")
+    @patch("llm_health.date")
     def test_sleep_compliance_fields(
         self,
         mock_date: MagicMock,
@@ -1211,8 +1210,8 @@ class TestBuildLlmData:
         assert "2026-03-12" in summary["sleep_not_tracked_dates"]
         assert len(summary["sleep_not_tracked_dates"]) == 5
 
-    @patch("llm.datetime")
-    @patch("llm.date")
+    @patch("llm_health.datetime")
+    @patch("llm_health.date")
     def test_today_snapshot_in_summary(
         self,
         mock_date: MagicMock,

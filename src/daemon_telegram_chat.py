@@ -781,12 +781,11 @@ class TelegramChatHandler:
         """
         from baselines import compute_baselines
         from config import MAX_TOOL_ITERATIONS
-        from llm import (
+        from llm import call_llm
+        from llm_context import build_messages, load_context
+        from llm_health import (
             build_llm_data,
-            build_messages,
-            call_llm,
             format_recent_nudges,
-            load_context,
             render_health_data,
         )
         from tools import all_chat_tools, execute_tool

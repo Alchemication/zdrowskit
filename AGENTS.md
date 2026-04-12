@@ -43,6 +43,8 @@ Challenge my ideas early. If an approach is over-engineered, fragile, or there's
 - **Linter/formatter:** `uv run ruff check .` and `uv run ruff format .`
 - **Type hints:** required on all signatures. Use native types (`list`, `dict`, `str | None`) — never `typing.List` etc.
 - **Docstrings:** Google style.
+- **File size:** keep source files under ~1000 lines. If a module grows past that, extract a cohesive subset into its own file (see `daemon_*.py` and `cmd_*.py` for the pattern).
+- **No backward-compat shims:** when moving code to a new module, update all callers to import from the new location directly. Don't leave re-export stubs behind.
 
 ## Output Rules
 
