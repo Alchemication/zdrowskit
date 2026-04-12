@@ -359,13 +359,9 @@ class TestFindWorkoutClone:
         )
 
         with patch("llm.call_llm", return_value=mock_result) as mock_call:
-            from daemon import ZdrowskitDaemon
+            from daemon_add_flow import find_workout_clone
 
-            daemon = MagicMock(spec=ZdrowskitDaemon)
-            daemon.db = ":memory:"
-            result = ZdrowskitDaemon._find_workout_clone(
-                daemon, db, "Outdoor Run", "run"
-            )
+            result = find_workout_clone(db, "Outdoor Run", "run")
 
             assert mock_call.called
             call_kwargs = mock_call.call_args
@@ -379,22 +375,18 @@ class TestFindWorkoutClone:
         _seed_workouts(db)
 
         with patch("llm.call_llm", side_effect=RuntimeError("API error")):
-            from daemon import ZdrowskitDaemon
+            from daemon_add_flow import find_workout_clone
 
-            daemon = MagicMock(spec=ZdrowskitDaemon)
-            result = ZdrowskitDaemon._find_workout_clone(
-                daemon, db, "Outdoor Run", "run"
-            )
+            result = find_workout_clone(db, "Outdoor Run", "run")
             assert result["type"] == "Outdoor Run"
             assert result["duration_min"] is not None
             assert "most recent" in result.get("source_note", "")
 
     def test_fallback_no_history(self, db: sqlite3.Connection) -> None:
         """With no workout history at all, should return safe defaults."""
-        from daemon import ZdrowskitDaemon
+        from daemon_add_flow import find_workout_clone
 
-        daemon = MagicMock(spec=ZdrowskitDaemon)
-        result = ZdrowskitDaemon._find_workout_clone(daemon, db, "Outdoor Run", "run")
+        result = find_workout_clone(db, "Outdoor Run", "run")
         assert result["type"] == "Outdoor Run"
         assert result["duration_min"] == 30
         assert "no history" in result.get("source_note", "")

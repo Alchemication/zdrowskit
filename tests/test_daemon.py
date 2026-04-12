@@ -208,9 +208,9 @@ class TestCoachFeedbackFlow:
             "## Weekly Structure\n\nKeep volume steady\n", encoding="utf-8"
         )
         daemon = _make_daemon(tmp_path)
-        daemon._poller = MagicMock()
+        daemon._chat._poller = MagicMock()
         daemon._poller.send_reply.return_value = 321
-        daemon._pending_edits = PendingEdits()
+        daemon._chat._pending_edits = PendingEdits()
 
         edit = ContextEdit(
             file="strategy",
@@ -271,8 +271,8 @@ class TestCoachFeedbackFlow:
             "## Weekly Structure\n\nKeep volume steady\n", encoding="utf-8"
         )
         daemon = _make_daemon(tmp_path)
-        daemon._poller = MagicMock()
-        daemon._pending_edits = PendingEdits()
+        daemon._chat._poller = MagicMock()
+        daemon._chat._pending_edits = PendingEdits()
 
         edit = ContextEdit(
             file="strategy",
@@ -292,7 +292,7 @@ class TestCoachFeedbackFlow:
 class TestTelegramFeedbackFlow:
     def test_fb_neg_swaps_to_category_keyboard(self, tmp_path: Path) -> None:
         daemon = _make_daemon(tmp_path)
-        daemon._poller = MagicMock()
+        daemon._chat._poller = MagicMock()
 
         daemon._handle_telegram_callback(
             {
@@ -309,7 +309,7 @@ class TestTelegramFeedbackFlow:
 
     def test_fb_cat_logs_reason_prompt_with_force_reply(self, tmp_path: Path) -> None:
         daemon = _make_daemon(tmp_path)
-        daemon._poller = MagicMock()
+        daemon._chat._poller = MagicMock()
         daemon._poller.send_reply.return_value = 555
         conn = open_db(tmp_path / "test.db")
         log_llm_call(
@@ -342,7 +342,7 @@ class TestTelegramFeedbackFlow:
 
     def test_feedback_reason_persists_across_restart(self, tmp_path: Path) -> None:
         daemon = _make_daemon(tmp_path)
-        daemon._poller = MagicMock()
+        daemon._chat._poller = MagicMock()
         daemon._poller.send_reply.return_value = 777
         conn = open_db(tmp_path / "test.db")
         log_llm_call(
@@ -375,7 +375,7 @@ class TestTelegramFeedbackFlow:
 
     def test_fb_undo_deletes_feedback_and_restores_button(self, tmp_path: Path) -> None:
         daemon = _make_daemon(tmp_path)
-        daemon._poller = MagicMock()
+        daemon._chat._poller = MagicMock()
 
         conn = open_db(tmp_path / "test.db")
         conn.execute(
@@ -433,7 +433,7 @@ class TestTelegramFeedbackFlow:
 
     def test_insights_feedback_edits_last_chunk(self, tmp_path: Path) -> None:
         daemon = _make_daemon(tmp_path)
-        daemon._poller = MagicMock()
+        daemon._chat._poller = MagicMock()
 
         daemon._attach_feedback_button(
             CommandResult(text="report", llm_call_id=12, telegram_message_id=44),
@@ -448,7 +448,7 @@ class TestTelegramFeedbackFlow:
 class TestNotifyFlow:
     def test_notify_without_args_shows_summary(self, tmp_path: Path) -> None:
         daemon = _make_daemon(tmp_path)
-        daemon._poller = MagicMock()
+        daemon._chat._poller = MagicMock()
 
         daemon._handle_command("/notify", 77)
 
@@ -459,18 +459,20 @@ class TestNotifyFlow:
 
     def test_notify_accept_persists_json(self, tmp_path: Path) -> None:
         daemon = _make_daemon(tmp_path)
-        daemon._poller = MagicMock()
-        daemon._pending_notify_proposals["np_1"] = daemon_module.PendingNotifyProposal(
-            request_text="no nudges before 11am",
-            preview="Proposed notification changes:\n- Nudge earliest time: 10:00 -> 11:00",
-            summary="Move nudges to after 11:00.",
-            changes=[
-                {
-                    "action": "set",
-                    "path": "nudges.earliest_time",
-                    "value": "11:00",
-                }
-            ],
+        daemon._chat._poller = MagicMock()
+        daemon._notify_flow._pending_proposals["np_1"] = (
+            daemon_module.PendingNotifyProposal(
+                request_text="no nudges before 11am",
+                preview="Proposed notification changes:\n- Nudge earliest time: 10:00 -> 11:00",
+                summary="Move nudges to after 11:00.",
+                changes=[
+                    {
+                        "action": "set",
+                        "path": "nudges.earliest_time",
+                        "value": "11:00",
+                    }
+                ],
+            )
         )
 
         daemon._handle_telegram_callback(
@@ -487,18 +489,20 @@ class TestNotifyFlow:
 
     def test_notify_reject_leaves_json_unchanged(self, tmp_path: Path) -> None:
         daemon = _make_daemon(tmp_path)
-        daemon._poller = MagicMock()
-        daemon._pending_notify_proposals["np_2"] = daemon_module.PendingNotifyProposal(
-            request_text="turn off midweek report",
-            preview="Proposed notification changes:\n- Midweek report: Thursday 09:00 (on) -> Thursday 09:00 (off)",
-            summary="Turn off midweek report.",
-            changes=[
-                {
-                    "action": "set",
-                    "path": "midweek_report.enabled",
-                    "value": False,
-                }
-            ],
+        daemon._chat._poller = MagicMock()
+        daemon._notify_flow._pending_proposals["np_2"] = (
+            daemon_module.PendingNotifyProposal(
+                request_text="turn off midweek report",
+                preview="Proposed notification changes:\n- Midweek report: Thursday 09:00 (on) -> Thursday 09:00 (off)",
+                summary="Turn off midweek report.",
+                changes=[
+                    {
+                        "action": "set",
+                        "path": "midweek_report.enabled",
+                        "value": False,
+                    }
+                ],
+            )
         )
 
         daemon._handle_telegram_callback(
@@ -515,8 +519,8 @@ class TestNotifyFlow:
 
     def test_notify_clarification_reply_continues_request(self, tmp_path: Path) -> None:
         daemon = _make_daemon(tmp_path)
-        daemon._poller = MagicMock()
-        daemon._pending_notify_clarifications[222] = (
+        daemon._chat._poller = MagicMock()
+        daemon._notify_flow._pending_clarifications[222] = (
             daemon_module.PendingNotifyClarification(
                 request_text="move reports to Tuesday"
             )
@@ -539,7 +543,7 @@ class TestNotifyFlow:
                 "reason": "clarified weekly insights",
             },
         ):
-            handled = daemon._consume_notify_clarification(
+            handled = daemon._notify_flow.consume_clarification(
                 {"message_id": 222},
                 "weekly insights",
                 {"message_id": 333},
@@ -550,7 +554,7 @@ class TestNotifyFlow:
 
     def test_stale_notify_proposal_expires_after_restart(self, tmp_path: Path) -> None:
         daemon = _make_daemon(tmp_path)
-        daemon._poller = MagicMock()
+        daemon._chat._poller = MagicMock()
 
         daemon._handle_telegram_callback(
             {
@@ -566,7 +570,7 @@ class TestNotifyFlow:
 class TestTelegramCommands:
     def test_review_runs_last_week_insights_flow(self, tmp_path: Path) -> None:
         daemon = _make_daemon(tmp_path)
-        daemon._poller = MagicMock()
+        daemon._chat._poller = MagicMock()
 
         with (
             patch.object(daemon, "_run_import"),
@@ -589,7 +593,7 @@ class TestTelegramCommands:
 
     def test_review_accepts_current_week_argument(self, tmp_path: Path) -> None:
         daemon = _make_daemon(tmp_path)
-        daemon._poller = MagicMock()
+        daemon._chat._poller = MagicMock()
 
         with (
             patch.object(daemon, "_run_import"),
@@ -611,7 +615,7 @@ class TestTelegramCommands:
 
     def test_review_rejects_invalid_argument(self, tmp_path: Path) -> None:
         daemon = _make_daemon(tmp_path)
-        daemon._poller = MagicMock()
+        daemon._chat._poller = MagicMock()
 
         with patch.object(daemon, "_run_review") as run_review:
             daemon._handle_command("/review tomorrow", 11)
@@ -624,7 +628,7 @@ class TestTelegramCommands:
 
     def test_status_includes_system_and_data_summary(self, tmp_path: Path) -> None:
         daemon = _make_daemon(tmp_path)
-        daemon._poller = MagicMock()
+        daemon._chat._poller = MagicMock()
         daemon._state.update(
             {
                 "nudge_count_today": 2,
@@ -673,7 +677,7 @@ class TestTelegramCommands:
 
     def test_status_handles_missing_state_fields(self, tmp_path: Path) -> None:
         daemon = _make_daemon(tmp_path)
-        daemon._poller = MagicMock()
+        daemon._chat._poller = MagicMock()
 
         daemon._handle_command("/status", 88)
 
@@ -686,7 +690,7 @@ class TestTelegramCommands:
 
     def test_help_mentions_review_and_context_usage(self, tmp_path: Path) -> None:
         daemon = _make_daemon(tmp_path)
-        daemon._poller = MagicMock()
+        daemon._chat._poller = MagicMock()
         (tmp_path / "me.md").write_text("About me\n", encoding="utf-8")
 
         daemon._handle_command("/help", 55)
@@ -770,7 +774,7 @@ class TestFailureCapture:
 
     def test_notify_user_failure_sends_truncated_error(self, tmp_path: Path) -> None:
         daemon = _make_daemon(tmp_path)
-        daemon._poller = MagicMock()
+        daemon._chat._poller = MagicMock()
 
         daemon._notify_user_failure("Weekly review", "LLM call failed: details")
 
@@ -781,7 +785,7 @@ class TestFailureCapture:
 
     def test_notify_user_failure_truncates_long_errors(self, tmp_path: Path) -> None:
         daemon = _make_daemon(tmp_path)
-        daemon._poller = MagicMock()
+        daemon._chat._poller = MagicMock()
 
         long_error = "x" * 1000
         daemon._notify_user_failure("Nudge", long_error)
@@ -795,7 +799,7 @@ class TestFailureCapture:
         self, tmp_path: Path
     ) -> None:
         daemon = _make_daemon(tmp_path)
-        daemon._poller = MagicMock()
+        daemon._chat._poller = MagicMock()
 
         daemon._notify_user_failure("Coaching review", None)
 

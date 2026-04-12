@@ -86,6 +86,50 @@ MAX_TOOL_ITERATIONS_NUDGE: int = 3
 must be quick and a single targeted query is usually enough."""
 
 
+# ---------------------------------------------------------------------------
+# Daemon paths and timing
+# ---------------------------------------------------------------------------
+
+LOG_FILE: Path = Path.home() / "Library/Logs/zdrowskit.daemon.log"
+"""Daemon log file (stderr/stdout sink under launchd)."""
+
+LOCK_FILE: Path = Path.home() / "Documents/zdrowskit/.daemon.lock"
+"""Single-instance lock file held by the daemon while running."""
+
+STATE_FILE: Path = Path.home() / "Documents/zdrowskit/.daemon_state.json"
+"""Persistent rate-limit and queue state for the daemon."""
+
+HEALTH_DEBOUNCE_S: int = 180
+"""Health-data debounce window: wait this long after the last .json modify
+event before importing, so all sibling files have time to land via iCloud."""
+
+CONTEXT_DEBOUNCE_S: int = 60
+"""Context-file (.md) debounce window: collapse rapid edits into one fire."""
+
+MAX_NUDGES_PER_DAY: int = 3
+"""Hard cap on nudges per calendar day."""
+
+MIN_NUDGE_INTERVAL_S: int = 90 * 60
+"""Minimum gap between consecutive nudges."""
+
+TRAINING_DAYS: set[int] = {0, 1, 2, 3, 4, 5, 6}
+"""Weekdays (Mon=0..Sun=6) eligible for nudges. Currently every day —
+the user catches up on weekends."""
+
+SCHEDULED_CHECK_INTERVAL_S: int = 30 * 60
+"""How often the scheduled-check loop wakes to evaluate report cadence."""
+
+EVENING_HOUR_START: int = 20
+"""Inclusive lower bound (24h) of the evening nudge window."""
+
+EVENING_HOUR_END: int = 21
+"""Exclusive upper bound (24h) of the evening nudge window."""
+
+COACH_SUPPRESSION_S: int = 3600
+"""±1 hour suppression around scheduled reports — no nudges fire inside
+this window so the report itself can land first."""
+
+
 def resolve_data_dir(arg: str | None, source: str = "autoexport") -> Path:
     """Resolve the data directory from CLI arg, env var, or source default.
 
