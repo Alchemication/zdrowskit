@@ -7,8 +7,7 @@ Your 24/7 ultra-personal trainer. Parses Apple Health exports (metrics, workouts
 Always use `uv run` — never plain `python`. Run any subcommand with `--help` for full flags.
 
 ```bash
-uv run python main.py import                      # import from Auto Export (default)
-uv run python main.py import --source shortcuts    # import from iOS Shortcuts export
+uv run python main.py import                      # import from Auto Export
 uv run python main.py insights        # LLM weekly report (add --week last|current, --telegram, --email, --explain)
 uv run python main.py nudge           # short LLM nudge (add --trigger TYPE)
 uv run python main.py coach           # coaching review with plan/goal proposals (add --week, --telegram, --email)

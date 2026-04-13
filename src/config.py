@@ -1,7 +1,6 @@
 """Shared paths and configuration resolution.
 
 Public API:
-    SHORTCUTS_DATA_DIR    — iCloud path for iOS Shortcuts health exports.
     AUTOEXPORT_DATA_DIR   — iCloud path for Auto Export app automation exports.
     CONTEXT_DIR           — directory containing user context files (me, strategy, log).
     NOTIFICATION_PREFS_PATH — JSON file storing notification preference overrides.
@@ -10,11 +9,11 @@ Public API:
     NUDGES_DIR            — directory where sent nudges are saved.
     MAX_HISTORY_ENTRIES   — max entries kept in history.md.
     MAX_CONVERSATION_MESSAGES — max messages in the Telegram chat buffer.
-    resolve_data_dir      — resolve data directory from CLI arg, env var, or source default.
+    resolve_data_dir      — resolve data directory from CLI arg, env var, or default.
 
 Example:
     from config import resolve_data_dir, CONTEXT_DIR
-    data = resolve_data_dir(args.data_dir, source="autoexport")
+    data = resolve_data_dir(args.data_dir)
 """
 
 from __future__ import annotations
@@ -22,22 +21,11 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-SHORTCUTS_DATA_DIR: Path = (
-    Path.home()
-    / "Library/Mobile Documents/iCloud~is~workflow~my~workflows/Documents/MyHealth"
-)
-"""iCloud path where iOS Shortcuts exports land (historical backfill)."""
-
 AUTOEXPORT_DATA_DIR: Path = (
     Path.home()
     / "Library/Mobile Documents/iCloud~com~ifunography~HealthExport/Documents"
 )
-"""iCloud path where Auto Export app automation exports land (ongoing sync)."""
-
-_SOURCE_DEFAULTS: dict[str, Path] = {
-    "shortcuts": SHORTCUTS_DATA_DIR,
-    "autoexport": AUTOEXPORT_DATA_DIR,
-}
+"""iCloud path where Auto Export app exports land."""
 CONTEXT_DIR: Path = Path.home() / "Documents" / "zdrowskit" / "ContextFiles"
 NOTIFICATION_PREFS_PATH: Path = (
     Path.home() / "Documents" / "zdrowskit" / "notification_prefs.json"
@@ -130,14 +118,13 @@ COACH_SUPPRESSION_S: int = 3600
 this window so the report itself can land first."""
 
 
-def resolve_data_dir(arg: str | None, source: str = "autoexport") -> Path:
-    """Resolve the data directory from CLI arg, env var, or source default.
+def resolve_data_dir(arg: str | None) -> Path:
+    """Resolve the data directory from CLI arg, env var, or default.
 
-    Priority: CLI --data-dir > HEALTH_DATA_DIR env var > source default.
+    Priority: CLI --data-dir > HEALTH_DATA_DIR env var > AUTOEXPORT_DATA_DIR.
 
     Args:
         arg: Value of the --data-dir CLI argument, or None if not provided.
-        source: Data source format — "shortcuts" or "autoexport".
 
     Returns:
         An absolute Path to the resolved data directory.
@@ -147,4 +134,4 @@ def resolve_data_dir(arg: str | None, source: str = "autoexport") -> Path:
     env = os.environ.get("HEALTH_DATA_DIR")
     if env:
         return Path(env).expanduser().resolve()
-    return _SOURCE_DEFAULTS.get(source, AUTOEXPORT_DATA_DIR)
+    return AUTOEXPORT_DATA_DIR

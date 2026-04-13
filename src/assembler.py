@@ -1,22 +1,16 @@
 """Join all parsed data sources into a list of DailySnapshot objects.
 
-Supports two data sources via the ``source`` parameter:
-
-- ``shortcuts``: iOS Shortcuts export (Metrics/*.json + Workouts/workouts.json
-  + Sleep/sleep.json + Routes/*.xml).
-- ``autoexport``: Auto Export app automation (Metrics/*.json with embedded
-  sleep_analysis + Workouts/*.json with embedded routes).
-
-Both produce the same ``list[DailySnapshot]`` output.
+Parses Auto Export app data (Metrics/*.json with embedded sleep_analysis +
+Workouts/*.json with embedded routes) into ``list[DailySnapshot]``.
 
 Public API:
-    assemble(data_dir, source) -- parse all sources and return daily snapshots
+    assemble(data_dir) -- parse all sources and return daily snapshots
 
 Example:
     from pathlib import Path
     from assembler import assemble
 
-    snapshots = assemble(Path("..."), source="autoexport")
+    snapshots = assemble(Path("..."))
     for day in snapshots:
         print(day.date, day.steps, day.resting_hr)
 """
@@ -26,7 +20,7 @@ from pathlib import Path
 
 from models import DailySnapshot, WorkoutSnapshot
 from parsers.metrics import parse_all_metrics
-from parsers.workouts import parse_workouts, parse_workouts_dir
+from parsers.workouts import parse_workouts_dir
 
 
 def _workout_date(w: WorkoutSnapshot) -> str:
@@ -51,46 +45,6 @@ def _safe_float(val: float | None) -> float | None:
         float(val) or None.
     """
     return float(val) if val is not None else None
-
-
-def _parse_shortcuts(
-    data_dir: Path,
-) -> tuple[
-    dict[str, dict[str, float]],
-    dict[str, dict[str, float]],
-    list[WorkoutSnapshot],
-]:
-    """Parse data from iOS Shortcuts export format.
-
-    Args:
-        data_dir: Root of the MyHealth data directory.
-
-    Returns:
-        Tuple of (metrics_by_date, sleep_by_date, workouts).
-    """
-    from parsers.gpx import match_gpx_to_workout, parse_all_gpx
-    from parsers.sleep import parse_sleep
-
-    metrics_dir = data_dir / "Metrics"
-    workouts_path = data_dir / "Workouts" / "workouts.json"
-    routes_dir = data_dir / "Routes"
-    sleep_path = data_dir / "Sleep" / "sleep.json"
-
-    metrics_by_date = parse_all_metrics(metrics_dir) if metrics_dir.exists() else {}
-    workouts = parse_workouts(workouts_path) if workouts_path.exists() else []
-    gpx_index = parse_all_gpx(routes_dir) if routes_dir.exists() else {}
-    sleep_by_date = parse_sleep(sleep_path) if sleep_path.exists() else {}
-
-    # Attach GPX stats to workouts that have a matching route
-    for w in workouts:
-        gpx = match_gpx_to_workout(w.start_utc, gpx_index)
-        if gpx is not None:
-            w.gpx_distance_km = round(gpx.distance_km, 3)
-            w.gpx_elevation_gain_m = gpx.elevation_gain_m
-            w.gpx_avg_speed_ms = round(gpx.avg_speed_ms, 4)
-            w.gpx_max_speed_p95_ms = round(gpx.max_speed_p95_ms, 4)
-
-    return metrics_by_date, sleep_by_date, workouts
 
 
 def _parse_autoexport(
@@ -124,14 +78,12 @@ def _parse_autoexport(
 
 def _build_snapshots(
     metrics_by_date: dict[str, dict[str, float]],
-    sleep_by_date: dict[str, dict[str, float]],
     workouts: list[WorkoutSnapshot],
 ) -> list[DailySnapshot]:
     """Build DailySnapshot objects from parsed data.
 
     Args:
-        metrics_by_date: Metrics (and possibly sleep) fields keyed by date.
-        sleep_by_date: Separate sleep fields keyed by date (empty for autoexport).
+        metrics_by_date: Metrics (including sleep) fields keyed by date.
         workouts: List of parsed WorkoutSnapshots.
 
     Returns:
@@ -143,16 +95,11 @@ def _build_snapshots(
         workouts_by_date.setdefault(_workout_date(w), []).append(w)
 
     # Collect all dates
-    all_dates = sorted(
-        set(metrics_by_date.keys())
-        | set(workouts_by_date.keys())
-        | set(sleep_by_date.keys())
-    )
+    all_dates = sorted(set(metrics_by_date.keys()) | set(workouts_by_date.keys()))
 
     snapshots: list[DailySnapshot] = []
     for date in all_dates:
         m = metrics_by_date.get(date, {})
-        sl = sleep_by_date.get(date, {})
         day_workouts = workouts_by_date.get(date, [])
 
         # Cast numeric fields to appropriate types
@@ -170,10 +117,8 @@ def _build_snapshots(
         if hrv_ms is not None and resting_hr is not None and resting_hr > 0:
             recovery_index = round(hrv_ms / resting_hr, 4)
 
-        # Sleep: prefer fields from metrics (autoexport), fall back to separate
-        # sleep dict (shortcuts).
         def _sleep(field: str) -> float | None:
-            return _safe_float(m.get(field) or sl.get(field))
+            return _safe_float(m.get(field))
 
         snap = DailySnapshot(
             date=date,
@@ -215,20 +160,15 @@ def _build_snapshots(
     return snapshots
 
 
-def assemble(data_dir: Path, source: str = "autoexport") -> list[DailySnapshot]:
-    """Parse all data sources under data_dir and return daily snapshots.
+def assemble(data_dir: Path) -> list[DailySnapshot]:
+    """Parse all Auto Export data under data_dir and return daily snapshots.
 
     Args:
-        data_dir: Root data directory (layout depends on source).
-        source: Data source format — "shortcuts" or "autoexport".
+        data_dir: Root Auto Export data directory.
 
     Returns:
         A list of DailySnapshot objects, one per calendar date, sorted
         chronologically.
     """
-    if source == "shortcuts":
-        metrics, sleep, workouts = _parse_shortcuts(data_dir)
-    else:
-        metrics, sleep, workouts = _parse_autoexport(data_dir)
-
-    return _build_snapshots(metrics, sleep, workouts)
+    metrics, _sleep, workouts = _parse_autoexport(data_dir)
+    return _build_snapshots(metrics, workouts)

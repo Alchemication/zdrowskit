@@ -57,16 +57,15 @@ def cmd_import(args: argparse.Namespace) -> None:
     """Handle the 'import' subcommand: parse export dir and upsert into DB.
 
     Args:
-        args: Parsed CLI arguments with data_dir, source, and db attributes.
+        args: Parsed CLI arguments with data_dir and db attributes.
     """
-    source = getattr(args, "source", "autoexport")
-    data_dir = resolve_data_dir(args.data_dir, source=source)
+    data_dir = resolve_data_dir(args.data_dir)
     if not data_dir.exists():
         logger.error("data directory not found: %s", data_dir)
         sys.exit(1)
 
-    logger.info("Loading data from: %s (source=%s)", data_dir, source)
-    snapshots = assemble(data_dir, source=source)
+    logger.info("Loading data from: %s", data_dir)
+    snapshots = assemble(data_dir)
     if not snapshots:
         logger.warning("No snapshots parsed from %s", data_dir)
         return

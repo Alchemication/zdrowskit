@@ -53,7 +53,7 @@ The workaround is a third-party iOS app that reads HealthKit directly and writes
 
 **One universal constraint:** iOS requires the phone to be **unlocked** for any health data export — automations silently skip when the phone is locked.
 
-### Auto Export automations (ongoing, `--source autoexport`)
+### Auto Export setup
 
 The Automations feature syncs health data to iCloud Drive on a schedule — no taps required once configured.
 
@@ -63,33 +63,34 @@ The Automations feature syncs health data to iCloud Drive on a schedule — no t
 3. Select all metrics you care about (steps, energy, HR, HRV, VO2max, mobility, resting heart rate, sleep analysis, etc.)
 4. Set the schedule — **every 5 minutes recommended** (shorter intervals catch more unlock windows)
 
-**Limitations:**
-- Automations only export the **current week** — you can't pull historical data at daily granularity this way ("Year" aggregation has no daily option; "Month" has daily but you can't choose which month)
-- Sleep data is pre-aggregated nightly totals (no per-segment breakdown)
-- Workout routes are embedded as `route` arrays (latitude, longitude, altitude, speed, timestamp)
-- The app writes weekly JSON files: `Metrics/HealthAutoExport-YYYY-WW.json` and `Workouts/HealthAutoExport-YYYY-WW.json`
+The app writes weekly JSON files: `Metrics/HealthAutoExport-YYYY-WW.json` and `Workouts/HealthAutoExport-YYYY-WW.json`
 
 **Data path:** `~/Library/Mobile Documents/iCloud~com~ifunography~HealthExport/Documents/`
 
-### Auto Export shortcuts actions (one-time backfill, `--source shortcuts`)
+**Notes:**
+- Sleep data is pre-aggregated nightly totals (no per-segment breakdown)
+- Workout routes are embedded as `route` arrays (latitude, longitude, altitude, speed, timestamp)
 
-Auto Export also provides iOS Shortcut actions with flexible date ranges — useful for backfilling historical data that automations can't reach.
+### Historical backfill
 
-**Limitations:**
-- Each action supports **max 10 metrics** — you need a chain of actions to cover everything (metrics, workouts, routes)
-- Every action in the chain requires a **manual confirmation tap** (iOS limitation on health data access), and the whole shortcut must be kicked off manually on an unlocked phone
-- Separate output files for metrics, workouts, sleep, and GPX routes
+Each automation has a **Manual Export** button (at the bottom of the automation screen) that supports custom date ranges. Use this to backfill historical data — the output uses the exact same format as the scheduled exports, so no separate import path is needed.
 
-Tedious, but it's a one-time chore. Once historical data is imported, automations handle everything going forward.
+**How to backfill:**
+1. Open an existing automation in Auto Export
+2. Scroll to the bottom and tap **Manual Export**
+3. Set a custom date range (e.g. the whole of 2024) — the app splits it into weekly files automatically
+4. Wait for the files to sync via iCloud
+5. Run `uv run python main.py import` — the same command handles both current and historical data
 
-**Data path:** `~/Library/Mobile Documents/iCloud~is~workflow~my~workflows/Documents/MyHealth/`
+Do this once per automation (Metrics and Workouts). The import is idempotent — re-running it won't duplicate data.
 
 ### Recommended workflow
 
-1. **Backfill** historical data using Shortcuts actions: `uv run python main.py import --source shortcuts`
-2. **Set up Auto Export** automations (Week + Day aggregation, see setup above)
-3. **Run the daemon** — it watches the Auto Export iCloud folder and imports new data automatically
-4. Never think about exporting again (until Apple changes something)
+1. **Set up Auto Export** automations (Week + Day aggregation, see setup above)
+2. **Backfill** historical data using Manual Export from each automation
+3. **Import everything:** `uv run python main.py import`
+4. **Run the daemon** — it watches the Auto Export iCloud folder and imports new data automatically
+5. Never think about exporting again (until Apple changes something)
 
 ## Quick start
 
@@ -138,8 +139,7 @@ The LLM reads your profile, goals, training plan, and weekly journal alongside y
 ## Commands
 
 ```bash
-uv run python main.py import                   # import from Auto Export (default)
-uv run python main.py import --source shortcuts # one-time backfill from Shortcuts export
+uv run python main.py import                   # import from Auto Export
 uv run python main.py report                   # current week: summary + daily
 uv run python main.py report --history         # all weeks, one block each
 uv run python main.py report --llm             # JSON for LLM: current + 3mo history
@@ -181,7 +181,7 @@ uv run python -m evals.leaderboard render               # rebuild leaderboard.md
 uv run python -m evals.leaderboard render-html          # rebuild interactive leaderboard.html from recorded JSONL history
 ```
 
-Each source has its own default iCloud data directory. Override with `--data-dir` or the `HEALTH_DATA_DIR` env var. Run any command with `--help` for the full flag list.
+Override the default iCloud data directory with `--data-dir` or the `HEALTH_DATA_DIR` env var. Run any command with `--help` for the full flag list.
 
 ## The daemon — always-on trainer mode
 
