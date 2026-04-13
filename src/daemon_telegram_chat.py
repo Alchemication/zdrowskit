@@ -880,11 +880,12 @@ class TelegramChatHandler:
                     tool_result = "Proposed. User will be asked to confirm."
                 else:
                     tool_result = execute_tool(fn_name, args, self._daemon.db)
-                    # Accumulate query rows for chart rendering.
+                    # Keep latest query rows for chart rendering.
                     if fn_name == "run_sql":
                         try:
                             parsed = _json.loads(tool_result)
                             if isinstance(parsed, list):
+                                query_rows.clear()
                                 query_rows.extend(parsed)
                                 logger.info("run_sql returned %d rows", len(parsed))
                             elif isinstance(parsed, dict) and "error" in parsed:
