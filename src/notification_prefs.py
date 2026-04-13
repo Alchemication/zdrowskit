@@ -70,7 +70,7 @@ _DEFAULT_EFFECTIVE: dict[str, dict[str, Any]] = {
     "weekly_insights": {
         "enabled": True,
         "weekday": "monday",
-        "time": "08:00",
+        "time": "10:00",
     },
     "midweek_report": {
         "enabled": True,

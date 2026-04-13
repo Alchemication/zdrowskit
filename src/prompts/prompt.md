@@ -108,7 +108,8 @@ with these sections:
 
 1. **Week at a Glance** — 2-3 sentence executive summary of the week.
 2. **Training Review** — did they hit the plan? What deviated and why?
-   List each day in this format (NO markdown tables — they break on mobile):
+   List each **training day** in this format (NO markdown tables — they break
+   on mobile):
 
    🏃 **Mon 16** — 8.15 km run
      Pace 6:12/km · HR 151 · Elev 45m
@@ -117,8 +118,13 @@ with these sections:
    🏋️ **Wed 18** — Push strength (42 min)
      HR 93 · 30.5 kg DB bench (PR)
 
-   😴 **Tue 17** — Rest
-     Back soreness, smart call.
+   **Collapsing rules:**
+   - Short warm-ups or accessory work (under 10 min) on the same day as a
+     main session: fold into the main session's entry, don't list separately.
+   - Rest days: do NOT list individually. Summarise all rest days in one line
+     at the end, e.g. "Rest: Tue, Sat, Sun — Sat was post-night-out, smart
+     call." Only mention a rest day separately if something notable happened
+     (injury, unusually bad recovery, user note).
 
    Use activity-appropriate emoji. For mid-week progress checks, only
    cover days that have elapsed — do not penalize for sessions scheduled
@@ -160,8 +166,9 @@ with these sections:
 
 ### Output rules
 
-Keep the report under 600 words. Be specific with numbers. Do not repeat
-raw data — interpret it. Always express pace in mm:ss/km format (e.g.
+Keep the report under 450 words. Be specific with numbers. Do not repeat
+raw data — interpret it. Brevity is a feature — if a section has nothing
+notable, shrink it to one line or drop it. Always express pace in mm:ss/km format (e.g.
 `5:37/km`), never as decimal minutes. **Do not use markdown tables anywhere
 in the report — they break on mobile. Use the day-by-day text format shown
 above for the Training Review and bulleted lists everywhere else.**
