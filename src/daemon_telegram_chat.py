@@ -223,7 +223,6 @@ class TelegramChatHandler:
         # Propose any deferred context edits from the tool-calling loop.
         for edit in deferred_edits:
             self._daemon._propose_context_edit(edit, source="chat")
-            break  # At most one context update per response
 
     # ------------------------------------------------------------------
     # Placeholder animation

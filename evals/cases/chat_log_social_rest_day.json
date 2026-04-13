@@ -1,0 +1,94 @@
+{
+  "id": "chat_log_social_rest_day",
+  "feature": "chat",
+  "case_kind": "real_regression",
+  "source_feedback_id": 13,
+  "source_llm_call_id": 315,
+  "derived_from": {
+    "feedback_id": 13,
+    "llm_call_id": 315,
+    "hypothesis": "A social outing causing poor sleep and a rest day is a training-relevant life disruption that should be logged to log.md without an explicit request."
+  },
+  "intent": "When the user shares that they went out, slept poorly, and are resting today, chat should propose appending it to log.md and still reply concisely.",
+  "fixture": {
+    "today": "2026-04-11",
+    "context": {
+      "me": "# Profile\n\n- Adam, 42M, 81 kg.\n- Wife + 3-year-old; live in Crosshaven, Ireland.\n",
+      "strategy": "# Strategy\n\n## Goals — Current focus\n\n- Hold 3 runs + 2 lifts/week at 15+ km volume.\n- Build tempo capacity: extend tempo segments toward 3 km @ sub-5:10/km.\n\n## Weekly Plan\n\n**Week runs Monday → Sunday.** Target: 3 runs + 2 strength sessions per week (~15 km+ total running).\n\n- Run days: ~5 km each\n  - 1 tempo session/week when HRV is above personal baseline (~50 ms)\n  - Remaining runs at easy pace (5:30–6:00/km)\n- Strength A: Push + core\n- Strength B: Pull + core\n- Prefer not to stack run + strength on the same day\n",
+      "log": "# Log\n\n## 2026-04-09\n\n- Small one was sick; skipped planned strength.\n\n## 2026-04-10\n\n- Slept better and got strength done.\n",
+      "history": "(not provided)",
+      "coach_feedback": "(not provided)",
+      "recent_nudges": "(none yet)",
+      "last_coach_summary": "(no recent coach review)"
+    },
+    "health_data": {
+      "current_week": {
+        "summary": {
+          "week_label": "W15",
+          "start_date": "2026-04-06",
+          "end_date": "2026-04-12",
+          "run_count": 3,
+          "lift_count": 1,
+          "total_run_km": 13.9,
+          "total_lift_min": 41,
+          "avg_hrv_ms": 47.0,
+          "avg_resting_hr": 53.0,
+          "avg_sleep_total_h": 6.9,
+          "avg_sleep_efficiency_pct": 83.4,
+          "sleep_nights_tracked": 5,
+          "sleep_nights_total": 5
+        },
+        "days": [
+          {
+            "date": "2026-04-11",
+            "workouts": [],
+            "hrv_ms": 41.5,
+            "resting_hr": 49,
+            "sleep_total_h": 5.8,
+            "sleep_efficiency_pct": 85.5
+          }
+        ]
+      },
+      "history": []
+    },
+    "turns": [
+      {
+        "role": "user",
+        "content": "Went out last night hence sleep wasn't great and also resting today. Nothing crazy but enough to take it easy today."
+      }
+    ]
+  },
+  "assertions": [
+    {
+      "type": "tool_called",
+      "name": "proposes_log_append",
+      "tool": "update_context",
+      "count": 1
+    },
+    {
+      "type": "tool_arg_matches",
+      "name": "log_append_uses_pinned_date",
+      "tool": "update_context",
+      "matches": {
+        "file": "log",
+        "action": "append",
+        "content": {
+          "regex": "(?is)##\\s*2026-04-11\\b"
+        }
+      }
+    },
+    {
+      "type": "tool_arg_matches",
+      "name": "log_append_captures_disruption",
+      "tool": "update_context",
+      "matches": {
+        "file": "log",
+        "action": "append",
+        "content": {
+          "regex": "(?is)(?=.*\\b(went out|night out|social|late night)\\b)(?=.*\\b(rest\\w*|recover\\w*|taking it easy|day off)\\b).+"
+        }
+      }
+    }
+  ],
+  "notes": "Real regression derived from thumbs-down feedback #13 / llm_call #315. The failed response acknowledged the rest day with good advice but did not call update_context to append to log.md. This extends coverage from chat_log_life_disruption (childcare disruption) to a social/lifestyle disruption causing the same missing log behavior."
+}

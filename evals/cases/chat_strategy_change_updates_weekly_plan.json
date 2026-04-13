@@ -62,7 +62,8 @@
       "type": "tool_called",
       "name": "proposes_strategy_update",
       "tool": "update_context",
-      "count": 1
+      "min_count": 1,
+      "max_count": 2
     },
     {
       "type": "tool_arg_matches",
