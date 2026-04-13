@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import daemon as daemon_module
+import daemon_runners as daemon_runners_module
 from cmd_llm import CommandResult
 from context_edit import (
     ContextEdit,
@@ -68,6 +69,7 @@ class TestNudgeScheduling:
 
         with (
             patch.object(daemon_module, "datetime", fake_datetime),
+            patch.object(daemon_runners_module, "datetime", fake_datetime),
             patch("cmd_llm.cmd_nudge") as cmd_nudge,
         ):
             daemon._run_nudge("new_data")
