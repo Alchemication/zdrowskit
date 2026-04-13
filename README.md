@@ -29,7 +29,7 @@ Auto Export iOS app (iCloud Drive, on a schedule)
         zdrowskit report          → weekly summary + daily breakdown
         zdrowskit report --llm    → structured JSON for LLM consumption
             ↓
-        zdrowskit insights        → personalised weekly report (~600 words)
+        zdrowskit insights        → personalised weekly report (~450 words)
         zdrowskit coach           → plan/goal proposals with Approve/Reject
         zdrowskit nudge           → short reactive notification (≤80 words)
             + context files: your profile, goals, plan, journal
@@ -266,7 +266,7 @@ Each notification type is a distinct LLM call with its own prompt, context, tool
 
 | Channel | Purpose | Trigger | Frequency | Length | Tools | Special output |
 |---------|---------|---------|-----------|--------|-------|----------------|
-| **Insights** | Full weekly report | Scheduled (default: Mon 8am) or manual `/review` | 1×/week | ~600 words | `run_sql` | `<chart>` (0+), `<memory>` (always 1, appended to `history.md`) |
+| **Insights** | Full weekly report | Scheduled (default: Mon 10am) or manual `/review` | 1×/week | ~450 words | `run_sql` | `<chart>` (0+), `<memory>` (always 1, appended to `history.md`) |
 | **Coach** | Weekly strategy review, only when proposals exist | After insights (silent on no-change weeks) | 1×/week | ~300 words | `run_sql`, `update_context` (`strategy` only) | `SKIP` if no changes warranted; bundled message with inline Accept/Reject buttons per edit |
 | **Nudge** | Short reactive next-action nudge | Data sync, file edit, missed session | Up to 3/day by default | 80 words | `run_sql` | `SKIP` if nothing changes; `<chart>` (0–1) |
 | **Chat** | Interactive conversation — answer the current message, ask anything, get charts | Your Telegram message | On demand | 150 words | `run_sql` (up to 5/turn), `update_context` (any file) | `<chart>` (optional), `update_context` (at most 1) |
