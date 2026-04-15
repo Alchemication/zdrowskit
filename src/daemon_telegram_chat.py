@@ -359,6 +359,8 @@ class TelegramChatHandler:
                 "\n".join(self._daemon._build_status_lines()),
                 reply_to_message_id=message_id,
             )
+        elif cmd == "/events":
+            self._handle_events_command(text, message_id)
         elif cmd == "/context":
             parts = text.split()
             file_arg = parts[1] if len(parts) > 1 else None
@@ -392,6 +394,10 @@ class TelegramChatHandler:
                     lines.append(f"/context [name] — {command['description']}")
                 elif command["command"] == "add":
                     lines.append(f"/add — {command['description']} (workouts, sleep)")
+                elif command["command"] == "events":
+                    lines.append(
+                        f"/events [N] [category] — {command['description']} (default: last 3 days)"
+                    )
                 else:
                     lines.append(f"/{command['command']} — {command['description']}")
             lines.append(f"\nAvailable context files: {ctx_opts}")
@@ -405,6 +411,64 @@ class TelegramChatHandler:
     # ------------------------------------------------------------------
     # Context overview
     # ------------------------------------------------------------------
+
+    def _handle_events_command(self, text: str, message_id: int) -> None:
+        """Handle ``/events [N | category]`` — show recent system events.
+
+        With no argument, shows events from the last 3 days. A numeric
+        argument overrides the day window; a category token (nudge,
+        import, coach, …) filters to that category over the default 3-day
+        window. Combinations like ``/events nudge 7`` are supported.
+
+        Args:
+            text: The full ``/events …`` message text.
+            message_id: Telegram message ID for reply threading.
+        """
+        from datetime import datetime, timedelta, timezone
+
+        from cmd_events import format_events_for_telegram
+        from events import CATEGORIES, query_events
+        from store import open_db
+
+        parts = text.split()[1:]
+        days = 3
+        category: str | None = None
+        for part in parts:
+            if part.isdigit():
+                days = max(1, int(part))
+            elif part.lower() in CATEGORIES:
+                category = part.lower()
+            else:
+                self._poller.send_reply(
+                    "Usage: /events [N] [category]. "
+                    f"Categories: {', '.join(CATEGORIES)}.",
+                    reply_to_message_id=message_id,
+                )
+                return
+
+        since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        conn = open_db(self._daemon.db)
+        try:
+            rows = query_events(conn, category=category, since=since, limit=200)
+        finally:
+            conn.close()
+
+        if not rows:
+            scope = f"last {days}d"
+            if category:
+                scope += f" · {category}"
+            self._poller.send_reply(
+                f"No system events ({scope}).", reply_to_message_id=message_id
+            )
+            return
+
+        header_scope = f"last {days}d"
+        if category:
+            header_scope += f" · {category}"
+        body = format_events_for_telegram(rows)
+        self._poller.send_reply(
+            f"_{header_scope}_\n{body}", reply_to_message_id=message_id
+        )
 
     def _send_context_overview(
         self, message_id: int, file_arg: str | None = None

@@ -547,6 +547,12 @@ class ZdrowskitDaemon:
         }
         trigger = trigger_map.get(stem, "log_update")
         logger.info("Context trigger fired: %s.md → %s", stem, trigger)
+        self._record_event(
+            "context",
+            "edited",
+            f"Context file edited: {stem}.md → {trigger}",
+            {"stem": stem, "trigger": trigger},
+        )
         trigger_context = self._runners._format_context_trigger(stem, trigger)
         self._runners._run_nudge(trigger, trigger_context=trigger_context)
 
@@ -577,6 +583,35 @@ class ZdrowskitDaemon:
     def _can_send_nudge(self) -> bool:
         """Delegate to the runner handler."""
         return self._runners._can_send_nudge()
+
+    def _check_nudge_rate_limit(self) -> tuple[bool, str | None, dict | None]:
+        """Delegate: returns (allowed, reason, details)."""
+        return self._runners._check_nudge_rate_limit()
+
+    def _record_event(
+        self,
+        category: str,
+        kind: str,
+        summary: str,
+        details: dict | None = None,
+        llm_call_id: int | None = None,
+    ) -> None:
+        """Record a diagnostic event into the events table.
+
+        Opens a short-lived DB connection so event writes don't contend with
+        long-running LLM or import work.
+        """
+        from events import record_event
+        from store import open_db
+
+        try:
+            conn = open_db(self.db)
+            try:
+                record_event(conn, category, kind, summary, details, llm_call_id)
+            finally:
+                conn.close()
+        except sqlite3.DatabaseError:
+            logger.warning("Event write failed (%s.%s)", category, kind, exc_info=True)
 
     def _record_report(self, report_type: str) -> None:
         """Delegate to the runner handler."""
@@ -894,6 +929,7 @@ class ZdrowskitDaemon:
         self._chat.start()
 
         logger.info("Daemon running — press Ctrl+C to stop")
+        self._record_event("daemon", "start", "Daemon started")
         try:
             while observer.is_alive():
                 observer.join(timeout=1)
@@ -904,6 +940,7 @@ class ZdrowskitDaemon:
             observer.stop()
             observer.join()
             logger.info("Daemon stopped")
+            self._record_event("daemon", "stop", "Daemon stopped")
 
 
 # ---------------------------------------------------------------------------

@@ -777,7 +777,7 @@ def cmd_nudge(
     # Check for SKIP as the entire response OR as a standalone line.
     if raw_text.upper() == "SKIP" or "\nSKIP\n" in f"\n{raw_text}\n":
         logger.info("Nudge skipped by LLM — nothing new to say (trigger: %s)", _trigger)
-        return CommandResult()
+        return CommandResult(llm_call_id=result.llm_call_id)
 
     # Extract and render optional chart(s).
     chart_blocks = extract_charts(raw_text)

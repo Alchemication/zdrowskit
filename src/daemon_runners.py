@@ -81,6 +81,19 @@ class DaemonRunnerHandler:
         Returns:
             True if a nudge may be sent; False if suppressed.
         """
+        allowed, _, _ = self._check_nudge_rate_limit()
+        return allowed
+
+    def _check_nudge_rate_limit(self) -> tuple[bool, str | None, dict | None]:
+        """Evaluate nudge rate limits and return allowed + reason + details.
+
+        Returns:
+            A tuple ``(allowed, reason, details)``. When allowed is False,
+            ``reason`` is a short machine-readable tag (e.g. "daily_cap",
+            "min_interval", "report_recent", "report_imminent") and
+            ``details`` is a JSON-serialisable dict with the numbers behind
+            the decision. Both are None when allowed is True.
+        """
         prefs = self._d._load_notification_prefs(now=datetime.now().astimezone())
         max_nudges_per_day = (
             prefs.get("overrides", {}).get("nudges", {}).get("max_per_day")
@@ -92,7 +105,6 @@ class DaemonRunnerHandler:
                 "max_per_day"
             ]
 
-        # Suppress near scheduled reports (±1 hour)
         last_report_ts = self._d._state.get("last_report_ts")
         if last_report_ts:
             elapsed = abs(
@@ -105,10 +117,14 @@ class DaemonRunnerHandler:
                     "Nudge suppressed: within %.0f min of scheduled report",
                     elapsed / 60,
                 )
-                return False
+                return (
+                    False,
+                    "report_recent",
+                    {"minutes_since_report": round(elapsed / 60, 1)},
+                )
         if self._is_report_imminent():
             logger.info("Nudge suppressed: scheduled report imminent")
-            return False
+            return False, "report_imminent", None
 
         today_str = date.today().isoformat()
 
@@ -120,7 +136,14 @@ class DaemonRunnerHandler:
             logger.info(
                 "Nudge suppressed: daily limit (%d) reached", max_nudges_per_day
             )
-            return False
+            return (
+                False,
+                "daily_cap",
+                {
+                    "sent_today": self._d._state.get("nudge_count_today", 0),
+                    "max_per_day": max_nudges_per_day,
+                },
+            )
 
         last_ts = self._d._state.get("last_nudge_ts")
         if last_ts:
@@ -131,9 +154,16 @@ class DaemonRunnerHandler:
                     elapsed / 60,
                     MIN_NUDGE_INTERVAL_S / 60,
                 )
-                return False
+                return (
+                    False,
+                    "min_interval",
+                    {
+                        "minutes_since_last": round(elapsed / 60, 1),
+                        "min_interval_min": round(MIN_NUDGE_INTERVAL_S / 60, 1),
+                    },
+                )
 
-        return True
+        return True, None, None
 
     def _record_nudge(self, text: str, trigger: str) -> None:
         """Update state after a nudge is sent.
@@ -359,11 +389,44 @@ class DaemonRunnerHandler:
             source="autoexport",
             db=str(self._d.db),
         )
+        before = self._data_snapshot()
         try:
             logger.info("Importing health data from %s", ICLOUD_HEALTH_DIR)
             cmd_import(args)
         except SystemExit:
             logger.error("Import failed — proceeding with existing DB data")
+            self._d._record_event("import", "failed", "Health data import failed")
+            return
+        after = self._data_snapshot()
+        changed = any(
+            before.get(k) != after.get(k)
+            for k in after
+            if k.endswith("_count") or k.endswith("_max")
+        )
+        if changed:
+            delta = {
+                "daily_added": max(
+                    0,
+                    (after.get("daily_count") or 0) - (before.get("daily_count") or 0),
+                ),
+                "workouts_added": max(
+                    0,
+                    (after.get("workout_all_count") or 0)
+                    - (before.get("workout_all_count") or 0),
+                ),
+                "sleep_added": max(
+                    0,
+                    (after.get("sleep_all_count") or 0)
+                    - (before.get("sleep_all_count") or 0),
+                ),
+            }
+            summary = (
+                f"Imported: {delta['daily_added']} days, "
+                f"{delta['workouts_added']} workouts, {delta['sleep_added']} sleep"
+            )
+            self._d._record_event("import", "new_data", summary, delta)
+        else:
+            self._d._record_event("import", "no_changes", "Import ran, no new rows")
 
     # ------------------------------------------------------------------
     # Report runners
@@ -424,12 +487,22 @@ class DaemonRunnerHandler:
         if decision["status"] != "allowed":
             self._d._state["last_review_skip_date"] = date.today().isoformat()
             _save_state(self._d._state)
-            logger.info(
-                "Weekly insights suppressed: %s",
-                decision.get("reason", "unknown"),
+            reason = decision.get("reason", "unknown")
+            logger.info("Weekly insights suppressed: %s", reason)
+            self._d._record_event(
+                "insights",
+                "prefs_suppressed",
+                f"Weekly report suppressed: {reason}",
+                {"reason": reason, "kind": "weekly"},
             )
             return
         if not self._can_send_report("review"):
+            self._d._record_event(
+                "insights",
+                "already_ran",
+                "Weekly report skipped: already ran/skipped today",
+                {"kind": "weekly"},
+            )
             return
 
         self._d._run_import()
@@ -457,11 +530,24 @@ class DaemonRunnerHandler:
                 self._d._record_report("review")
                 self._d._state["last_report_ts"] = datetime.now().isoformat()
                 _save_state(self._d._state)
+                self._d._record_event(
+                    "insights",
+                    "fired",
+                    "Weekly review report sent",
+                    {"kind": "weekly"},
+                    llm_call_id=result.llm_call_id,
+                )
                 self._d._run_coach(week="last", skip_import=True)
             except SystemExit:
                 captured = cap.last_message
                 logger.error("Weekly review report failed")
                 self._d._notify_user_failure("Weekly review", captured)
+                self._d._record_event(
+                    "insights",
+                    "failed",
+                    "Weekly review report failed",
+                    {"kind": "weekly", "error": (captured or "")[:500]},
+                )
 
     def _run_midweek_report(self) -> None:
         """Run a mid-week progress report and send via Telegram."""
@@ -474,12 +560,22 @@ class DaemonRunnerHandler:
         if decision["status"] != "allowed":
             self._d._state["last_progress_skip_date"] = date.today().isoformat()
             _save_state(self._d._state)
-            logger.info(
-                "Midweek report suppressed: %s",
-                decision.get("reason", "unknown"),
+            reason = decision.get("reason", "unknown")
+            logger.info("Midweek report suppressed: %s", reason)
+            self._d._record_event(
+                "insights",
+                "prefs_suppressed",
+                f"Midweek report suppressed: {reason}",
+                {"reason": reason, "kind": "midweek"},
             )
             return
         if not self._can_send_report("progress"):
+            self._d._record_event(
+                "insights",
+                "already_ran",
+                "Midweek report skipped: already ran/skipped today",
+                {"kind": "midweek"},
+            )
             return
 
         self._d._run_import()
@@ -507,10 +603,23 @@ class DaemonRunnerHandler:
                 self._d._record_report("progress")
                 self._d._state["last_report_ts"] = datetime.now().isoformat()
                 _save_state(self._d._state)
+                self._d._record_event(
+                    "insights",
+                    "fired",
+                    "Mid-week progress report sent",
+                    {"kind": "midweek"},
+                    llm_call_id=result.llm_call_id,
+                )
             except SystemExit:
                 captured = cap.last_message
                 logger.error("Mid-week progress report failed")
                 self._d._notify_user_failure("Mid-week progress", captured)
+                self._d._record_event(
+                    "insights",
+                    "failed",
+                    "Mid-week progress report failed",
+                    {"kind": "midweek", "error": (captured or "")[:500]},
+                )
 
     # ------------------------------------------------------------------
     # Nudge runner
@@ -544,25 +653,53 @@ class DaemonRunnerHandler:
         prefs = self._d._load_notification_prefs(now=now)
         decision = evaluate_nudge_delivery(prefs, now=now)
         if decision["status"] == "suppressed":
-            logger.info(
-                "Nudge suppressed by notification prefs: %s",
-                decision.get("reason", "unknown"),
+            reason = decision.get("reason", "unknown")
+            logger.info("Nudge suppressed by notification prefs: %s", reason)
+            self._d._record_event(
+                "nudge",
+                "prefs_suppressed",
+                f"Nudge suppressed ({trigger}): {reason}",
+                {"trigger": trigger, "reason": reason, "from_drain": _from_drain},
             )
             return
         if decision["status"] == "deferred":
             if _from_drain:
                 logger.info("Deferred nudge still blocked at drain time; skipping")
+                self._d._record_event(
+                    "nudge",
+                    "quiet_dropped",
+                    f"Deferred nudge dropped at drain ({trigger}): still blocked",
+                    {"trigger": trigger, "until": decision.get("until")},
+                )
                 return
             self._d._queue_nudge_trigger(trigger, now=now)
+            queue_size = len(self._d._state.get("quiet_queue", []))
             logger.info(
                 "Nudge deferred until %s (trigger: %s, queue size: %d)",
                 decision.get("until", "later"),
                 trigger,
-                len(self._d._state.get("quiet_queue", [])),
+                queue_size,
+            )
+            self._d._record_event(
+                "nudge",
+                "quiet_deferred",
+                f"Nudge deferred ({trigger}) until {decision.get('until', 'later')}",
+                {
+                    "trigger": trigger,
+                    "until": decision.get("until"),
+                    "queue_size": queue_size,
+                },
             )
             return
 
-        if not self._d._can_send_nudge():
+        allowed, rl_reason, rl_details = self._check_nudge_rate_limit()
+        if not allowed:
+            self._d._record_event(
+                "nudge",
+                "rate_limited",
+                f"Nudge rate-limited ({trigger}): {rl_reason}",
+                {"trigger": trigger, "reason": rl_reason, **(rl_details or {})},
+            )
             return
 
         from cmd_llm import cmd_nudge
@@ -586,10 +723,31 @@ class DaemonRunnerHandler:
                 if result.text:
                     self._record_nudge(result.text, trigger)
                     self._d._attach_feedback_button(result, "nudge")
+                    self._d._record_event(
+                        "nudge",
+                        "fired",
+                        f"Nudge sent ({trigger})",
+                        {"trigger": trigger, "chars": len(result.text)},
+                        llm_call_id=result.llm_call_id,
+                    )
+                else:
+                    self._d._record_event(
+                        "nudge",
+                        "llm_skip",
+                        f"LLM returned SKIP ({trigger})",
+                        {"trigger": trigger},
+                        llm_call_id=result.llm_call_id,
+                    )
             except SystemExit:
                 captured = cap.last_message
                 logger.error("Nudge failed (trigger: %s)", trigger)
                 self._d._notify_user_failure(f"Nudge ({trigger})", captured)
+                self._d._record_event(
+                    "nudge",
+                    "failed",
+                    f"Nudge failed ({trigger})",
+                    {"trigger": trigger, "error": (captured or "")[:500]},
+                )
 
     def _drain_quiet_queue(self) -> None:
         """Process deferred triggers as a single consolidated nudge."""
@@ -616,6 +774,12 @@ class DaemonRunnerHandler:
             "Draining quiet queue: %d triggers, sending consolidated nudge (trigger: %s)",
             len(queue),
             best["trigger"],
+        )
+        self._d._record_event(
+            "nudge",
+            "quiet_drain",
+            f"Draining {len(queue)} quiet-hour trigger(s) as {best['trigger']}",
+            {"queue_size": len(queue), "chosen_trigger": best["trigger"]},
         )
         # Compose a consolidated trigger_context from every queued event so
         # the nudge has the full picture of what accumulated during quiet hours.
@@ -690,10 +854,32 @@ class DaemonRunnerHandler:
                     self._d._state["last_coach_summary"] = cmd_result.text[:500]
                     self._d._state["last_coach_summary_date"] = today_str
                 _save_state(self._d._state)
+                if cmd_result.text:
+                    self._d._record_event(
+                        "coach",
+                        "fired",
+                        f"Coach review sent ({len(proposals)} proposal(s))",
+                        {"week": week, "proposals": len(proposals), "force": force},
+                        llm_call_id=cmd_result.llm_call_id,
+                    )
+                else:
+                    self._d._record_event(
+                        "coach",
+                        "llm_skip",
+                        "Coach returned SKIP — no strategy changes",
+                        {"week": week, "force": force},
+                        llm_call_id=cmd_result.llm_call_id,
+                    )
             except SystemExit:
                 captured = cap.last_message
                 logger.error("Coaching review failed")
                 self._d._notify_user_failure("Coaching review", captured)
+                self._d._record_event(
+                    "coach",
+                    "failed",
+                    "Coach review failed",
+                    {"week": week, "error": (captured or "")[:500]},
+                )
 
     def _send_coach_bundle(
         self,

@@ -17,6 +17,7 @@ uv run python main.py db status       # migration status for the SQLite DB
 uv run python main.py db schema       # print the live SQLite schema
 uv run python main.py context         # show context files and their status
 uv run python main.py llm-log         # query LLM call history (add --stats, --id N, --json)
+uv run python main.py events          # system event log (add --category, --kind, --since 3d)
 uv run python main.py telegram-setup  # register bot /commands for Telegram autocomplete + menu
 uv run python main.py daemon-restart  # restart the background launchd daemon
 uv run python main.py daemon-stop     # stop and unload the background daemon

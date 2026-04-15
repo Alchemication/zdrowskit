@@ -103,6 +103,7 @@ from dotenv import load_dotenv
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 from cmd_db import cmd_db
+from cmd_events import CATEGORIES as EVENT_CATEGORIES, cmd_events
 from cmd_llm import cmd_coach, cmd_insights, cmd_nudge
 from cmd_llm_log import cmd_llm_log
 from commands import (
@@ -393,6 +394,36 @@ def main() -> None:
     p_llm_log.add_argument("--json", action="store_true", help="Output JSON")
     _add_db(p_llm_log)
 
+    # events
+    p_events = sub.add_parser(
+        "events",
+        help="Show system diagnostic events (nudges, imports, coach decisions, …)",
+    )
+    p_events.add_argument(
+        "--category",
+        choices=list(EVENT_CATEGORIES),
+        help="Filter to a single category",
+    )
+    p_events.add_argument(
+        "--kind",
+        metavar="KIND",
+        help="Filter to a single kind (e.g. fired, llm_skip, rate_limited)",
+    )
+    p_events.add_argument(
+        "--since",
+        metavar="WHEN",
+        help="Only events after this point (e.g. '3d', '24h', '2026-04-10')",
+    )
+    p_events.add_argument(
+        "--limit",
+        type=int,
+        default=100,
+        metavar="N",
+        help="Maximum rows to show (default: 100)",
+    )
+    p_events.add_argument("--json", action="store_true", help="Output JSON")
+    _add_db(p_events)
+
     args = parser.parse_args()
 
     def _cli_coach(coach_args: argparse.Namespace) -> None:
@@ -421,6 +452,7 @@ def main() -> None:
         "nudge": cmd_nudge,
         "coach": _cli_coach,
         "llm-log": cmd_llm_log,
+        "events": cmd_events,
         "daemon-restart": cmd_daemon_restart,
         "daemon-stop": cmd_daemon_stop,
         "telegram-setup": cmd_telegram_setup,
