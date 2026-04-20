@@ -322,6 +322,7 @@ TELEGRAM_BOT_COMMANDS: list[dict[str, str]] = [
     {"command": "review", "description": "Weekly report"},
     {"command": "coach", "description": "Coaching review (strategy proposals)"},
     {"command": "add", "description": "Log a workout or sleep"},
+    {"command": "log", "description": "Fast daily log entry via tap-keyboard"},
     {"command": "status", "description": "Bot and data status"},
     {"command": "events", "description": "Recent system events (nudges, imports, …)"},
     {"command": "notify", "description": "Notification settings"},

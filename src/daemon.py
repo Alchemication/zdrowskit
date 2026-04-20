@@ -265,12 +265,14 @@ class ZdrowskitDaemon:
             value_type="int",
         )
         from daemon_add_flow import AddFlowHandler
+        from daemon_log_flow import LogFlowHandler
         from daemon_notify_flow import NotifyFlowHandler
         from daemon_runners import DaemonRunnerHandler
         from daemon_telegram_chat import TelegramChatHandler
 
         self._add_flow = AddFlowHandler(self)
         self._notify_flow = NotifyFlowHandler(self)
+        self._log_flow = LogFlowHandler(self)
         self._chat = TelegramChatHandler(self)
         self._runners = DaemonRunnerHandler(self)
         # Paths the daemon is about to write itself (e.g. accepted coach

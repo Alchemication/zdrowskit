@@ -108,6 +108,14 @@ class TestLoadContext:
         assert "## 2026-03-07" in ctx["log"]
         assert "## 2026-03-06" not in ctx["log"]
 
+    def test_max_log_zero_disables_trimming(self, tmp_path: Path) -> None:
+        (tmp_path / "prompt.md").write_text("template")
+        entries = "\n\n".join(f"## 2026-03-{i:02d}\n\nLog {i}" for i in range(1, 12))
+        (tmp_path / "log.md").write_text(entries)
+        ctx = load_context(tmp_path, prompts_dir=tmp_path, max_log=0)
+        assert "## 2026-03-11" in ctx["log"]
+        assert "## 2026-03-01" in ctx["log"]
+
     def test_coach_feedback_trimmed(self, tmp_path: Path) -> None:
         (tmp_path / "prompt.md").write_text("template")
         entries = "\n\n".join(

@@ -65,6 +65,32 @@ _NUDGE_NONFINAL_RETRY = (
     "SKIP. Do not mention checking, reviewing, or deciding whether to send."
 )
 NOTIFY_MODEL = "anthropic/claude-haiku-4-5"
+LOG_FLOW_MODEL = "anthropic/claude-haiku-4-5"
+
+# Hard caps must match log_flow_prompt.md and log-flow handler expectations.
+MAX_LOG_FLOW_STEPS = 3
+MAX_LOG_FLOW_OPTIONS_PER_STEP = 8
+
+
+@dataclass
+class LogFlowStep:
+    """One step in the /log tap-through flow."""
+
+    id: str
+    question: str
+    options: list[str]
+    multi_select: bool = False
+    optional: bool = False
+    ask_end_date_if_selected: list[str] | None = None
+
+
+@dataclass
+class LogFlow:
+    """A complete /log interview returned by the LLM."""
+
+    steps: list[LogFlowStep]
+    llm_call_id: int | None = None
+    model: str | None = None
 
 
 @dataclass
@@ -339,6 +365,173 @@ def interpret_notify_request(
     payload["llm_call_id"] = result.llm_call_id
     payload["model"] = result.model
     return payload
+
+
+def _query_today_snapshot(conn, today: date) -> str:
+    """Build a short human-readable snapshot of today's signals for /log.
+
+    Pulls today's `daily` row, last night's `sleep_all`, and today's
+    `workout_all` entries. Kept tiny so the prompt stays focused.
+    """
+    lines: list[str] = [f"Date: {today.isoformat()}"]
+
+    row = conn.execute(
+        "SELECT hrv_ms, resting_hr, recovery_index, steps FROM daily WHERE date = ?",
+        (today.isoformat(),),
+    ).fetchone()
+    if row:
+        parts = []
+        if row[0] is not None:
+            parts.append(f"HRV {row[0]:.1f} ms")
+        if row[1] is not None:
+            parts.append(f"RHR {int(row[1])}")
+        if row[2] is not None:
+            parts.append(f"recovery_index {row[2]:.2f}")
+        if row[3] is not None:
+            parts.append(f"steps {int(row[3])}")
+        if parts:
+            lines.append("Today daily: " + ", ".join(parts))
+        else:
+            lines.append("Today daily: row present, all nulls")
+    else:
+        lines.append("Today daily: (no row yet)")
+
+    sleep_date = today - timedelta(days=1)
+    sleep_row = conn.execute(
+        "SELECT sleep_total_h, sleep_efficiency_pct FROM sleep_all WHERE date = ?",
+        (sleep_date.isoformat(),),
+    ).fetchone()
+    if sleep_row and sleep_row[0] is not None:
+        effpart = (
+            f", {sleep_row[1]:.0f}% efficiency" if sleep_row[1] is not None else ""
+        )
+        lines.append(f"Last night: {sleep_row[0]:.2f}h{effpart}")
+    else:
+        lines.append("Last night: (no sleep data)")
+
+    workouts = conn.execute(
+        "SELECT category, duration_min FROM workout_all "
+        "WHERE date = ? ORDER BY start_utc, category, duration_min",
+        (today.isoformat(),),
+    ).fetchall()
+    if workouts:
+        summary = ", ".join(
+            f"{cat or 'other'} {int(dur or 0)}m" for cat, dur in workouts
+        )
+        lines.append(f"Today workouts: {summary}")
+    else:
+        lines.append("Today workouts: (none logged)")
+
+    return "\n".join(lines)
+
+
+def _coerce_log_flow_step(raw: Any, index: int) -> LogFlowStep:
+    """Validate and coerce a single raw step dict into a LogFlowStep."""
+    if not isinstance(raw, dict):
+        raise ValueError(f"Step {index} is not an object")
+    step_id = raw.get("id")
+    question = raw.get("question")
+    options = raw.get("options")
+    if not isinstance(step_id, str) or not step_id.strip():
+        raise ValueError(f"Step {index} missing 'id'")
+    if not isinstance(question, str) or not question.strip():
+        raise ValueError(f"Step {index} missing 'question'")
+    if not isinstance(options, list) or not options:
+        raise ValueError(f"Step {index} missing non-empty 'options'")
+    if len(options) > MAX_LOG_FLOW_OPTIONS_PER_STEP:
+        raise ValueError(
+            f"Step {index} has {len(options)} options "
+            f"(max {MAX_LOG_FLOW_OPTIONS_PER_STEP})"
+        )
+    clean_options: list[str] = []
+    for j, opt in enumerate(options):
+        if not isinstance(opt, str) or not opt.strip():
+            raise ValueError(f"Step {index} option {j} is not a non-empty string")
+        clean_options.append(opt.strip())
+    ask_end = raw.get("ask_end_date_if_selected")
+    if ask_end is not None:
+        if not isinstance(ask_end, list) or not all(
+            isinstance(x, str) for x in ask_end
+        ):
+            raise ValueError(
+                f"Step {index} 'ask_end_date_if_selected' must be a list of strings"
+            )
+        unknown = [x for x in ask_end if x not in clean_options]
+        if unknown:
+            raise ValueError(
+                f"Step {index} 'ask_end_date_if_selected' references unknown "
+                f"options: {unknown}"
+            )
+    return LogFlowStep(
+        id=step_id.strip(),
+        question=question.strip(),
+        options=clean_options,
+        multi_select=bool(raw.get("multi_select", False)),
+        optional=bool(raw.get("optional", False)),
+        ask_end_date_if_selected=[x.strip() for x in ask_end] if ask_end else None,
+    )
+
+
+def build_log_flow(
+    *,
+    db: str | Path,
+    now: datetime | None = None,
+    model: str = LOG_FLOW_MODEL,
+) -> LogFlow:
+    """Ask the LLM to design an adaptive /log interview for today.
+
+    Reads me.md, strategy.md, the entire log.md (self-trimmed by history.md
+    pipeline), and a lean snapshot of today's DB signals, then returns a
+    validated 1–3 step flow.
+    """
+    now = now or datetime.now().astimezone()
+    today = now.date()
+
+    try:
+        context = load_context(
+            CONTEXT_DIR,
+            prompt_file="log_flow_prompt",
+            max_history=0,
+            max_log=0,
+        )
+    except FileNotFoundError as exc:
+        logger.error("%s", exc)
+        raise
+
+    conn = open_db(Path(db))
+    try:
+        context["today_snapshot"] = _query_today_snapshot(conn, today)
+
+        messages = build_messages(
+            context,
+            health_data_text="{}",
+            baselines=None,
+            week_complete=False,
+            today=today,
+        )
+
+        result = call_llm(
+            messages,
+            model=model,
+            max_tokens=512,
+            temperature=0,
+            conn=conn,
+            request_type="log_flow",
+            metadata={"date": today.isoformat()},
+        )
+    finally:
+        conn.close()
+
+    payload = _extract_json_object(result.text)
+    raw_steps = payload.get("steps")
+    if not isinstance(raw_steps, list) or not raw_steps:
+        raise ValueError("Log flow must include a non-empty 'steps' array")
+    if len(raw_steps) > MAX_LOG_FLOW_STEPS:
+        raise ValueError(
+            f"Log flow returned {len(raw_steps)} steps (max {MAX_LOG_FLOW_STEPS})"
+        )
+    steps = [_coerce_log_flow_step(raw, i) for i, raw in enumerate(raw_steps)]
+    return LogFlow(steps=steps, llm_call_id=result.llm_call_id, model=result.model)
 
 
 def _looks_like_nonfinal_nudge(text: str) -> bool:

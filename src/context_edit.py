@@ -37,6 +37,7 @@ VALID_ACTIONS: set[str] = {"append", "replace_section"}
 PENDING_EDIT_TTL_S: float = 600  # 10 minutes
 
 _CONTEXT_UPDATE_RE = re.compile(r"<context_update>(.*?)</context_update>", re.DOTALL)
+_LOG_BULLET_RE = re.compile(r"^- \d{4}-\d{2}-\d{2}(?:\s+.+)?$")
 
 
 @dataclass
@@ -76,6 +77,28 @@ class CoachFeedbackEntry:
 
 class EditPreviewError(ValueError):
     """Raised when a proposed edit cannot be previewed or applied safely."""
+
+
+def _validate_log_append_content(content: str) -> None:
+    """Validate the compact bullet format used for ``log.md`` appends."""
+    stripped = content.strip()
+    lines = [line.strip() for line in stripped.splitlines() if line.strip()]
+    if len(lines) != 1:
+        raise EditPreviewError("log append must be exactly one non-empty bullet line")
+
+    line = lines[0]
+    if line.startswith("## "):
+        raise EditPreviewError("log append must be a bullet, not a heading block")
+    if not _LOG_BULLET_RE.match(line):
+        raise EditPreviewError("log append must start with '- YYYY-MM-DD'")
+    if len(line) > 160:
+        raise EditPreviewError("log append is too long; keep it compact")
+
+
+def _validate_context_edit(edit: "ContextEdit") -> None:
+    """Validate edit content beyond the basic tool/schema checks."""
+    if edit.file == "log" and edit.action == "append":
+        _validate_log_append_content(edit.content)
 
 
 def _normalize_section_heading(section: object) -> str | None:
@@ -140,13 +163,19 @@ def _parse_context_update_block(raw: str) -> ContextEdit | None:
         logger.warning("replace_section requires a section heading")
         return None
 
-    return ContextEdit(
+    edit = ContextEdit(
         file=file_stem,
         action=action,
         content=content,
         summary=summary,
         section=section,
     )
+    try:
+        _validate_context_edit(edit)
+    except EditPreviewError as exc:
+        logger.warning("Invalid context update: %s", exc)
+        return None
+    return edit
 
 
 def extract_context_update(response: str) -> ContextEdit | None:
@@ -226,13 +255,19 @@ def context_edit_from_tool_call(tool_call: object) -> ContextEdit | None:
         logger.warning("replace_section tool call requires a section heading")
         return None
 
-    return ContextEdit(
+    edit = ContextEdit(
         file=file_stem,
         action=action,
         content=content,
         summary=summary,
         section=section,
     )
+    try:
+        _validate_context_edit(edit)
+    except EditPreviewError as exc:
+        logger.warning("Invalid context edit tool call: %s", exc)
+        return None
+    return edit
 
 
 def strip_context_update(response: str) -> str:
@@ -268,6 +303,7 @@ def build_edit_preview(
     max_chars: int = 3200,
 ) -> str:
     """Build a compact unified diff preview for a proposed edit."""
+    _validate_context_edit(edit)
     path = context_dir / f"{edit.file}.md"
     existing = path.read_text(encoding="utf-8") if path.exists() else ""
     new_content = _render_edit(existing, edit, strict=strict)
@@ -321,6 +357,7 @@ def apply_edit(context_dir: Path, edit: ContextEdit, *, strict: bool = False) ->
         strict: When True, reject unsafe fallback behavior such as silently
             appending a missing replace_section target.
     """
+    _validate_context_edit(edit)
     path = context_dir / f"{edit.file}.md"
     existing = path.read_text(encoding="utf-8") if path.exists() else ""
     new_content = _render_edit(existing, edit, strict=strict)

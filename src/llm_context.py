@@ -66,11 +66,15 @@ def _recent_history(content: str, n: int) -> str:
 
     Args:
         content: Full history.md text with '## ' delimited entries.
-        n: Number of most recent entries to keep.
+        n: Number of most recent entries to keep. ``0`` or negative means
+            "do not trim".
 
     Returns:
         The last n entries joined as text, or the original if fewer than n.
     """
+    if n <= 0:
+        return content
+
     parts = re.split(r"(?m)(?=^## )", content)
     entries = [p.strip() for p in parts if p.strip() and p.strip().startswith("## ")]
     if len(entries) <= n:

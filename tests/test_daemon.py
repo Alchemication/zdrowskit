@@ -569,6 +569,304 @@ class TestNotifyFlow:
         daemon._poller.edit_message.assert_called_once()
 
 
+class TestLogFlow:
+    @staticmethod
+    def _two_step_flow():
+        from cmd_llm import LogFlow, LogFlowStep
+
+        return LogFlow(
+            steps=[
+                LogFlowStep(
+                    id="state",
+                    question="How did today feel?",
+                    options=["solid", "tired"],
+                    multi_select=False,
+                    optional=False,
+                ),
+                LogFlowStep(
+                    id="life",
+                    question="Anything going on?",
+                    options=["son sick", "travel"],
+                    multi_select=True,
+                    optional=True,
+                    ask_end_date_if_selected=["son sick", "travel"],
+                ),
+            ],
+            llm_call_id=None,
+            model="test-model",
+        )
+
+    def test_log_flow_happy_path(self, tmp_path: Path) -> None:
+        from datetime import date, timedelta
+
+        daemon = _make_daemon(tmp_path)
+        daemon._chat._poller = MagicMock()
+        # Make the placeholder send return a known message id.
+        daemon._poller.send_reply.return_value = 500
+
+        log_path = tmp_path / "log.md"
+        log_path.write_text("# Weekly Log\n\n## 2026-04-19\n\nOld entry.\n")
+
+        with patch(
+            "cmd_llm.build_log_flow", return_value=self._two_step_flow()
+        ) as build_flow:
+            daemon._handle_command("/log", 100)
+
+        build_flow.assert_called_once()
+        # One pending session exists keyed by a random token.
+        assert len(daemon._log_flow._pending) == 1
+        token = next(iter(daemon._log_flow._pending))
+
+        # Tap "tired" on step 0.
+        daemon._handle_telegram_callback(
+            {
+                "id": "cb1",
+                "data": f"log_toggle:{token}:0:1",
+                "message": {"message_id": 500},
+            }
+        )
+        # Advance to step 1.
+        daemon._handle_telegram_callback(
+            {
+                "id": "cb2",
+                "data": f"log_next:{token}",
+                "message": {"message_id": 500},
+            }
+        )
+        # Select "travel" on step 1 (multi-select, triggers end-date picker).
+        daemon._handle_telegram_callback(
+            {
+                "id": "cb3",
+                "data": f"log_toggle:{token}:1:1",
+                "message": {"message_id": 500},
+            }
+        )
+        # Tap done — should switch to end-date picker first.
+        daemon._handle_telegram_callback(
+            {
+                "id": "cb4",
+                "data": f"log_done:{token}",
+                "message": {"message_id": 500},
+            }
+        )
+        pending = daemon._log_flow._pending[token]
+        assert pending.awaiting_end_date is True
+
+        # Pick "tomorrow" — commits the bullet.
+        daemon._handle_telegram_callback(
+            {
+                "id": "cb5",
+                "data": f"log_enddate:{token}:tomorrow",
+                "message": {"message_id": 500},
+            }
+        )
+
+        # Session cleared; log.md has the appended bullet with `until`.
+        assert token not in daemon._log_flow._pending
+        content = log_path.read_text()
+        assert "[tired]" in content
+        assert "[travel]" in content
+        tomorrow = (date.today() + timedelta(days=1)).isoformat()
+        assert f"until {tomorrow}" in content
+
+    def test_log_flow_expired_session_message(self, tmp_path: Path) -> None:
+        daemon = _make_daemon(tmp_path)
+        daemon._chat._poller = MagicMock()
+
+        daemon._handle_telegram_callback(
+            {
+                "id": "cb_expired",
+                "data": "log_toggle:lf_nonexistent:0:0",
+                "message": {"message_id": 999},
+            }
+        )
+
+        daemon._poller.edit_message.assert_called_once()
+        msg = daemon._poller.edit_message.call_args.args[1]
+        assert "expired" in msg.lower()
+
+    def test_log_flow_note_intercept(self, tmp_path: Path) -> None:
+        daemon = _make_daemon(tmp_path)
+        daemon._chat._poller = MagicMock()
+        daemon._poller.send_reply.return_value = 700
+
+        log_path = tmp_path / "log.md"
+        log_path.write_text("# Weekly Log\n")
+
+        one_step = self._two_step_flow().steps[0]
+        from cmd_llm import LogFlow
+
+        simple_flow = LogFlow(steps=[one_step], llm_call_id=None, model="t")
+        with patch("cmd_llm.build_log_flow", return_value=simple_flow):
+            daemon._handle_command("/log", 200)
+        token = next(iter(daemon._log_flow._pending))
+
+        # Select an option so done can commit.
+        daemon._handle_telegram_callback(
+            {
+                "id": "cb_sel",
+                "data": f"log_toggle:{token}:0:0",
+                "message": {"message_id": 700},
+            }
+        )
+        # Tap `+ note` — session now awaits free-text.
+        daemon._handle_telegram_callback(
+            {
+                "id": "cb_note",
+                "data": f"log_note:{token}",
+                "message": {"message_id": 700},
+            }
+        )
+        assert daemon._log_flow._awaiting_note_token == token
+        assert daemon._log_flow._pending[token].awaiting_note is True
+
+        # Patch the chat LLM path so we can detect it was NOT called.
+        with patch.object(daemon._chat, "_chat_reply") as chat_reply:
+            daemon._handle_telegram_message(
+                {"message_id": 800, "text": "legs felt heavy on the warm-up"}
+            )
+
+        chat_reply.assert_not_called()
+        pending = daemon._log_flow._pending[token]
+        assert pending.note == "legs felt heavy on the warm-up"
+        assert pending.awaiting_note is False
+
+        # Finish with done — note appears in bullet tail.
+        daemon._handle_telegram_callback(
+            {
+                "id": "cb_done",
+                "data": f"log_done:{token}",
+                "message": {"message_id": 700},
+            }
+        )
+        assert token not in daemon._log_flow._pending
+        content = log_path.read_text()
+        assert "legs felt heavy on the warm-up" in content
+
+    def test_log_flow_note_wait_state_ignores_commands(self, tmp_path: Path) -> None:
+        daemon = _make_daemon(tmp_path)
+        daemon._chat._poller = MagicMock()
+        daemon._poller.send_reply.return_value = 710
+
+        one_step = self._two_step_flow().steps[0]
+        from cmd_llm import LogFlow
+
+        simple_flow = LogFlow(steps=[one_step], llm_call_id=None, model="t")
+        with patch("cmd_llm.build_log_flow", return_value=simple_flow):
+            daemon._handle_command("/log", 201)
+        token = next(iter(daemon._log_flow._pending))
+
+        daemon._handle_telegram_callback(
+            {
+                "id": "cb_note",
+                "data": f"log_note:{token}",
+                "message": {"message_id": 710},
+            }
+        )
+
+        with patch.object(daemon, "_build_status_lines", return_value=["bot ok"]):
+            daemon._handle_telegram_message({"message_id": 801, "text": "/status"})
+
+        pending = daemon._log_flow._pending[token]
+        assert pending.awaiting_note is True
+        assert pending.note is None
+        daemon._poller.send_reply.assert_any_call("bot ok", reply_to_message_id=801)
+
+    def test_log_flow_uses_session_date_for_end_date_and_commit(
+        self, tmp_path: Path
+    ) -> None:
+        from datetime import date, timedelta
+
+        daemon = _make_daemon(tmp_path)
+        daemon._chat._poller = MagicMock()
+        daemon._poller.send_reply.return_value = 720
+
+        log_path = tmp_path / "log.md"
+        log_path.write_text("# Weekly Log\n")
+
+        with patch("cmd_llm.build_log_flow", return_value=self._two_step_flow()):
+            daemon._handle_command("/log", 202)
+        token = next(iter(daemon._log_flow._pending))
+        daemon._log_flow._pending[token].session_date = date(2026, 4, 19)
+
+        daemon._handle_telegram_callback(
+            {
+                "id": "cb_s0",
+                "data": f"log_toggle:{token}:0:1",
+                "message": {"message_id": 720},
+            }
+        )
+        daemon._handle_telegram_callback(
+            {
+                "id": "cb_next",
+                "data": f"log_next:{token}",
+                "message": {"message_id": 720},
+            }
+        )
+        daemon._handle_telegram_callback(
+            {
+                "id": "cb_s1",
+                "data": f"log_toggle:{token}:1:1",
+                "message": {"message_id": 720},
+            }
+        )
+        daemon._handle_telegram_callback(
+            {
+                "id": "cb_done",
+                "data": f"log_done:{token}",
+                "message": {"message_id": 720},
+            }
+        )
+        daemon._handle_telegram_callback(
+            {
+                "id": "cb_end",
+                "data": f"log_enddate:{token}:tomorrow",
+                "message": {"message_id": 720},
+            }
+        )
+
+        content = log_path.read_text()
+        assert "- 2026-04-19" in content
+        assert f"until {(date(2026, 4, 19) + timedelta(days=1)).isoformat()}" in content
+
+    def test_log_flow_cancel_clears_session_and_note_wait_state(
+        self, tmp_path: Path
+    ) -> None:
+        daemon = _make_daemon(tmp_path)
+        daemon._chat._poller = MagicMock()
+        daemon._poller.send_reply.return_value = 730
+
+        one_step = self._two_step_flow().steps[0]
+        from cmd_llm import LogFlow
+
+        simple_flow = LogFlow(steps=[one_step], llm_call_id=None, model="t")
+        with patch("cmd_llm.build_log_flow", return_value=simple_flow):
+            daemon._handle_command("/log", 203)
+        token = next(iter(daemon._log_flow._pending))
+
+        daemon._handle_telegram_callback(
+            {
+                "id": "cb_note",
+                "data": f"log_note:{token}",
+                "message": {"message_id": 730},
+            }
+        )
+        assert daemon._log_flow._awaiting_note_token == token
+
+        daemon._handle_telegram_callback(
+            {
+                "id": "cb_cancel",
+                "data": f"log_cancel:{token}",
+                "message": {"message_id": 730},
+            }
+        )
+
+        assert token not in daemon._log_flow._pending
+        assert daemon._log_flow._awaiting_note_token is None
+        daemon._poller.edit_message.assert_any_call(730, "Cancelled.")
+        daemon._poller.edit_message_reply_markup.assert_any_call(730, None)
+
+
 class TestTelegramCommands:
     def test_review_runs_last_week_insights_flow(self, tmp_path: Path) -> None:
         daemon = _make_daemon(tmp_path)

@@ -351,8 +351,28 @@ What each file is for:
   changes and `## Weekly Plan` / `## Diet` / `## Sleep` for how-to
   changes.
 - **log** — dated entries of what actually happened each day: sessions,
-  how they felt, disruptions, noteworthy observations. Always append with
-  a ## YYYY-MM-DD heading. Never replace existing entries.
+  how they felt, disruptions, noteworthy observations. Append terse
+  bullets prefixed `- YYYY-MM-DD`. Never replace existing entries.
+
+### Log-entry style (when calling `update_context` with file=`log`)
+
+The log is read back by future LLM calls and by the `/log` flow. Keep it
+compact and factual:
+
+- Append exactly one bullet line: `- YYYY-MM-DD ...`
+- Prefer bracketed tokens first: `[son sick]`, `[travel BCN]`, `[rest]`
+- A short prose tail after ` — ` is allowed when it preserves nuance
+- Never recap metrics already in the DB
+- Keep user-given numbers verbatim
+- If relevant, append ` until YYYY-MM-DD` before the prose tail
+
+Wrong:
+
+> - 2026-04-14 Felt weak, HRV 69.6, slept 7.5h at 95.7%, planning a light session today
+
+Right:
+
+> - 2026-04-14 [strength A] [recovery] — lingering stomach bug, light session only
 
 When to update: user changes a goal, reports an injury or new condition,
 updates their schedule, explicitly asks you to add something to the log,

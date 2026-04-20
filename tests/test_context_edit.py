@@ -34,7 +34,7 @@ class TestExtractContextUpdate:
             "Sure, I noted that.\n"
             "<context_update>"
             '{"file": "log", "action": "append", '
-            '"content": "## 2026-W12\\n\\nEasy 8k felt great.\\n", '
+            '"content": "- 2026-04-14 [easy 8k] — felt great\\n", '
             '"summary": "Added W12 log entry"}'
             "</context_update>"
         )
@@ -42,7 +42,7 @@ class TestExtractContextUpdate:
         assert edit is not None
         assert edit.file == "log"
         assert edit.action == "append"
-        assert "Easy 8k" in edit.content
+        assert "[easy 8k]" in edit.content
         assert edit.summary == "Added W12 log entry"
         assert edit.section is None
 
@@ -123,7 +123,7 @@ class TestExtractContextUpdate:
             {
                 "file": "log",
                 "action": "append",
-                "content": "Line 1\nLine 2\n",
+                "content": "- 2026-04-14 [rest] — line one only\n",
                 "summary": "Multi-line entry",
             },
             indent=2,
@@ -131,7 +131,29 @@ class TestExtractContextUpdate:
         response = f"Reply text.\n<context_update>\n{block}\n</context_update>"
         edit = extract_context_update(response)
         assert edit is not None
-        assert "Line 1" in edit.content
+        assert "[rest]" in edit.content
+
+    def test_log_append_heading_block_rejected(self) -> None:
+        response = (
+            "<context_update>"
+            '{"file": "log", "action": "append", '
+            '"content": "## 2026-04-14\\n\\nVerbose note\\n", '
+            '"summary": "Bad log format"}'
+            "</context_update>"
+        )
+        assert extract_context_update(response) is None
+
+    def test_log_append_short_prose_tail_allowed(self) -> None:
+        response = (
+            "<context_update>"
+            '{"file": "log", "action": "append", '
+            '"content": "- 2026-04-14 [child sick] [rest day] — sick for several days now", '
+            '"summary": "Added family disruption note"}'
+            "</context_update>"
+        )
+        edit = extract_context_update(response)
+        assert edit is not None
+        assert "sick for several days now" in edit.content
 
 
 # ---------------------------------------------------------------------------
@@ -175,30 +197,34 @@ class TestApplyEdit:
         edit = ContextEdit(
             file="log",
             action="append",
-            content="## 2026-W12\n\nNew entry.",
+            content="- 2026-04-14 [easy 8k] — new entry",
             summary="Added W12",
         )
         apply_edit(tmp_path, edit)
         result = md.read_text()
         assert "Old entry." in result
-        assert "## 2026-W12" in result
-        assert "New entry." in result
+        assert "- 2026-04-14 [easy 8k] — new entry" in result
 
     def test_append_to_empty_file(self, tmp_path: Path) -> None:
         md = tmp_path / "log.md"
         md.write_text("")
         edit = ContextEdit(
-            file="log", action="append", content="First entry.", summary="Init"
+            file="log", action="append", content="- 2026-04-14 [rest]", summary="Init"
         )
         apply_edit(tmp_path, edit)
-        assert "First entry." in md.read_text()
+        assert "- 2026-04-14 [rest]" in md.read_text()
 
     def test_append_creates_file(self, tmp_path: Path) -> None:
         edit = ContextEdit(
-            file="log", action="append", content="Brand new.", summary="Create"
+            file="log",
+            action="append",
+            content="- 2026-04-14 [rest day] — brand new",
+            summary="Create",
         )
         apply_edit(tmp_path, edit)
-        assert (tmp_path / "log.md").read_text().strip() == "Brand new."
+        assert (
+            tmp_path / "log.md"
+        ).read_text().strip() == "- 2026-04-14 [rest day] — brand new"
 
     def test_replace_section_found(self, tmp_path: Path) -> None:
         md = tmp_path / "strategy.md"
@@ -304,10 +330,29 @@ class TestApplyEdit:
         """Verify no .tmp file remains after a successful write."""
         md = tmp_path / "log.md"
         md.write_text("existing\n")
-        edit = ContextEdit(file="log", action="append", content="new", summary="test")
+        edit = ContextEdit(
+            file="log",
+            action="append",
+            content="- 2026-04-14 [rest] — new",
+            summary="test",
+        )
         apply_edit(tmp_path, edit)
         assert not (tmp_path / "log.md.tmp").exists()
         assert md.exists()
+
+    def test_invalid_log_append_raises(self, tmp_path: Path) -> None:
+        edit = ContextEdit(
+            file="log",
+            action="append",
+            content="## 2026-04-14\n\nLong paragraph",
+            summary="Bad format",
+        )
+        try:
+            apply_edit(tmp_path, edit)
+        except EditPreviewError as exc:
+            assert "bullet" in str(exc).lower() or "start" in str(exc).lower()
+        else:
+            raise AssertionError("Expected EditPreviewError")
 
 
 class TestBuildEditPreview:
@@ -318,7 +363,7 @@ class TestBuildEditPreview:
         edit = ContextEdit(
             file="log",
             action="append",
-            content="## 2026-03-21\n\nNew note\n",
+            content="- 2026-03-21 [rest] — new note\n",
             summary="Add next log entry",
         )
 
@@ -326,7 +371,7 @@ class TestBuildEditPreview:
 
         assert "--- log.md" in preview
         assert "+++ log.md (proposed)" in preview
-        assert "+## 2026-03-21" in preview
+        assert "+- 2026-03-21 [rest] — new note" in preview
 
     def test_strict_preview_rejects_missing_section(self, tmp_path: Path) -> None:
         (tmp_path / "strategy.md").write_text("## Weekly Structure\n\nEasy week\n")
@@ -387,6 +432,23 @@ class TestContextEditFromToolCall:
         assert edit is not None
         assert edit.section == "## Weekly Plan"
 
+    def test_log_append_rejects_heading_block(self) -> None:
+        tool_call = SimpleNamespace(
+            function=SimpleNamespace(
+                name="update_context",
+                arguments=json.dumps(
+                    {
+                        "file": "log",
+                        "action": "append",
+                        "content": "## 2026-04-14\n\nVerbose paragraph\n",
+                        "summary": "Bad log format",
+                    }
+                ),
+            )
+        )
+
+        assert context_edit_from_tool_call(tool_call) is None
+
 
 # ---------------------------------------------------------------------------
 # PendingEdits
@@ -396,7 +458,12 @@ class TestContextEditFromToolCall:
 class TestPendingEdits:
     def test_store_and_pop(self) -> None:
         pe = PendingEdits()
-        edit = ContextEdit(file="log", action="append", content="x", summary="y")
+        edit = ContextEdit(
+            file="log",
+            action="append",
+            content="- 2026-04-14 [rest]",
+            summary="y",
+        )
         edit_id = pe.store(edit, source="chat", preview="preview")
         assert edit_id.startswith("ce_")
         result = pe.pop(edit_id)
@@ -411,14 +478,24 @@ class TestPendingEdits:
 
     def test_pop_twice_returns_none(self) -> None:
         pe = PendingEdits()
-        edit = ContextEdit(file="log", action="append", content="x", summary="y")
+        edit = ContextEdit(
+            file="log",
+            action="append",
+            content="- 2026-04-14 [rest]",
+            summary="y",
+        )
         edit_id = pe.store(edit, source="chat", preview="preview")
         pe.pop(edit_id)
         assert pe.pop(edit_id) is None
 
     def test_expiry(self) -> None:
         pe = PendingEdits()
-        edit = ContextEdit(file="log", action="append", content="x", summary="y")
+        edit = ContextEdit(
+            file="log",
+            action="append",
+            content="- 2026-04-14 [rest]",
+            summary="y",
+        )
         edit_id = pe.store(edit, source="chat", preview="preview")
         # Manually expire the entry.
         with pe._lock:
@@ -428,7 +505,12 @@ class TestPendingEdits:
 
     def test_sequential_ids(self) -> None:
         pe = PendingEdits()
-        edit = ContextEdit(file="log", action="append", content="x", summary="y")
+        edit = ContextEdit(
+            file="log",
+            action="append",
+            content="- 2026-04-14 [rest]",
+            summary="y",
+        )
         id1 = pe.store(edit, source="chat", preview="preview")
         id2 = pe.store(edit, source="coach", preview="preview2")
         assert id1 != id2
@@ -468,7 +550,7 @@ class TestExtractAllContextUpdates:
             "Reasoning for log entry.\n"
             "<context_update>"
             '{"file": "log", "action": "append", '
-            '"content": "## 2026-04-07\\n\\nFelt great today.\\n", '
+            '"content": "- 2026-04-07 [felt good]\\n", '
             '"summary": "Added log entry"}'
             "</context_update>"
         )
@@ -486,7 +568,7 @@ class TestExtractAllContextUpdates:
             "<context_update>not valid json</context_update>\n"
             "<context_update>"
             '{"file": "log", "action": "append", '
-            '"content": "Also valid.", "summary": "Another edit"}'
+            '"content": "- 2026-04-08 [rest] — also valid", "summary": "Another edit"}'
             "</context_update>"
         )
         edits = extract_all_context_updates(response)

@@ -4,12 +4,19 @@ from __future__ import annotations
 
 import sqlite3
 import json
+from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from cmd_db import cmd_db
-from cmd_llm import cmd_coach, cmd_insights, cmd_nudge, interpret_notify_request
+from cmd_llm import (
+    _query_today_snapshot,
+    cmd_coach,
+    cmd_insights,
+    cmd_nudge,
+    interpret_notify_request,
+)
 from cmd_llm_log import cmd_llm_log
 from commands import TELEGRAM_BOT_COMMANDS
 from llm import LLMResult
@@ -25,6 +32,7 @@ class TestTelegramBotCommands:
                 "description": "Coaching review (strategy proposals)",
             },
             {"command": "add", "description": "Log a workout or sleep"},
+            {"command": "log", "description": "Fast daily log entry via tap-keyboard"},
             {"command": "status", "description": "Bot and data status"},
             {
                 "command": "events",
@@ -36,6 +44,21 @@ class TestTelegramBotCommands:
             {"command": "tutorial", "description": "Guided tour of zdrowskit"},
             {"command": "help", "description": "Command list"},
         ]
+
+
+class TestLogFlowSnapshot:
+    def test_uses_previous_night_sleep_in_today_snapshot(
+        self, in_memory_db: sqlite3.Connection
+    ) -> None:
+        in_memory_db.execute(
+            """
+            INSERT INTO daily (date, imported_at, sleep_total_h, sleep_efficiency_pct)
+            VALUES (?, ?, ?, ?)
+            """,
+            ("2026-04-19", "2026-04-20T08:00:00+00:00", 7.5, 94.0),
+        )
+        snapshot = _query_today_snapshot(in_memory_db, date(2026, 4, 20))
+        assert "Last night: 7.50h, 94% efficiency" in snapshot
 
 
 class TestCmdCoach:
