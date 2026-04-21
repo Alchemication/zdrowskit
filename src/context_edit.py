@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 
 VALID_ACTIONS: set[str] = {"append", "replace_section"}
 PENDING_EDIT_TTL_S: float = 600  # 10 minutes
+MAX_LOG_BULLET_CHARS: int = 160
 
 _CONTEXT_UPDATE_RE = re.compile(r"<context_update>(.*?)</context_update>", re.DOTALL)
 _LOG_BULLET_RE = re.compile(r"^- \d{4}-\d{2}-\d{2}(?:\s+.+)?$")
@@ -91,7 +92,7 @@ def _validate_log_append_content(content: str) -> None:
         raise EditPreviewError("log append must be a bullet, not a heading block")
     if not _LOG_BULLET_RE.match(line):
         raise EditPreviewError("log append must start with '- YYYY-MM-DD'")
-    if len(line) > 160:
+    if len(line) > MAX_LOG_BULLET_CHARS:
         raise EditPreviewError("log append is too long; keep it compact")
 
 

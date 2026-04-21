@@ -616,6 +616,9 @@ class TestLogFlow:
         # One pending session exists keyed by a random token.
         assert len(daemon._log_flow._pending) == 1
         token = next(iter(daemon._log_flow._pending))
+        # Pin session_date so the `until` assertion below is midnight-safe.
+        session_date = date(2026, 4, 20)
+        daemon._log_flow._pending[token].session_date = session_date
 
         # Tap "tired" on step 0.
         daemon._handle_telegram_callback(
@@ -666,7 +669,7 @@ class TestLogFlow:
         content = log_path.read_text()
         assert "[tired]" in content
         assert "[travel]" in content
-        tomorrow = (date.today() + timedelta(days=1)).isoformat()
+        tomorrow = (session_date + timedelta(days=1)).isoformat()
         assert f"until {tomorrow}" in content
 
     def test_log_flow_expired_session_message(self, tmp_path: Path) -> None:
@@ -865,6 +868,108 @@ class TestLogFlow:
         assert daemon._log_flow._awaiting_note_token is None
         daemon._poller.edit_message.assert_any_call(730, "Cancelled.")
         daemon._poller.edit_message_reply_markup.assert_any_call(730, None)
+
+    def test_log_flow_done_rejects_empty_optional_submission(
+        self, tmp_path: Path
+    ) -> None:
+        from cmd_llm import LogFlow, LogFlowStep
+
+        daemon = _make_daemon(tmp_path)
+        daemon._chat._poller = MagicMock()
+        daemon._poller.send_reply.return_value = 740
+
+        optional_flow = LogFlow(
+            steps=[
+                LogFlowStep(
+                    id="life",
+                    question="Anything going on?",
+                    options=["travel", "sick"],
+                    multi_select=True,
+                    optional=True,
+                )
+            ],
+            llm_call_id=None,
+            model="t",
+        )
+        log_path = tmp_path / "log.md"
+        log_path.write_text("# Weekly Log\n")
+
+        with patch("cmd_llm.build_log_flow", return_value=optional_flow):
+            daemon._handle_command("/log", 210)
+        token = next(iter(daemon._log_flow._pending))
+
+        daemon._handle_telegram_callback(
+            {
+                "id": "cb_done_empty",
+                "data": f"log_done:{token}",
+                "message": {"message_id": 740},
+            }
+        )
+
+        # Session still open; nothing written; user told to pick or note.
+        assert token in daemon._log_flow._pending
+        assert log_path.read_text() == "# Weekly Log\n"
+        daemon._poller.answer_callback_query.assert_any_call(
+            "cb_done_empty", "Pick at least one option or add a note."
+        )
+
+    def test_log_flow_truncates_long_note_to_bullet_cap(self, tmp_path: Path) -> None:
+        from datetime import date
+
+        from context_edit import MAX_LOG_BULLET_CHARS, _validate_log_append_content
+
+        from cmd_llm import LogFlow, LogFlowStep
+
+        daemon = _make_daemon(tmp_path)
+        daemon._chat._poller = MagicMock()
+        daemon._poller.send_reply.return_value = 750
+
+        flow = LogFlow(
+            steps=[
+                LogFlowStep(
+                    id="state",
+                    question="How did today feel?",
+                    options=["solid", "tired"],
+                    multi_select=False,
+                    optional=False,
+                )
+            ],
+            llm_call_id=None,
+            model="t",
+        )
+        log_path = tmp_path / "log.md"
+        log_path.write_text("# Weekly Log\n")
+
+        with patch("cmd_llm.build_log_flow", return_value=flow):
+            daemon._handle_command("/log", 211)
+        token = next(iter(daemon._log_flow._pending))
+        daemon._log_flow._pending[token].session_date = date(2026, 4, 20)
+
+        daemon._handle_telegram_callback(
+            {
+                "id": "cb_sel",
+                "data": f"log_toggle:{token}:0:0",
+                "message": {"message_id": 750},
+            }
+        )
+        # Long note with embedded newlines — must collapse and fit under cap.
+        long_note = ("legs heavy\nbut\n" + "word " * 60).strip()
+        daemon._log_flow._pending[token].note = long_note
+        daemon._handle_telegram_callback(
+            {
+                "id": "cb_done",
+                "data": f"log_done:{token}",
+                "message": {"message_id": 750},
+            }
+        )
+
+        bullet = log_path.read_text().strip().splitlines()[-1]
+        assert len(bullet) <= MAX_LOG_BULLET_CHARS
+        assert "\n" not in bullet
+        assert bullet.endswith("\u2026")
+        # Belt-and-suspenders: the bullet should satisfy the same validator
+        # the LLM `update_context` path uses.
+        _validate_log_append_content(bullet)
 
 
 class TestTelegramCommands:

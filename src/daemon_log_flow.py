@@ -12,11 +12,14 @@ through a back-reference.
 from __future__ import annotations
 
 import logging
+import secrets
 import threading
 import time
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import TYPE_CHECKING
+
+from context_edit import MAX_LOG_BULLET_CHARS
 
 if TYPE_CHECKING:
     from cmd_llm import LogFlow
@@ -96,18 +99,29 @@ def compose_bullet(
     end_date: str | None,
     note: str | None,
 ) -> str:
-    """Render the final log.md bullet line from interview answers."""
-    tokens: list[str] = []
-    for step_answers in answers.values():
-        for opt in step_answers:
-            tokens.append(f"[{opt}]")
+    """Render the final log.md bullet line from interview answers.
+
+    The output is guaranteed to be a single line no longer than
+    ``MAX_LOG_BULLET_CHARS`` so it satisfies the same validation the LLM
+    ``update_context`` path uses. A long note is collapsed to one line and
+    truncated with an ellipsis; tokens and the ``until`` tail are kept
+    because they carry structured meaning.
+    """
+    tokens = [f"[{opt}]" for step_answers in answers.values() for opt in step_answers]
     line = f"- {date_iso}"
     if tokens:
         line += " " + " ".join(tokens)
     if end_date:
         line += f" until {end_date}"
     if note:
-        line += f" — {note.strip()}"
+        clean = " ".join(note.split())
+        if clean:
+            tail = f" — {clean}"
+            overflow = len(line) + len(tail) - MAX_LOG_BULLET_CHARS
+            if overflow > 0:
+                clean = clean[: len(clean) - overflow - 1].rstrip() + "\u2026"
+                tail = f" — {clean}"
+            line += tail
     return line
 
 
@@ -247,7 +261,7 @@ class LogFlowHandler:
                 )
             return
 
-        token = f"lf_{time.time_ns()}"
+        token = f"lf_{secrets.token_hex(4)}"
         pending = PendingLogEntry(
             token=token,
             flow=flow,
@@ -497,6 +511,14 @@ class LogFlowHandler:
             if not selected and not step.optional:
                 self._poller.answer_callback_query(cb_id, "Pick at least one option.")
                 return
+            # If every step was optional and skipped, a bare `- YYYY-MM-DD`
+            # bullet carries no signal — require at least one tag or a note.
+            has_any = any(pending.answers.values()) or pending.note
+            if not has_any:
+                self._poller.answer_callback_query(
+                    cb_id, "Pick at least one option or add a note."
+                )
+                return
             triggers = step.ask_end_date_if_selected or []
             needs_end_date = pending.end_date is None and any(
                 opt in triggers for opt in selected
@@ -537,10 +559,7 @@ class LogFlowHandler:
         )
 
         log_path = self._daemon.context_dir / "log.md"
-        try:
-            self._daemon._self_originated_writes.add(log_path.resolve())
-        except Exception:  # context_dir may be a plain path in tests
-            pass
+        self._daemon._self_originated_writes.add(log_path.resolve())
         try:
             with open(log_path, "a", encoding="utf-8") as f:
                 # Ensure we start on a new line, in case the file lacks a
