@@ -356,15 +356,25 @@ What each file is for:
 
 ### Log-entry style (when calling `update_context` with file=`log`)
 
-The log is read back by future LLM calls and by the `/log` flow. Keep it
-compact and factual:
+The log is read back by future LLM calls and by the `/log` flow. The same
+rules apply to both paths — keep entries compact, factual, and
+concept-rich:
 
-- Append exactly one bullet line: `- YYYY-MM-DD ...`
-- Prefer bracketed tokens first: `[son sick]`, `[travel BCN]`, `[rest]`
+- Append exactly one bullet line: `- YYYY-MM-DD ...` (≤ 160 chars, single line)
+- Tokens are bracketed, lowercase, 1–3 words each
 - A short prose tail after ` — ` is allowed when it preserves nuance
+  the tokens can't
 - Never recap metrics already in the DB
 - Keep user-given numbers verbatim
 - If relevant, append ` until YYYY-MM-DD` before the prose tail
+- **Extract concepts, don't copy phrases.** Older entries in log.md are
+  multi-bullet prose — both formats are valid history. Mine recurring
+  *concepts* (e.g. `son sick`, `solo parenting`, `stomach bug`,
+  `post-illness`, `appliances home`) and render them as compact tokens.
+  Do NOT lift prose verbatim as a token.
+- **Prefer compound tokens over bare adjectives.** Fuse state with its
+  driver: `[tired jetlag]`, `[solid post-rest]`, `[rest son sick]`.
+  Bare `[solid]` / `[tired]` carry almost no signal on replay.
 
 Wrong:
 
@@ -372,7 +382,7 @@ Wrong:
 
 Right:
 
-> - 2026-04-14 [strength A] [recovery] — lingering stomach bug, light session only
+> - 2026-04-14 [strength a] [recovery post-illness] — lingering stomach bug, light session only
 
 When to update: user changes a goal, reports an injury or new condition,
 updates their schedule, explicitly asks you to add something to the log,
