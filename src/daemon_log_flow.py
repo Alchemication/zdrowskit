@@ -151,36 +151,44 @@ def _step_keyboard(
     if current_row:
         rows.append(current_row)
 
-    controls: list[dict[str, str]] = [
-        {
-            "text": "\U0001f4dd + note",
-            "callback_data": f"log_note:{pending.token}",
-        },
-        {
-            "text": "\u274c cancel",
-            "callback_data": f"log_cancel:{pending.token}",
-        },
-    ]
-    rows.append(controls)
+    # `+ note` gets its own row — prominent and full-width on mobile.
+    rows.append(
+        [
+            {
+                "text": "\U0001f4dd + note",
+                "callback_data": f"log_note:{pending.token}",
+            }
+        ]
+    )
 
-    controls = []
+    # Primary action on its own full-width row; cancel demoted below so
+    # it can't be mis-tapped when the user is aiming for next/done. Show
+    # "done" only when this is truly the final view the user will see —
+    # either the reactive follow-up has already been consulted, or the
+    # initial flow came back with multiple steps (bypassing the
+    # follow-up entirely).
     is_last_step = pending.step_index == len(pending.flow.steps) - 1
-    if is_last_step:
-        controls.append(
-            {
-                "text": "\u2705 done",
-                "callback_data": f"log_done:{pending.token}",
-            }
-        )
+    followup_done = pending.followup_consulted or len(pending.flow.steps) > 1
+    show_done = is_last_step and followup_done
+    if show_done:
+        action = {
+            "text": "\u2705 done",
+            "callback_data": f"log_done:{pending.token}",
+        }
     else:
-        controls.append(
+        action = {
+            "text": "next \u27a1\ufe0f",
+            "callback_data": f"log_next:{pending.token}",
+        }
+    rows.append([action])
+    rows.append(
+        [
             {
-                "text": "next \u27a1\ufe0f",
-                "callback_data": f"log_next:{pending.token}",
+                "text": "\u274c cancel",
+                "callback_data": f"log_cancel:{pending.token}",
             }
-        )
-    if controls:
-        rows.append(controls)
+        ]
+    )
     return rows
 
 
@@ -474,11 +482,18 @@ class LogFlowHandler:
             )
             if needs_end_date:
                 pending.awaiting_end_date = True
-            else:
-                pending.step_index += 1
+                self._poller.answer_callback_query(cb_id)
+                self._render_current(pending)
+                return
+            pending.step_index += 1
 
         self._poller.answer_callback_query(cb_id)
-        self._render_current(pending)
+        # If we've advanced past every pre-designed step, either fire the
+        # reactive follow-up or commit. Otherwise render the next step.
+        if pending.step_index >= len(pending.flow.steps):
+            self._followup_or_commit(pending)
+        else:
+            self._render_current(pending)
 
     def _handle_enddate(
         self, cb_id: str, token: str, choice: str, msg_id: int | None
