@@ -73,6 +73,7 @@ class PendingLogEntry:
     end_date: str | None = None
     awaiting_note: bool = False
     note: str | None = None
+    followup_consulted: bool = False
 
 
 def _resolve_end_date(choice: str, today: date) -> str | None:
@@ -492,9 +493,10 @@ class LogFlowHandler:
             pending.step_index += 1
 
         self._poller.answer_callback_query(cb_id, "Got it.")
-        # If we just finished the last step, commit. Otherwise render next.
+        # If we just finished the last step, try the reactive follow-up
+        # (or commit). Otherwise render the next pre-designed step.
         if pending.step_index >= len(pending.flow.steps):
-            self._commit(pending)
+            self._followup_or_commit(pending)
         else:
             self._render_current(pending)
 
@@ -530,7 +532,7 @@ class LogFlowHandler:
                 return
 
         self._poller.answer_callback_query(cb_id, "Saving\u2026")
-        self._commit(pending)
+        self._followup_or_commit(pending)
 
     def _handle_cancel(self, cb_id: str, token: str, msg_id: int | None) -> None:
         """Cancel the /log flow and discard any in-progress state."""
@@ -545,8 +547,53 @@ class LogFlowHandler:
             self._poller.edit_message_reply_markup(msg_id, None)
 
     # ------------------------------------------------------------------
-    # Commit
+    # Reactive follow-up + commit
     # ------------------------------------------------------------------
+
+    def _followup_or_commit(self, pending: PendingLogEntry) -> None:
+        """Consult the reactive follow-up step (once) or commit.
+
+        Fired once per session, after the user finishes the initial state
+        step. If the follow-up LLM returns a tailored step, it is
+        appended to the flow and rendered. If it returns ``None`` (or
+        the flow was already multi-step to begin with), the bullet is
+        committed immediately.
+        """
+        if pending.followup_consulted or len(pending.flow.steps) > 1:
+            self._commit(pending)
+            return
+
+        pending.followup_consulted = True
+        prior_step = pending.flow.steps[0]
+        prior_answer = list(pending.answers.get(prior_step.id, []))
+
+        if pending.chat_message_id is not None:
+            try:
+                self._poller.edit_message(
+                    pending.chat_message_id, "\U0001f914 Tailoring step 2…"
+                )
+            except Exception:
+                logger.debug("Tailoring-step edit failed; continuing", exc_info=True)
+
+        try:
+            from cmd_llm import build_log_step_followup
+
+            next_step = build_log_step_followup(
+                prior_step=prior_step,
+                prior_answer=prior_answer,
+                db=self._daemon.db,
+            )
+        except Exception:
+            logger.error("build_log_step_followup failed", exc_info=True)
+            next_step = None
+
+        if next_step is None:
+            self._commit(pending)
+            return
+
+        pending.flow.steps.append(next_step)
+        pending.step_index = len(pending.flow.steps) - 1
+        self._render_current(pending)
 
     def _commit(self, pending: PendingLogEntry) -> None:
         """Append the composed bullet to log.md and finalise the message."""

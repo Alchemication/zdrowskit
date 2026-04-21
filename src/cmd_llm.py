@@ -68,7 +68,10 @@ NOTIFY_MODEL = "anthropic/claude-haiku-4-5"
 LOG_FLOW_MODEL = "anthropic/claude-haiku-4-5"
 
 # Hard caps must match log_flow_prompt.md and log-flow handler expectations.
-MAX_LOG_FLOW_STEPS = 3
+# The initial call returns exactly 1 step (the state check); a second step
+# may be appended later by build_log_step_followup, giving 2 steps total.
+MAX_LOG_FLOW_INITIAL_STEPS = 1
+MAX_LOG_FLOW_STEPS = 2
 MAX_LOG_FLOW_OPTIONS_PER_STEP = 8
 
 
@@ -526,12 +529,80 @@ def build_log_flow(
     raw_steps = payload.get("steps")
     if not isinstance(raw_steps, list) or not raw_steps:
         raise ValueError("Log flow must include a non-empty 'steps' array")
-    if len(raw_steps) > MAX_LOG_FLOW_STEPS:
+    if len(raw_steps) > MAX_LOG_FLOW_INITIAL_STEPS:
         raise ValueError(
-            f"Log flow returned {len(raw_steps)} steps (max {MAX_LOG_FLOW_STEPS})"
+            f"Log flow returned {len(raw_steps)} steps "
+            f"(max {MAX_LOG_FLOW_INITIAL_STEPS} for the initial call)"
         )
     steps = [_coerce_log_flow_step(raw, i) for i, raw in enumerate(raw_steps)]
     return LogFlow(steps=steps, llm_call_id=result.llm_call_id, model=result.model)
+
+
+def build_log_step_followup(
+    *,
+    prior_step: LogFlowStep,
+    prior_answer: list[str],
+    db: str | Path,
+    now: datetime | None = None,
+    model: str = LOG_FLOW_MODEL,
+) -> LogFlowStep | None:
+    """Design a reactive follow-up step given the user's step-1 answer.
+
+    Returns a tailored ``LogFlowStep`` whose options react to
+    ``prior_answer`` (affirmative tags after a positive state, disruption
+    tags after a negative state), or ``None`` when step 1 already
+    captured everything worth knowing and the bullet should commit now.
+    """
+    now = now or datetime.now().astimezone()
+    today = now.date()
+
+    try:
+        context = load_context(
+            CONTEXT_DIR,
+            prompt_file="log_followup_prompt",
+            max_history=0,
+            max_log=0,
+        )
+    except FileNotFoundError as exc:
+        logger.error("%s", exc)
+        raise
+
+    conn = open_db(Path(db))
+    try:
+        context["today_snapshot"] = _query_today_snapshot(conn, today)
+        context["prior_question"] = prior_step.question
+        context["prior_options"] = ", ".join(prior_step.options)
+        context["prior_answer"] = ", ".join(prior_answer) if prior_answer else "(none)"
+
+        messages = build_messages(
+            context,
+            health_data_text="{}",
+            baselines=None,
+            week_complete=False,
+            today=today,
+        )
+
+        result = call_llm(
+            messages,
+            model=model,
+            max_tokens=512,
+            temperature=0,
+            conn=conn,
+            request_type="log_flow_followup",
+            metadata={
+                "date": today.isoformat(),
+                "prior_step_id": prior_step.id,
+                "prior_answer": prior_answer,
+            },
+        )
+    finally:
+        conn.close()
+
+    payload = _extract_json_object(result.text)
+    raw_step = payload.get("step")
+    if raw_step is None:
+        return None
+    return _coerce_log_flow_step(raw_step, 1)
 
 
 def _looks_like_nonfinal_nudge(text: str) -> bool:
