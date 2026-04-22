@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import time
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -428,3 +429,295 @@ class TestFindWorkoutClone:
         assert result["type"] == "Outdoor Run"
         assert result["duration_min"] == 30
         assert "no history" in result.get("source_note", "")
+
+    def test_honours_explicit_duration(self, db: sqlite3.Connection) -> None:
+        """Explicit duration_min must be reflected in the returned clone."""
+        _seed_workouts(db)
+        mock_result = MagicMock()
+        mock_result.text = json.dumps(
+            {
+                "type": "Outdoor Run",
+                "category": "run",
+                "duration_min": 42,
+                "source_note": "cloned",
+            }
+        )
+        with patch("llm.call_llm", return_value=mock_result):
+            from daemon_add_flow import find_workout_clone
+
+            result = find_workout_clone(db, "Outdoor Run", "run", duration_min=60)
+            assert result["duration_min"] == 60
+
+
+# -----------------------------------------------------------------------
+# /add flow state machine
+# -----------------------------------------------------------------------
+
+
+def _make_add_handler(db_path):
+    """Build a minimal AddFlowHandler with a mocked poller for unit tests."""
+    from daemon_add_flow import AddFlowHandler
+
+    daemon_stub = MagicMock()
+    daemon_stub.db = db_path
+    daemon_stub._poller = MagicMock()
+    daemon_stub._poller.send_message_with_keyboard.return_value = 100
+    return AddFlowHandler(daemon_stub)
+
+
+class TestAddFlowReorder:
+    """Verify the upfront-signals-before-LLM flow ordering."""
+
+    def test_type_pick_goes_to_duration_picker_without_llm(self, tmp_path) -> None:
+        db_path = tmp_path / "test.db"
+        conn = sqlite3.connect(str(db_path))
+        apply_migrations(conn)
+        conn.close()
+
+        handler = _make_add_handler(db_path)
+        handler._pending["a1"] = __import__("daemon_add_flow").PendingAdd(
+            step="pick_type",
+            message_id=100,
+            created_at=time.monotonic(),
+            type_options=[{"type": "Outdoor Run", "category": "run", "count": 3}],
+        )
+
+        with patch("llm.call_llm") as mock_llm:
+            handler.handle_callback("cb1", "add_type:a1:0", 100)
+            assert not mock_llm.called
+
+        pending = handler._pending["a1"]
+        assert pending.step == "pick_duration"
+        assert pending.workout_type == "Outdoor Run"
+        assert pending.category == "run"
+
+    def test_duration_advances_to_date_picker(self, tmp_path) -> None:
+        handler = _make_add_handler(tmp_path / "test.db")
+        handler._pending["a1"] = __import__("daemon_add_flow").PendingAdd(
+            step="pick_duration",
+            message_id=100,
+            created_at=time.monotonic(),
+            workout_type="Outdoor Run",
+            category="run",
+        )
+
+        handler.handle_callback("cb1", "add_d:a1:45", 100)
+
+        pending = handler._pending["a1"]
+        assert pending.chosen_duration_min == 45.0
+        assert pending.step == "pick_workout_date"
+
+    def test_date_advances_to_feel_picker(self, tmp_path) -> None:
+        handler = _make_add_handler(tmp_path / "test.db")
+        handler._pending["a1"] = __import__("daemon_add_flow").PendingAdd(
+            step="pick_workout_date",
+            message_id=100,
+            created_at=time.monotonic(),
+            workout_type="Outdoor Run",
+            category="run",
+            chosen_duration_min=45.0,
+        )
+
+        handler.handle_callback("cb1", "add_dt:a1:today", 100)
+
+        pending = handler._pending["a1"]
+        assert pending.date is not None
+        assert pending.step == "pick_feel"
+
+    def test_workout_feel_runs_clone_with_duration_and_adjusts(self, tmp_path) -> None:
+        db_path = tmp_path / "test.db"
+        conn = sqlite3.connect(str(db_path))
+        apply_migrations(conn)
+        conn.close()
+
+        handler = _make_add_handler(db_path)
+        handler._pending["a1"] = __import__("daemon_add_flow").PendingAdd(
+            step="pick_feel",
+            message_id=100,
+            created_at=time.monotonic(),
+            workout_type="Outdoor Run",
+            category="run",
+            chosen_duration_min=45.0,
+            date="2026-04-22",
+        )
+
+        fake_clone = {
+            "type": "Outdoor Run",
+            "category": "run",
+            "duration_min": 45.0,
+            "hr_avg": 150.0,
+            "active_energy_kj": 1800.0,
+            "source_note": "cloned from Apr 1 run",
+        }
+        with patch(
+            "daemon_add_flow.find_workout_clone", return_value=fake_clone
+        ) as mock_find:
+            handler.handle_callback("cb1", "add_feel:a1:hard", 100)
+
+            assert mock_find.called
+            call_kwargs = mock_find.call_args.kwargs
+            assert call_kwargs["duration_min"] == 45.0
+            assert call_kwargs["target_date"] == "2026-04-22"
+
+        pending = handler._pending["a1"]
+        assert pending.feel == "hard"
+        assert pending.feel_adjusted is True
+        assert pending.step == "confirm_workout"
+        # HR bumped up ~6% for hard feel.
+        assert pending.clone_row["hr_avg"] == pytest.approx(150.0 * 1.06, abs=0.1)
+
+    def test_workout_feel_skip_leaves_clone_untouched(self, tmp_path) -> None:
+        db_path = tmp_path / "test.db"
+        conn = sqlite3.connect(str(db_path))
+        apply_migrations(conn)
+        conn.close()
+
+        handler = _make_add_handler(db_path)
+        handler._pending["a1"] = __import__("daemon_add_flow").PendingAdd(
+            step="pick_feel",
+            message_id=100,
+            created_at=time.monotonic(),
+            workout_type="Outdoor Run",
+            category="run",
+            chosen_duration_min=45.0,
+            date="2026-04-22",
+        )
+
+        fake_clone = {
+            "type": "Outdoor Run",
+            "category": "run",
+            "duration_min": 45.0,
+            "hr_avg": 150.0,
+            "source_note": "cloned",
+        }
+        with patch("daemon_add_flow.find_workout_clone", return_value=fake_clone):
+            handler.handle_callback("cb1", "add_feel:a1:skip", 100)
+
+        pending = handler._pending["a1"]
+        assert pending.feel is None
+        assert pending.feel_adjusted is False
+        assert pending.clone_row["hr_avg"] == 150.0
+
+
+class TestAddFlowSleep:
+    def test_sleep_duration_advances_to_feel_picker(self, tmp_path) -> None:
+        handler = _make_add_handler(tmp_path / "test.db")
+        handler._pending["a1"] = __import__("daemon_add_flow").PendingAdd(
+            step="pick_sleep_dur",
+            message_id=100,
+            created_at=time.monotonic(),
+            date="2026-04-21",
+        )
+
+        handler.handle_callback("cb1", "add_sd:a1:7.0", 100)
+
+        pending = handler._pending["a1"]
+        assert pending.sleep_total_h == 7.0
+        assert pending.step == "pick_sleep_feel"
+
+    def test_sleep_feel_applies_in_bed_factor(self, tmp_path) -> None:
+        handler = _make_add_handler(tmp_path / "test.db")
+        handler._pending["a1"] = __import__("daemon_add_flow").PendingAdd(
+            step="pick_sleep_feel",
+            message_id=100,
+            created_at=time.monotonic(),
+            date="2026-04-21",
+            sleep_total_h=7.0,
+        )
+
+        handler.handle_callback("cb1", "add_feel:a1:wrecked", 100)
+
+        pending = handler._pending["a1"]
+        assert pending.feel == "wrecked"
+        assert pending.feel_adjusted is True
+        # 7h total × 1.25 factor for wrecked.
+        assert pending.sleep_in_bed_h == pytest.approx(7.0 * 1.25, abs=0.01)
+        assert pending.step == "confirm_sleep"
+
+    def test_sleep_feel_skip_uses_default_padding(self, tmp_path) -> None:
+        handler = _make_add_handler(tmp_path / "test.db")
+        handler._pending["a1"] = __import__("daemon_add_flow").PendingAdd(
+            step="pick_sleep_feel",
+            message_id=100,
+            created_at=time.monotonic(),
+            date="2026-04-21",
+            sleep_total_h=7.0,
+        )
+
+        handler.handle_callback("cb1", "add_feel:a1:skip", 100)
+
+        pending = handler._pending["a1"]
+        assert pending.feel is None
+        assert pending.feel_adjusted is False
+        assert pending.sleep_in_bed_h == pytest.approx(7.0 * 1.08, abs=0.01)
+
+
+class TestAddFlowConfirmPersistsFeel:
+    def test_workout_confirm_writes_feel_columns(self, tmp_path) -> None:
+        db_path = tmp_path / "test.db"
+        conn = sqlite3.connect(str(db_path))
+        apply_migrations(conn)
+        conn.close()
+
+        handler = _make_add_handler(db_path)
+        handler._pending["a1"] = __import__("daemon_add_flow").PendingAdd(
+            step="confirm_workout",
+            message_id=100,
+            created_at=time.monotonic(),
+            workout_type="Outdoor Run",
+            category="run",
+            date="2026-04-22",
+            feel="hard",
+            feel_adjusted=True,
+            clone_row={
+                "type": "Outdoor Run",
+                "category": "run",
+                "duration_min": 45.0,
+                "hr_avg": 159.0,
+                "active_energy_kj": 1944.0,
+                "source_note": "cloned, adjusted up for 'hard' feel",
+            },
+        )
+
+        handler.handle_callback("cb1", "add_ok:a1", 100)
+
+        conn = sqlite3.connect(str(db_path))
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT feel, feel_adjusted FROM manual_workout WHERE date = ?",
+            ("2026-04-22",),
+        ).fetchone()
+        conn.close()
+        assert row["feel"] == "hard"
+        assert row["feel_adjusted"] == 1
+
+    def test_sleep_confirm_writes_feel_columns(self, tmp_path) -> None:
+        db_path = tmp_path / "test.db"
+        conn = sqlite3.connect(str(db_path))
+        apply_migrations(conn)
+        conn.close()
+
+        handler = _make_add_handler(db_path)
+        handler._pending["a1"] = __import__("daemon_add_flow").PendingAdd(
+            step="confirm_sleep",
+            message_id=100,
+            created_at=time.monotonic(),
+            date="2026-04-22",
+            feel="wrecked",
+            feel_adjusted=True,
+            sleep_total_h=7.0,
+            sleep_in_bed_h=8.75,
+        )
+
+        handler.handle_callback("cb1", "add_ok:a1", 100)
+
+        conn = sqlite3.connect(str(db_path))
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT feel, feel_adjusted, sleep_in_bed_h FROM manual_sleep WHERE date = ?",
+            ("2026-04-22",),
+        ).fetchone()
+        conn.close()
+        assert row["feel"] == "wrecked"
+        assert row["feel_adjusted"] == 1
+        assert row["sleep_in_bed_h"] == 8.75

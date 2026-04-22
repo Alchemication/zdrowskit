@@ -8,6 +8,21 @@ The flow is driven by the daemon's Telegram callback dispatcher, which
 forwards every ``add_*`` callback to :meth:`AddFlowHandler.handle_callback`.
 The handler owns its own pending-state map and lock; it borrows the daemon's
 ``db`` path and ``_poller`` for I/O.
+
+Flow shape (after the feel reorder):
+
+Workout:
+    pick_type -> pick_duration -> pick_workout_date -> pick_feel
+        -> LLM clone + deterministic feel adjustment -> confirm_workout -> save
+
+Sleep:
+    pick_type -> pick_sleep_date -> pick_sleep_dur -> pick_sleep_feel
+        -> deterministic in-bed padding -> confirm_sleep -> save
+
+The LLM sees type + category + chosen duration + date when picking the
+clone; feel is applied deterministically on top so the clone selection
+stays about "which historical session is the right analog" and not "how
+hard did it feel".
 """
 
 from __future__ import annotations
@@ -35,14 +50,17 @@ _PENDING_ADD_TTL_S = 600  # 10 min
 class PendingAdd:
     """In-flight /add manual activity flow state."""
 
-    step: str  # pick_type | confirm_workout | pick_sleep_date | pick_sleep_dur | confirm_sleep
+    step: str
     message_id: int
     created_at: float  # time.monotonic() for TTL cleanup
     type_options: list[dict] | None = None  # [{type, category, count}, ...]
     workout_type: str | None = None
     category: str | None = None
-    clone_row: dict | None = None  # full workout column dict from LLM
+    chosen_duration_min: float | None = None  # set before clone runs
+    clone_row: dict | None = None  # full workout column dict from LLM + feel adjust
     date: str | None = None
+    feel: str | None = None
+    feel_adjusted: bool = False
     sleep_total_h: float | None = None
     sleep_in_bed_h: float | None = None
     saved_id: int | None = None  # row id after save, for undo
@@ -53,17 +71,23 @@ def find_workout_clone(
     conn: sqlite3.Connection,
     workout_type: str,
     category: str,
+    duration_min: float | None = None,
+    target_date: str | None = None,
 ) -> dict:
     """Find the best historical workout to clone via LLM.
 
     Queries recent workouts and asks a lightweight LLM to pick (or
-    synthesize) the best match for the requested type. Falls back to the
-    most recent same-type workout on LLM failure.
+    synthesize) the best match for the requested type at the requested
+    duration. Falls back to the most recent same-type workout on LLM
+    failure.
 
     Args:
         conn: Open database connection.
         workout_type: Requested workout type name (e.g. "Outdoor Run").
         category: Workout category (e.g. "run").
+        duration_min: Chosen duration in minutes. When provided, the LLM is
+            asked to scale / pick a clone that fits this duration directly.
+        target_date: ISO date for the entry. Used for prompt context only.
 
     Returns:
         Dict with workout column values suitable for ``insert_manual_workout``.
@@ -83,7 +107,7 @@ def find_workout_clone(
         return {
             "type": workout_type,
             "category": category,
-            "duration_min": 30,
+            "duration_min": duration_min or 30,
             "source_note": "default (no history)",
         }
 
@@ -96,6 +120,12 @@ def find_workout_clone(
                 entry[col] = val
         entry["date"] = r["date"]
         history.append(entry)
+
+    ask_bits = [f"Log this workout: {workout_type} (category: {category})"]
+    if duration_min is not None:
+        ask_bits.append(f"Duration: {duration_min:.0f} min")
+    if target_date:
+        ask_bits.append(f"Date: {target_date}")
 
     messages = [
         {
@@ -114,6 +144,11 @@ def find_workout_clone(
                 "Rules:\n"
                 "- Copy HR and sensor fields from the source workout as-is.\n"
                 "- If scaling duration/distance, scale active_energy_kj proportionally.\n"
+                "- If the user specified a duration, match it exactly in the "
+                "returned duration_min.\n"
+                "- Pick an analog that reflects a TYPICAL session of this "
+                "type — a separate deterministic layer applies feel-based "
+                "adjustments on top, so do NOT factor in effort/feel here.\n"
                 "- counts_as_lift should be 1 for strength workouts, 0 otherwise.\n"
                 "- Return valid JSON only, no markdown fences."
             ),
@@ -121,9 +156,9 @@ def find_workout_clone(
         {
             "role": "user",
             "content": (
-                f"Log this workout: {workout_type} (category: {category})\n\n"
-                f"Recent history ({len(history)} workouts):\n"
-                f"{json.dumps(history, default=str)}"
+                "\n".join(ask_bits)
+                + f"\n\nRecent history ({len(history)} workouts):\n"
+                + json.dumps(history, default=str)
             ),
         },
     ]
@@ -146,7 +181,10 @@ def find_workout_clone(
         clone = json.loads(text)
         clone.setdefault("type", workout_type)
         clone.setdefault("category", category)
-        clone.setdefault("duration_min", 30)
+        if duration_min is not None:
+            clone["duration_min"] = duration_min
+        else:
+            clone.setdefault("duration_min", 30)
         return clone
     except Exception:
         logger.warning(
@@ -156,21 +194,27 @@ def find_workout_clone(
         )
         for r in rows:
             if r["type"] == workout_type:
-                return {
+                out = {
                     col: r[col] if col in r.keys() else None
                     for col in _WORKOUT_CLONE_COLUMNS
                 } | {"source_note": f"most recent {workout_type}"}
+                if duration_min is not None:
+                    out = _scale_clone_to_duration(out, duration_min)
+                return out
         for r in rows:
             if r["category"] == category:
-                return {
+                out = {
                     col: r[col] if col in r.keys() else None
                     for col in _WORKOUT_CLONE_COLUMNS
                 } | {
                     "type": workout_type,
                     "source_note": f"most recent {category} workout",
                 }
+                if duration_min is not None:
+                    out = _scale_clone_to_duration(out, duration_min)
+                return out
         first = rows[0]
-        return {
+        out = {
             col: first[col] if col in first.keys() else None
             for col in _WORKOUT_CLONE_COLUMNS
         } | {
@@ -178,6 +222,22 @@ def find_workout_clone(
             "category": category,
             "source_note": "most recent workout",
         }
+        if duration_min is not None:
+            out = _scale_clone_to_duration(out, duration_min)
+        return out
+
+
+def _scale_clone_to_duration(clone: dict, new_duration_min: float) -> dict:
+    """Scale energy and distance proportionally when falling back without LLM."""
+    old = clone.get("duration_min") or new_duration_min
+    if old and old > 0 and old != new_duration_min:
+        ratio = new_duration_min / old
+        if clone.get("active_energy_kj"):
+            clone["active_energy_kj"] = round(clone["active_energy_kj"] * ratio, 1)
+        if clone.get("gpx_distance_km"):
+            clone["gpx_distance_km"] = round(clone["gpx_distance_km"] * ratio, 2)
+    clone["duration_min"] = new_duration_min
+    return clone
 
 
 class AddFlowHandler:
@@ -216,6 +276,8 @@ class AddFlowHandler:
         for k in expired:
             del self._pending[k]
 
+    # --- Entry -----------------------------------------------------------
+
     def handle_command(self, message_id: int) -> None:
         """Start the /add flow: show personalized workout type buttons."""
         from store import get_frequent_workout_types, open_db
@@ -243,7 +305,7 @@ class AddFlowHandler:
         rows.append(
             [{"text": "\U0001f634 Sleep", "callback_data": f"add_sleep:{add_id}"}]
         )
-        rows.append([{"text": "\u274c cancel", "callback_data": f"add_x:{add_id}"}])
+        rows.append([{"text": "❌ cancel", "callback_data": f"add_x:{add_id}"}])
 
         sent_id = self._poller.send_message_with_keyboard(
             "What would you like to add?",
@@ -259,6 +321,8 @@ class AddFlowHandler:
         )
         with self._lock:
             self._pending[add_id] = pending
+
+    # --- Dispatch --------------------------------------------------------
 
     def handle_callback(self, cb_id: str, data: str, msg_id: int | None) -> None:
         """Dispatch /add inline keyboard callbacks."""
@@ -281,22 +345,24 @@ class AddFlowHandler:
             self._handle_type(cb_id, add_id, pending, int(param), msg_id)
         elif action == "add_sleep":
             self._handle_sleep_start(cb_id, add_id, pending, msg_id)
-        elif action == "add_ok":
-            self._handle_confirm(cb_id, add_id, pending, msg_id)
-        elif action == "add_dur":
-            self._show_duration_picker(cb_id, add_id, pending, msg_id)
         elif action == "add_d":
             self._handle_duration(cb_id, add_id, pending, float(param), msg_id)
         elif action == "add_dt":
             self._handle_date(cb_id, add_id, pending, param, msg_id)
         elif action == "add_sd":
             self._handle_sleep_duration(cb_id, add_id, pending, float(param), msg_id)
+        elif action == "add_feel":
+            self._handle_feel(cb_id, add_id, pending, param, msg_id)
+        elif action == "add_ok":
+            self._handle_confirm(cb_id, add_id, pending, msg_id)
         elif action == "add_undo":
             self._handle_undo(cb_id, add_id, pending, msg_id)
         elif action == "add_x":
             self._handle_cancel(cb_id, add_id, msg_id)
         else:
             self._poller.answer_callback_query(cb_id, "Unknown action.")
+
+    # --- Workout path ---------------------------------------------------
 
     def _handle_type(
         self,
@@ -306,114 +372,22 @@ class AddFlowHandler:
         type_index: int,
         msg_id: int | None,
     ) -> None:
-        """User picked a workout type — run LLM clone and show confirmation."""
+        """User picked a workout type — collect duration next (LLM waits)."""
         self._poller.answer_callback_query(cb_id)
         if not pending.type_options or type_index >= len(pending.type_options):
             return
 
         chosen = pending.type_options[type_index]
-        today = date.today().isoformat()
-
-        if msg_id:
-            self._poller.edit_message(
-                msg_id, f"\u23f3 Finding best match for {chosen['type']}..."
-            )
-
-        from store import open_db
-
-        conn = open_db(self._db)
-        try:
-            clone = find_workout_clone(conn, chosen["type"], chosen["category"])
-        finally:
-            conn.close()
-
         pending.workout_type = chosen["type"]
         pending.category = chosen["category"]
-        pending.clone_row = clone
-        pending.date = today
-        pending.step = "confirm_workout"
-
-        self._show_workout_confirm(add_id, pending, msg_id)
-
-    def _check_existing_workout(self, target_date: str, workout_type: str) -> str:
-        """Warn if a workout of the same type already exists for ``target_date``."""
-        from store import open_db
-
-        conn = open_db(self._db)
-        try:
-            row = conn.execute(
-                "SELECT COUNT(*) AS n FROM workout_all WHERE date = ? AND type = ?",
-                (target_date, workout_type),
-            ).fetchone()
-            if row and row["n"] > 0:
-                return (
-                    f"\u26a0\ufe0f A {workout_type} already exists for {target_date}.\n"
-                )
-            return ""
-        finally:
-            conn.close()
-
-    def _check_existing_sleep(self, target_date: str) -> str:
-        """Warn if sleep data already exists for ``target_date``."""
-        from store import open_db
-
-        conn = open_db(self._db)
-        try:
-            row = conn.execute(
-                "SELECT COUNT(*) AS n FROM sleep_all WHERE date = ?",
-                (target_date,),
-            ).fetchone()
-            if row and row["n"] > 0:
-                return f"\u26a0\ufe0f Sleep data already exists for {target_date} — saving will replace it.\n"
-            return ""
-        finally:
-            conn.close()
-
-    def _show_workout_confirm(
-        self, add_id: str, pending: PendingAdd, msg_id: int | None
-    ) -> None:
-        """Display the workout confirmation screen with Save/Adjust/Date buttons."""
-        clone = pending.clone_row or {}
-        dur = clone.get("duration_min", 0)
-        energy = clone.get("active_energy_kj")
-        dist = clone.get("gpx_distance_km")
-        note = clone.get("source_note", "")
-
-        parts = [f"**{pending.workout_type}** — {dur:.0f} min"]
-        if dist:
-            parts.append(f"{dist:.1f} km")
-        if energy:
-            parts.append(f"~{energy:.0f} kJ")
-        summary = ", ".join(parts)
-
-        warning = self._check_existing_workout(
-            pending.date or "", pending.workout_type or ""
-        )
-        text = f"{warning}{summary}\nDate: {pending.date}"
-        if note:
-            text += f"\n_{note}_"
-
-        buttons = [
-            [{"text": "\u2705 Save", "callback_data": f"add_ok:{add_id}"}],
-            [
-                {"text": "\u23f1 Duration", "callback_data": f"add_dur:{add_id}"},
-                {"text": "\U0001f4c5 Date", "callback_data": f"add_dt:{add_id}:pick"},
-            ],
-            [{"text": "\u274c cancel", "callback_data": f"add_x:{add_id}"}],
-        ]
-        if msg_id:
-            self._poller.edit_message_with_keyboard(msg_id, text, buttons)
+        pending.step = "pick_duration"
+        self._show_duration_picker(add_id, pending, msg_id)
 
     def _show_duration_picker(
-        self,
-        cb_id: str,
-        add_id: str,
-        pending: PendingAdd,
-        msg_id: int | None,
+        self, add_id: str, pending: PendingAdd, msg_id: int | None
     ) -> None:
-        """Show duration adjustment buttons based on workout category."""
-        self._poller.answer_callback_query(cb_id)
-        cat = pending.clone_row.get("category", "") if pending.clone_row else ""
+        """Show category-aware duration presets before the LLM clone runs."""
+        cat = pending.category or ""
         if cat in ("run", "walk", "cycle"):
             durations = [15, 20, 30, 45, 60, 90]
         else:
@@ -428,11 +402,11 @@ class AddFlowHandler:
                 row = []
         if row:
             rows.append(row)
-        rows.append([{"text": "\u274c cancel", "callback_data": f"add_x:{add_id}"}])
+        rows.append([{"text": "❌ cancel", "callback_data": f"add_x:{add_id}"}])
 
         if msg_id:
             self._poller.edit_message_with_keyboard(
-                msg_id, f"Pick duration for {pending.workout_type}:", rows
+                msg_id, f"How long was the {pending.workout_type}?", rows
             )
 
     def _handle_duration(
@@ -443,33 +417,26 @@ class AddFlowHandler:
         new_dur: float,
         msg_id: int | None,
     ) -> None:
-        """User picked a new duration — scale energy/distance proportionally."""
+        """User picked the workout duration — advance to date picker."""
         self._poller.answer_callback_query(cb_id)
-        clone = pending.clone_row
-        if clone:
-            old_dur = clone.get("duration_min") or new_dur
-            if old_dur and old_dur > 0:
-                ratio = new_dur / old_dur
-                if clone.get("active_energy_kj"):
-                    clone["active_energy_kj"] = round(
-                        clone["active_energy_kj"] * ratio, 1
-                    )
-                if clone.get("gpx_distance_km"):
-                    clone["gpx_distance_km"] = round(
-                        clone["gpx_distance_km"] * ratio, 2
-                    )
-            clone["duration_min"] = new_dur
-            note = clone.get("source_note", "")
-            if ", adjusted to " in note:
-                note = note[: note.index(", adjusted to ")]
-            clone["source_note"] = (
-                f"{note}, adjusted to {new_dur:.0f} min"
-                if note
-                else f"adjusted to {new_dur:.0f} min"
-            )
+        pending.chosen_duration_min = new_dur
+        pending.step = "pick_workout_date"
+        self._show_workout_date_picker(add_id, msg_id)
 
-        pending.step = "confirm_workout"
-        self._show_workout_confirm(add_id, pending, msg_id)
+    def _show_workout_date_picker(self, add_id: str, msg_id: int | None) -> None:
+        """Show the workout date picker (today / yesterday / 2 days ago)."""
+        buttons = [
+            [
+                {"text": "Today", "callback_data": f"add_dt:{add_id}:today"},
+                {"text": "Yesterday", "callback_data": f"add_dt:{add_id}:yest"},
+                {"text": "2 days ago", "callback_data": f"add_dt:{add_id}:bfr"},
+            ],
+            [{"text": "❌ cancel", "callback_data": f"add_x:{add_id}"}],
+        ]
+        if msg_id:
+            self._poller.edit_message_with_keyboard(
+                msg_id, "When did you do it?", buttons
+            )
 
     def _handle_date(
         self,
@@ -479,37 +446,151 @@ class AddFlowHandler:
         param: str,
         msg_id: int | None,
     ) -> None:
-        """Handle date selection — either show picker or apply a choice."""
+        """Apply a date choice, then advance to the next step for this path."""
         self._poller.answer_callback_query(cb_id)
-
         today = date.today()
-        if param == "pick":
-            buttons = [
-                [
-                    {"text": "Today", "callback_data": f"add_dt:{add_id}:today"},
-                    {"text": "Yesterday", "callback_data": f"add_dt:{add_id}:yest"},
-                    {"text": "2 days ago", "callback_data": f"add_dt:{add_id}:bfr"},
-                ],
-                [{"text": "\u274c cancel", "callback_data": f"add_x:{add_id}"}],
-            ]
-            if msg_id:
-                self._poller.edit_message_with_keyboard(
-                    msg_id, "When did you do it?", buttons
-                )
-            return
-
         if param == "today":
             pending.date = today.isoformat()
         elif param == "yest":
             pending.date = (today - timedelta(days=1)).isoformat()
         elif param == "bfr":
             pending.date = (today - timedelta(days=2)).isoformat()
-
-        if pending.step in ("confirm_workout", "pick_type"):
-            pending.step = "confirm_workout"
-            self._show_workout_confirm(add_id, pending, msg_id)
         else:
+            return
+
+        if pending.step == "pick_workout_date":
+            pending.step = "pick_feel"
+            self._show_workout_feel_picker(add_id, pending, msg_id)
+        elif pending.step == "pick_sleep_date":
             self._show_sleep_duration_picker(add_id, pending, msg_id)
+
+    def _show_workout_feel_picker(
+        self, add_id: str, pending: PendingAdd, msg_id: int | None
+    ) -> None:
+        """Show the feel picker for workouts (easy/solid/hard/wrecked + skip)."""
+        rows = [
+            [
+                {"text": "easy", "callback_data": f"add_feel:{add_id}:easy"},
+                {"text": "solid", "callback_data": f"add_feel:{add_id}:solid"},
+            ],
+            [
+                {"text": "hard", "callback_data": f"add_feel:{add_id}:hard"},
+                {"text": "wrecked", "callback_data": f"add_feel:{add_id}:wrecked"},
+            ],
+            [
+                {
+                    "text": "\U0001f937 skip",
+                    "callback_data": f"add_feel:{add_id}:skip",
+                }
+            ],
+            [{"text": "❌ cancel", "callback_data": f"add_x:{add_id}"}],
+        ]
+        if msg_id:
+            self._poller.edit_message_with_keyboard(
+                msg_id, f"How did the {pending.workout_type} feel?", rows
+            )
+
+    def _show_sleep_feel_picker(
+        self, add_id: str, pending: PendingAdd, msg_id: int | None
+    ) -> None:
+        """Show the feel picker for sleep (solid/ok/restless/wrecked + skip)."""
+        rows = [
+            [
+                {"text": "solid", "callback_data": f"add_feel:{add_id}:solid"},
+                {"text": "ok", "callback_data": f"add_feel:{add_id}:ok"},
+            ],
+            [
+                {"text": "restless", "callback_data": f"add_feel:{add_id}:restless"},
+                {"text": "wrecked", "callback_data": f"add_feel:{add_id}:wrecked"},
+            ],
+            [
+                {
+                    "text": "\U0001f937 skip",
+                    "callback_data": f"add_feel:{add_id}:skip",
+                }
+            ],
+            [{"text": "❌ cancel", "callback_data": f"add_x:{add_id}"}],
+        ]
+        if msg_id:
+            self._poller.edit_message_with_keyboard(
+                msg_id, f"How was the sleep? ({pending.sleep_total_h}h)", rows
+            )
+
+    def _handle_feel(
+        self,
+        cb_id: str,
+        add_id: str,
+        pending: PendingAdd,
+        param: str,
+        msg_id: int | None,
+    ) -> None:
+        """Route feel selection to workout or sleep based on current step."""
+        if pending.step == "pick_feel":
+            self._handle_workout_feel(cb_id, add_id, pending, param, msg_id)
+        elif pending.step == "pick_sleep_feel":
+            self._handle_sleep_feel(cb_id, add_id, pending, param, msg_id)
+        else:
+            self._poller.answer_callback_query(cb_id, "Unexpected state.")
+
+    def _handle_workout_feel(
+        self,
+        cb_id: str,
+        add_id: str,
+        pending: PendingAdd,
+        param: str,
+        msg_id: int | None,
+    ) -> None:
+        """User picked feel (or skipped) — run LLM clone + deterministic adjust."""
+        from feel_adjust import apply_workout_feel
+        from store import open_db
+
+        self._poller.answer_callback_query(cb_id)
+        pending.feel = None if param == "skip" else param
+
+        if msg_id:
+            self._poller.edit_message(
+                msg_id, f"⏳ Finding best match for {pending.workout_type}..."
+            )
+
+        conn = open_db(self._db)
+        try:
+            clone = find_workout_clone(
+                conn,
+                pending.workout_type or "",
+                pending.category or "",
+                duration_min=pending.chosen_duration_min,
+                target_date=pending.date,
+            )
+        finally:
+            conn.close()
+
+        adjusted, flag = apply_workout_feel(clone, pending.feel)
+        pending.clone_row = adjusted
+        pending.feel_adjusted = flag
+        pending.step = "confirm_workout"
+        self._show_workout_confirm(add_id, pending, msg_id)
+
+    def _handle_sleep_feel(
+        self,
+        cb_id: str,
+        add_id: str,
+        pending: PendingAdd,
+        param: str,
+        msg_id: int | None,
+    ) -> None:
+        """User picked sleep feel — compute in_bed via multiplier, show confirm."""
+        from feel_adjust import apply_sleep_feel
+
+        self._poller.answer_callback_query(cb_id)
+        pending.feel = None if param == "skip" else param
+
+        in_bed, flag = apply_sleep_feel(pending.sleep_total_h or 0.0, pending.feel)
+        pending.sleep_in_bed_h = in_bed
+        pending.feel_adjusted = flag
+        pending.step = "confirm_sleep"
+        self._show_sleep_confirm(add_id, pending, msg_id)
+
+    # --- Sleep path ------------------------------------------------------
 
     def _handle_sleep_start(
         self,
@@ -529,7 +610,7 @@ class AddFlowHandler:
                 {"text": "Last night", "callback_data": f"add_dt:{add_id}:yest"},
                 {"text": "Night before", "callback_data": f"add_dt:{add_id}:bfr"},
             ],
-            [{"text": "\u274c cancel", "callback_data": f"add_x:{add_id}"}],
+            [{"text": "❌ cancel", "callback_data": f"add_x:{add_id}"}],
         ]
         if msg_id:
             self._poller.edit_message_with_keyboard(
@@ -554,7 +635,7 @@ class AddFlowHandler:
                 row = []
         if row:
             rows.append(row)
-        rows.append([{"text": "\u274c cancel", "callback_data": f"add_x:{add_id}"}])
+        rows.append([{"text": "❌ cancel", "callback_data": f"add_x:{add_id}"}])
 
         if msg_id:
             self._poller.edit_message_with_keyboard(
@@ -569,17 +650,92 @@ class AddFlowHandler:
         hours: float,
         msg_id: int | None,
     ) -> None:
-        """User picked sleep duration — show confirmation."""
+        """User picked sleep duration — advance to feel picker."""
         self._poller.answer_callback_query(cb_id)
         pending.sleep_total_h = hours
-        pending.sleep_in_bed_h = round(hours * 1.08, 2)
-        pending.step = "confirm_sleep"
+        pending.step = "pick_sleep_feel"
+        self._show_sleep_feel_picker(add_id, pending, msg_id)
 
-        warning = self._check_existing_sleep(pending.date or "")
-        text = f"{warning}**Sleep** — {hours}h\nDate: {pending.date}"
+    # --- Confirm & save -------------------------------------------------
+
+    def _check_existing_workout(self, target_date: str, workout_type: str) -> str:
+        """Warn if a workout of the same type already exists for ``target_date``."""
+        from store import open_db
+
+        conn = open_db(self._db)
+        try:
+            row = conn.execute(
+                "SELECT COUNT(*) AS n FROM workout_all WHERE date = ? AND type = ?",
+                (target_date, workout_type),
+            ).fetchone()
+            if row and row["n"] > 0:
+                return f"⚠️ A {workout_type} already exists for {target_date}.\n"
+            return ""
+        finally:
+            conn.close()
+
+    def _check_existing_sleep(self, target_date: str) -> str:
+        """Warn if sleep data already exists for ``target_date``."""
+        from store import open_db
+
+        conn = open_db(self._db)
+        try:
+            row = conn.execute(
+                "SELECT COUNT(*) AS n FROM sleep_all WHERE date = ?",
+                (target_date,),
+            ).fetchone()
+            if row and row["n"] > 0:
+                return f"⚠️ Sleep data already exists for {target_date} — saving will replace it.\n"
+            return ""
+        finally:
+            conn.close()
+
+    def _show_workout_confirm(
+        self, add_id: str, pending: PendingAdd, msg_id: int | None
+    ) -> None:
+        """Final Save/Cancel screen for a workout."""
+        clone = pending.clone_row or {}
+        dur = clone.get("duration_min", 0)
+        energy = clone.get("active_energy_kj")
+        dist = clone.get("gpx_distance_km")
+        note = clone.get("source_note", "")
+
+        parts = [f"**{pending.workout_type}** — {dur:.0f} min"]
+        if dist:
+            parts.append(f"{dist:.1f} km")
+        if energy:
+            parts.append(f"~{energy:.0f} kJ")
+        summary = ", ".join(parts)
+
+        warning = self._check_existing_workout(
+            pending.date or "", pending.workout_type or ""
+        )
+        text = f"{warning}{summary}\nDate: {pending.date}"
+        if pending.feel:
+            text += f" · feel: {pending.feel}"
+        if note:
+            text += f"\n_{note}_"
+
         buttons = [
-            [{"text": "\u2705 Save", "callback_data": f"add_ok:{add_id}"}],
-            [{"text": "\u274c cancel", "callback_data": f"add_x:{add_id}"}],
+            [{"text": "✅ Save", "callback_data": f"add_ok:{add_id}"}],
+            [{"text": "❌ cancel", "callback_data": f"add_x:{add_id}"}],
+        ]
+        if msg_id:
+            self._poller.edit_message_with_keyboard(msg_id, text, buttons)
+
+    def _show_sleep_confirm(
+        self, add_id: str, pending: PendingAdd, msg_id: int | None
+    ) -> None:
+        """Final Save/Cancel screen for sleep."""
+        warning = self._check_existing_sleep(pending.date or "")
+        text = f"{warning}**Sleep** — {pending.sleep_total_h}h\nDate: {pending.date}"
+        if pending.feel:
+            text += f" · feel: {pending.feel}"
+        if pending.feel_adjusted and pending.sleep_in_bed_h:
+            text += f"\n_in bed ≈ {pending.sleep_in_bed_h}h (adjusted for '{pending.feel}' feel)_"
+        buttons = [
+            [{"text": "✅ Save", "callback_data": f"add_ok:{add_id}"}],
+            [{"text": "❌ cancel", "callback_data": f"add_x:{add_id}"}],
         ]
         if msg_id:
             self._poller.edit_message_with_keyboard(msg_id, text, buttons)
@@ -603,30 +759,40 @@ class AddFlowHandler:
                     clone_row=pending.clone_row,
                     date=pending.date or date.today().isoformat(),
                     source_note=pending.clone_row.get("source_note"),
+                    feel=pending.feel,
+                    feel_adjusted=pending.feel_adjusted,
                 )
                 pending.saved_id = row_id
                 pending.saved_table = "manual_workout"
 
                 clone = pending.clone_row
                 dur = clone.get("duration_min", 0)
-                text = f"\u2705 Saved: {pending.workout_type} \u00b7 {dur:.0f} min \u00b7 {pending.date}"
+                text = (
+                    f"✅ Saved: {pending.workout_type} · {dur:.0f} min · {pending.date}"
+                )
+                if pending.feel:
+                    text += f" · {pending.feel}"
             elif pending.step == "confirm_sleep" and pending.sleep_total_h:
                 row_id = insert_manual_sleep(
                     conn,
                     date=pending.date or date.today().isoformat(),
                     sleep_total_h=pending.sleep_total_h,
                     sleep_in_bed_h=pending.sleep_in_bed_h,
+                    feel=pending.feel,
+                    feel_adjusted=pending.feel_adjusted,
                 )
                 pending.saved_id = row_id
                 pending.saved_table = "manual_sleep"
-                text = f"\u2705 Saved: Sleep \u00b7 {pending.sleep_total_h}h \u00b7 {pending.date}"
+                text = f"✅ Saved: Sleep · {pending.sleep_total_h}h · {pending.date}"
+                if pending.feel:
+                    text += f" · {pending.feel}"
             else:
                 self._poller.answer_callback_query(cb_id, "Nothing to save.")
                 return
         finally:
             conn.close()
 
-        buttons = [[{"text": "\u21a9 Undo", "callback_data": f"add_undo:{add_id}"}]]
+        buttons = [[{"text": "↩ Undo", "callback_data": f"add_undo:{add_id}"}]]
         if msg_id:
             self._poller.edit_message_with_keyboard(msg_id, text, buttons)
 
@@ -656,7 +822,7 @@ class AddFlowHandler:
         if deleted:
             self._poller.answer_callback_query(cb_id, "Undone!")
             if msg_id:
-                self._poller.edit_message(msg_id, "\u21a9 Undone.")
+                self._poller.edit_message(msg_id, "↩ Undone.")
                 self._poller.edit_message_reply_markup(msg_id, None)
         else:
             self._poller.answer_callback_query(cb_id, "Nothing to undo.")
