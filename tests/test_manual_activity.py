@@ -210,6 +210,28 @@ class TestInsertManualWorkout:
         assert row["hr_avg"] is None
         assert row["gpx_distance_km"] is None
 
+    def test_feel_columns_default_to_unset(self, db: sqlite3.Connection) -> None:
+        clone = {"type": "Walking", "category": "walk", "duration_min": 30}
+        row_id = insert_manual_workout(db, clone, "2026-04-04")
+        row = db.execute(
+            "SELECT feel, feel_adjusted FROM manual_workout WHERE id = ?",
+            (row_id,),
+        ).fetchone()
+        assert row["feel"] is None
+        assert row["feel_adjusted"] == 0
+
+    def test_feel_columns_persisted(self, db: sqlite3.Connection) -> None:
+        clone = {"type": "Outdoor Run", "category": "run", "duration_min": 45}
+        row_id = insert_manual_workout(
+            db, clone, "2026-04-04", feel="hard", feel_adjusted=True
+        )
+        row = db.execute(
+            "SELECT feel, feel_adjusted FROM manual_workout WHERE id = ?",
+            (row_id,),
+        ).fetchone()
+        assert row["feel"] == "hard"
+        assert row["feel_adjusted"] == 1
+
 
 class TestInsertManualSleep:
     def test_basic_insert(self, db: sqlite3.Connection) -> None:
@@ -238,6 +260,22 @@ class TestInsertManualSleep:
         ).fetchall()
         assert len(rows) == 1
         assert rows[0]["sleep_total_h"] == 8.0
+
+    def test_feel_columns_persisted(self, db: sqlite3.Connection) -> None:
+        insert_manual_sleep(
+            db,
+            "2026-04-04",
+            7.0,
+            sleep_in_bed_h=8.75,
+            feel="wrecked",
+            feel_adjusted=True,
+        )
+        row = db.execute(
+            "SELECT feel, feel_adjusted, sleep_in_bed_h FROM manual_sleep WHERE date = '2026-04-04'"
+        ).fetchone()
+        assert row["feel"] == "wrecked"
+        assert row["feel_adjusted"] == 1
+        assert row["sleep_in_bed_h"] == 8.75
 
 
 class TestDeleteManualWorkout:

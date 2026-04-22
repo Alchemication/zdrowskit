@@ -559,6 +559,8 @@ def insert_manual_workout(
     clone_row: dict,
     date: str,
     source_note: str | None = None,
+    feel: str | None = None,
+    feel_adjusted: bool = False,
 ) -> int:
     """Insert a manually-logged workout cloned from a historical entry.
 
@@ -568,6 +570,9 @@ def insert_manual_workout(
             ``_WORKOUT_CLONE_COLUMNS``).  Missing keys default to ``None``.
         date: ISO date for the new entry (e.g. "2026-04-04").
         source_note: Free-text provenance note (e.g. "cloned from Apr 1 run").
+        feel: Subjective feel tag (``easy``/``solid``/``hard``/``wrecked``).
+        feel_adjusted: True when deterministic feel multipliers were applied
+            on top of the clone.
 
     Returns:
         The ``id`` of the inserted ``manual_workout`` row.
@@ -587,6 +592,8 @@ def insert_manual_workout(
     values["start_utc"] = start_utc
     values["date"] = date
     values["source_note"] = source_note
+    values["feel"] = feel
+    values["feel_adjusted"] = 1 if feel_adjusted else 0
     values["created_at"] = now
 
     cols = ", ".join(values.keys())
@@ -610,6 +617,8 @@ def insert_manual_sleep(
     date: str,
     sleep_total_h: float,
     sleep_in_bed_h: float | None = None,
+    feel: str | None = None,
+    feel_adjusted: bool = False,
 ) -> int:
     """Insert or replace a manually-logged sleep entry.
 
@@ -619,6 +628,8 @@ def insert_manual_sleep(
         sleep_total_h: Total sleep hours (excluding awake time).
         sleep_in_bed_h: Total time in bed (including awake). Estimated from
             sleep_total_h if not provided.
+        feel: Subjective feel tag (``solid``/``ok``/``restless``/``wrecked``).
+        feel_adjusted: True when a non-default in-bed multiplier was applied.
 
     Returns:
         The ``id`` of the inserted ``manual_sleep`` row.
@@ -628,10 +639,18 @@ def insert_manual_sleep(
         sleep_in_bed_h = round(sleep_total_h * 1.08, 2)
     cursor = conn.execute(
         """
-        INSERT OR REPLACE INTO manual_sleep (date, sleep_total_h, sleep_in_bed_h, created_at)
-        VALUES (?, ?, ?, ?)
+        INSERT OR REPLACE INTO manual_sleep
+            (date, sleep_total_h, sleep_in_bed_h, feel, feel_adjusted, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
         """,
-        (date, sleep_total_h, sleep_in_bed_h, now),
+        (
+            date,
+            sleep_total_h,
+            sleep_in_bed_h,
+            feel,
+            1 if feel_adjusted else 0,
+            now,
+        ),
     )
     conn.commit()
     logger.info("Inserted manual sleep date=%s total_h=%.1f", date, sleep_total_h)

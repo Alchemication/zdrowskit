@@ -334,7 +334,7 @@ class TestMigrations:
 
         applied = apply_migrations(conn)
 
-        assert len(applied) == 6
+        assert len(applied) == 7
         statuses = list_migrations(conn)
         assert all(status.status == "applied" for status in statuses)
         schema = get_live_schema(conn)
