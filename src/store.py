@@ -25,7 +25,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from db.migrations import apply_migrations
-from models import DailySnapshot, WorkoutSnapshot
+from models import DailySnapshot, WorkoutSnapshot, WorkoutSplit
 
 logger = logging.getLogger(__name__)
 
@@ -199,6 +199,26 @@ def store_snapshots(conn: sqlite3.Connection, snapshots: list[DailySnapshot]) ->
                         now,
                     ),
                 )
+                if w.splits:
+                    conn.executemany(
+                        """
+                        INSERT INTO workout_split (
+                            start_utc, km_index, pace_min_km, avg_speed_ms,
+                            elevation_gain_m, elevation_loss_m
+                        ) VALUES (?, ?, ?, ?, ?, ?)
+                        """,
+                        [
+                            (
+                                w.start_utc,
+                                split.km_index,
+                                split.pace_min_km,
+                                split.avg_speed_ms,
+                                split.elevation_gain_m,
+                                split.elevation_loss_m,
+                            )
+                            for split in w.splits
+                        ],
+                    )
     logger.info("Stored %d day(s) to database", len(snapshots))
     return len(snapshots)
 
@@ -255,6 +275,29 @@ def load_snapshots(
 
     # Group workouts by date for O(n) assembly.
     workouts_by_date: dict[str, list[WorkoutSnapshot]] = {d: [] for d in dates}
+    workout_starts = [row["start_utc"] for row in workout_rows]
+    splits_by_start: dict[str, list[WorkoutSplit]] = {}
+    if workout_starts:
+        split_placeholders = ",".join("?" * len(workout_starts))
+        split_rows = conn.execute(
+            f"""
+            SELECT * FROM workout_split
+            WHERE start_utc IN ({split_placeholders})
+            ORDER BY start_utc ASC, km_index ASC
+            """,
+            workout_starts,
+        ).fetchall()
+        for row in split_rows:
+            splits_by_start.setdefault(row["start_utc"], []).append(
+                WorkoutSplit(
+                    km_index=row["km_index"],
+                    pace_min_km=row["pace_min_km"],
+                    avg_speed_ms=row["avg_speed_ms"],
+                    elevation_gain_m=row["elevation_gain_m"],
+                    elevation_loss_m=row["elevation_loss_m"],
+                )
+            )
+
     for row in workout_rows:
         workouts_by_date[row["date"]].append(
             WorkoutSnapshot(
@@ -274,6 +317,7 @@ def load_snapshots(
                 gpx_elevation_gain_m=row["gpx_elevation_gain_m"],
                 gpx_avg_speed_ms=row["gpx_avg_speed_ms"],
                 gpx_max_speed_p95_ms=row["gpx_max_speed_p95_ms"],
+                splits=splits_by_start.get(row["start_utc"], []),
             )
         )
 

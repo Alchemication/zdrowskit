@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import date, timedelta
 
-from models import DailySnapshot, WorkoutSnapshot
+from models import DailySnapshot, WorkoutSnapshot, WorkoutSplit
 from baselines import compute_baselines
 from store import store_snapshots
 
@@ -103,3 +103,51 @@ class TestComputeBaselines:
         store_snapshots(in_memory_db, [snap])
         result = compute_baselines(in_memory_db)
         assert "Best pace" not in result
+
+    def test_year_over_year_and_seasonal_sections(
+        self, in_memory_db: sqlite3.Connection
+    ) -> None:
+        snapshots = []
+        seed_rows = [
+            (7, 50, 60.0, 10000, 5.8),
+            (365 + 7, 53, 56.0, 9500, 5.5),
+            (365 * 2 + 7, 55, 54.0, 9000, 5.2),
+            (365 * 3 + 7, 57, 52.0, 8500, 4.9),
+        ]
+        for days_ago, resting_hr, hrv_ms, steps, split_pace in seed_rows:
+            d = _days_ago(days_ago)
+            snapshots.append(
+                DailySnapshot(
+                    date=d,
+                    resting_hr=resting_hr,
+                    hrv_ms=hrv_ms,
+                    steps=steps,
+                    workouts=[
+                        WorkoutSnapshot(
+                            type="Outdoor Run",
+                            category="run",
+                            start_utc=f"{d}T07:00:00Z",
+                            duration_min=split_pace * 5,
+                            gpx_distance_km=5.0,
+                            splits=[
+                                WorkoutSplit(
+                                    km_index=index + 1,
+                                    pace_min_km=split_pace,
+                                    avg_speed_ms=3.0,
+                                )
+                                for index in range(5)
+                            ],
+                        )
+                    ],
+                )
+            )
+        store_snapshots(in_memory_db, snapshots)
+
+        result = compute_baselines(in_memory_db)
+
+        assert "Same-season comparison" in result
+        assert "Same month last year" in result
+        assert "Seasonal run volume" in result
+        assert "Same 4w 3y ago" in result
+        assert "Annual best 5 km pace" in result
+        assert "2026" in result

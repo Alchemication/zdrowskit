@@ -268,6 +268,7 @@ class TestCharts:
 
         assert "Query routing:" in prompt
         assert "Use `workout_all` for workout/session questions" in prompt
+        assert "Use `workout_split` joined on `start_utc`" in prompt
         assert "running speed" in normalized
         assert "prefer `workout_all`, not `daily.running_speed_kmh`" in prompt
 
@@ -277,6 +278,7 @@ class TestCharts:
             prompt = (PROMPTS_DIR / prompt_name).read_text(encoding="utf-8")
             assert "Query routing:" in prompt
             assert "Use `workout_all` for workout/session questions" in prompt
+            assert "Use `workout_split` joined on `start_utc`" in prompt
             assert "Use `daily` for day-level health questions" in prompt
             assert "prefer `workout_all`, not `daily.running_speed_kmh`" in prompt
 
@@ -438,6 +440,15 @@ class TestBuildMessages:
         ctx = {"prompt": "Baselines: {baselines}"}
         msgs = build_messages(ctx, health_data_text="{}", baselines=None)
         assert "(not computed)" in msgs[1]["content"]
+
+    def test_milestones_injected(self) -> None:
+        ctx = {"prompt": "Milestones: {milestones}"}
+        msgs = build_messages(
+            ctx,
+            health_data_text="{}",
+            milestones="## Milestones\n- 5 km PR",
+        )
+        assert "5 km PR" in msgs[1]["content"]
 
     def test_explicit_today_override_is_used(self) -> None:
         ctx = {

@@ -42,6 +42,7 @@ from llm_health import (
     format_recent_nudges,
     render_health_data,
 )
+from milestones import compute_milestones
 from notification_prefs import (
     DEFAULT_NOTIFICATION_PREFS,
     active_temporary_mutes,
@@ -143,6 +144,7 @@ def _print_explain(
     result: LLMResult,
     memory: str | None,
     baselines: str | None = None,
+    milestones: str | None = None,
     report_path: Path | None = None,
 ) -> None:
     """Print LLM call diagnostics to stderr using rich formatting.
@@ -154,6 +156,7 @@ def _print_explain(
         result: LLMResult from call_llm().
         memory: Extracted memory string, or None.
         baselines: Auto-computed baselines markdown, or None if skipped.
+        milestones: Auto-computed milestones markdown, or None if skipped.
         report_path: Path where the report was saved, or None.
     """
     from rich.console import Console
@@ -235,6 +238,9 @@ def _print_explain(
                 title="Auto-computed Baselines",
             )
         )
+
+    if milestones:
+        stderr.print(Panel(milestones, title="Milestones", border_style="cyan"))
 
     # Memory extraction
     if memory:
@@ -710,9 +716,11 @@ def cmd_insights(
         sys.exit(1)
 
     baselines = None
+    milestones = None
     if not args.no_update_baselines and args.week != "current":
         baselines = compute_baselines(conn)
         _save_baselines(CONTEXT_DIR, baselines)
+    milestones = compute_milestones(conn)
 
     week_complete = health_data.get("week_complete", False)
     week_label = health_data.get("week_label")
@@ -732,6 +740,7 @@ def cmd_insights(
             context,
             health_data_text,
             baselines=baselines,
+            milestones=milestones,
             week_complete=week_complete,
         )
     except (KeyError, ValueError) as e:
@@ -860,7 +869,14 @@ def cmd_insights(
 
     if args.explain:
         _print_explain(
-            context, CONTEXT_DIR, messages, result, memory, baselines, report_path
+            context,
+            CONTEXT_DIR,
+            messages,
+            result,
+            memory,
+            baselines,
+            milestones,
+            report_path,
         )
 
     print(visible_report)
@@ -1135,6 +1151,7 @@ def cmd_coach(
         sys.exit(1)
 
     baselines = compute_baselines(conn)
+    milestones = compute_milestones(conn)
     _save_baselines(CONTEXT_DIR, baselines)
 
     week_complete = health_data.get("week_complete", False)
@@ -1171,6 +1188,7 @@ def cmd_coach(
             context,
             health_data_text,
             baselines=baselines,
+            milestones=milestones,
             week_complete=week_complete,
         )
     except (KeyError, ValueError) as e:

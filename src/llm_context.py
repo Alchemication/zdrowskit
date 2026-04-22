@@ -54,6 +54,13 @@ SCHEMA_REFERENCE = """### Database schema (for run_sql)
 - Pace tip: `duration_min / gpx_distance_km` = min/km when `gpx_distance_km IS NOT NULL`
 - Use `workout_all` as the canonical source for workout questions: runs, pace, splits/proxies, distance, elevation, workout HR, and session trends.
 
+**workout_split** — one row per completed 1 km split for imported route-based runs
+
+- Key: (`start_utc`, `km_index`) where `km_index` is 1-based within the workout
+- Columns: `pace_min_km`, `avg_speed_ms`, `elevation_gain_m`, `elevation_loss_m`
+- Join tip: join `workout_split.start_utc` to imported sessions in `workout` (or to `workout_all` on `start_utc`, noting that manual workouts will not have split rows)
+- Use `workout_split` for within-run pacing: late-run fade, fastest contiguous 5 km / 10 km segments, and elevation-adjusted pacing checks.
+
 **sleep_all** — one row per night, keyed by `date`, with `source` (`'import'` or `'manual'`)
 
 - Columns: `sleep_total_h`, `sleep_in_bed_h`, `sleep_efficiency_pct`, `sleep_deep_h`, `sleep_core_h`, `sleep_rem_h`, `sleep_awake_h`
@@ -156,6 +163,7 @@ def build_messages(
     context: dict[str, str],
     health_data_text: str,
     baselines: str | None = None,
+    milestones: str | None = None,
     week_complete: bool = True,
     today: date | None = None,
 ) -> list[dict[str, str]]:
@@ -169,6 +177,7 @@ def build_messages(
         context: Dict from load_context() with file stems as keys.
         health_data_text: Rendered health-data markdown for the prompt.
         baselines: Auto-computed baselines markdown, or None to skip.
+        milestones: Auto-computed milestone markdown, or None to skip.
         week_complete: Whether the reported week has fully elapsed.
         today: Override for the current date (defaults to today).
             Useful for evals with pinned dates.
@@ -203,6 +212,7 @@ def build_messages(
             "coach_feedback": context.get("coach_feedback", "(not provided)"),
             "health_data": health_data_text,
             "baselines": baselines or "(not computed)",
+            "milestones": milestones or "(not computed)",
             "review_facts": context.get("review_facts", "(not provided)"),
             "schema_reference": SCHEMA_REFERENCE,
             "today": today.isoformat(),

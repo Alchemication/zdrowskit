@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from db.migrations import apply_migrations, get_live_schema, list_migrations
-from models import DailySnapshot, WorkoutSnapshot
+from models import DailySnapshot, WorkoutSnapshot, WorkoutSplit
 from store import (
     connect_db,
     delete_feedback,
@@ -59,6 +59,22 @@ class TestStoreAndLoad:
             gpx_elevation_gain_m=45.0,
             gpx_avg_speed_ms=2.5,
             gpx_max_speed_p95_ms=3.8,
+            splits=[
+                WorkoutSplit(
+                    km_index=1,
+                    pace_min_km=6.0,
+                    avg_speed_ms=2.7778,
+                    elevation_gain_m=8.0,
+                    elevation_loss_m=1.0,
+                ),
+                WorkoutSplit(
+                    km_index=2,
+                    pace_min_km=5.8,
+                    avg_speed_ms=2.8736,
+                    elevation_gain_m=10.0,
+                    elevation_loss_m=2.0,
+                ),
+            ],
         )
         original = DailySnapshot(
             date="2026-03-10",
@@ -108,6 +124,10 @@ class TestStoreAndLoad:
         assert w.gpx_distance_km == 5.2
         assert w.temperature_c == 8.0
         assert w.humidity_pct == 65
+        assert len(w.splits) == 2
+        assert w.splits[0].km_index == 1
+        assert w.splits[0].pace_min_km == 6.0
+        assert w.splits[1].elevation_gain_m == 10.0
 
     def test_upsert_overwrites(self, in_memory_db: sqlite3.Connection) -> None:
         day1 = DailySnapshot(date="2026-03-10", steps=5000, resting_hr=50)
@@ -334,7 +354,7 @@ class TestMigrations:
 
         applied = apply_migrations(conn)
 
-        assert len(applied) == 7
+        assert len(applied) == 8
         statuses = list_migrations(conn)
         assert all(status.status == "applied" for status in statuses)
         schema = get_live_schema(conn)
@@ -345,6 +365,7 @@ class TestMigrations:
         assert "CREATE TABLE manual_workout" in schema
         assert "CREATE TABLE manual_sleep" in schema
         assert "CREATE TABLE events" in schema
+        assert "CREATE TABLE workout_split" in schema
 
     def test_adopts_legacy_schema_and_applies_missing(self) -> None:
         conn = sqlite3.connect(":memory:")

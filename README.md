@@ -4,7 +4,7 @@
 
 Your watch collects thousands of data points a week. Apple shows you rings. zdrowskit gives you a coach.
 
-- **Personalised weekly reports** — not generic summaries, but analysis that knows your goals, your plan, your injuries, and what you wrote in your journal last Tuesday
+- **Personalised weekly reports** — not generic summaries, but analysis that knows your goals, your plan, your injuries, what you wrote in your journal last Tuesday, and how this season compares to prior years
 - **Coaching proposals** — every Monday after the weekly report, the coach reviews the completed week and proposes concrete changes to your training plan or goals, with diff-first Approve/Reject buttons in Telegram
 - **Reactive nudges** — skipped a session? New data synced? The coach notices and says something useful (or stays quiet if there's nothing to say)
 - **Remembers you week to week** — a freeform journal captures *why* things happened (travel, illness, life), and the coach appends its own memory after each report. No cold starts.
@@ -62,7 +62,7 @@ The app writes weekly JSON files: `Metrics/HealthAutoExport-YYYY-WW.json` and `W
 
 **Notes:**
 - Sleep data is pre-aggregated nightly totals (no per-segment breakdown)
-- Workout routes are embedded as `route` arrays (latitude, longitude, altitude, speed, timestamp)
+- Workout routes are embedded as `route` arrays (latitude, longitude, altitude, speed, timestamp); zdrowskit derives per-km splits from these when present
 
 ### Historical backfill
 
@@ -128,6 +128,7 @@ Normal CLI usage auto-applies pending SQLite migrations when the database is ope
    ```
 
 The LLM reads your profile, goals, training plan, and weekly journal alongside your health data. After each run it appends a brief memory to `history.md` so it can track your progress across weeks.
+Reports and coach reviews also include auto-computed seasonal baselines, lifetime milestones, and split-derived run pacing when route data is available.
 
 ## Commands
 
@@ -219,7 +220,7 @@ The `insights`, `coach`, `nudge`, and `chat` commands use markdown files from `~
 | `me.md` | you (or chat) | Your profile — age, weight, injuries, pace zones |
 | `strategy.md` | you (or chat or coach) | Goals + weekly training schedule + diet + sleep targets, all in one file |
 | `log.md` | you (or chat) | Freeform weekly journal — *why* things happened (travel, illness, life) |
-| `baselines.md` | auto | Rolling averages computed from DB (updated on each `insights` run) |
+| `baselines.md` | auto | Rolling + seasonal baselines computed from DB (updated on each `insights` run) |
 | `history.md` | auto | LLM's own memory — appended after each weekly report |
 | `coach_feedback.md` | auto | Accept/reject history for coach and chat suggestions, including optional rejection reasons |
 
@@ -355,4 +356,3 @@ These evals call the configured real model and may use network/API quota. Normal
 
 Recorded leaderboard runs live in `evals/leaderboard/runs.jsonl`. The generated Markdown snapshot lives in `evals/leaderboard.md`. Comparisons are scope-aware: runs over different case sets are rendered in separate sections rather than ranked together.
 The interactive HTML report lives in `evals/leaderboard.html` and is generated from the same raw JSONL history.
-

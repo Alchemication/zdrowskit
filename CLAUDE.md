@@ -1,6 +1,6 @@
 ## What is zdrowskit
 
-Your 24/7 ultra-personal trainer. Parses Apple Health exports (metrics, workouts, GPX routes, sleep), stores them in SQLite, and uses an LLM to generate personalised weekly reports and short nudges via Telegram/email. A daemon watches for new data, fires nudges automatically, and listens for incoming Telegram messages for interactive two-way coaching chat — including ad-hoc data queries and on-demand charts.
+Your 24/7 ultra-personal trainer. Parses Apple Health exports (metrics, workouts, GPX routes, sleep), stores them in SQLite, derives per-km splits from route-bearing runs, and uses an LLM to generate personalised weekly reports and short nudges via Telegram/email. A daemon watches for new data, fires nudges automatically, and listens for incoming Telegram messages for interactive two-way coaching chat — including ad-hoc data queries and on-demand charts.
 
 ## Commands
 
@@ -85,9 +85,10 @@ When adding eval coverage:
 - `src/commands.py` — all subcommand handlers; `main.py` is just dispatch
 - `src/daemon.py` — file watcher, scheduled reports, Telegram chat loop
 - `src/llm.py` — `load_context()`, `build_messages()`, `call_llm()`
+- `src/milestones.py` — lifetime PRs, streaks, and milestone summaries for prompts
 - `src/prompts/` — prompt templates (soul, report, nudge, chat, coach)
 - `src/charts.py` — Plotly chart rendering from `<chart>` blocks
 - `src/tools.py` — LLM tools (`run_sql`, `update_context`)
 - `evals/` — feedback-derived LLM eval cases and deterministic runner
 
-User context files: `~/Documents/zdrowskit/ContextFiles/` (`me.md`, `strategy.md`, `log.md` — user-edited; `baselines.md`, `history.md` — auto-generated). `strategy.md` is the merged goals + weekly plan + diet + sleep file (formerly `goals.md` + `plan.md`).
+User context files: `~/Documents/zdrowskit/ContextFiles/` (`me.md`, `strategy.md`, `log.md` — user-edited; `baselines.md`, `history.md` — auto-generated). `baselines.md` now includes rolling plus seasonal / YoY baselines. `strategy.md` is the merged goals + weekly plan + diet + sleep file (formerly `goals.md` + `plan.md`).

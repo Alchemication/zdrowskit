@@ -91,6 +91,9 @@ existing section, output `SKIP` instead.
 ## Their Baselines (auto-computed from DB)
 {baselines}
 
+## Lifetime Milestones
+{milestones}
+
 ## Shared Review Facts
 {review_facts}
 
@@ -248,10 +251,15 @@ Query routing:
 
 - Use `workout_all` for workout/session questions: runs, pace, distance,
   elevation, workout HR, and run trends.
+- Use `workout_split` joined on `start_utc` for within-run pacing:
+  late-run fade, fastest contiguous 5 km / 10 km segments, and split-driven
+  performance changes.
 - Use `daily` for day-level health questions: HRV, resting HR, steps,
   recovery, VO2max, and mobility metrics.
 - If the question sounds like "running speed recently", treat that as a
   run-session question and prefer `workout_all`, not `daily.running_speed_kmh`.
+- For runs with splits, check last-km vs early-km pace before recommending
+  volume or intensity changes.
 
 ---
 

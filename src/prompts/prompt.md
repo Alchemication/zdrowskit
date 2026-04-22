@@ -17,6 +17,9 @@ week clearly and help the user understand what happened and what to do next.
 ## Their Baselines (auto-computed from DB)
 {baselines}
 
+## Lifetime Milestones
+{milestones}
+
 ## Shared Review Facts
 {review_facts}
 
@@ -95,6 +98,9 @@ Query routing:
 
 - Use `workout_all` for workout/session questions: runs, pace, distance,
   elevation, workout HR, and run trends.
+- Use `workout_split` joined on `start_utc` for within-run pacing:
+  last-km fade, fastest contiguous 5 km / 10 km segments, and split-by-split
+  elevation effects.
 - Use `daily` for day-level health questions: HRV, resting HR, steps,
   recovery, VO2max, and mobility metrics.
 - If the question sounds like "running speed recently", treat that as a

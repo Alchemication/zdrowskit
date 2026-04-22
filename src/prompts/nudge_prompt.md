@@ -89,6 +89,8 @@ Query routing:
 
 - Use `workout_all` for workout/session questions: runs, pace, distance,
   elevation, workout HR, and run trends.
+- Use `workout_split` joined on `start_utc` for within-run pacing checks:
+  late-run fade, strong finishes, and contiguous fast segments.
 - Use `daily` for day-level health questions: HRV, resting HR, steps,
   recovery, VO2max, and mobility metrics.
 - If the question sounds like "running speed recently", treat that as a

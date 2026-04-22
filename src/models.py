@@ -1,6 +1,7 @@
 """Data models for the Apple Health pipeline.
 
 Public API:
+    WorkoutSplit    -- per-km pacing and elevation stats for route-based workouts
     WorkoutSnapshot -- per-workout metrics including optional GPX-derived stats
     DailySnapshot   -- all metrics for a single calendar day
     WeeklySummary   -- aggregated week-level stats
@@ -14,6 +15,25 @@ Example:
 
 from __future__ import annotations
 from dataclasses import dataclass, field
+
+
+@dataclass
+class WorkoutSplit:
+    """Per-km pacing and elevation stats for a route-based workout.
+
+    Attributes:
+        km_index: 1-based split number (1 = first kilometre).
+        pace_min_km: Minutes required to cover this kilometre.
+        avg_speed_ms: Average speed in m/s across the split.
+        elevation_gain_m: Positive elevation gain in metres inside the split.
+        elevation_loss_m: Negative elevation loss in metres inside the split.
+    """
+
+    km_index: int
+    pace_min_km: float
+    avg_speed_ms: float | None = None
+    elevation_gain_m: float | None = None
+    elevation_loss_m: float | None = None
 
 
 @dataclass
@@ -39,6 +59,7 @@ class WorkoutSnapshot:
         gpx_elevation_gain_m: Positive elevation gain in metres from GPX.
         gpx_avg_speed_ms: Mean speed in m/s from GPX speed field.
         gpx_max_speed_p95_ms: 95th-percentile speed in m/s (filters GPS spikes).
+        splits: Derived per-km splits for route-bearing workouts.
     """
 
     type: str  # "Outdoor Run", "Traditional Strength Training", etc.
@@ -58,6 +79,7 @@ class WorkoutSnapshot:
     gpx_elevation_gain_m: float | None = None
     gpx_avg_speed_ms: float | None = None
     gpx_max_speed_p95_ms: float | None = None
+    splits: list[WorkoutSplit] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         """Derive lift-counting semantics when not explicitly provided."""

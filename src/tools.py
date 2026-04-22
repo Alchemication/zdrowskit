@@ -47,14 +47,16 @@ def run_sql_tool() -> list[dict]:
                     "Execute a read-only SQL query against the health database "
                     "and return results as JSON. Key tables: 'daily' (one row "
                     "per day with health metrics), 'workout_all' (all workouts "
-                    "including manual entries), 'sleep_all' (all sleep data "
-                    "including manual entries). Both '_all' views have a "
+                    "including manual entries), 'workout_split' (1 km splits "
+                    "for imported route-based runs), and 'sleep_all' (all sleep "
+                    "data including manual entries). Both '_all' views have a "
                     "'source' column. Prefer 'workout_all' for workout/session "
                     "questions (runs, pace, distance, elevation, workout HR, "
-                    "session trends) and 'daily' for day-level health metrics "
-                    "(HRV, resting HR, steps, recovery, mobility). See the "
-                    "schema reference in your system prompt for column details "
-                    "and units."
+                    "session trends), 'workout_split' for within-run pacing and "
+                    "contiguous PR segments, and 'daily' for day-level health "
+                    "metrics (HRV, resting HR, steps, recovery, mobility). See "
+                    "the schema reference in your system prompt for column "
+                    "details and units."
                 ),
                 "parameters": {
                     "type": "object",
