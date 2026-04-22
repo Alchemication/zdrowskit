@@ -7,11 +7,12 @@ Your watch collects thousands of data points a week. Apple shows you rings. zdro
 - **Personalised weekly reports** — not generic summaries, but analysis that knows your goals, your plan, your injuries, and what you wrote in your journal last Tuesday
 - **Coaching proposals** — every Monday after the weekly report, the coach reviews the completed week and proposes concrete changes to your training plan or goals, with diff-first Approve/Reject buttons in Telegram
 - **Reactive nudges** — skipped a session? New data synced? The coach notices and says something useful (or stays quiet if there's nothing to say)
-- **Adjust notifications from Telegram** — use `/notify` to change report days/times, mute nudges temporarily, or reset everything to defaults with an Approve/Reject confirmation
+- **Remembers you week to week** — a freeform journal captures *why* things happened (travel, illness, life), and the coach appends its own memory after each report. No cold starts.
 - **Ask anything about your data** — "What's my fastest 1km pace?", "How's my HRV trending since January?", "Do I sleep worse after evening runs?" — if the data exists, it'll find the answer and chart it
-- **Two-way conversation** — reply to a report, update your goals mid-chat, get a chart on demand. It's a Telegram conversation, not a dashboard
 
-Your raw data lives in a SQLite database on your machine — no third-party sync, no analytics, no telemetry. Be aware though: every coaching call sends the relevant slice of that data (metrics, workouts, journal excerpts) to the LLM provider and the responses go through Telegram. Storage is local; the intelligence is not.
+It's a Telegram conversation, not a dashboard — reply to a report, update your goals mid-chat, get a chart on demand.
+
+Your raw data stays local — SQLite on your machine, no third-party sync. The LLM calls don't: every coaching call sends the relevant slice to the provider. See [How it works](#how-it-works) for the full picture.
 
 Built by Adam Napora (adamsky). *Zdrowie* is Polish for health. *Kit* is the tool.
 
@@ -19,31 +20,23 @@ Built by Adam Napora (adamsky). *Zdrowie* is Polish for health. *Kit* is the too
 
 ## How it works
 
-```
-Auto Export iOS app (iCloud Drive, on a schedule)
-    Metrics/HealthAutoExport-*.json  — steps, energy, HR, HRV, VO2max, mobility, sleep
-    Workouts/HealthAutoExport-*.json — sessions with HR, energy, temp, embedded routes
-            ↓
-        zdrowskit import          → SQLite database
-            ↓
-        zdrowskit report          → weekly summary + daily breakdown
-        zdrowskit report --llm    → structured JSON for LLM consumption
-            ↓
-        zdrowskit insights        → personalised weekly report (~450 words)
-        zdrowskit coach           → plan/goal proposals with Approve/Reject
-        zdrowskit nudge           → short reactive notification (≤80 words)
-            + context files: your profile, goals, plan, journal
-            ↓
-        Telegram                  → delivered to your phone
-            ↑
-        zdrowskit daemon          → watches for new data and context changes,
-                                    triggers reports and nudges automatically
-                                    + listens for Telegram messages (interactive chat)
-                                    + answers data questions via SQL tool-calling loop
-                                    + generates on-demand Plotly charts
-```
+Three loops run continuously:
 
-zdrowskit's storage is local — SQLite on your machine, no third-party sync. The processing isn't: every coaching call sends the relevant slice of your data (metrics, workouts, journal excerpts) to the LLM provider, and the responses are delivered through Telegram. If your health data leaving the machine for an LLM API is a dealbreaker, this isn't the tool for you.
+- **Data in** — The Auto Export iOS app writes weekly JSON files to iCloud Drive on a schedule. A daemon on your Mac imports new files into SQLite as they arrive.
+- **Coach out** — The daemon decides when to send something: a Monday weekly report, coaching proposals that change your plan or goals, a midweek check-in, or reactive nudges when new data lands or you edit a context file. Each notification is a distinct LLM call with its own prompt, tools, and purpose — and the LLM can stay silent if there's nothing useful to say.
+- **Two-way chat** — Reply in Telegram and the chat LLM reads your full health history via SQL, renders charts on demand, and proposes edits to your context files (profile, goals, journal) with Approve/Reject buttons.
+
+Storage is local — SQLite on your machine, no third-party sync. The processing isn't: every coaching call sends the relevant slice of your data (metrics, workouts, journal excerpts) to the LLM provider, and responses come back through Telegram. If your health data leaving the machine for an LLM API is a dealbreaker, this isn't the tool for you.
+
+## Requirements
+
+- **Apple Watch + iPhone** — zdrowskit reads Apple Health data. That's the only supported source right now. You need the [Auto Export](https://apps.apple.com/app/myhealth-export-to-icloud/id6737380982) iOS app to get data out of HealthKit into iCloud Drive as JSON.
+- **Mac** — the daemon watches your iCloud Drive folder, so it needs to run on a Mac where iCloud syncs. The rest of the stack (Python, SQLite) runs anywhere, but the data pipeline assumes macOS paths.
+- **A capable LLM** — this isn't a simple summariser. The coach writes personalised reports, decides when to stay quiet, generates SQL queries against your data, and produces chart code. That requires real intelligence. **Recommended: Claude Opus 4.6** (or equivalent). **Minimum: Claude Sonnet 4.6** — anything below that and the reports get generic, the queries get unreliable, and the charts break. Any model provider works — zdrowskit uses [litellm](https://github.com/BerriAI/litellm) so you can swap in OpenAI, Google, or any compatible API.
+- **Python 3.11+** and [uv](https://github.com/astral-sh/uv)
+- **Telegram bot** (for notifications and chat)
+
+Under the hood: SQLite for storage, [litellm](https://github.com/BerriAI/litellm) for provider-agnostic LLM calls, [Plotly](https://plotly.com/python/) + Kaleido for charts, [watchdog](https://github.com/gorakhargosh/watchdog) for filesystem events, Telegram Bot API for delivery.
 
 ## Getting your data out of Apple Health
 
@@ -139,54 +132,23 @@ The LLM reads your profile, goals, training plan, and weekly journal alongside y
 ## Commands
 
 ```bash
-uv run python main.py import                   # import from Auto Export
-uv run python main.py report                   # current week: summary + daily
-uv run python main.py report --history         # all weeks, one block each
-uv run python main.py report --llm             # JSON for LLM: current + 3mo history
-uv run python main.py report --llm --months 6  # same, 6 months
-uv run python main.py status                   # DB row counts + date range
-uv run python main.py context                  # show context files and their status
-
-uv run python main.py insights                 # personalised weekly report via LLM
-uv run python main.py insights --week last     # full review of previous week
-uv run python main.py insights --explain       # show diagnostics (tokens, cost, context)
-uv run python main.py insights --telegram      # send report via Telegram
-
-uv run python main.py nudge                             # short nudge via Telegram (default)
-uv run python main.py nudge --trigger log_update        # respond to a log.md change
-uv run python main.py nudge --trigger missed_session    # missed training day reminder
-uv run python main.py nudge --trigger goal_updated      # acknowledge a goals change
-
-uv run python main.py coach                              # coaching review: propose plan/goal updates for last week
-uv run python main.py coach --week current               # provisional review of the current week so far
-uv run python main.py coach --telegram                   # send proposals with Approve/Reject buttons
-
-uv run python main.py llm-log                           # last 10 LLM calls
-uv run python main.py llm-log --stats                   # usage summary by type and model
-uv run python main.py llm-log --id 42                   # full stored trace for one LLM call (messages, tool use, response)
-uv run python main.py llm-log --feedback                # recent thumbs-down feedback
-uv run python main.py llm-log --json                    # output as JSON
-
-uv run python main.py events                            # recent system events (nudge fires/skips, imports, coach decisions)
-uv run python main.py events --category nudge           # filter to a single category (nudge, import, coach, insights, context, daemon)
-uv run python main.py events --since 3d --kind fired    # what the system actually sent in the last 3 days
-uv run python main.py events --json                     # output as JSON
-
-uv run python main.py telegram-setup                    # register bot /commands for autocomplete + menu
-uv run python main.py daemon-stop                       # stop the background daemon
-uv run python main.py daemon-restart                    # restart (or re-load) the daemon
-
-uv run python -m evals.run                              # run all feedback-derived LLM evals (real model)
-uv run python -m evals.run --feature chat               # run only chat eval cases
-uv run python -m evals.run chat_log_life_disruption     # run one eval case
-uv run python -m evals.run --details                    # include failed-case text and captured tool calls
-uv run python -m evals.run --record                     # append this run to leaderboard history + regenerate markdown
-uv run python -m evals.run --record-duplicate --record  # intentionally keep a duplicate fingerprint run
-uv run python -m evals.leaderboard render               # rebuild leaderboard.md from recorded JSONL history
-uv run python -m evals.leaderboard render-html          # rebuild interactive leaderboard.html from recorded JSONL history
+uv run python main.py import              # import from Auto Export
+uv run python main.py status              # DB row counts + date range
+uv run python main.py report              # current week: summary + daily
+uv run python main.py insights            # personalised weekly report via LLM
+uv run python main.py coach               # coaching review with plan/goal proposals
+uv run python main.py nudge               # short reactive nudge
+uv run python main.py context             # show context files and their status
+uv run python main.py events              # system event log (fires, skips, imports)
+uv run python main.py llm-log             # inspect stored LLM call traces
+uv run python main.py telegram-setup      # register bot /commands for Telegram menu
+uv run python main.py daemon-restart      # restart the background daemon
+uv run python main.py daemon-stop         # stop the background daemon
 ```
 
-Override the default iCloud data directory with `--data-dir` or the `HEALTH_DATA_DIR` env var. Run any command with `--help` for the full flag list.
+Run any command with `--help` for the full flag list — e.g. `insights --week last --telegram`, `nudge --trigger missed_session`, `llm-log --id 42 --feedback`, `events --since 3d --category nudge`. LLM evals have their own runner, see [LLM evals](#llm-evals).
+
+Override the default iCloud data directory with `--data-dir` or the `HEALTH_DATA_DIR` env var.
 
 ## The daemon — always-on trainer mode
 
@@ -394,19 +356,3 @@ These evals call the configured real model and may use network/API quota. Normal
 Recorded leaderboard runs live in `evals/leaderboard/runs.jsonl`. The generated Markdown snapshot lives in `evals/leaderboard.md`. Comparisons are scope-aware: runs over different case sets are rendered in separate sections rather than ranked together.
 The interactive HTML report lives in `evals/leaderboard.html` and is generated from the same raw JSONL history.
 
-## Requirements
-
-- **Apple Watch + iPhone** — zdrowskit reads Apple Health data. That's the only supported source right now. You need the [Auto Export](https://apps.apple.com/app/myhealth-export-to-icloud/id6737380982) iOS app to get data out of HealthKit into iCloud Drive as JSON.
-- **Mac** — the daemon watches your iCloud Drive folder, so it needs to run on a Mac where iCloud syncs. The rest of the stack (Python, SQLite) runs anywhere, but the data pipeline assumes macOS paths.
-- **A capable LLM** — this isn't a simple summariser. The coach writes personalised reports, decides when to stay quiet, generates SQL queries against your data, and produces chart code. That requires real intelligence. **Recommended: Claude Opus 4.6** (or equivalent). **Minimum: Claude Sonnet 4.6** — anything below that and the reports get generic, the queries get unreliable, and the charts break. Any model provider works — zdrowskit uses [litellm](https://github.com/BerriAI/litellm) so you can swap in OpenAI, Google, or any compatible API.
-- **Python 3.11+** and [uv](https://github.com/astral-sh/uv)
-- **Telegram bot** (for notifications and chat)
-
-## Stack
-
-- Python + [uv](https://github.com/astral-sh/uv)
-- SQLite (local storage; LLM API calls still send data slices off-machine)
-- [litellm](https://github.com/BerriAI/litellm) for LLM calls (provider-agnostic)
-- [Plotly](https://plotly.com/python/) for chart rendering (PNG via Kaleido)
-- [watchdog](https://github.com/gorakhargosh/watchdog) for filesystem monitoring
-- Telegram Bot API for notifications and interactive chat
