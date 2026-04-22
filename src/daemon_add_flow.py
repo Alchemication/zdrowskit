@@ -241,11 +241,9 @@ class AddFlowHandler:
         if type_row:
             rows.append(type_row)
         rows.append(
-            [
-                {"text": "\U0001f634 Sleep", "callback_data": f"add_sleep:{add_id}"},
-                {"text": "\u2716 Cancel", "callback_data": f"add_x:{add_id}"},
-            ]
+            [{"text": "\U0001f634 Sleep", "callback_data": f"add_sleep:{add_id}"}]
         )
+        rows.append([{"text": "\u274c cancel", "callback_data": f"add_x:{add_id}"}])
 
         sent_id = self._poller.send_message_with_keyboard(
             "What would you like to add?",
@@ -396,14 +394,12 @@ class AddFlowHandler:
             text += f"\n_{note}_"
 
         buttons = [
+            [{"text": "\u2705 Save", "callback_data": f"add_ok:{add_id}"}],
             [
-                {"text": "\u2705 Save", "callback_data": f"add_ok:{add_id}"},
                 {"text": "\u23f1 Duration", "callback_data": f"add_dur:{add_id}"},
-            ],
-            [
                 {"text": "\U0001f4c5 Date", "callback_data": f"add_dt:{add_id}:pick"},
-                {"text": "\u2716 Cancel", "callback_data": f"add_x:{add_id}"},
             ],
+            [{"text": "\u274c cancel", "callback_data": f"add_x:{add_id}"}],
         ]
         if msg_id:
             self._poller.edit_message_with_keyboard(msg_id, text, buttons)
@@ -432,7 +428,7 @@ class AddFlowHandler:
                 row = []
         if row:
             rows.append(row)
-        rows.append([{"text": "\u2716 Cancel", "callback_data": f"add_x:{add_id}"}])
+        rows.append([{"text": "\u274c cancel", "callback_data": f"add_x:{add_id}"}])
 
         if msg_id:
             self._poller.edit_message_with_keyboard(
@@ -494,7 +490,7 @@ class AddFlowHandler:
                     {"text": "Yesterday", "callback_data": f"add_dt:{add_id}:yest"},
                     {"text": "2 days ago", "callback_data": f"add_dt:{add_id}:bfr"},
                 ],
-                [{"text": "\u2716 Cancel", "callback_data": f"add_x:{add_id}"}],
+                [{"text": "\u274c cancel", "callback_data": f"add_x:{add_id}"}],
             ]
             if msg_id:
                 self._poller.edit_message_with_keyboard(
@@ -533,7 +529,7 @@ class AddFlowHandler:
                 {"text": "Last night", "callback_data": f"add_dt:{add_id}:yest"},
                 {"text": "Night before", "callback_data": f"add_dt:{add_id}:bfr"},
             ],
-            [{"text": "\u2716 Cancel", "callback_data": f"add_x:{add_id}"}],
+            [{"text": "\u274c cancel", "callback_data": f"add_x:{add_id}"}],
         ]
         if msg_id:
             self._poller.edit_message_with_keyboard(
@@ -558,7 +554,7 @@ class AddFlowHandler:
                 row = []
         if row:
             rows.append(row)
-        rows.append([{"text": "\u2716 Cancel", "callback_data": f"add_x:{add_id}"}])
+        rows.append([{"text": "\u274c cancel", "callback_data": f"add_x:{add_id}"}])
 
         if msg_id:
             self._poller.edit_message_with_keyboard(
@@ -582,10 +578,8 @@ class AddFlowHandler:
         warning = self._check_existing_sleep(pending.date or "")
         text = f"{warning}**Sleep** — {hours}h\nDate: {pending.date}"
         buttons = [
-            [
-                {"text": "\u2705 Save", "callback_data": f"add_ok:{add_id}"},
-                {"text": "\u2716 Cancel", "callback_data": f"add_x:{add_id}"},
-            ]
+            [{"text": "\u2705 Save", "callback_data": f"add_ok:{add_id}"}],
+            [{"text": "\u274c cancel", "callback_data": f"add_x:{add_id}"}],
         ]
         if msg_id:
             self._poller.edit_message_with_keyboard(msg_id, text, buttons)
