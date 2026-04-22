@@ -46,6 +46,18 @@ _FUNCTIONAL_LIFT_MIN_DURATION = 15.0
 _SPLIT_DISTANCE_M = 1000.0
 _SPLIT_DISTANCE_EPSILON_M = 1e-3
 
+# Max plausible per-segment speed (m/s) before treating a trackpoint pair as a
+# GPS glitch. Running world-record 1500 m pace is ~7.3 m/s; 10 m/s covers every
+# real human run split. Cycling leaves headroom for descents.
+_MAX_SEGMENT_SPEED_MS: dict[str, float] = {"run": 10.0, "cycle": 25.0}
+
+# Max plausible per-segment distance (m). Apple samples GPS at 1–5 s during
+# activity, so even fast cycling yields sub-100 m segments. A single segment
+# above this cap indicates a GPS dropout where sampling resumed far away; its
+# proportional time split produces phantom sub-elite paces. Caps are generous
+# to stay well above any legitimate observed segment.
+_MAX_SEGMENT_DISTANCE_M: dict[str, float] = {"run": 1200.0, "cycle": 3000.0}
+
 
 def _category(name: str) -> str:
     """Map a workout name to its normalised category string.
@@ -224,7 +236,11 @@ def _haversine_m(
     return radius_m * c
 
 
-def _extract_splits(w: dict) -> list[WorkoutSplit]:
+def _extract_splits(
+    w: dict,
+    category: str,
+    session_elevation_gain_m: float | None,
+) -> list[WorkoutSplit]:
     """Derive 1 km splits from embedded route trackpoints.
 
     Splits are based on haversine distance between consecutive points. Pace is
@@ -232,13 +248,30 @@ def _extract_splits(w: dict) -> list[WorkoutSplit]:
     time-weighted representative speed per segment, preferring trackpoint
     speed values when present and falling back to distance / elapsed time.
 
+    Segments implying an implausible speed for the category (GPS teleports) are
+    skipped so a single bad trackpoint cannot produce a phantom PR split. Only
+    ``run`` and ``cycle`` categories produce splits — swims, paddles, and other
+    activities have unreliable route data.
+
+    When ``session_elevation_gain_m`` is available, per-split elevation gain
+    and loss are rescaled so the per-split gains sum to Apple's authoritative
+    session total, since raw per-sample altitude deltas are dominated by GPS
+    jitter and overcount real climbs by several multiples.
+
     Args:
         w: Raw workout dict from the JSON.
+        category: Normalised workout category string.
+        session_elevation_gain_m: Apple-reported session elevation gain, if any.
 
     Returns:
-        A list of complete 1 km splits. Workouts shorter than 1 km or without
-        usable route/timestamp data return an empty list.
+        A list of complete 1 km splits. Workouts shorter than 1 km, unsupported
+        categories, or routes without usable trackpoints return an empty list.
     """
+    speed_cap_ms = _MAX_SEGMENT_SPEED_MS.get(category)
+    distance_cap_m = _MAX_SEGMENT_DISTANCE_M.get(category)
+    if speed_cap_ms is None or distance_cap_m is None:
+        return []
+
     route = w.get("route", [])
     if not isinstance(route, list) or len(route) < 2:
         return []
@@ -345,6 +378,17 @@ def _extract_splits(w: dict) -> list[WorkoutSplit]:
         elapsed_s = max(0.0, (ts - prev_ts).total_seconds())
         distance_m = _haversine_m(prev_lat, prev_lon, lat, lon)
 
+        # Drop GPS-teleport segments (single-point warps) and multi-km dropout
+        # segments that would otherwise populate phantom sub-elite splits.
+        # Zero-elapsed segments are also skipped since they imply infinite
+        # speed.
+        if (
+            elapsed_s <= 0
+            or distance_m > distance_cap_m
+            or distance_m / elapsed_s > speed_cap_ms
+        ):
+            continue
+
         prev_altitude = _finite_float(prev_point.get("altitude"))
         altitude = _finite_float(point.get("altitude"))
         elevation_delta_m: float | None = None
@@ -398,6 +442,20 @@ def _extract_splits(w: dict) -> list[WorkoutSplit]:
                 1.0,
             )
 
+    # Per-sample altitude deltas are dominated by GPS jitter and overcount
+    # climbs multiple times over. If Apple reports an authoritative session
+    # gain, rescale per-split gain and loss by the same factor so the split
+    # totals agree with the session-level number.
+    if session_elevation_gain_m is not None and splits:
+        raw_total_gain = sum(s.elevation_gain_m or 0.0 for s in splits)
+        if raw_total_gain > 0:
+            scale = session_elevation_gain_m / raw_total_gain
+            for split in splits:
+                if split.elevation_gain_m is not None:
+                    split.elevation_gain_m = round(split.elevation_gain_m * scale, 2)
+                if split.elevation_loss_m is not None:
+                    split.elevation_loss_m = round(split.elevation_loss_m * scale, 2)
+
     return splits
 
 
@@ -449,12 +507,13 @@ def parse_workouts(path: Path) -> list[WorkoutSnapshot]:
 
         # Extract embedded route/summary stats (Auto Export format)
         route_stats = _extract_route_stats(w)
-        splits = _extract_splits(w)
+        category = _category(name)
+        splits = _extract_splits(w, category, route_stats["gpx_elevation_gain_m"])
 
         snapshots.append(
             WorkoutSnapshot(
                 type=name,
-                category=_category(name),
+                category=category,
                 counts_as_lift=_counts_as_lift(name, duration_min),
                 start_utc=start_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
                 duration_min=duration_min,

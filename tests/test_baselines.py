@@ -104,25 +104,61 @@ class TestComputeBaselines:
         result = compute_baselines(in_memory_db)
         assert "Best pace" not in result
 
+    def test_yoy_window_with_single_sample_is_suppressed(
+        self, in_memory_db: sqlite3.Connection
+    ) -> None:
+        """A single sparse reading a year ago must not poison the YoY column."""
+        snapshots = [
+            DailySnapshot(date=_days_ago(i), sleep_total_h=7.0) for i in range(10)
+        ]
+        # One solitary very-short sleep sample a year ago; real history has >0.
+        snapshots.append(DailySnapshot(date=_days_ago(365), sleep_total_h=0.26))
+        store_snapshots(in_memory_db, snapshots)
+
+        result = compute_baselines(in_memory_db)
+
+        # The suppressed YoY value must not render as a numeric baseline.
+        assert "0.26" not in result
+
+    def test_yoy_window_ignores_zero_padded_sleep_rows(
+        self, in_memory_db: sqlite3.Connection
+    ) -> None:
+        """Apple writes sleep_total_h=0 for untracked nights — ignore those."""
+        snapshots = [
+            DailySnapshot(date=_days_ago(i), sleep_total_h=7.0) for i in range(10)
+        ]
+        # A year ago: 20 zero-tracked nights plus one real 6.5 hr night. If the
+        # guard only checked IS NOT NULL, AVG would collapse toward zero.
+        for i in range(20):
+            snapshots.append(DailySnapshot(date=_days_ago(360 + i), sleep_total_h=0.0))
+        snapshots.append(DailySnapshot(date=_days_ago(365), sleep_total_h=6.5))
+        store_snapshots(in_memory_db, snapshots)
+
+        result = compute_baselines(in_memory_db)
+
+        # Neither a drag-to-zero value nor a single-sample 6.5 should render.
+        assert "0.31" not in result
+        assert "6.50" not in result
+
     def test_year_over_year_and_seasonal_sections(
         self, in_memory_db: sqlite3.Connection
     ) -> None:
         snapshots = []
+        # Seed multiple days per year-offset anchor so the YoY ±15-day window
+        # contains enough samples to clear the minimum-sample guard.
         seed_rows = [
             (7, 50, 60.0, 10000, 5.8),
             (365 + 7, 53, 56.0, 9500, 5.5),
             (365 * 2 + 7, 55, 54.0, 9000, 5.2),
             (365 * 3 + 7, 57, 52.0, 8500, 4.9),
         ]
-        for days_ago, resting_hr, hrv_ms, steps, split_pace in seed_rows:
-            d = _days_ago(days_ago)
-            snapshots.append(
-                DailySnapshot(
-                    date=d,
-                    resting_hr=resting_hr,
-                    hrv_ms=hrv_ms,
-                    steps=steps,
-                    workouts=[
+        for anchor_days_ago, resting_hr, hrv_ms, steps, split_pace in seed_rows:
+            for offset in range(10):
+                days_ago = anchor_days_ago + offset
+                d = _days_ago(days_ago)
+                workouts = []
+                if offset == 0:
+                    workouts.append(
                         WorkoutSnapshot(
                             type="Outdoor Run",
                             category="run",
@@ -138,9 +174,16 @@ class TestComputeBaselines:
                                 for index in range(5)
                             ],
                         )
-                    ],
+                    )
+                snapshots.append(
+                    DailySnapshot(
+                        date=d,
+                        resting_hr=resting_hr,
+                        hrv_ms=hrv_ms,
+                        steps=steps,
+                        workouts=workouts,
+                    )
                 )
-            )
         store_snapshots(in_memory_db, snapshots)
 
         result = compute_baselines(in_memory_db)

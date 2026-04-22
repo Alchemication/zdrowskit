@@ -27,6 +27,19 @@ _DAILY_METRICS = [
     ("REM Sleep", "sleep_rem_h", "hr", 2),
 ]
 
+# Columns where a literal 0 means "not tracked" rather than a real observation.
+# Apple Health writes zero-valued sleep rows for untracked nights, which would
+# otherwise drag baselines toward zero.
+_ZERO_IS_NO_DATA = {
+    "sleep_total_h",
+    "sleep_in_bed_h",
+    "sleep_efficiency_pct",
+    "sleep_deep_h",
+    "sleep_core_h",
+    "sleep_rem_h",
+    "sleep_awake_h",
+}
+
 _TRAINING_VOLUME_QUERIES = [
     (
         "Run distance",
@@ -75,20 +88,30 @@ def _query_daily_avg(
     column: str,
     start_modifiers: tuple[str, ...],
     end_modifiers: tuple[str, ...] = ("0 days",),
+    min_samples: int = 1,
 ) -> float | None:
-    """Return a daily average over a relative SQLite date window."""
+    """Return a daily average over a relative SQLite date window.
+
+    When fewer than ``min_samples`` non-null values exist in the window, return
+    None so a single sparse observation cannot dominate the average. Callers
+    comparing against historical windows (e.g. YoY) should set this to at least
+    7 to avoid rendering a noisy single-day reading as a 30-day baseline.
+    """
     start_expr = "date('now'" + "".join(", ?" for _ in start_modifiers) + ")"
     end_expr = "date('now'" + "".join(", ?" for _ in end_modifiers) + ")"
+    zero_filter = f" AND {column} != 0" if column in _ZERO_IS_NO_DATA else ""
     row = conn.execute(
         f"""
-        SELECT AVG({column}) AS value
+        SELECT AVG({column}) AS value, COUNT({column}) AS n
         FROM daily
-        WHERE {column} IS NOT NULL
+        WHERE {column} IS NOT NULL{zero_filter}
           AND date BETWEEN {start_expr} AND {end_expr}
         """,  # noqa: S608
         (*start_modifiers, *end_modifiers),
     ).fetchone()
-    return row["value"] if row and row["value"] is not None else None
+    if not row or row["value"] is None or row["n"] < min_samples:
+        return None
+    return row["value"]
 
 
 def _query_window_value(
@@ -167,10 +190,18 @@ def _append_yoy_daily_metrics(lines: list[str], conn: sqlite3.Connection) -> Non
     for label, column, unit, decimals in _DAILY_METRICS:
         current_30d = _query_daily_avg(conn, column, ("-30 days",))
         year_1 = _query_daily_avg(
-            conn, column, ("-1 year", "-15 days"), ("-1 year", "+15 days")
+            conn,
+            column,
+            ("-1 year", "-15 days"),
+            ("-1 year", "+15 days"),
+            min_samples=7,
         )
         year_2 = _query_daily_avg(
-            conn, column, ("-2 years", "-15 days"), ("-2 years", "+15 days")
+            conn,
+            column,
+            ("-2 years", "-15 days"),
+            ("-2 years", "+15 days"),
+            min_samples=7,
         )
         if year_1 is None and year_2 is None:
             continue
