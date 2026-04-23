@@ -23,6 +23,7 @@ from rich.progress import (
 from evals import leaderboard
 from evals.framework import (
     DEFAULT_MODEL,
+    EVAL_TEMPERATURE,
     EvalCache,
     EvalCase,
     load_cases,
@@ -81,6 +82,14 @@ def main() -> None:
         help="Reasoning effort hint passed to the LLM for eval calls.",
     )
     parser.add_argument(
+        "--no-temperature",
+        action="store_true",
+        help=(
+            "Omit the temperature parameter from LLM calls. Required for "
+            "models that reject it (e.g. claude-opus-4-7)."
+        ),
+    )
+    parser.add_argument(
         "--no-cache",
         action="store_true",
         help="Disable the local SQLite cache for eval LLM responses.",
@@ -117,12 +126,14 @@ def main() -> None:
         sys.exit(2)
 
     reasoning_effort = _normalize_reasoning_effort(args.reasoning_effort)
+    temperature = None if args.no_temperature else EVAL_TEMPERATURE
     cache = None if args.no_cache else EvalCache()
     results = _run_selected_cases(
         selected,
         model=args.model,
         max_tool_iterations=args.max_tool_iterations,
         reasoning_effort=reasoning_effort,
+        temperature=temperature,
         cache=cache,
         refresh_cache=args.refresh_cache,
     )
@@ -159,6 +170,7 @@ def _run_selected_cases(
     model: str,
     max_tool_iterations: int,
     reasoning_effort: str | None = None,
+    temperature: float | None = EVAL_TEMPERATURE,
     cache: EvalCache | None = None,
     refresh_cache: bool = False,
 ):
@@ -170,6 +182,7 @@ def _run_selected_cases(
                 model=model,
                 max_tool_iterations=max_tool_iterations,
                 reasoning_effort=reasoning_effort,
+                temperature=temperature,
                 cache=cache,
                 refresh_cache=refresh_cache,
             )
@@ -193,6 +206,7 @@ def _run_selected_cases(
                     model=model,
                     max_tool_iterations=max_tool_iterations,
                     reasoning_effort=reasoning_effort,
+                    temperature=temperature,
                     cache=cache,
                     refresh_cache=refresh_cache,
                 )

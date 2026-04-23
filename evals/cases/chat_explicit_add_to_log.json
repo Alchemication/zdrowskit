@@ -15,7 +15,7 @@
     "context": {
       "me": "# Profile\n\n- Adam, 42M.\n",
       "strategy": "# Strategy\n\n## Weekly Plan\n\n- Thu: Strength A if the day allows.\n",
-      "log": "# Log\n\n## 2026-04-08\n\n- Completed a short tempo-style run in the morning.\n",
+      "log": "# Log\n\n- 2026-04-08 [run tempo] — short morning session\n",
       "history": "(not provided)",
       "coach_feedback": "(not provided)",
       "recent_nudges": "(none yet)",
@@ -54,7 +54,7 @@
         "file": "log",
         "action": "append",
         "content": {
-          "regex": "(?is)##\\s*2026-04-09\\b"
+          "regex": "(?im)^-\\s+2026-04-09\\b"
         }
       }
     },

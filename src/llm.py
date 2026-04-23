@@ -134,7 +134,7 @@ def call_llm(
     messages: list[dict[str, str]],
     model: str = DEFAULT_MODEL,
     max_tokens: int = 4096,
-    temperature: float = 0.7,
+    temperature: float | None = 0.7,
     reasoning_effort: str | None = None,
     tools: list[dict] | None = None,
     conn: sqlite3.Connection | None = None,
@@ -151,7 +151,9 @@ def call_llm(
         messages: System + user messages for the LLM.
         model: litellm model string.
         max_tokens: Maximum tokens in the response.
-        temperature: Sampling temperature.
+        temperature: Sampling temperature. Pass ``None`` to omit the parameter
+            entirely for models that reject it (e.g. claude-opus-4-7, which
+            deprecated the field).
         reasoning_effort: Optional reasoning effort hint (model-dependent).
         tools: Optional list of tool definitions for function calling.
         conn: Open DB connection for logging. None to skip logging.
@@ -169,14 +171,20 @@ def call_llm(
     # is rejected with a BadRequestError. Force it here so callers can keep
     # passing their preferred sampling temperature without having to know
     # about this constraint.
-    effective_temperature = 1.0 if reasoning_effort is not None else temperature
+    if temperature is None:
+        effective_temperature: float | None = None
+    elif reasoning_effort is not None:
+        effective_temperature = 1.0
+    else:
+        effective_temperature = temperature
 
     kwargs: dict = {
         "model": model,
         "messages": messages,
         "max_tokens": max_tokens,
-        "temperature": effective_temperature,
     }
+    if effective_temperature is not None:
+        kwargs["temperature"] = effective_temperature
     if reasoning_effort is not None:
         kwargs["reasoning_effort"] = reasoning_effort
     if tools is not None:
@@ -223,7 +231,9 @@ def call_llm(
     )
 
     if conn and request_type:
-        params = {"max_tokens": max_tokens, "temperature": effective_temperature}
+        params: dict = {"max_tokens": max_tokens}
+        if effective_temperature is not None:
+            params["temperature"] = effective_temperature
         if reasoning_effort is not None:
             params["reasoning_effort"] = reasoning_effort
         try:

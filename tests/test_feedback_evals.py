@@ -147,9 +147,8 @@ class TestChatRunner:
                 "file": "log",
                 "action": "append",
                 "content": (
-                    "## 2026-04-09\n\n"
-                    "- Small one is sick and did not go to creche; strength "
-                    "session may be hard today."
+                    "- 2026-04-09 [rest son sick] — small one home from creche, "
+                    "strength session may be hard today"
                 ),
                 "summary": "Logged child sickness disrupting strength session.",
             },
@@ -194,9 +193,8 @@ class TestChatRunner:
                         "file": "log",
                         "action": "append",
                         "content": (
-                            "## 2026-04-09\n\n"
-                            "- Small one is sick and did not go to creche; "
-                            "strength may not happen."
+                            "- 2026-04-09 [rest son sick] — small one home from "
+                            "creche, strength may not happen"
                         ),
                         "summary": "Logged child sickness disrupting strength.",
                     }

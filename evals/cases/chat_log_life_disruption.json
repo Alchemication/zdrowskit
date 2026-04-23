@@ -15,7 +15,7 @@
     "context": {
       "me": "# Profile\n\n- Adam, 42M.\n- Has a young child and trains around family/work constraints.\n",
       "strategy": "# Strategy\n\n## Weekly Plan\n\n- Mon: easy run.\n- Wed: tempo or quality run if recovery is good.\n- Thu: Strength A if the day allows.\n- Fri: Strength B or easy run depending on the week.\n\n## Goals - Current focus\n\n- Build consistency without overloading recovery.\n",
-      "log": "# Log\n\n## 2026-04-08\n\n- Completed a short tempo-style run in the morning.\n",
+      "log": "# Log\n\n- 2026-04-08 [run tempo] — short morning session\n",
       "history": "# History\n\n- W14 was disrupted by poor recovery; keep advice practical and context-aware.\n",
       "coach_feedback": "(not provided)",
       "recent_nudges": "(none yet)",
@@ -105,7 +105,7 @@
         "file": "log",
         "action": "append",
         "content": {
-          "regex": "(?is)##\\s*2026-04-09\\b"
+          "regex": "(?im)^-\\s+2026-04-09\\b"
         }
       }
     },

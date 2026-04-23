@@ -235,10 +235,15 @@ def run_case(
     model: str = DEFAULT_MODEL,
     max_tool_iterations: int = 5,
     reasoning_effort: str | None = None,
+    temperature: float | None = EVAL_TEMPERATURE,
     cache: EvalCache | None = None,
     refresh_cache: bool = False,
 ) -> EvalResult:
-    """Run one eval case and evaluate its deterministic assertions."""
+    """Run one eval case and evaluate its deterministic assertions.
+
+    Pass ``temperature=None`` for models that reject the parameter entirely
+    (e.g. claude-opus-4-7).
+    """
     result = EvalResult(
         case_id=case.id,
         feature=case.feature,
@@ -255,6 +260,7 @@ def run_case(
             model=model,
             max_tool_iterations=max_tool_iterations,
             reasoning_effort=reasoning_effort,
+            temperature=temperature,
             cache=cache,
             refresh_cache=refresh_cache,
         )
@@ -587,6 +593,7 @@ def _run_chat_case(
     model: str,
     max_tool_iterations: int,
     reasoning_effort: str | None,
+    temperature: float | None,
     cache: EvalCache | None,
     refresh_cache: bool,
 ) -> EvalExecution:
@@ -623,6 +630,7 @@ def _run_chat_case(
             model=model,
             max_tokens=int(fixture.get("max_tokens", 1024)),
             reasoning_effort=reasoning_effort,
+            temperature=temperature,
             tools=tools,
             metadata={
                 "eval_case_id": case.id,
@@ -676,6 +684,7 @@ def _run_chat_case(
             model=model,
             max_tokens=int(fixture.get("max_tokens", 1024)),
             reasoning_effort=reasoning_effort,
+            temperature=temperature,
             tools=None,
             metadata={
                 "eval_case_id": case.id,
@@ -716,6 +725,7 @@ def _call_llm_for_eval(
     model: str,
     max_tokens: int,
     reasoning_effort: str | None,
+    temperature: float | None,
     tools: list[dict[str, Any]] | None,
     metadata: dict[str, Any],
     cache: EvalCache | None,
@@ -727,7 +737,7 @@ def _call_llm_for_eval(
         "model": model,
         "messages": messages,
         "max_tokens": max_tokens,
-        "temperature": EVAL_TEMPERATURE,
+        "temperature": temperature,
         "reasoning_effort": reasoning_effort,
         "tools": tools,
     }
@@ -740,7 +750,7 @@ def _call_llm_for_eval(
         messages,
         model=model,
         max_tokens=max_tokens,
-        temperature=EVAL_TEMPERATURE,
+        temperature=temperature,
         reasoning_effort=reasoning_effort,
         tools=tools,
         request_type="",

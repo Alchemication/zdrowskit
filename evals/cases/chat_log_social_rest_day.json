@@ -15,7 +15,7 @@
     "context": {
       "me": "# Profile\n\n- Adam, 42M, 81 kg.\n- Wife + 3-year-old; live in Crosshaven, Ireland.\n",
       "strategy": "# Strategy\n\n## Goals — Current focus\n\n- Hold 3 runs + 2 lifts/week at 15+ km volume.\n- Build tempo capacity: extend tempo segments toward 3 km @ sub-5:10/km.\n\n## Weekly Plan\n\n**Week runs Monday → Sunday.** Target: 3 runs + 2 strength sessions per week (~15 km+ total running).\n\n- Run days: ~5 km each\n  - 1 tempo session/week when HRV is above personal baseline (~50 ms)\n  - Remaining runs at easy pace (5:30–6:00/km)\n- Strength A: Push + core\n- Strength B: Pull + core\n- Prefer not to stack run + strength on the same day\n",
-      "log": "# Log\n\n## 2026-04-09\n\n- Small one was sick; skipped planned strength.\n\n## 2026-04-10\n\n- Slept better and got strength done.\n",
+      "log": "# Log\n\n- 2026-04-09 [rest son sick] — skipped planned strength\n- 2026-04-10 [strength b done] — slept better, felt strong\n",
       "history": "(not provided)",
       "coach_feedback": "(not provided)",
       "recent_nudges": "(none yet)",
@@ -73,7 +73,7 @@
         "file": "log",
         "action": "append",
         "content": {
-          "regex": "(?is)##\\s*2026-04-11\\b"
+          "regex": "(?im)^-\\s+2026-04-11\\b"
         }
       }
     },
@@ -85,7 +85,7 @@
         "file": "log",
         "action": "append",
         "content": {
-          "regex": "(?is)(?=.*\\b(went out|night out|social|late night)\\b)(?=.*\\b(rest\\w*|recover\\w*|taking it easy|day off)\\b).+"
+          "regex": "(?is)(?=.*\\b(went out|night[\\s\\-]+out|social|late night)\\b)(?=.*\\b(rest\\w*|recover\\w*|taking it easy|day off)\\b).+"
         }
       }
     }
