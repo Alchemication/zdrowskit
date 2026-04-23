@@ -627,6 +627,26 @@ class TestPromptRenderers:
         assert "#### Tuesday 7 Apr" in rendered
         assert "#### Wednesday 8 Apr" in rendered
 
+    def test_render_health_data_inlines_current_week_run_splits(self) -> None:
+        data = self._health_data()
+        monday = data["current_week"]["days"][0]
+        monday["workouts"][0]["splits"] = [
+            {"km_index": 1, "pace_min_km": 5.2},
+            {"km_index": 2, "pace_min_km": 5.1333},
+            {"km_index": 3, "pace_min_km": 5.0833},
+            {"km_index": 4, "pace_min_km": 5.3},
+            {"km_index": 5, "pace_min_km": 5.4},
+        ]
+
+        rendered = render_health_data(
+            data,
+            prompt_kind="report",
+            week="current",
+            today=date(2026, 4, 8),
+        )
+
+        assert "splits 5:12/5:08/5:05/5:18/5:24" in rendered
+
     def test_format_recent_nudges_strips_saved_nudge_chrome(self) -> None:
         rendered = format_recent_nudges(
             [

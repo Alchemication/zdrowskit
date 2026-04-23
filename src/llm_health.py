@@ -147,9 +147,39 @@ def _format_workout_line(workout: dict) -> str:
     if elevation:
         parts.append(f"elev +{elevation}")
 
+    splits_text = _format_splits(workout.get("splits"))
+    if splits_text:
+        parts.append(f"splits {splits_text}")
+
     if parts:
         return f"{name} ({'; '.join(parts)})"
     return name
+
+
+def _format_splits(splits: object) -> str | None:
+    """Format per-km splits as a compact slash-separated pace string.
+
+    Returns None when splits are missing, empty, or unparseable, so the
+    workout line stays clean for non-GPS sessions.
+    """
+    if not isinstance(splits, list) or not splits:
+        return None
+    rendered: list[str] = []
+    for split in splits:
+        if not isinstance(split, dict):
+            continue
+        pace = split.get("pace_min_km")
+        if not isinstance(pace, (int, float)):
+            continue
+        minutes = int(pace)
+        seconds = int(round((float(pace) - minutes) * 60))
+        if seconds == 60:
+            minutes += 1
+            seconds = 0
+        rendered.append(f"{minutes}:{seconds:02d}")
+    if not rendered:
+        return None
+    return "/".join(rendered)
 
 
 # ---------------------------------------------------------------------------
