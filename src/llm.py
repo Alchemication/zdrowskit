@@ -18,6 +18,7 @@ import re
 import sqlite3
 import time
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 import litellm
@@ -31,6 +32,48 @@ FALLBACK_MODEL = "anthropic/claude-sonnet-4-6"
 
 # Exponential backoff delays (seconds) between retries on overloaded errors.
 _RETRY_DELAYS = [10, 30, 90]
+
+
+@dataclass(frozen=True)
+class _TokenPricingWindow:
+    """Temporary per-token pricing until LiteLLM carries the model entry."""
+
+    effective_from: datetime
+    effective_until: datetime | None
+    input_cache_hit_per_1m: float
+    input_cache_miss_per_1m: float
+    output_per_1m: float
+
+
+# Verified against https://api-docs.deepseek.com/quick_start/pricing/ on
+# 2026-04-25. Keep this narrow so it is easy to delete once LiteLLM catches up.
+_DEEPSEEK_V4_PRICING: dict[str, list[_TokenPricingWindow]] = {
+    "deepseek-v4-flash": [
+        _TokenPricingWindow(
+            effective_from=datetime(2026, 4, 25, tzinfo=UTC),
+            effective_until=None,
+            input_cache_hit_per_1m=0.028,
+            input_cache_miss_per_1m=0.14,
+            output_per_1m=0.28,
+        )
+    ],
+    "deepseek-v4-pro": [
+        _TokenPricingWindow(
+            effective_from=datetime(2026, 4, 25, tzinfo=UTC),
+            effective_until=datetime(2026, 5, 5, 15, 59, tzinfo=UTC),
+            input_cache_hit_per_1m=0.03625,
+            input_cache_miss_per_1m=0.435,
+            output_per_1m=0.87,
+        ),
+        _TokenPricingWindow(
+            effective_from=datetime(2026, 5, 5, 15, 59, tzinfo=UTC),
+            effective_until=None,
+            input_cache_hit_per_1m=0.145,
+            input_cache_miss_per_1m=1.74,
+            output_per_1m=3.48,
+        ),
+    ],
+}
 
 
 @dataclass
@@ -60,6 +103,135 @@ class LLMResult:
     list in a tool-calling loop (includes ``tool_calls`` when present)."""
     llm_call_id: int | None = None
     """Database row id from ``llm_call`` table, set when the call is logged."""
+
+
+def _numeric(value: Any) -> float | None:
+    """Return a numeric value from API data without accepting mock sentinels."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int | float):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return None
+    return None
+
+
+def _field(obj: Any, name: str) -> Any:
+    """Read a field from dicts, pydantic extras, or simple response objects."""
+    if isinstance(obj, dict):
+        return obj.get(name)
+    model_extra = getattr(obj, "model_extra", None)
+    if isinstance(model_extra, dict) and name in model_extra:
+        return model_extra[name]
+    return getattr(obj, name, None)
+
+
+def _provider_reported_cost(response: Any) -> float | None:
+    """Return provider-reported response cost when present."""
+    usage = _field(response, "usage")
+    if usage is None:
+        return None
+    return _numeric(_field(usage, "cost"))
+
+
+def _direct_deepseek_v4_model(model: str) -> str | None:
+    """Return the direct DeepSeek v4 model id, excluding proxy providers."""
+    if model.startswith("openrouter/"):
+        return None
+    if model.startswith("deepseek/"):
+        model = model.removeprefix("deepseek/")
+    if model in _DEEPSEEK_V4_PRICING:
+        return model
+    return None
+
+
+def _deepseek_v4_pricing_window(
+    model: str,
+    *,
+    at: datetime | None = None,
+) -> _TokenPricingWindow | None:
+    """Return the active temporary DeepSeek v4 price window for *model*."""
+    direct_model = _direct_deepseek_v4_model(model)
+    if direct_model is None:
+        return None
+
+    now = at or datetime.now(tz=UTC)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=UTC)
+    for window in _DEEPSEEK_V4_PRICING[direct_model]:
+        if now < window.effective_from:
+            continue
+        if window.effective_until is not None and now >= window.effective_until:
+            continue
+        return window
+    return None
+
+
+def _deepseek_v4_cost(
+    response: Any,
+    model: str,
+    *,
+    at: datetime | None = None,
+) -> float | None:
+    """Estimate direct DeepSeek v4 cost from usage while LiteLLM lacks pricing."""
+    window = _deepseek_v4_pricing_window(model, at=at)
+    if window is None:
+        return None
+
+    usage = _field(response, "usage")
+    if usage is None:
+        return None
+
+    prompt_tokens = _numeric(_field(usage, "prompt_tokens"))
+    completion_tokens = _numeric(_field(usage, "completion_tokens"))
+    if completion_tokens is None:
+        return None
+
+    cache_hit_tokens = _numeric(_field(usage, "prompt_cache_hit_tokens"))
+    cache_miss_tokens = _numeric(_field(usage, "prompt_cache_miss_tokens"))
+
+    if cache_hit_tokens is None and cache_miss_tokens is None:
+        prompt_details = _field(usage, "prompt_tokens_details")
+        cache_hit_tokens = _numeric(_field(prompt_details, "cached_tokens"))
+
+    if prompt_tokens is not None:
+        if cache_hit_tokens is not None and cache_miss_tokens is None:
+            cache_miss_tokens = max(prompt_tokens - cache_hit_tokens, 0.0)
+        elif cache_miss_tokens is not None and cache_hit_tokens is None:
+            cache_hit_tokens = max(prompt_tokens - cache_miss_tokens, 0.0)
+        elif cache_hit_tokens is None and cache_miss_tokens is None:
+            cache_hit_tokens = 0.0
+            cache_miss_tokens = prompt_tokens
+
+    if cache_hit_tokens is None or cache_miss_tokens is None:
+        return None
+
+    return (
+        cache_hit_tokens * window.input_cache_hit_per_1m
+        + cache_miss_tokens * window.input_cache_miss_per_1m
+        + completion_tokens * window.output_per_1m
+    ) / 1_000_000
+
+
+def _response_cost(response: Any, model: str) -> float | None:
+    """Return response cost from LiteLLM, provider metadata, or local fallbacks."""
+    try:
+        cost = litellm.completion_cost(completion_response=response)
+    except Exception:
+        cost = None
+
+    numeric_cost = _numeric(cost)
+    if numeric_cost is not None:
+        return numeric_cost
+
+    provider_cost = _provider_reported_cost(response)
+    if provider_cost is not None:
+        return provider_cost
+
+    return _deepseek_v4_cost(response, model)
 
 
 def _is_overloaded(exc: Exception) -> bool:
@@ -244,10 +416,7 @@ def call_llm(
     latency = time.perf_counter() - t0
     usage = response.usage
 
-    try:
-        cost = litellm.completion_cost(completion_response=response)
-    except Exception:
-        cost = None
+    cost = _response_cost(response, model)
 
     message = response.choices[0].message
     raw_tool_calls = getattr(message, "tool_calls", None)
