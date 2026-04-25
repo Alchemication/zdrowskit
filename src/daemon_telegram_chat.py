@@ -17,6 +17,8 @@ import sqlite3
 import threading
 from typing import TYPE_CHECKING
 
+from config import MAX_TOKENS_CHAT
+
 if TYPE_CHECKING:
     from daemon import ZdrowskitDaemon
 
@@ -913,7 +915,7 @@ class TelegramChatHandler:
                 tools=tools,
                 conn=conn,
                 request_type="chat",
-                max_tokens=1024,
+                max_tokens=MAX_TOKENS_CHAT,
                 metadata={"iteration": _iteration},
             )
 
@@ -1002,7 +1004,7 @@ class TelegramChatHandler:
                 tools=None,
                 conn=conn,
                 request_type="chat",
-                max_tokens=1024,
+                max_tokens=MAX_TOKENS_CHAT,
                 metadata={"iteration": "final_synthesis"},
             )
 

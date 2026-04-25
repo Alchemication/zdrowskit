@@ -73,6 +73,22 @@ MAX_TOOL_ITERATIONS_NUDGE: int = 3
 """Maximum tool-call loop iterations for nudges. Kept tight on purpose — nudges
 must be quick and a single targeted query is usually enough."""
 
+MAX_TOKENS_INSIGHTS: int = 8192
+"""Output token budget for weekly insights reports. Reports are async and can
+include chart code, so the cap is higher than interactive chat."""
+
+MAX_TOKENS_COACH: int = 8192
+"""Output token budget for coaching reviews. Coach runs are async and may need
+room for narrative plus context-edit proposals."""
+
+MAX_TOKENS_CHAT: int = 4096
+"""Output token budget for interactive chat. Kept responsive, but high enough
+for chart-generating answers."""
+
+MAX_TOKENS_NUDGE: int = 1024
+"""Output token budget for nudges. Nudges should be short, but tool-repair
+turns need enough room to finish cleanly."""
+
 
 # ---------------------------------------------------------------------------
 # Daemon paths and timing

@@ -150,6 +150,11 @@ class EvalCache:
             cost=(
                 float(cached["cost"]) if cached.get("cost", None) is not None else None
             ),
+            max_tokens=(
+                int(cached["max_tokens"])
+                if cached.get("max_tokens", None) is not None
+                else None
+            ),
             tool_calls=tool_calls,
             raw_message=raw_message if isinstance(raw_message, dict) else None,
         )
@@ -167,6 +172,7 @@ class EvalCache:
                 "total_tokens": getattr(result, "total_tokens", 0),
                 "latency_s": getattr(result, "latency_s", 0.0),
                 "cost": getattr(result, "cost", None),
+                "max_tokens": getattr(result, "max_tokens", None),
                 "raw_message": getattr(result, "raw_message", None),
             },
             sort_keys=True,

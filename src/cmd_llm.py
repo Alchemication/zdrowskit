@@ -26,6 +26,9 @@ from charts import (
 )
 from config import (
     CONTEXT_DIR,
+    MAX_TOKENS_COACH,
+    MAX_TOKENS_INSIGHTS,
+    MAX_TOKENS_NUDGE,
     MAX_TOOL_ITERATIONS_COACH,
     MAX_TOOL_ITERATIONS_INSIGHTS,
     MAX_TOOL_ITERATIONS_NUDGE,
@@ -209,7 +212,8 @@ def _print_explain(
     params_table.add_column("Value")
     params_table.add_row("Model", result.model)
     params_table.add_row("Temperature", "0.7")
-    params_table.add_row("Max tokens", "4,096")
+    max_tokens = result.max_tokens or MAX_TOKENS_INSIGHTS
+    params_table.add_row("Max tokens", f"{max_tokens:,}")
     stderr.print(params_table)
 
     # Response stats
@@ -670,6 +674,11 @@ def _save_report(report: str, week: str) -> Path:
     return path
 
 
+def _hit_token_ceiling(result: LLMResult) -> bool:
+    """Return True when an LLM result likely ended because max_tokens was hit."""
+    return result.max_tokens is not None and result.output_tokens >= result.max_tokens
+
+
 def _save_nudge(text: str, trigger: str) -> Path:
     """Save a nudge to a timestamped markdown file."""
     NUDGES_DIR.mkdir(parents=True, exist_ok=True)
@@ -761,6 +770,7 @@ def cmd_insights(
             result = call_llm(
                 messages,
                 model=args.model,
+                max_tokens=MAX_TOKENS_INSIGHTS,
                 tools=tools,
                 reasoning_effort=reasoning_effort,
                 conn=conn,
@@ -826,23 +836,88 @@ def cmd_insights(
                         ),
                     }
                 )
+        synthesis_attempts = [("final_synthesis", reasoning_effort)]
+        if reasoning_effort is not None:
+            synthesis_attempts.append(("final_synthesis_no_reasoning", None))
+        for label, effort in synthesis_attempts:
+            try:
+                result = call_llm(
+                    messages,
+                    model=args.model,
+                    max_tokens=MAX_TOKENS_INSIGHTS,
+                    tools=None,
+                    reasoning_effort=effort,
+                    conn=conn,
+                    request_type="insights",
+                    metadata={
+                        "week": args.week,
+                        "months": args.months,
+                        "iteration": label,
+                        "reasoning_effort": effort,
+                    },
+                )
+            except Exception as e:
+                logger.error("Final synthesis call failed: %s", e)
+                sys.exit(1)
+            if result.text.strip():
+                break
+            if effort is not None:
+                logger.warning(
+                    "Insights final synthesis returned empty text; retrying with reasoning disabled"
+                )
+
+    if not result.text.strip():
+        logger.error(
+            "Insights returned an empty report after fallback synthesis; refusing to save a blank report"
+        )
+        sys.exit(1)
+
+    if _hit_token_ceiling(result):
+        logger.warning(
+            "Insights response hit max_tokens=%d; retrying concise synthesis",
+            MAX_TOKENS_INSIGHTS,
+        )
+        concise_messages = [
+            *messages,
+            {
+                "role": "user",
+                "content": (
+                    "Your previous report hit the output token limit. Produce the final "
+                    "report again from the data above in under 450 words. Include all "
+                    "required report sections and end with a short <memory> block. "
+                    "Do not include charts or extra analysis."
+                ),
+            },
+        ]
         try:
             result = call_llm(
-                messages,
+                concise_messages,
                 model=args.model,
+                max_tokens=MAX_TOKENS_INSIGHTS,
                 tools=None,
-                reasoning_effort=reasoning_effort,
+                reasoning_effort=None,
                 conn=conn,
                 request_type="insights",
                 metadata={
                     "week": args.week,
                     "months": args.months,
-                    "iteration": "final_synthesis",
-                    "reasoning_effort": reasoning_effort,
+                    "iteration": "truncation_retry",
+                    "reasoning_effort": None,
                 },
             )
         except Exception as e:
-            logger.error("Final synthesis call failed: %s", e)
+            logger.error("Concise synthesis retry failed: %s", e)
+            sys.exit(1)
+        if not result.text.strip():
+            logger.error(
+                "Insights concise synthesis returned empty text; refusing to save a blank report"
+            )
+            sys.exit(1)
+        if _hit_token_ceiling(result):
+            logger.error(
+                "Insights concise synthesis still hit max_tokens=%d; refusing to save a truncated report",
+                MAX_TOKENS_INSIGHTS,
+            )
             sys.exit(1)
 
     # Extract and render charts before stripping them from the response.
@@ -971,6 +1046,7 @@ def cmd_nudge(
             result = call_llm(
                 messages,
                 model=model,
+                max_tokens=MAX_TOKENS_NUDGE,
                 tools=tools,
                 conn=conn,
                 request_type="nudge",
@@ -1043,6 +1119,7 @@ def cmd_nudge(
             result = call_llm(
                 messages,
                 model=model,
+                max_tokens=MAX_TOKENS_NUDGE,
                 tools=None,
                 conn=conn,
                 request_type="nudge",
@@ -1214,6 +1291,7 @@ def cmd_coach(
             result = call_llm(
                 messages,
                 model=model,
+                max_tokens=MAX_TOKENS_COACH,
                 tools=tools,
                 reasoning_effort=reasoning_effort,
                 conn=conn,
@@ -1293,6 +1371,7 @@ def cmd_coach(
             result = call_llm(
                 messages,
                 model=model,
+                max_tokens=MAX_TOKENS_COACH,
                 tools=None,
                 reasoning_effort=reasoning_effort,
                 conn=conn,

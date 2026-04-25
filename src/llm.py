@@ -97,6 +97,7 @@ class LLMResult:
     total_tokens: int
     latency_s: float
     cost: float | None = None
+    max_tokens: int | None = None
     tool_calls: list | None = None
     raw_message: dict | None = None
     """The assistant message dict suitable for appending back to the messages
@@ -440,6 +441,7 @@ def call_llm(
         total_tokens=usage.total_tokens,
         latency_s=latency,
         cost=cost,
+        max_tokens=max_tokens,
         tool_calls=raw_tool_calls if tool_call_dicts else None,
         raw_message=raw_msg,
     )
