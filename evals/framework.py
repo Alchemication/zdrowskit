@@ -35,7 +35,7 @@ from tools import all_chat_tools  # noqa: E402
 CASES_DIR = Path(__file__).resolve().parent / "cases"
 DEFAULT_MODEL = llm.DEFAULT_MODEL
 DEFAULT_CACHE_PATH = Path(__file__).resolve().parent / ".cache.sqlite"
-EVAL_CACHE_SCHEMA_VERSION = 2
+EVAL_CACHE_SCHEMA_VERSION = 3
 EVAL_TEMPERATURE = 0.0
 
 

@@ -18,6 +18,7 @@ import re
 import sqlite3
 import time
 from dataclasses import dataclass
+from typing import Any
 
 import litellm
 
@@ -130,8 +131,56 @@ def _call_with_retry(
     raise last_exc  # type: ignore[misc]
 
 
+def _message_to_dict(message: Any) -> dict[str, Any]:
+    """Return a JSON-safe LiteLLM message dict, preserving provider fields."""
+    model_dump = getattr(message, "model_dump", None)
+    if callable(model_dump):
+        try:
+            dumped = model_dump(mode="json", exclude_none=True)
+        except TypeError:
+            dumped = model_dump(exclude_none=True)
+        if isinstance(dumped, dict):
+            return dict(dumped)
+
+    if isinstance(message, dict):
+        return dict(message)
+
+    role = getattr(message, "role", "assistant") or "assistant"
+    content = getattr(message, "content", "") or ""
+    return {
+        "role": role if isinstance(role, str) else "assistant",
+        "content": content if isinstance(content, str) else str(content),
+    }
+
+
+def _tool_call_to_dict(tool_call: Any) -> dict[str, Any]:
+    """Normalize a LiteLLM tool call object into chat-message JSON."""
+    if isinstance(tool_call, dict):
+        return {
+            "id": tool_call.get("id"),
+            "type": tool_call.get("type", "function"),
+            "function": dict(tool_call.get("function", {}) or {}),
+        }
+
+    return {
+        "id": tool_call.id,
+        "type": "function",
+        "function": {
+            "name": tool_call.function.name,
+            "arguments": tool_call.function.arguments,
+        },
+    }
+
+
+def _tool_calls_to_dicts(tool_calls: Any) -> list[dict[str, Any]]:
+    """Normalize an iterable of tool calls; tolerate mock objects with none."""
+    if not isinstance(tool_calls, list | tuple):
+        return []
+    return [_tool_call_to_dict(tc) for tc in tool_calls]
+
+
 def call_llm(
-    messages: list[dict[str, str]],
+    messages: list[dict[str, Any]],
     model: str = DEFAULT_MODEL,
     max_tokens: int = 4096,
     temperature: float | None = 0.7,
@@ -202,21 +251,17 @@ def call_llm(
 
     message = response.choices[0].message
     raw_tool_calls = getattr(message, "tool_calls", None)
+    tool_call_dicts = _tool_calls_to_dicts(raw_tool_calls)
 
-    # Build a raw message dict for tool-calling loops.
-    raw_msg: dict = {"role": "assistant", "content": message.content or ""}
-    if raw_tool_calls:
-        raw_msg["tool_calls"] = [
-            {
-                "id": tc.id,
-                "type": "function",
-                "function": {
-                    "name": tc.function.name,
-                    "arguments": tc.function.arguments,
-                },
-            }
-            for tc in raw_tool_calls
-        ]
+    # Build a raw message dict for tool-calling loops. Some providers require
+    # their assistant-side reasoning fields to be replayed with tool results.
+    raw_msg = _message_to_dict(message)
+    if not isinstance(raw_msg.get("role"), str):
+        raw_msg["role"] = "assistant"
+    raw_msg["role"] = raw_msg.get("role") or "assistant"
+    raw_msg["content"] = raw_msg.get("content") or ""
+    if tool_call_dicts:
+        raw_msg["tool_calls"] = tool_call_dicts
 
     result = LLMResult(
         text=message.content or "",
@@ -226,7 +271,7 @@ def call_llm(
         total_tokens=usage.total_tokens,
         latency_s=latency,
         cost=cost,
-        tool_calls=raw_tool_calls if raw_tool_calls else None,
+        tool_calls=raw_tool_calls if tool_call_dicts else None,
         raw_message=raw_msg,
     )
 

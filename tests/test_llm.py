@@ -752,6 +752,37 @@ class TestCallLlm:
         assert result.cost is None
 
     @patch("llm.litellm")
+    def test_raw_message_preserves_reasoning_content(
+        self, mock_litellm: MagicMock
+    ) -> None:
+        """DeepSeek requires reasoning_content to be replayed after tool calls."""
+        tool_call = {
+            "id": "call_1",
+            "type": "function",
+            "function": {"name": "run_sql", "arguments": '{"sql":"select 1"}'},
+        }
+        response = self._mock_response(text="")
+        response.choices[0].message.content = ""
+        response.choices[0].message.tool_calls = [tool_call]
+        response.choices[0].message.model_dump.return_value = {
+            "role": "assistant",
+            "content": "",
+            "reasoning_content": "I should query the database.",
+            "tool_calls": [tool_call],
+        }
+        mock_litellm.completion.return_value = response
+        mock_litellm.completion_cost.return_value = None
+
+        result = call_llm([{"role": "user", "content": "test"}], tools=[])
+
+        assert result.raw_message == {
+            "role": "assistant",
+            "content": "",
+            "reasoning_content": "I should query the database.",
+            "tool_calls": [tool_call],
+        }
+
+    @patch("llm.litellm")
     def test_reasoning_effort_passed(self, mock_litellm: MagicMock) -> None:
         mock_litellm.completion.return_value = self._mock_response()
         mock_litellm.completion_cost.return_value = None
