@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -9,13 +10,33 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from config import PROMPTS_DIR
+from config import (
+    ANTHROPIC_HAIKU_MODEL,
+    ANTHROPIC_OPUS_MODEL,
+    DEEPSEEK_FLASH_MODEL,
+    DEEPSEEK_PRO_MODEL,
+    DEFAULT_ADD_CLONE_MODEL,
+    DEFAULT_CHAT_MODEL,
+    DEFAULT_COACH_MODEL,
+    DEFAULT_INSIGHTS_MODEL,
+    DEFAULT_LOG_FLOW_MODEL,
+    DEFAULT_MODEL,
+    DEFAULT_NOTIFY_MODEL,
+    DEFAULT_NUDGE_MODEL,
+    FALLBACK_FLASH_MODEL,
+    FALLBACK_MODEL,
+    FALLBACK_PRO_MODEL,
+    PRIMARY_FLASH_MODEL,
+    PRIMARY_PRO_MODEL,
+    PROMPTS_DIR,
+)
 from charts import chart_figure_caption
 from llm import (
-    FALLBACK_MODEL,
     LLMResult,
     _call_with_retry,
+    _completion_kwargs_for_model,
     _deepseek_v4_cost,
+    _fallback_chain,
     _is_overloaded,
     call_llm,
     extract_memory,
@@ -48,6 +69,23 @@ class TestExtractMemory:
     def test_strips_whitespace(self) -> None:
         text = "<memory>  padded content  </memory>"
         assert extract_memory(text) == "padded content"
+
+
+class TestFeatureDefaultModels:
+    def test_high_judgment_surfaces_default_to_deepseek_pro(self) -> None:
+        assert DEFAULT_MODEL == PRIMARY_PRO_MODEL == DEEPSEEK_PRO_MODEL
+        assert FALLBACK_MODEL == FALLBACK_PRO_MODEL == ANTHROPIC_OPUS_MODEL
+        assert DEFAULT_INSIGHTS_MODEL == PRIMARY_PRO_MODEL
+        assert DEFAULT_COACH_MODEL == PRIMARY_PRO_MODEL
+        assert DEFAULT_NUDGE_MODEL == PRIMARY_PRO_MODEL
+        assert DEFAULT_CHAT_MODEL == PRIMARY_PRO_MODEL
+
+    def test_lightweight_utility_surfaces_default_to_deepseek_flash(self) -> None:
+        assert PRIMARY_FLASH_MODEL == DEEPSEEK_FLASH_MODEL
+        assert FALLBACK_FLASH_MODEL == ANTHROPIC_HAIKU_MODEL
+        assert DEFAULT_NOTIFY_MODEL == PRIMARY_FLASH_MODEL
+        assert DEFAULT_LOG_FLOW_MODEL == PRIMARY_FLASH_MODEL
+        assert DEFAULT_ADD_CLONE_MODEL == PRIMARY_FLASH_MODEL
 
 
 class TestRecentHistory:
@@ -750,7 +788,8 @@ class TestCallLlm:
         mock_litellm.completion_cost.side_effect = Exception("no pricing")
 
         result = call_llm([{"role": "user", "content": "test"}])
-        assert result.cost is None
+        assert result.model == DEFAULT_MODEL
+        assert result.cost == pytest.approx(0.000087)
 
     @patch("llm.litellm")
     def test_uses_provider_reported_cost_when_litellm_missing(
@@ -836,12 +875,30 @@ class TestCallLlm:
         }
 
     @patch("llm.litellm")
-    def test_reasoning_effort_passed(self, mock_litellm: MagicMock) -> None:
+    def test_reasoning_effort_omitted_for_deepseek_default(
+        self, mock_litellm: MagicMock
+    ) -> None:
         mock_litellm.completion.return_value = self._mock_response()
         mock_litellm.completion_cost.return_value = None
 
         call_llm(
             [{"role": "user", "content": "test"}],
+            reasoning_effort="high",
+        )
+        kwargs = mock_litellm.completion.call_args[1]
+        assert kwargs["model"] == DEFAULT_MODEL
+        assert "reasoning_effort" not in kwargs
+
+    @patch("llm.litellm")
+    def test_reasoning_effort_passed_for_anthropic(
+        self, mock_litellm: MagicMock
+    ) -> None:
+        mock_litellm.completion.return_value = self._mock_response()
+        mock_litellm.completion_cost.return_value = None
+
+        call_llm(
+            [{"role": "user", "content": "test"}],
+            model=ANTHROPIC_OPUS_MODEL,
             reasoning_effort="high",
         )
         kwargs = mock_litellm.completion.call_args[1]
@@ -867,6 +924,7 @@ class TestCallLlm:
 
         call_llm(
             [{"role": "user", "content": "test"}],
+            model=ANTHROPIC_OPUS_MODEL,
             temperature=0.7,
             reasoning_effort="medium",
         )
@@ -905,6 +963,35 @@ class TestCallLlm:
         row = in_memory_db.execute("SELECT * FROM llm_call").fetchone()
         assert row is not None
         assert row["request_type"] == "insights"
+
+    @patch("llm.litellm")
+    def test_logs_requested_model_when_fallback_used(
+        self, mock_litellm: MagicMock, in_memory_db: sqlite3.Connection
+    ) -> None:
+        mock_litellm.completion.side_effect = [
+            Exception("anthropic unavailable"),
+            self._mock_response(),
+        ]
+        mock_litellm.completion_cost.return_value = 0.02
+
+        call_llm(
+            [{"role": "user", "content": "test"}],
+            model=ANTHROPIC_OPUS_MODEL,
+            conn=in_memory_db,
+            request_type="insights",
+            metadata={"week": "last"},
+        )
+        row = in_memory_db.execute("SELECT * FROM llm_call").fetchone()
+        assert row["model"] == DEEPSEEK_PRO_MODEL
+
+        params = json.loads(row["params_json"])
+        metadata = json.loads(row["metadata_json"])
+        assert params["requested_model"] == ANTHROPIC_OPUS_MODEL
+        assert params["fallback_used"] is True
+        assert metadata["requested_model"] == ANTHROPIC_OPUS_MODEL
+        assert metadata["effective_model"] == DEEPSEEK_PRO_MODEL
+        assert metadata["fallback_used"] is True
+        assert metadata["week"] == "last"
 
     @patch("llm.litellm")
     def test_db_logging_failure_swallowed(self, mock_litellm: MagicMock) -> None:
@@ -981,7 +1068,7 @@ class TestCallWithRetry:
 
     @patch("llm.time.sleep")
     @patch("llm.litellm")
-    def test_falls_back_to_sonnet_after_all_retries(
+    def test_deepseek_pro_falls_back_to_opus_after_all_retries(
         self, mock_litellm, mock_sleep
     ) -> None:
         # Primary model always overloaded; fallback succeeds.
@@ -992,17 +1079,36 @@ class TestCallWithRetry:
             self._overloaded_error(),  # primary attempt 4 (no delay after)
             self._mock_response("fallback ok"),  # fallback succeeds
         ]
-        resp, model = _call_with_retry({"model": "primary"}, "primary")
+        resp, model = _call_with_retry(
+            {"model": DEEPSEEK_PRO_MODEL}, DEEPSEEK_PRO_MODEL
+        )
         assert model == FALLBACK_MODEL
+        assert model == ANTHROPIC_OPUS_MODEL
         # 3 delays for primary retries.
         assert mock_sleep.call_count == 3
 
     @patch("llm.time.sleep")
     @patch("llm.litellm")
-    def test_raises_on_non_overloaded_error(self, mock_litellm, mock_sleep) -> None:
+    def test_non_overloaded_error_uses_cross_provider_fallback(
+        self, mock_litellm, mock_sleep
+    ) -> None:
+        mock_litellm.completion.side_effect = [
+            Exception("authentication failed"),
+            self._mock_response("fallback ok"),
+        ]
+        resp, model = _call_with_retry(
+            {"model": ANTHROPIC_OPUS_MODEL}, ANTHROPIC_OPUS_MODEL
+        )
+        assert resp.choices[0].message.content == "fallback ok"
+        assert model == DEEPSEEK_PRO_MODEL
+        mock_sleep.assert_not_called()
+
+    @patch("llm.time.sleep")
+    @patch("llm.litellm")
+    def test_raises_after_all_providers_fail(self, mock_litellm, mock_sleep) -> None:
         mock_litellm.completion.side_effect = Exception("authentication failed")
         with pytest.raises(Exception, match="authentication failed"):
-            _call_with_retry({"model": "m"}, "m")
+            _call_with_retry({"model": ANTHROPIC_OPUS_MODEL}, ANTHROPIC_OPUS_MODEL)
         mock_sleep.assert_not_called()
 
     @patch("llm.time.sleep")
@@ -1012,6 +1118,48 @@ class TestCallWithRetry:
         mock_litellm.completion.side_effect = self._overloaded_error()
         with pytest.raises(Exception, match="overloaded_error"):
             _call_with_retry({"model": "m"}, "m")
+
+    def test_fallback_chain_pairs_budget_models(self) -> None:
+        assert _fallback_chain(PRIMARY_FLASH_MODEL) == [
+            PRIMARY_FLASH_MODEL,
+            FALLBACK_FLASH_MODEL,
+        ]
+        assert _fallback_chain(FALLBACK_FLASH_MODEL) == [
+            FALLBACK_FLASH_MODEL,
+            PRIMARY_FLASH_MODEL,
+        ]
+
+    def test_deepseek_attempt_omits_reasoning_effort(self) -> None:
+        kwargs = _completion_kwargs_for_model(
+            {
+                "model": DEEPSEEK_PRO_MODEL,
+                "messages": [],
+                "max_tokens": 10,
+                "temperature": 0.7,
+                "reasoning_effort": "medium",
+            },
+            DEEPSEEK_PRO_MODEL,
+        )
+
+        assert kwargs["model"] == DEEPSEEK_PRO_MODEL
+        assert kwargs["temperature"] == 0.7
+        assert "reasoning_effort" not in kwargs
+
+    def test_anthropic_attempt_keeps_reasoning_effort_and_temperature_one(self) -> None:
+        kwargs = _completion_kwargs_for_model(
+            {
+                "model": DEFAULT_MODEL,
+                "messages": [],
+                "max_tokens": 10,
+                "temperature": 0.7,
+                "reasoning_effort": "medium",
+            },
+            ANTHROPIC_OPUS_MODEL,
+        )
+
+        assert kwargs["model"] == ANTHROPIC_OPUS_MODEL
+        assert kwargs["temperature"] == 1.0
+        assert kwargs["reasoning_effort"] == "medium"
 
 
 class TestAppendHistory:

@@ -134,6 +134,75 @@ def _load_nearby_llm_calls(
     return nearby
 
 
+def _parse_metadata(raw: object) -> dict[str, object]:
+    """Parse a metadata_json value into a dict."""
+    if not isinstance(raw, str) or not raw.strip():
+        return {}
+    try:
+        data = json.loads(raw)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _metadata_source_llm_call_id(metadata: dict[str, object]) -> int | None:
+    """Return source_llm_call_id from parsed metadata when present."""
+    raw_id = metadata.get("source_llm_call_id")
+    if isinstance(raw_id, bool) or raw_id is None:
+        return None
+    try:
+        return int(raw_id)
+    except (TypeError, ValueError):
+        return None
+
+
+def _load_related_verification_calls(conn, target_row) -> list[dict[str, object]]:
+    """Load source/verifier/rewrite calls that share a verification trace.
+
+    Works in both directions: selecting the original ``nudge`` call shows its
+    ``nudge_verify``/``nudge_rewrite`` calls, while selecting a verifier row
+    shows the original source call and sibling rewrite.
+    """
+    target_metadata = _parse_metadata(target_row["metadata_json"])
+    source_id = _metadata_source_llm_call_id(target_metadata) or int(target_row["id"])
+
+    rows = conn.execute(
+        """
+        SELECT id, timestamp, request_type, model, input_tokens, output_tokens,
+               total_tokens, latency_s, cost, metadata_json
+        FROM llm_call
+        ORDER BY timestamp ASC, id ASC
+        """
+    ).fetchall()
+
+    related: list[dict[str, object]] = []
+    for row in rows:
+        metadata = _parse_metadata(row["metadata_json"])
+        is_source = int(row["id"]) == source_id
+        is_related = _metadata_source_llm_call_id(metadata) == source_id
+        if not is_source and not is_related:
+            continue
+        related.append(
+            {
+                "id": row["id"],
+                "timestamp": row["timestamp"],
+                "request_type": row["request_type"],
+                "model": row["model"],
+                "input_tokens": row["input_tokens"],
+                "output_tokens": row["output_tokens"],
+                "total_tokens": row["total_tokens"],
+                "latency_s": row["latency_s"],
+                "cost": row["cost"],
+                "metadata": metadata,
+                "relationship": "source"
+                if is_source
+                else str(metadata.get("stage", "related")),
+                "selected": row["id"] == target_row["id"],
+            }
+        )
+    return related
+
+
 # ---------------------------------------------------------------------------
 # Subcommand handler
 # ---------------------------------------------------------------------------
@@ -164,12 +233,14 @@ def cmd_llm_log(args: argparse.Namespace) -> None:
         messages = json.loads(row["messages_json"])
         transcript = _normalize_llm_log_transcript(messages, row["response_text"])
         nearby_calls = _load_nearby_llm_calls(conn, row)
+        related_verification_calls = _load_related_verification_calls(conn, row)
 
         if args.json:
             detail = {k: row[k] for k in row.keys()}
             detail["messages"] = messages
             detail["transcript"] = transcript
             detail["nearby_calls"] = nearby_calls
+            detail["related_verification_calls"] = related_verification_calls
             print(json.dumps(detail, indent=2))
             return
 
@@ -225,6 +296,35 @@ def cmd_llm_log(args: argparse.Namespace) -> None:
                     style=row_style,
                 )
             console.print(nearby_table)
+
+        if len(related_verification_calls) > 1:
+            related_table = Table(title="Related Verification Trace", show_lines=False)
+            related_table.add_column("ID", justify="right", style="dim")
+            related_table.add_column("Stage", style="cyan")
+            related_table.add_column("Type")
+            related_table.add_column("Model", style="dim")
+            related_table.add_column("Verdict")
+            related_table.add_column("Issues", justify="right")
+            related_table.add_column("Cost", justify="right", style="green")
+            for related in related_verification_calls:
+                metadata = related["metadata"]
+                assert isinstance(metadata, dict)
+                marker = ">" if related["selected"] else ""
+                verdict = str(metadata.get("verdict") or "—")
+                issue_count = metadata.get("issue_count")
+                issue_text = str(issue_count) if issue_count is not None else "—"
+                cost = related["cost"]
+                related_table.add_row(
+                    f"{marker}{related['id']}",
+                    str(related["relationship"]),
+                    str(related["request_type"]),
+                    str(related["model"]).split("/")[-1],
+                    verdict,
+                    issue_text,
+                    f"${float(cost):.4f}" if cost is not None else "—",
+                    style="bold green" if related["selected"] else "",
+                )
+            console.print(related_table)
 
         feedback_rows = load_feedback_for_call(conn, args.id)
         if feedback_rows:

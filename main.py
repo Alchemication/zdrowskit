@@ -49,7 +49,7 @@ Examples:
         Print the live SQLite schema from the database.
 
     uv run python main.py insights
-        Generate this week's personalized report using Claude Haiku.
+        Generate this week's personalized report using the default model.
 
     uv run python main.py insights --months 6
         Same, with 6 months of historical context.
@@ -73,7 +73,7 @@ Examples:
         Send the report via Telegram (requires TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID).
 
     uv run python main.py insights --model openai/gpt-4o
-        Use a different litellm model instead of the default Claude Haiku.
+        Use a different litellm model instead of the default.
 
     uv run python main.py context
         Show context files used by insights and whether each exists.
@@ -115,7 +115,7 @@ from commands import (
     cmd_status,
     cmd_telegram_setup,
 )
-from llm import DEFAULT_MODEL
+from config import DEFAULT_COACH_MODEL, DEFAULT_INSIGHTS_MODEL, DEFAULT_NUDGE_MODEL
 from log import setup_logging
 from store import default_db_path
 
@@ -215,9 +215,9 @@ def main() -> None:
     )
     p_insights.add_argument(
         "--model",
-        default=DEFAULT_MODEL,
+        default=DEFAULT_INSIGHTS_MODEL,
         metavar="MODEL",
-        help=f"litellm model string (default: {DEFAULT_MODEL})",
+        help=f"litellm model string (default: {DEFAULT_INSIGHTS_MODEL})",
     )
     p_insights.add_argument(
         "--week",
@@ -304,9 +304,9 @@ def main() -> None:
     )
     p_nudge.add_argument(
         "--model",
-        default=DEFAULT_MODEL,
+        default=DEFAULT_NUDGE_MODEL,
         metavar="MODEL",
-        help=f"litellm model string (default: {DEFAULT_MODEL})",
+        help=f"litellm model string (default: {DEFAULT_NUDGE_MODEL})",
     )
     p_nudge.add_argument(
         "--email",
@@ -339,9 +339,9 @@ def main() -> None:
     )
     p_coach.add_argument(
         "--model",
-        default=DEFAULT_MODEL,
+        default=DEFAULT_COACH_MODEL,
         metavar="MODEL",
-        help=f"litellm model string (default: {DEFAULT_MODEL})",
+        help=f"litellm model string (default: {DEFAULT_COACH_MODEL})",
     )
     p_coach.add_argument(
         "--reasoning-effort",

@@ -32,11 +32,39 @@ Storage is local — SQLite on your machine, no third-party sync. The processing
 
 - **Apple Watch + iPhone** — zdrowskit reads Apple Health data. That's the only supported source right now. You need the [Auto Export](https://apps.apple.com/app/myhealth-export-to-icloud/id6737380982) iOS app to get data out of HealthKit into iCloud Drive as JSON.
 - **Mac** — the daemon watches your iCloud Drive folder, so it needs to run on a Mac where iCloud syncs. The rest of the stack (Python, SQLite) runs anywhere, but the data pipeline assumes macOS paths.
-- **A capable LLM** — this isn't a simple summariser. The coach writes personalised reports, decides when to stay quiet, generates SQL queries against your data, and produces chart code. That requires real intelligence. **Recommended: Claude Opus 4.6** (or equivalent). **Minimum: Claude Sonnet 4.6** — anything below that and the reports get generic, the queries get unreliable, and the charts break. Any model provider works — zdrowskit uses [litellm](https://github.com/BerriAI/litellm) so you can swap in OpenAI, Google, or any compatible API.
+- **A capable LLM** — this isn't a simple summariser. The coach writes personalised reports, decides when to stay quiet, generates SQL queries against your data, and produces chart code. That requires real intelligence. **Default: DeepSeek V4 Pro**, with Anthropic Opus 4.6 as the cross-provider fallback. **Minimum: Claude Sonnet 4.6 or equivalent** — anything below that and the reports get generic, the queries get unreliable, and the charts break. Any model provider works — zdrowskit uses [litellm](https://github.com/BerriAI/litellm) so you can swap in OpenAI, Google, or any compatible API.
 - **Python 3.11+** and [uv](https://github.com/astral-sh/uv)
 - **Telegram bot** (for notifications and chat)
 
 Under the hood: SQLite for storage, [litellm](https://github.com/BerriAI/litellm) for provider-agnostic LLM calls, [Plotly](https://plotly.com/python/) + Kaleido for charts, [watchdog](https://github.com/gorakhargosh/watchdog) for filesystem events, Telegram Bot API for delivery.
+
+**Model defaults and fallback policy:** high-judgement surfaces — insights,
+coach, nudges, and chat — default to `deepseek/deepseek-v4-pro`. Lightweight
+utility surfaces — `/notify` interpretation, `/log` flow building, and `/add`
+workout clone selection — default to `deepseek/deepseek-v4-flash`. If a
+DeepSeek Pro call fails, zdrowskit falls back to `anthropic/claude-opus-4-6`;
+if DeepSeek Flash fails, it falls back to `anthropic/claude-haiku-4-5`.
+Anthropic calls cross the other way: Opus/Sonnet fall back to DeepSeek Pro,
+while Haiku falls back to DeepSeek Flash. Logged LLM calls record the effective
+model, and fallback calls include `requested_model` and `fallback_used` in
+params/metadata.
+
+The defaults live in `src/config.py` and can be overridden from `.env`:
+
+```env
+ZDROWSKIT_PRIMARY_PRO_MODEL=deepseek/deepseek-v4-pro
+ZDROWSKIT_FALLBACK_PRO_MODEL=anthropic/claude-opus-4-6
+ZDROWSKIT_PRIMARY_FLASH_MODEL=deepseek/deepseek-v4-flash
+ZDROWSKIT_FALLBACK_FLASH_MODEL=anthropic/claude-haiku-4-5
+
+ZDROWSKIT_INSIGHTS_MODEL=deepseek/deepseek-v4-pro
+ZDROWSKIT_COACH_MODEL=deepseek/deepseek-v4-pro
+ZDROWSKIT_NUDGE_MODEL=deepseek/deepseek-v4-pro
+ZDROWSKIT_CHAT_MODEL=deepseek/deepseek-v4-pro
+ZDROWSKIT_NOTIFY_MODEL=deepseek/deepseek-v4-flash
+ZDROWSKIT_LOG_FLOW_MODEL=deepseek/deepseek-v4-flash
+ZDROWSKIT_ADD_CLONE_MODEL=deepseek/deepseek-v4-flash
+```
 
 ## Getting your data out of Apple Health
 
@@ -309,6 +337,30 @@ Each channel sees what the others recently said so the LLM avoids redundancy:
 - **LLM SKIP:** the nudge LLM can respond `SKIP` if there's nothing genuinely new to say
 - **Coach:** runs at most once per calendar day
 - **No replay after mute:** skipped nudges/reports are not replayed after a temporary mute expires
+
+### Optional LLM verification
+
+Post-generation verification can be enabled for reports, coach reviews, and
+nudges. This adds a separate verifier call and, when the issue is fixable, one
+bounded rewrite call before the output is saved or sent. It is off by default
+for controlled eval rollouts.
+
+```env
+ZDROWSKIT_ENABLE_LLM_VERIFICATION=1
+ZDROWSKIT_VERIFICATION_MODEL=deepseek/deepseek-v4-pro
+ZDROWSKIT_VERIFICATION_REWRITE_MODEL=deepseek/deepseek-v4-flash
+ZDROWSKIT_MAX_VERIFICATION_REVISIONS=1
+ZDROWSKIT_VERIFY_INSIGHTS=1
+ZDROWSKIT_VERIFY_COACH=1
+ZDROWSKIT_VERIFY_NUDGE=1
+```
+
+Verification traces are logged as `insights_verify`, `insights_rewrite`,
+`coach_verify`, `coach_rewrite`, `nudge_verify`, and `nudge_rewrite`. The
+original source call metadata also records the verifier verdict, issue counts,
+issue details, and verifier/rewrite call IDs. Use
+`uv run python main.py llm-log --id N` on either the source call or a verifier
+call to see the related verification trace.
 
 ### Telegram configuration
 

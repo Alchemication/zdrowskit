@@ -381,7 +381,7 @@ class TestDurationScaling:
 
 class TestFindWorkoutClone:
     def test_llm_called_with_correct_params(self, db: sqlite3.Connection) -> None:
-        """Verify the LLM is called with request_type='add_clone' and haiku model."""
+        """Verify add_clone uses the lightweight feature default model."""
         _seed_workouts(db)
 
         mock_result = MagicMock()
@@ -405,7 +405,7 @@ class TestFindWorkoutClone:
             assert mock_call.called
             call_kwargs = mock_call.call_args
             assert call_kwargs.kwargs.get("request_type") == "add_clone"
-            assert "haiku" in call_kwargs.kwargs.get("model", "")
+            assert call_kwargs.kwargs.get("model") == "deepseek/deepseek-v4-flash"
             assert result["type"] == "Outdoor Run"
             assert result["duration_min"] == 40
 

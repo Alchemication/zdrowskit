@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 from cmd_db import cmd_db
 from cmd_llm import (
+    _apply_verification,
     _query_today_snapshot,
     cmd_coach,
     cmd_insights,
@@ -21,6 +22,7 @@ from cmd_llm_log import cmd_llm_log
 from commands import TELEGRAM_BOT_COMMANDS
 from config import MAX_TOKENS_INSIGHTS
 from llm import LLMResult
+from llm_verify import VerificationResult
 from store import log_feedback, log_llm_call, open_db
 
 
@@ -60,6 +62,82 @@ class TestLogFlowSnapshot:
         )
         snapshot = _query_today_snapshot(in_memory_db, date(2026, 4, 20))
         assert "Last night: 7.50h, 94% efficiency" in snapshot
+
+
+class TestVerificationGate:
+    def test_config_disabled_skips_verifier(
+        self,
+        in_memory_db: sqlite3.Connection,
+        monkeypatch,
+    ) -> None:
+        monkeypatch.setattr("cmd_llm.ENABLE_LLM_VERIFICATION", False)
+
+        def fail_verify(**kwargs):
+            raise AssertionError("verifier should not run")
+
+        monkeypatch.setattr("cmd_llm.verify_and_rewrite", fail_verify)
+
+        approved = _apply_verification(
+            kind="insights",
+            draft="draft",
+            evidence={},
+            source_messages=[],
+            conn=in_memory_db,
+            metadata={},
+        )
+
+        assert approved == "draft"
+
+    def test_revised_text_is_used_when_enabled(
+        self,
+        in_memory_db: sqlite3.Connection,
+        monkeypatch,
+    ) -> None:
+        monkeypatch.setattr("cmd_llm.ENABLE_LLM_VERIFICATION", True)
+        monkeypatch.setattr("cmd_llm.VERIFY_INSIGHTS", True)
+
+        def fake_verify(**kwargs):
+            return VerificationResult(
+                verdict="revise",
+                issues=[],
+                revised_text="fixed draft",
+            )
+
+        monkeypatch.setattr("cmd_llm.verify_and_rewrite", fake_verify)
+
+        approved = _apply_verification(
+            kind="insights",
+            draft="draft",
+            evidence={},
+            source_messages=[],
+            conn=in_memory_db,
+            metadata={},
+        )
+
+        assert approved == "fixed draft"
+
+    def test_fail_returns_none_when_enabled(
+        self,
+        in_memory_db: sqlite3.Connection,
+        monkeypatch,
+    ) -> None:
+        monkeypatch.setattr("cmd_llm.ENABLE_LLM_VERIFICATION", True)
+        monkeypatch.setattr("cmd_llm.VERIFY_NUDGE", True)
+        monkeypatch.setattr(
+            "cmd_llm.verify_and_rewrite",
+            lambda **kwargs: VerificationResult(verdict="fail", issues=[]),
+        )
+
+        approved = _apply_verification(
+            kind="nudge",
+            draft="weak nudge",
+            evidence={},
+            source_messages=[],
+            conn=in_memory_db,
+            metadata={},
+        )
+
+        assert approved is None
 
 
 class TestCmdCoach:
@@ -204,6 +282,60 @@ class TestCmdCoach:
         assert proposals[0].edit.file == "strategy"
         assert proposals[0].edit.section == "## Weekly Plan"
         assert "Reduce run volume" in (cmd_result.text or "")
+
+    def test_verifier_fail_suppresses_coach_bundle(
+        self,
+        in_memory_db,
+        capsys,
+        monkeypatch,
+    ) -> None:
+        args = SimpleNamespace(
+            db="ignored.db", model="test-model", week="current", months=3
+        )
+        result = LLMResult(
+            text="Change the plan because this week felt messy.",
+            model="test-model",
+            input_tokens=1,
+            output_tokens=1,
+            total_tokens=2,
+            latency_s=0.1,
+            llm_call_id=10,
+        )
+        monkeypatch.setattr("cmd_llm.ENABLE_LLM_VERIFICATION", True)
+        monkeypatch.setattr("cmd_llm.VERIFY_COACH", True)
+        monkeypatch.setattr(
+            "cmd_llm.verify_and_rewrite",
+            lambda **kwargs: VerificationResult(verdict="fail", issues=[]),
+        )
+
+        with (
+            patch("cmd_llm.load_context", return_value={"prompt": "x", "soul": "y"}),
+            patch("cmd_llm.open_db", return_value=in_memory_db),
+            patch("cmd_llm.compute_baselines", return_value="baseline md"),
+            patch("cmd_llm._save_baselines"),
+            patch(
+                "cmd_llm.build_llm_data",
+                return_value={
+                    "current_week": {"summary": {"week_label": "2026-W14"}, "days": []},
+                    "history": [],
+                    "week_complete": False,
+                    "week_label": "2026-W14",
+                },
+            ),
+            patch(
+                "cmd_llm.build_messages",
+                return_value=[
+                    {"role": "system", "content": "s"},
+                    {"role": "user", "content": "u"},
+                ],
+            ),
+            patch("cmd_llm.call_llm", return_value=result),
+        ):
+            cmd_result, proposals = cmd_coach(args)
+
+        assert capsys.readouterr().out == ""
+        assert cmd_result.text is None
+        assert proposals == []
 
 
 class TestCmdInsights:
@@ -822,8 +954,136 @@ class TestCmdLlmLog:
         assert payload["transcript"][-1]["role"] == "assistant_final"
         assert nearby_ids == [earlier_id, target_id]
 
+    def test_detail_json_includes_related_verification_calls(
+        self,
+        in_memory_db,
+        capsys,
+    ) -> None:
+        source_id = log_llm_call(
+            in_memory_db,
+            request_type="nudge",
+            model="draft-model",
+            messages=[{"role": "user", "content": "nudge"}],
+            response_text="Weak nudge.",
+            metadata={
+                "nudge_verification": {
+                    "verdict": "fail",
+                    "verifier_call_id": None,
+                    "issue_count": 1,
+                }
+            },
+        )
+        verify_id = log_llm_call(
+            in_memory_db,
+            request_type="nudge_verify",
+            model="verify-model",
+            messages=[{"role": "user", "content": "{}"}],
+            response_text='{"verdict":"fail","issues":[],"confidence":"high"}',
+            metadata={
+                "source_llm_call_id": source_id,
+                "stage": "verify",
+                "verdict": "fail",
+                "issue_count": 1,
+            },
+        )
+        rewrite_id = log_llm_call(
+            in_memory_db,
+            request_type="nudge_rewrite",
+            model="rewrite-model",
+            messages=[{"role": "user", "content": "{}"}],
+            response_text="SKIP",
+            metadata={
+                "source_llm_call_id": source_id,
+                "stage": "rewrite",
+                "verdict": "revise",
+                "issue_count": 1,
+            },
+        )
+        args = SimpleNamespace(
+            db="ignored.db",
+            last=10,
+            stats=False,
+            id=source_id,
+            feedback=False,
+            json=True,
+        )
+
+        with patch("cmd_llm_log.open_db", return_value=in_memory_db):
+            cmd_llm_log(args)
+
+        payload = json.loads(capsys.readouterr().out)
+        related = payload["related_verification_calls"]
+        assert [row["id"] for row in related] == [source_id, verify_id, rewrite_id]
+        assert [row["relationship"] for row in related] == [
+            "source",
+            "verify",
+            "rewrite",
+        ]
+        assert related[1]["metadata"]["source_llm_call_id"] == source_id
+
 
 class TestCmdNudge:
+    def test_verifier_fail_turns_nudge_into_skip(
+        self,
+        in_memory_db,
+        capsys,
+        monkeypatch,
+    ) -> None:
+        args = SimpleNamespace(
+            db="ignored.db",
+            model="test-model",
+            months=1,
+            trigger="new_data",
+            email=False,
+            telegram=True,
+        )
+        result = LLMResult(
+            text="Your run was fine, maybe do something later.",
+            model="test-model",
+            input_tokens=1,
+            output_tokens=1,
+            total_tokens=2,
+            latency_s=0.1,
+            llm_call_id=9,
+        )
+        monkeypatch.setattr("cmd_llm.ENABLE_LLM_VERIFICATION", True)
+        monkeypatch.setattr("cmd_llm.VERIFY_NUDGE", True)
+        monkeypatch.setattr(
+            "cmd_llm.verify_and_rewrite",
+            lambda **kwargs: VerificationResult(verdict="fail", issues=[]),
+        )
+
+        with (
+            patch("cmd_llm.load_context", return_value={"prompt": "x", "soul": "y"}),
+            patch("cmd_llm.open_db", return_value=in_memory_db),
+            patch(
+                "cmd_llm.build_llm_data",
+                return_value={
+                    "current_week": {"summary": {"week_label": "2026-W14"}, "days": []},
+                    "history": [],
+                    "week_complete": False,
+                    "week_label": "2026-W14",
+                },
+            ),
+            patch(
+                "cmd_llm.build_messages",
+                return_value=[
+                    {"role": "system", "content": "s"},
+                    {"role": "user", "content": "u"},
+                ],
+            ),
+            patch("cmd_llm.call_llm", return_value=result),
+            patch("tools.run_sql_tool", return_value=[{"type": "function"}]),
+            patch("cmd_llm._save_nudge") as save_nudge,
+            patch("cmd_llm.send_telegram") as send_telegram,
+        ):
+            cmd_result = cmd_nudge(args)
+
+        assert capsys.readouterr().out == ""
+        assert cmd_result.text is None
+        save_nudge.assert_not_called()
+        send_telegram.assert_not_called()
+
     def test_retries_when_model_returns_meta_text_instead_of_final_nudge(
         self,
         in_memory_db,

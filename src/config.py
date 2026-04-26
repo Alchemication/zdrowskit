@@ -1,18 +1,25 @@
-"""Shared paths and configuration resolution.
+"""Shared paths, limits, model routing, and daemon configuration.
 
-Public API:
-    AUTOEXPORT_DATA_DIR   — iCloud path for Auto Export app automation exports.
-    CONTEXT_DIR           — directory containing user context files (me, strategy, log).
-    NOTIFICATION_PREFS_PATH — JSON file storing notification preference overrides.
-    PROMPTS_DIR           — directory containing prompt templates (prompt.md, soul.md, etc.).
-    REPORTS_DIR           — directory where generated reports are saved.
-    NUDGES_DIR            — directory where sent nudges are saved.
-    MAX_HISTORY_ENTRIES   — max entries kept in history.md.
-    MAX_CONVERSATION_MESSAGES — max messages in the Telegram chat buffer.
-    resolve_data_dir      — resolve data directory from CLI arg, env var, or default.
+This module is the central place for runtime knobs. Most model and verification
+settings can be overridden with environment variables; see README.md for the
+user-facing list.
+
+Public groups:
+    Paths: AUTOEXPORT_DATA_DIR, CONTEXT_DIR, NOTIFICATION_PREFS_PATH,
+        PROMPTS_DIR, REPORTS_DIR, NUDGES_DIR.
+    Prompt/context limits: MAX_HISTORY_ENTRIES, MAX_LOG_ENTRIES,
+        MAX_COACH_FEEDBACK_ENTRIES, MAX_CONVERSATION_MESSAGES,
+        MAX_TOOL_ITERATIONS*, MAX_TOKENS*.
+    Model routing: DEEPSEEK_*_MODEL, ANTHROPIC_*_MODEL, PRIMARY_*_MODEL,
+        FALLBACK_*_MODEL, DEFAULT_*_MODEL, FALLBACK_MODEL.
+    Verification: ENABLE_LLM_VERIFICATION, VERIFY_*, VERIFICATION_MODEL,
+        VERIFICATION_REWRITE_MODEL, MAX_VERIFICATION_REVISIONS.
+    Daemon: LOG_FILE, LOCK_FILE, STATE_FILE, debounce windows, nudge limits,
+        report cadence, and suppression timing.
+    Helpers: resolve_data_dir.
 
 Example:
-    from config import resolve_data_dir, CONTEXT_DIR
+    from config import CONTEXT_DIR, resolve_data_dir
     data = resolve_data_dir(args.data_dir)
 """
 
@@ -33,6 +40,15 @@ NOTIFICATION_PREFS_PATH: Path = (
 PROMPTS_DIR: Path = Path(__file__).resolve().parent / "prompts"
 REPORTS_DIR: Path = Path.home() / "Documents" / "zdrowskit" / "Reports"
 NUDGES_DIR: Path = Path.home() / "Documents" / "zdrowskit" / "Nudges"
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    """Return a bool from an environment variable."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
 
 MAX_HISTORY_ENTRIES: int = 8
 """Maximum number of entries to retain in history.md."""
@@ -90,6 +106,131 @@ for chart-generating answers."""
 MAX_TOKENS_NUDGE: int = 1024
 """Output token budget for nudges. Nudges should be short, but tool-repair
 turns need enough room to finish cleanly."""
+
+DEEPSEEK_PRO_MODEL: str = os.environ.get(
+    "ZDROWSKIT_DEEPSEEK_PRO_MODEL",
+    "deepseek/deepseek-v4-pro",
+)
+"""Primary high-capability DeepSeek model used by feature defaults."""
+
+DEEPSEEK_FLASH_MODEL: str = os.environ.get(
+    "ZDROWSKIT_DEEPSEEK_FLASH_MODEL",
+    "deepseek/deepseek-v4-flash",
+)
+"""Lower-cost DeepSeek model used by lightweight feature defaults."""
+
+ANTHROPIC_OPUS_MODEL: str = os.environ.get(
+    "ZDROWSKIT_ANTHROPIC_OPUS_MODEL",
+    "anthropic/claude-opus-4-6",
+)
+"""High-capability Anthropic fallback paired with DeepSeek Pro."""
+
+ANTHROPIC_HAIKU_MODEL: str = os.environ.get(
+    "ZDROWSKIT_ANTHROPIC_HAIKU_MODEL",
+    "anthropic/claude-haiku-4-5",
+)
+"""Low-cost Anthropic fallback paired with DeepSeek Flash."""
+
+PRIMARY_PRO_MODEL: str = os.environ.get(
+    "ZDROWSKIT_PRIMARY_PRO_MODEL",
+    DEEPSEEK_PRO_MODEL,
+)
+"""Primary high-capability model for Pro-class LLM tasks."""
+
+FALLBACK_PRO_MODEL: str = os.environ.get(
+    "ZDROWSKIT_FALLBACK_PRO_MODEL",
+    ANTHROPIC_OPUS_MODEL,
+)
+"""Fallback high-capability model for Pro-class LLM tasks."""
+
+PRIMARY_FLASH_MODEL: str = os.environ.get(
+    "ZDROWSKIT_PRIMARY_FLASH_MODEL",
+    DEEPSEEK_FLASH_MODEL,
+)
+"""Primary lower-cost model for Flash-class LLM tasks."""
+
+FALLBACK_FLASH_MODEL: str = os.environ.get(
+    "ZDROWSKIT_FALLBACK_FLASH_MODEL",
+    ANTHROPIC_HAIKU_MODEL,
+)
+"""Fallback lower-cost model for Flash-class LLM tasks."""
+
+DEFAULT_MODEL: str = os.environ.get("ZDROWSKIT_DEFAULT_MODEL", PRIMARY_PRO_MODEL)
+"""General default model for uncategorised LLM calls."""
+
+FALLBACK_MODEL: str = os.environ.get("ZDROWSKIT_FALLBACK_MODEL", FALLBACK_PRO_MODEL)
+"""General fallback model paired with DEFAULT_MODEL."""
+
+DEFAULT_INSIGHTS_MODEL: str = os.environ.get(
+    "ZDROWSKIT_INSIGHTS_MODEL",
+    PRIMARY_PRO_MODEL,
+)
+"""Default model for weekly insights reports."""
+
+DEFAULT_COACH_MODEL: str = os.environ.get(
+    "ZDROWSKIT_COACH_MODEL",
+    PRIMARY_PRO_MODEL,
+)
+"""Default model for coaching review/proposal generation."""
+
+DEFAULT_NUDGE_MODEL: str = os.environ.get(
+    "ZDROWSKIT_NUDGE_MODEL",
+    PRIMARY_PRO_MODEL,
+)
+"""Default model for proactive nudges."""
+
+DEFAULT_CHAT_MODEL: str = os.environ.get(
+    "ZDROWSKIT_CHAT_MODEL",
+    PRIMARY_PRO_MODEL,
+)
+"""Default model for interactive Telegram chat."""
+
+DEFAULT_NOTIFY_MODEL: str = os.environ.get(
+    "ZDROWSKIT_NOTIFY_MODEL",
+    PRIMARY_FLASH_MODEL,
+)
+"""Default model for /notify intent interpretation."""
+
+DEFAULT_LOG_FLOW_MODEL: str = os.environ.get(
+    "ZDROWSKIT_LOG_FLOW_MODEL",
+    PRIMARY_FLASH_MODEL,
+)
+"""Default model for /log tap-flow generation."""
+
+DEFAULT_ADD_CLONE_MODEL: str = os.environ.get(
+    "ZDROWSKIT_ADD_CLONE_MODEL",
+    PRIMARY_FLASH_MODEL,
+)
+"""Default model for /add workout clone selection."""
+
+ENABLE_LLM_VERIFICATION: bool = _env_bool("ZDROWSKIT_ENABLE_LLM_VERIFICATION", False)
+"""Global feature flag for post-generation LLM verification."""
+
+VERIFY_INSIGHTS: bool = _env_bool("ZDROWSKIT_VERIFY_INSIGHTS", True)
+"""When LLM verification is enabled, verify weekly insights reports."""
+
+VERIFY_COACH: bool = _env_bool("ZDROWSKIT_VERIFY_COACH", True)
+"""When LLM verification is enabled, verify coaching review bundles."""
+
+VERIFY_NUDGE: bool = _env_bool("ZDROWSKIT_VERIFY_NUDGE", True)
+"""When LLM verification is enabled, verify nudges before sending."""
+
+VERIFICATION_MODEL: str = os.environ.get(
+    "ZDROWSKIT_VERIFICATION_MODEL",
+    PRIMARY_PRO_MODEL,
+)
+"""Model used for evidence-bound verifier passes."""
+
+VERIFICATION_REWRITE_MODEL: str = os.environ.get(
+    "ZDROWSKIT_VERIFICATION_REWRITE_MODEL",
+    PRIMARY_FLASH_MODEL,
+)
+"""Model used for bounded rewrites after verifier findings."""
+
+MAX_VERIFICATION_REVISIONS: int = int(
+    os.environ.get("ZDROWSKIT_MAX_VERIFICATION_REVISIONS", "1")
+)
+"""Maximum bounded rewrite attempts after a verifier returns revise."""
 
 
 # ---------------------------------------------------------------------------

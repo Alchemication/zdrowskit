@@ -10,6 +10,7 @@ import argparse
 import json
 import logging
 import re
+import sqlite3
 import sys
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
@@ -26,18 +27,29 @@ from charts import (
 )
 from config import (
     CONTEXT_DIR,
+    DEFAULT_COACH_MODEL,
+    DEFAULT_LOG_FLOW_MODEL,
+    DEFAULT_NOTIFY_MODEL,
+    DEFAULT_NUDGE_MODEL,
+    ENABLE_LLM_VERIFICATION,
     MAX_TOKENS_COACH,
     MAX_TOKENS_INSIGHTS,
     MAX_TOKENS_NUDGE,
+    MAX_VERIFICATION_REVISIONS,
     MAX_TOOL_ITERATIONS_COACH,
     MAX_TOOL_ITERATIONS_INSIGHTS,
     MAX_TOOL_ITERATIONS_NUDGE,
     NUDGES_DIR,
     NOTIFICATION_PREFS_PATH,
     REPORTS_DIR,
+    VERIFICATION_MODEL,
+    VERIFICATION_REWRITE_MODEL,
+    VERIFY_COACH,
+    VERIFY_INSIGHTS,
+    VERIFY_NUDGE,
 )
 from context_edit import ContextEdit, EditPreviewError, build_edit_preview
-from llm import DEFAULT_MODEL, LLMResult, call_llm, extract_memory
+from llm import LLMResult, call_llm, extract_memory
 from llm_context import append_history, build_messages, load_context
 from llm_health import (
     build_llm_data,
@@ -54,6 +66,7 @@ from notification_prefs import (
 )
 from notify import send_email, send_telegram, send_telegram_photo, send_telegram_report
 from store import open_db
+from llm_verify import VerificationKind, verify_and_rewrite
 
 logger = logging.getLogger(__name__)
 
@@ -68,8 +81,8 @@ _NUDGE_NONFINAL_RETRY = (
     "final user-facing nudge now: one short message (maximum 80 words) or "
     "SKIP. Do not mention checking, reviewing, or deciding whether to send."
 )
-NOTIFY_MODEL = "anthropic/claude-haiku-4-5"
-LOG_FLOW_MODEL = "anthropic/claude-haiku-4-5"
+NOTIFY_MODEL = DEFAULT_NOTIFY_MODEL
+LOG_FLOW_MODEL = DEFAULT_LOG_FLOW_MODEL
 
 # Hard caps must match log_flow_prompt.md and log-flow handler expectations.
 # The initial call returns exactly 1 step (the state check); a second step
@@ -692,6 +705,73 @@ def _save_nudge(text: str, trigger: str) -> Path:
     return path
 
 
+def _verification_enabled(kind: VerificationKind) -> bool:
+    """Return True when LLM verification should run for a surface."""
+    if not ENABLE_LLM_VERIFICATION:
+        return False
+    return {
+        "insights": VERIFY_INSIGHTS,
+        "coach": VERIFY_COACH,
+        "nudge": VERIFY_NUDGE,
+    }[kind]
+
+
+def _coach_proposal_evidence(
+    proposals: list[CoachProposal],
+) -> list[dict[str, str | None]]:
+    """Serialize coach proposals for verifier evidence."""
+    return [
+        {
+            "file": proposal.edit.file,
+            "action": proposal.edit.action,
+            "section": proposal.edit.section,
+            "summary": proposal.edit.summary,
+            "content": proposal.edit.content,
+            "preview": proposal.preview,
+        }
+        for proposal in proposals
+    ]
+
+
+def _apply_verification(
+    *,
+    kind: VerificationKind,
+    draft: str,
+    evidence: dict[str, Any],
+    source_messages: list[dict[str, Any]],
+    conn: sqlite3.Connection,
+    metadata: dict[str, Any],
+) -> str | None:
+    """Run verifier/rewrite and return the approved text, or None on fail."""
+    if not _verification_enabled(kind):
+        return draft
+
+    result = verify_and_rewrite(
+        kind=kind,
+        draft=draft,
+        evidence=evidence,
+        source_messages=source_messages,
+        conn=conn,
+        metadata=metadata,
+        model=VERIFICATION_MODEL,
+        rewrite_model=VERIFICATION_REWRITE_MODEL,
+        max_revisions=MAX_VERIFICATION_REVISIONS,
+    )
+    issue_summary = ", ".join(
+        f"{issue.severity}: {issue.problem}" for issue in result.issues
+    )
+    logger.info(
+        "%s verification verdict=%s issues=%d%s",
+        kind,
+        result.verdict,
+        len(result.issues),
+        f" ({issue_summary})" if issue_summary else "",
+    )
+    if result.verdict == "fail":
+        return None
+    return result.revised_text if result.revised_text is not None else draft
+
+
 # ---------------------------------------------------------------------------
 # Subcommand handlers
 # ---------------------------------------------------------------------------
@@ -920,6 +1000,35 @@ def cmd_insights(
             )
             sys.exit(1)
 
+    verified_text = _apply_verification(
+        kind="insights",
+        draft=result.text,
+        evidence={
+            "health_data": health_data,
+            "health_data_text": health_data_text,
+            "review_facts": context.get("review_facts"),
+            "baselines": baselines,
+            "milestones": milestones,
+            "week_complete": week_complete,
+            "week_label": week_label,
+        },
+        source_messages=[
+            *messages,
+            {"role": "assistant", "content": result.text},
+        ],
+        conn=conn,
+        metadata={
+            "source_llm_call_id": result.llm_call_id,
+            "week": args.week,
+            "months": args.months,
+            "week_label": week_label,
+        },
+    )
+    if verified_text is None:
+        logger.error("Insights verification failed; refusing to save/send report")
+        sys.exit(1)
+    result.text = verified_text
+
     # Extract and render charts before stripping them from the response.
     chart_blocks = extract_charts(result.text)
     chart_results: list[ChartResult] = []
@@ -1036,7 +1145,7 @@ def cmd_nudge(
 
     from tools import execute_run_sql, run_sql_tool
 
-    model = getattr(args, "model", DEFAULT_MODEL)
+    model = getattr(args, "model", DEFAULT_NUDGE_MODEL)
     tools = run_sql_tool()
     max_iterations = MAX_TOOL_ITERATIONS_NUDGE
 
@@ -1135,6 +1244,33 @@ def cmd_nudge(
     if raw_text.upper() == "SKIP" or "\nSKIP\n" in f"\n{raw_text}\n":
         logger.info("Nudge skipped by LLM — nothing new to say (trigger: %s)", _trigger)
         return CommandResult(llm_call_id=result.llm_call_id)
+
+    verified_text = _apply_verification(
+        kind="nudge",
+        draft=raw_text,
+        evidence={
+            "health_data": health_data,
+            "health_data_text": health_data_text,
+            "recent_nudges": recent_nudge_entries,
+            "recent_nudges_text": context.get("recent_nudges"),
+            "last_coach_summary": context.get("last_coach_summary"),
+            "trigger_type": _trigger,
+            "trigger_context": trigger_context_text,
+        },
+        source_messages=[
+            *messages,
+            {"role": "assistant", "content": raw_text},
+        ],
+        conn=conn,
+        metadata={
+            "source_llm_call_id": result.llm_call_id,
+            "trigger_type": _trigger,
+        },
+    )
+    if verified_text is None or verified_text.strip().upper() == "SKIP":
+        logger.info("Nudge skipped by verifier (trigger: %s)", _trigger)
+        return CommandResult(llm_call_id=result.llm_call_id)
+    raw_text = verified_text.strip()
 
     # Extract and render optional chart(s).
     chart_blocks = extract_charts(raw_text)
@@ -1272,7 +1408,7 @@ def cmd_coach(
         logger.error("Failed to render coach_prompt.md template: %s", e)
         sys.exit(1)
 
-    model = getattr(args, "model", DEFAULT_MODEL)
+    model = getattr(args, "model", DEFAULT_COACH_MODEL)
     tools = run_sql_tool() + context_update_tool(allowed_files=["strategy"])
     raw_edits: list[ContextEdit] = []
     narrative_parts: list[str] = []
@@ -1427,6 +1563,41 @@ def cmd_coach(
         )
 
     bundled_text = _format_coach_bundle(narrative, proposals)
+    verified_text = _apply_verification(
+        kind="coach",
+        draft=bundled_text,
+        evidence={
+            "health_data": health_data,
+            "health_data_text": health_data_text,
+            "review_facts": context.get("review_facts"),
+            "baselines": baselines,
+            "milestones": milestones,
+            "week_complete": week_complete,
+            "week_label": week_label,
+            "strategy_sections": strategy_sections,
+            "recent_nudges": recent_nudge_entries,
+            "coach_feedback": context.get("coach_feedback"),
+            "proposals": _coach_proposal_evidence(proposals),
+        },
+        source_messages=[
+            *messages,
+            {"role": "assistant", "content": bundled_text},
+        ],
+        conn=conn,
+        metadata={
+            "source_llm_call_id": result.llm_call_id,
+            "week": week,
+            "week_label": week_label,
+            "proposal_count": len(proposals),
+        },
+    )
+    if verified_text is None or verified_text.strip().upper() == "SKIP":
+        logger.info("Coach verification suppressed the review/proposals")
+        return (
+            CommandResult(text=None, llm_call_id=result.llm_call_id),
+            [],
+        )
+    bundled_text = verified_text
     print(bundled_text)
 
     cmd_result = CommandResult(

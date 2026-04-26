@@ -988,6 +988,7 @@ def main() -> None:
     load_dotenv()
 
     from config import CONTEXT_DIR
+    from config import DEFAULT_CHAT_MODEL
     from store import default_db_path
 
     parser = argparse.ArgumentParser(
@@ -1007,8 +1008,8 @@ def main() -> None:
     parser.add_argument(
         "--model",
         metavar="MODEL",
-        default="anthropic/claude-opus-4-6",
-        help="litellm model string for LLM calls (default: claude-opus-4-6)",
+        default=DEFAULT_CHAT_MODEL,
+        help=f"litellm model string for LLM calls (default: {DEFAULT_CHAT_MODEL})",
     )
     args = parser.parse_args()
 

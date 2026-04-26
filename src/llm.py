@@ -1,7 +1,7 @@
 """LLM call infrastructure: retry logic, model fallback, and response types.
 
-Handles the mechanics of calling litellm with exponential backoff, model
-fallback on overload, and structured result packaging. All app-domain
+Handles the mechanics of calling litellm with exponential backoff, provider
+fallback, and structured result packaging. All app-domain
 concerns (context loading, prompt assembly, health data rendering) live
 in ``llm_context`` and ``llm_health``.
 
@@ -23,12 +23,16 @@ from typing import Any
 
 import litellm
 
+from config import (
+    DEFAULT_MODEL,
+    FALLBACK_FLASH_MODEL,
+    FALLBACK_PRO_MODEL,
+    PRIMARY_FLASH_MODEL,
+    PRIMARY_PRO_MODEL,
+)
 from store import log_llm_call
 
 logger = logging.getLogger(__name__)
-
-DEFAULT_MODEL = "anthropic/claude-opus-4-6"
-FALLBACK_MODEL = "anthropic/claude-sonnet-4-6"
 
 # Exponential backoff delays (seconds) between retries on overloaded errors.
 _RETRY_DELAYS = [10, 30, 90]
@@ -240,15 +244,139 @@ def _is_overloaded(exc: Exception) -> bool:
     return "overloaded_error" in str(exc) or "Overloaded" in str(exc)
 
 
+def _is_deepseek_model(model: str) -> bool:
+    """Return True when a LiteLLM model id targets DeepSeek."""
+    normalized = model.lower()
+    return normalized.startswith("deepseek/") or normalized.startswith(
+        "openrouter/deepseek/"
+    )
+
+
+def _is_anthropic_model(model: str) -> bool:
+    """Return True when a LiteLLM model id targets Anthropic."""
+    normalized = model.lower()
+    return normalized.startswith("anthropic/") or normalized.startswith(
+        "openrouter/anthropic/"
+    )
+
+
+def _is_budget_model(model: str) -> bool:
+    """Return True for low-cost model variants that should get cheap fallback."""
+    normalized = model.lower()
+    return "haiku" in normalized or "flash" in normalized
+
+
+def _model_accepts_reasoning_effort(model: str) -> bool:
+    """Return True when we should pass LiteLLM reasoning_effort to *model*."""
+    normalized = model.lower()
+    return normalized.startswith("anthropic/claude-") or normalized.startswith(
+        "openrouter/anthropic/claude-"
+    )
+
+
+def _dedupe_models(models: list[str]) -> list[str]:
+    """Remove duplicate model ids while preserving order."""
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for model in models:
+        if model in seen:
+            continue
+        seen.add(model)
+        deduped.append(model)
+    return deduped
+
+
+def _fallback_chain(model: str) -> list[str]:
+    """Return the provider-crossing fallback chain for *model*.
+
+    Pro-class primary models fall back to the configured Pro fallback, and
+    Flash-class primary models fall back to the configured Flash fallback.
+    The chain also works in reverse so Anthropic calls cross back to DeepSeek.
+    Unknown providers fall back to the general default model.
+    """
+    if model == PRIMARY_PRO_MODEL:
+        return _dedupe_models([model, FALLBACK_PRO_MODEL])
+    if model == PRIMARY_FLASH_MODEL:
+        return _dedupe_models([model, FALLBACK_FLASH_MODEL])
+    if model == FALLBACK_PRO_MODEL:
+        return _dedupe_models([model, PRIMARY_PRO_MODEL])
+    if model == FALLBACK_FLASH_MODEL:
+        return _dedupe_models([model, PRIMARY_FLASH_MODEL])
+    if _is_deepseek_model(model):
+        return _dedupe_models(
+            [
+                model,
+                FALLBACK_FLASH_MODEL if _is_budget_model(model) else FALLBACK_PRO_MODEL,
+            ]
+        )
+    if _is_anthropic_model(model):
+        return _dedupe_models(
+            [
+                model,
+                PRIMARY_FLASH_MODEL if _is_budget_model(model) else PRIMARY_PRO_MODEL,
+            ]
+        )
+    return _dedupe_models([model, DEFAULT_MODEL])
+
+
+def _completion_kwargs_for_model(kwargs: dict, model: str) -> dict:
+    """Return LiteLLM kwargs adjusted for a specific attempted model."""
+    adjusted = {k: v for k, v in kwargs.items() if k != "model"}
+    requested_reasoning = adjusted.pop("reasoning_effort", None)
+    has_temperature = "temperature" in adjusted
+    requested_temperature = adjusted.pop("temperature", None)
+
+    effective_reasoning = (
+        requested_reasoning if _model_accepts_reasoning_effort(model) else None
+    )
+    if has_temperature:
+        effective_temperature = (
+            1.0 if effective_reasoning is not None else requested_temperature
+        )
+        if effective_temperature is not None:
+            adjusted["temperature"] = effective_temperature
+    if effective_reasoning is not None:
+        adjusted["reasoning_effort"] = effective_reasoning
+    adjusted["model"] = model
+    return adjusted
+
+
+def _effective_params_for_model(
+    *,
+    model: str,
+    max_tokens: int,
+    temperature: float | None,
+    reasoning_effort: str | None,
+    requested_model: str,
+) -> dict[str, Any]:
+    """Return call params as they were effectively sent to the final model."""
+    params: dict[str, Any] = {"max_tokens": max_tokens}
+    effective_reasoning = (
+        reasoning_effort if _model_accepts_reasoning_effort(model) else None
+    )
+    if temperature is not None:
+        params["temperature"] = 1.0 if effective_reasoning is not None else temperature
+    if effective_reasoning is not None:
+        params["reasoning_effort"] = effective_reasoning
+    elif reasoning_effort is not None:
+        params["requested_reasoning_effort"] = reasoning_effort
+        params["reasoning_effort_omitted_for_model"] = True
+    if requested_model != model:
+        params["requested_model"] = requested_model
+        params["fallback_used"] = True
+    return params
+
+
 def _call_with_retry(
     kwargs: dict,
     model: str,
 ) -> tuple:
-    """Call litellm.completion with retries and model fallback.
+    """Call litellm.completion with retries and provider fallback.
 
-    Retries on overloaded errors using exponential backoff.  After exhausting
-    retries on the primary model, switches to FALLBACK_MODEL and retries once
-    more.  Re-raises the last exception if all attempts fail.
+    Retries overloaded errors on the same model using exponential backoff. Any
+    provider failure then falls across the Anthropic/DeepSeek boundary, so a
+    DeepSeek outage tries Anthropic and an Anthropic outage tries DeepSeek.
+    Re-raises the last exception if all attempts fail.
 
     Args:
         kwargs: litellm.completion keyword arguments (may be mutated for fallback).
@@ -257,49 +385,42 @@ def _call_with_retry(
     Returns:
         A (response, effective_model) tuple.
     """
-    for attempt, delay in enumerate(_RETRY_DELAYS + [None]):
-        try:
-            response = litellm.completion(**{**kwargs, "model": model})
-            return response, model
-        except Exception as exc:
-            if not _is_overloaded(exc):
-                raise
-            if delay is not None:
-                logger.warning(
-                    "Anthropic overloaded (attempt %d/%d), retrying in %ds ...",
-                    attempt + 1,
-                    len(_RETRY_DELAYS),
-                    delay,
-                )
-                time.sleep(delay)
-            else:
-                logger.warning(
-                    "All retries exhausted on %s, switching to fallback %s",
-                    model,
-                    FALLBACK_MODEL,
-                )
-
-    # Fallback model — same retry schedule.
-    model = FALLBACK_MODEL
     last_exc: Exception | None = None
-    for attempt, delay in enumerate(_RETRY_DELAYS + [None]):
-        try:
-            response = litellm.completion(**{**kwargs, "model": model})
-            logger.info("Fallback model %s succeeded", model)
-            return response, model
-        except Exception as exc:
-            if not _is_overloaded(exc):
-                raise
-            last_exc = exc
-            if delay is not None:
-                logger.warning(
-                    "Fallback %s also overloaded (attempt %d/%d), retrying in %ds ...",
-                    model,
-                    attempt + 1,
-                    len(_RETRY_DELAYS),
-                    delay,
+    chain = _fallback_chain(model)
+    for model_index, candidate in enumerate(chain):
+        for attempt, delay in enumerate(_RETRY_DELAYS + [None]):
+            try:
+                response = litellm.completion(
+                    **_completion_kwargs_for_model(kwargs, candidate)
                 )
-                time.sleep(delay)
+                if candidate != model:
+                    logger.info("Fallback model %s succeeded", candidate)
+                return response, candidate
+            except Exception as exc:
+                last_exc = exc
+                if _is_overloaded(exc) and delay is not None:
+                    logger.warning(
+                        "%s overloaded (attempt %d/%d), retrying in %ds ...",
+                        candidate,
+                        attempt + 1,
+                        len(_RETRY_DELAYS),
+                        delay,
+                    )
+                    time.sleep(delay)
+                    continue
+
+                next_model = (
+                    chain[model_index + 1] if model_index + 1 < len(chain) else None
+                )
+                if next_model:
+                    logger.warning(
+                        "%s failed (%s: %s); switching to fallback %s",
+                        candidate,
+                        type(exc).__name__,
+                        exc,
+                        next_model,
+                    )
+                break
 
     raise last_exc  # type: ignore[misc]
 
@@ -389,29 +510,19 @@ def call_llm(
         litellm.AuthenticationError: If the API key is missing or invalid.
         litellm.APIError: On network or API failures.
     """
-    # Anthropic's extended thinking requires temperature=1; any other value
-    # is rejected with a BadRequestError. Force it here so callers can keep
-    # passing their preferred sampling temperature without having to know
-    # about this constraint.
-    if temperature is None:
-        effective_temperature: float | None = None
-    elif reasoning_effort is not None:
-        effective_temperature = 1.0
-    else:
-        effective_temperature = temperature
-
     kwargs: dict = {
         "model": model,
         "messages": messages,
         "max_tokens": max_tokens,
     }
-    if effective_temperature is not None:
-        kwargs["temperature"] = effective_temperature
+    if temperature is not None:
+        kwargs["temperature"] = temperature
     if reasoning_effort is not None:
         kwargs["reasoning_effort"] = reasoning_effort
     if tools is not None:
         kwargs["tools"] = tools
 
+    requested_model = model
     t0 = time.perf_counter()
     response, model = _call_with_retry(kwargs, model)
     latency = time.perf_counter() - t0
@@ -447,11 +558,18 @@ def call_llm(
     )
 
     if conn and request_type:
-        params: dict = {"max_tokens": max_tokens}
-        if effective_temperature is not None:
-            params["temperature"] = effective_temperature
-        if reasoning_effort is not None:
-            params["reasoning_effort"] = reasoning_effort
+        params = _effective_params_for_model(
+            model=model,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            reasoning_effort=reasoning_effort,
+            requested_model=requested_model,
+        )
+        log_metadata = dict(metadata or {})
+        if requested_model != model:
+            log_metadata.setdefault("requested_model", requested_model)
+            log_metadata.setdefault("effective_model", model)
+            log_metadata.setdefault("fallback_used", True)
         try:
             row_id = log_llm_call(
                 conn,
@@ -465,7 +583,7 @@ def call_llm(
                 total_tokens=result.total_tokens,
                 latency_s=result.latency_s,
                 cost=result.cost,
-                metadata=metadata,
+                metadata=log_metadata,
             )
             result.llm_call_id = row_id
         except Exception:
