@@ -417,9 +417,7 @@ class TestVerificationEvents:
         )
         monkeypatch.setattr(
             "llm_verify.call_llm",
-            self._fake_call_llm(
-                '{"verdict":"fail","issues":[],"confidence":"high"}'
-            ),
+            self._fake_call_llm('{"verdict":"fail","issues":[],"confidence":"high"}'),
         )
 
         verify_and_rewrite(
@@ -452,9 +450,7 @@ class TestVerificationEvents:
         )
         monkeypatch.setattr(
             "llm_verify.call_llm",
-            self._fake_call_llm(
-                '{"verdict":"pass","issues":[],"confidence":"high"}'
-            ),
+            self._fake_call_llm('{"verdict":"pass","issues":[],"confidence":"high"}'),
         )
 
         verify_and_rewrite(
