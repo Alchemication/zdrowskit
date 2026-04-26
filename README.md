@@ -420,3 +420,5 @@ These evals call the configured real model and may use network/API quota. Normal
 
 Recorded leaderboard runs live in `evals/leaderboard/runs.jsonl`. The generated Markdown snapshot lives in `evals/leaderboard.md`. Comparisons are scope-aware: runs over different case sets are rendered in separate sections rather than ranked together.
 The interactive HTML report lives in `evals/leaderboard.html` and is generated from the same raw JSONL history.
+
+`evals/leaderboard.html` is published to GitHub Pages by `.github/workflows/evals-pages.yml`. Enable Pages with **Settings -> Pages -> Source: GitHub Actions**; after that, pushes to `main` that update `evals/leaderboard/runs.jsonl` rebuild and deploy the latest leaderboard as the Pages `index.html`. The workflow can also be run manually from the Actions tab.
