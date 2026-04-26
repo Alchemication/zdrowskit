@@ -5,11 +5,14 @@ from __future__ import annotations
 import json
 import sqlite3
 
+from events import query_events
 from llm import LLMResult
 from llm_verify import (
     VerificationIssue,
     deterministic_verification_issues,
+    extract_tool_evidence,
     parse_verification_result,
+    slim_source_messages,
     verify_and_rewrite,
 )
 from store import log_llm_call
@@ -233,3 +236,238 @@ class TestVerifyAndRewrite:
 
         assert result.verdict == "fail"
         assert result.issues[0].severity == "critical"
+
+
+class TestExtractToolEvidence:
+    def test_pairs_assistant_tool_calls_with_results(self) -> None:
+        messages = [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "ask"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {
+                            "name": "run_sql",
+                            "arguments": '{"query": "SELECT 1"}',
+                        },
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call_1", "content": "[[1]]"},
+            {"role": "assistant", "content": "final"},
+        ]
+
+        pairs = extract_tool_evidence(messages)
+
+        assert pairs == [
+            {
+                "tool": "run_sql",
+                "arguments": '{"query": "SELECT 1"}',
+                "result": "[[1]]",
+            }
+        ]
+
+    def test_handles_orphan_tool_message(self) -> None:
+        # A tool result with no matching call (defensive — shouldn't happen
+        # in practice, but the helper must not crash).
+        messages = [{"role": "tool", "tool_call_id": "ghost", "content": "x"}]
+
+        pairs = extract_tool_evidence(messages)
+
+        assert pairs == [{"tool": "unknown", "arguments": "", "result": "x"}]
+
+    def test_skips_assistant_with_no_tool_calls(self) -> None:
+        messages = [
+            {"role": "assistant", "content": "thinking"},
+            {"role": "assistant", "content": "answer"},
+        ]
+
+        assert extract_tool_evidence(messages) == []
+
+
+class TestSlimSourceMessages:
+    def test_strips_tool_turns(self) -> None:
+        messages = [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "ask"},
+            {"role": "assistant", "content": "", "tool_calls": [{"id": "x"}]},
+            {"role": "tool", "tool_call_id": "x", "content": "result"},
+            {"role": "assistant", "content": "intermediate"},
+        ]
+
+        slim = slim_source_messages(messages, "final draft")
+
+        assert slim == [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "ask"},
+            {"role": "assistant", "content": "final draft"},
+        ]
+
+    def test_handles_missing_system(self) -> None:
+        slim = slim_source_messages(
+            [{"role": "user", "content": "ask"}],
+            "final",
+        )
+        assert slim == [
+            {"role": "user", "content": "ask"},
+            {"role": "assistant", "content": "final"},
+        ]
+
+
+class TestStrictMode:
+    def test_strict_revise_becomes_fail_and_skips_rewriter(
+        self,
+        in_memory_db: sqlite3.Connection,
+        monkeypatch,
+    ) -> None:
+        calls: list[str] = []
+
+        def fake_call_llm(messages, **kwargs):
+            calls.append(kwargs["request_type"])
+            text = json.dumps(
+                {
+                    "verdict": "revise",
+                    "confidence": "high",
+                    "issues": [
+                        {
+                            "severity": "major",
+                            "quote": "x",
+                            "problem": "wording",
+                            "correction": "rewrite it",
+                        }
+                    ],
+                }
+            )
+            row_id = log_llm_call(
+                kwargs["conn"],
+                request_type=kwargs["request_type"],
+                model=kwargs["model"],
+                messages=messages,
+                response_text=text,
+                metadata=kwargs["metadata"],
+            )
+            return LLMResult(
+                text=text,
+                model=kwargs["model"],
+                input_tokens=1,
+                output_tokens=1,
+                total_tokens=2,
+                latency_s=0.1,
+                llm_call_id=row_id,
+            )
+
+        monkeypatch.setattr("llm_verify.call_llm", fake_call_llm)
+
+        result = verify_and_rewrite(
+            kind="coach",
+            draft="draft text",
+            evidence={},
+            source_messages=[],
+            conn=in_memory_db,
+            metadata={"source_llm_call_id": 1},
+            model="verify-model",
+            rewrite_model="rewrite-model",
+            max_revisions=1,
+            strict=True,
+        )
+
+        assert result.verdict == "fail"
+        assert result.revised_text is None
+        assert calls == ["coach_verify"]
+
+
+class TestVerificationEvents:
+    def _fake_call_llm(self, response_text: str):
+        def fake(messages, **kwargs):
+            row_id = log_llm_call(
+                kwargs["conn"],
+                request_type=kwargs["request_type"],
+                model=kwargs["model"],
+                messages=messages,
+                response_text=response_text,
+                metadata=kwargs["metadata"],
+            )
+            return LLMResult(
+                text=response_text,
+                model=kwargs["model"],
+                input_tokens=1,
+                output_tokens=1,
+                total_tokens=2,
+                latency_s=0.1,
+                llm_call_id=row_id,
+            )
+
+        return fake
+
+    def test_fail_emits_suppressed_event(
+        self,
+        in_memory_db: sqlite3.Connection,
+        monkeypatch,
+    ) -> None:
+        source_id = log_llm_call(
+            in_memory_db,
+            request_type="nudge",
+            model="draft-model",
+            messages=[{"role": "user", "content": "draft"}],
+            response_text="Weak nudge.",
+        )
+        monkeypatch.setattr(
+            "llm_verify.call_llm",
+            self._fake_call_llm(
+                '{"verdict":"fail","issues":[],"confidence":"high"}'
+            ),
+        )
+
+        verify_and_rewrite(
+            kind="nudge",
+            draft="weak nudge",
+            evidence={},
+            source_messages=[],
+            conn=in_memory_db,
+            metadata={"source_llm_call_id": source_id},
+            model="verify-model",
+            rewrite_model="rewrite-model",
+            max_revisions=1,
+        )
+
+        events = query_events(in_memory_db, category="nudge")
+        kinds = [e["kind"] for e in events]
+        assert "verifier_suppressed" in kinds
+
+    def test_pass_emits_no_event(
+        self,
+        in_memory_db: sqlite3.Connection,
+        monkeypatch,
+    ) -> None:
+        source_id = log_llm_call(
+            in_memory_db,
+            request_type="insights",
+            model="draft-model",
+            messages=[{"role": "user", "content": "draft"}],
+            response_text="Clean report.",
+        )
+        monkeypatch.setattr(
+            "llm_verify.call_llm",
+            self._fake_call_llm(
+                '{"verdict":"pass","issues":[],"confidence":"high"}'
+            ),
+        )
+
+        verify_and_rewrite(
+            kind="insights",
+            draft="report text",
+            evidence={},
+            source_messages=[],
+            conn=in_memory_db,
+            metadata={"source_llm_call_id": source_id},
+            model="verify-model",
+            rewrite_model="rewrite-model",
+            max_revisions=1,
+        )
+
+        events = query_events(in_memory_db, category="insights")
+        assert events == []

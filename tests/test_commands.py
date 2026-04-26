@@ -139,6 +139,34 @@ class TestVerificationGate:
 
         assert approved is None
 
+    def test_strict_flag_threads_through_to_verify_and_rewrite(
+        self,
+        in_memory_db: sqlite3.Connection,
+        monkeypatch,
+    ) -> None:
+        monkeypatch.setattr("cmd_llm.ENABLE_LLM_VERIFICATION", True)
+        monkeypatch.setattr("cmd_llm.VERIFY_COACH", True)
+
+        captured: dict[str, object] = {}
+
+        def fake_verify(**kwargs):
+            captured.update(kwargs)
+            return VerificationResult(verdict="fail", issues=[])
+
+        monkeypatch.setattr("cmd_llm.verify_and_rewrite", fake_verify)
+
+        _apply_verification(
+            kind="coach",
+            draft="bundle",
+            evidence={},
+            source_messages=[],
+            conn=in_memory_db,
+            metadata={},
+            strict=True,
+        )
+
+        assert captured["strict"] is True
+
 
 class TestCmdCoach:
     def test_preserves_week_complete_when_building_messages(
@@ -458,11 +486,12 @@ class TestCmdInsights:
         in_memory_db,
         capsys,
     ) -> None:
-        """Reasoning models can return empty content even during synthesis.
-        Retry once without reasoning before giving up."""
+        """Anthropic extended thinking can return empty content even during
+        synthesis. Retry once without reasoning before giving up. The retry
+        is only meaningful for models that actually accept reasoning_effort."""
         args = SimpleNamespace(
             db="ignored.db",
-            model="test-model",
+            model="anthropic/claude-opus-4-6",
             months=1,
             week="last",
             no_update_baselines=True,

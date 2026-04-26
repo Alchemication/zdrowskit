@@ -38,6 +38,28 @@ logger = logging.getLogger(__name__)
 _RETRY_DELAYS = [10, 30, 90]
 
 
+def _warn_on_aliased_fallback() -> None:
+    """One-shot warning when a primary model equals its fallback.
+
+    Silent footgun: if a user sets ``ZDROWSKIT_FALLBACK_PRO_MODEL`` to the
+    same id as ``ZDROWSKIT_PRIMARY_PRO_MODEL`` (typo, copy-paste), the
+    fallback chain collapses to length 1 and nothing crosses providers.
+    """
+    if PRIMARY_PRO_MODEL == FALLBACK_PRO_MODEL:
+        logger.warning(
+            "Pro primary and fallback are both %s; provider fallback is disabled",
+            PRIMARY_PRO_MODEL,
+        )
+    if PRIMARY_FLASH_MODEL == FALLBACK_FLASH_MODEL:
+        logger.warning(
+            "Flash primary and fallback are both %s; provider fallback is disabled",
+            PRIMARY_FLASH_MODEL,
+        )
+
+
+_warn_on_aliased_fallback()
+
+
 @dataclass(frozen=True)
 class _TokenPricingWindow:
     """Temporary per-token pricing until LiteLLM carries the model entry."""

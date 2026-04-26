@@ -20,12 +20,19 @@ from config import (
     VERIFICATION_MODEL,
     VERIFICATION_REWRITE_MODEL,
 )
+from events import record_event
 from llm import call_llm
 
 logger = logging.getLogger(__name__)
 
 VerificationKind = Literal["insights", "coach", "nudge"]
 Verdict = Literal["pass", "revise", "fail"]
+
+_EVENT_CATEGORY: dict[VerificationKind, str] = {
+    "insights": "insights",
+    "coach": "coach",
+    "nudge": "nudge",
+}
 
 _PROMPT_BY_KIND: dict[VerificationKind, str] = {
     "insights": "verify_insights_prompt.md",
@@ -55,6 +62,63 @@ class VerificationResult:
     revised_text: str | None = None
     verifier_call_id: int | None = None
     rewrite_call_id: int | None = None
+
+
+def extract_tool_evidence(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Pair tool calls with their results as a flat evidence list.
+
+    Walks an assistant/tool conversation and pulls the data the writer
+    actually saw — `run_sql` queries with their results, `update_context`
+    proposals, etc. Used to seed the verifier's evidence packet without
+    forcing it to parse the full chat transcript.
+
+    Args:
+        messages: Full conversation including ``assistant`` messages with
+            ``tool_calls`` and ``tool`` messages with results.
+
+    Returns:
+        A list of {"tool", "arguments", "result"} dicts in call order.
+    """
+    pairs: list[dict[str, Any]] = []
+    pending: dict[str, dict[str, Any]] = {}
+    for msg in messages:
+        role = msg.get("role")
+        if role == "assistant":
+            for tc in msg.get("tool_calls") or []:
+                fn = tc.get("function") or {}
+                tc_id = tc.get("id")
+                if tc_id is None:
+                    continue
+                pending[tc_id] = {
+                    "tool": fn.get("name"),
+                    "arguments": fn.get("arguments"),
+                }
+        elif role == "tool":
+            tc_id = msg.get("tool_call_id")
+            call = pending.pop(tc_id, {"tool": "unknown", "arguments": ""})
+            pairs.append({**call, "result": msg.get("content", "")})
+    return pairs
+
+
+def slim_source_messages(
+    messages: list[dict[str, Any]],
+    final_text: str,
+) -> list[dict[str, str]]:
+    """Return a focused source_messages payload: system + user + final draft.
+
+    Tool turns are not included — they're surfaced separately via
+    :func:`extract_tool_evidence` so the verifier sees data, not the
+    assistant/tool back-and-forth that triples its prompt size.
+    """
+    slim: list[dict[str, str]] = []
+    system = next((m for m in messages if m.get("role") == "system"), None)
+    initial_user = next((m for m in messages if m.get("role") == "user"), None)
+    if system is not None:
+        slim.append({"role": "system", "content": str(system.get("content", ""))})
+    if initial_user is not None:
+        slim.append({"role": "user", "content": str(initial_user.get("content", ""))})
+    slim.append({"role": "assistant", "content": final_text})
+    return slim
 
 
 def _loads_json_object(text: str) -> dict[str, Any]:
@@ -303,10 +367,11 @@ def _messages_for_rewriter(
             "role": "system",
             "content": (
                 "You rewrite generated health-coaching text after an audit. "
-                "Preserve the original structure, tone, and length. Apply only "
-                "the listed corrections. Do not add new claims. Do not include "
-                "explanations, audit notes, or JSON. For nudges, output either "
-                "the final nudge text or exactly SKIP."
+                "Preserve the original structure and tone. Apply only the "
+                "listed corrections — including length cuts when the audit "
+                "says the draft is too long. Do not add new claims. Do not "
+                "include explanations, audit notes, or JSON. For nudges, "
+                "output either the final nudge text or exactly SKIP."
             ),
         },
         {
@@ -314,6 +379,59 @@ def _messages_for_rewriter(
             "content": json.dumps(payload, ensure_ascii=False, default=str),
         },
     ]
+
+
+def _emit_verification_event(
+    conn: sqlite3.Connection,
+    *,
+    kind: VerificationKind,
+    result: VerificationResult,
+    source_llm_call_id: int | None,
+    strict: bool,
+) -> None:
+    """Record a verifier outcome to the events log.
+
+    Surfaces verifier suppressions in `events`, alongside other daemon
+    decisions, so the user can see how often verification killed or
+    rewrote an output without grepping `llm-log`.
+    """
+    category = _EVENT_CATEGORY[kind]
+    counts = _issue_counts(result.issues)
+    if result.verdict == "pass":
+        return
+    if result.verdict == "fail":
+        event_kind = "verifier_suppressed"
+        summary = f"{kind} suppressed by verifier ({counts['issue_count']} issue(s))"
+    elif strict:
+        event_kind = "verifier_suppressed"
+        summary = (
+            f"{kind} suppressed (strict): verifier asked for revisions "
+            f"({counts['issue_count']} issue(s))"
+        )
+    elif result.revised_text is not None:
+        event_kind = "verifier_revised"
+        summary = f"{kind} rewritten by verifier ({counts['issue_count']} issue(s))"
+    else:
+        event_kind = "verifier_revise_skipped"
+        summary = (
+            f"{kind} kept original; verifier asked for revisions but "
+            f"rewriter was disabled ({counts['issue_count']} issue(s))"
+        )
+    record_event(
+        conn,
+        category,
+        event_kind,
+        summary,
+        details={
+            "verdict": result.verdict,
+            "confidence": result.confidence,
+            "strict": strict,
+            **counts,
+            "verifier_call_id": result.verifier_call_id,
+            "rewrite_call_id": result.rewrite_call_id,
+        },
+        llm_call_id=source_llm_call_id,
+    )
 
 
 def verify_and_rewrite(
@@ -327,6 +445,7 @@ def verify_and_rewrite(
     model: str = VERIFICATION_MODEL,
     rewrite_model: str = VERIFICATION_REWRITE_MODEL,
     max_revisions: int = MAX_VERIFICATION_REVISIONS,
+    strict: bool = False,
 ) -> VerificationResult:
     """Verify a draft and optionally perform one bounded rewrite.
 
@@ -334,12 +453,16 @@ def verify_and_rewrite(
         kind: Output surface being verified.
         draft: Generated text to audit.
         evidence: Compact facts the verifier may use.
-        source_messages: Source conversation that created the draft.
+        source_messages: Slim source payload (system + user + final draft).
         conn: Open DB connection for LLM logging.
         metadata: Product metadata to store with verifier/rewrite calls.
         model: Verifier model.
         rewrite_model: Bounded rewriter model.
-        max_revisions: Maximum rewrite attempts; normally 0 or 1.
+        max_revisions: Maximum rewrite attempts; normally 0 or 1. The rewriter
+            is also bypassed entirely when *strict* is True.
+        strict: When True, treat any non-pass verdict as fail and skip the
+            rewriter. Used by surfaces where a partial rewrite could ship
+            content (e.g. coach proposal diffs) the verifier never approved.
 
     Returns:
         VerificationResult. Malformed verifier JSON fails closed.
@@ -353,6 +476,13 @@ def verify_and_rewrite(
             kind=kind,
             source_llm_call_id=source_llm_call_id,
             result=result,
+        )
+        _emit_verification_event(
+            conn,
+            kind=kind,
+            result=result,
+            source_llm_call_id=source_llm_call_id,
+            strict=strict,
         )
         return result
 
@@ -397,12 +527,26 @@ def verify_and_rewrite(
             source_llm_call_id=source_llm_call_id,
             result=result,
         )
+        _emit_verification_event(
+            conn,
+            kind=kind,
+            result=result,
+            source_llm_call_id=source_llm_call_id,
+            strict=strict,
+        )
         return result
 
     if guard_issues:
         parsed.issues = [*guard_issues, *parsed.issues]
         if parsed.verdict == "pass":
             parsed.verdict = "revise"
+
+    if parsed.verdict == "pass" and parsed.confidence.lower() == "low":
+        logger.warning(
+            "%s verifier returned pass with low confidence; "
+            "treating as soft signal, output will still ship",
+            kind,
+        )
 
     _update_call_metadata(
         conn,
@@ -415,12 +559,36 @@ def verify_and_rewrite(
         },
     )
 
+    if strict and parsed.verdict != "pass":
+        parsed.verdict = "fail"
+        _record_source_verification(
+            conn,
+            kind=kind,
+            source_llm_call_id=source_llm_call_id,
+            result=parsed,
+        )
+        _emit_verification_event(
+            conn,
+            kind=kind,
+            result=parsed,
+            source_llm_call_id=source_llm_call_id,
+            strict=strict,
+        )
+        return parsed
+
     if parsed.verdict != "revise" or max_revisions <= 0:
         _record_source_verification(
             conn,
             kind=kind,
             source_llm_call_id=source_llm_call_id,
             result=parsed,
+        )
+        _emit_verification_event(
+            conn,
+            kind=kind,
+            result=parsed,
+            source_llm_call_id=source_llm_call_id,
+            strict=strict,
         )
         return parsed
 
@@ -464,6 +632,13 @@ def verify_and_rewrite(
             source_llm_call_id=source_llm_call_id,
             result=parsed,
         )
+        _emit_verification_event(
+            conn,
+            kind=kind,
+            result=parsed,
+            source_llm_call_id=source_llm_call_id,
+            strict=strict,
+        )
         return parsed
 
     parsed.revised_text = rewrite_result.text.strip()
@@ -477,5 +652,12 @@ def verify_and_rewrite(
         kind=kind,
         source_llm_call_id=source_llm_call_id,
         result=parsed,
+    )
+    _emit_verification_event(
+        conn,
+        kind=kind,
+        result=parsed,
+        source_llm_call_id=source_llm_call_id,
+        strict=strict,
     )
     return parsed

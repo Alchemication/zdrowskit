@@ -49,7 +49,7 @@ from config import (
     VERIFY_NUDGE,
 )
 from context_edit import ContextEdit, EditPreviewError, build_edit_preview
-from llm import LLMResult, call_llm, extract_memory
+from llm import LLMResult, call_llm, extract_memory, _model_accepts_reasoning_effort
 from llm_context import append_history, build_messages, load_context
 from llm_health import (
     build_llm_data,
@@ -66,7 +66,12 @@ from notification_prefs import (
 )
 from notify import send_email, send_telegram, send_telegram_photo, send_telegram_report
 from store import open_db
-from llm_verify import VerificationKind, verify_and_rewrite
+from llm_verify import (
+    VerificationKind,
+    extract_tool_evidence,
+    slim_source_messages,
+    verify_and_rewrite,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -741,8 +746,14 @@ def _apply_verification(
     source_messages: list[dict[str, Any]],
     conn: sqlite3.Connection,
     metadata: dict[str, Any],
+    strict: bool = False,
 ) -> str | None:
-    """Run verifier/rewrite and return the approved text, or None on fail."""
+    """Run verifier/rewrite and return the approved text, or None on fail.
+
+    When *strict* is True, any non-pass verdict is treated as fail and the
+    rewriter is bypassed — used by surfaces (e.g. coach) where shipping a
+    rewritten partial is worse than shipping nothing.
+    """
     if not _verification_enabled(kind):
         return draft
 
@@ -756,14 +767,16 @@ def _apply_verification(
         model=VERIFICATION_MODEL,
         rewrite_model=VERIFICATION_REWRITE_MODEL,
         max_revisions=MAX_VERIFICATION_REVISIONS,
+        strict=strict,
     )
     issue_summary = ", ".join(
         f"{issue.severity}: {issue.problem}" for issue in result.issues
     )
     logger.info(
-        "%s verification verdict=%s issues=%d%s",
+        "%s verification verdict=%s confidence=%s issues=%d%s",
         kind,
         result.verdict,
+        result.confidence,
         len(result.issues),
         f" ({issue_summary})" if issue_summary else "",
     )
@@ -917,7 +930,11 @@ def cmd_insights(
                     }
                 )
         synthesis_attempts = [("final_synthesis", reasoning_effort)]
-        if reasoning_effort is not None:
+        # The "no-reasoning" retry only helps when the model actually accepts
+        # reasoning_effort (Anthropic extended thinking). For DeepSeek and
+        # others the param is stripped upstream, so a second pass with
+        # effort=None is identical and just doubles cost — skip it.
+        if reasoning_effort is not None and _model_accepts_reasoning_effort(args.model):
             synthesis_attempts.append(("final_synthesis_no_reasoning", None))
         for label, effort in synthesis_attempts:
             try:
@@ -1004,18 +1021,15 @@ def cmd_insights(
         kind="insights",
         draft=result.text,
         evidence={
-            "health_data": health_data,
             "health_data_text": health_data_text,
             "review_facts": context.get("review_facts"),
             "baselines": baselines,
             "milestones": milestones,
             "week_complete": week_complete,
             "week_label": week_label,
+            "tool_calls": extract_tool_evidence(messages),
         },
-        source_messages=[
-            *messages,
-            {"role": "assistant", "content": result.text},
-        ],
+        source_messages=slim_source_messages(messages, result.text),
         conn=conn,
         metadata={
             "source_llm_call_id": result.llm_call_id,
@@ -1249,18 +1263,14 @@ def cmd_nudge(
         kind="nudge",
         draft=raw_text,
         evidence={
-            "health_data": health_data,
             "health_data_text": health_data_text,
-            "recent_nudges": recent_nudge_entries,
             "recent_nudges_text": context.get("recent_nudges"),
             "last_coach_summary": context.get("last_coach_summary"),
             "trigger_type": _trigger,
             "trigger_context": trigger_context_text,
+            "tool_calls": extract_tool_evidence(messages),
         },
-        source_messages=[
-            *messages,
-            {"role": "assistant", "content": raw_text},
-        ],
+        source_messages=slim_source_messages(messages, raw_text),
         conn=conn,
         metadata={
             "source_llm_call_id": result.llm_call_id,
@@ -1567,7 +1577,6 @@ def cmd_coach(
         kind="coach",
         draft=bundled_text,
         evidence={
-            "health_data": health_data,
             "health_data_text": health_data_text,
             "review_facts": context.get("review_facts"),
             "baselines": baselines,
@@ -1575,14 +1584,12 @@ def cmd_coach(
             "week_complete": week_complete,
             "week_label": week_label,
             "strategy_sections": strategy_sections,
-            "recent_nudges": recent_nudge_entries,
+            "recent_nudges_text": context.get("recent_nudges"),
             "coach_feedback": context.get("coach_feedback"),
             "proposals": _coach_proposal_evidence(proposals),
+            "tool_calls": extract_tool_evidence(messages),
         },
-        source_messages=[
-            *messages,
-            {"role": "assistant", "content": bundled_text},
-        ],
+        source_messages=slim_source_messages(messages, bundled_text),
         conn=conn,
         metadata={
             "source_llm_call_id": result.llm_call_id,
@@ -1590,6 +1597,7 @@ def cmd_coach(
             "week_label": week_label,
             "proposal_count": len(proposals),
         },
+        strict=True,
     )
     if verified_text is None or verified_text.strip().upper() == "SKIP":
         logger.info("Coach verification suppressed the review/proposals")

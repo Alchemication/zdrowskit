@@ -146,8 +146,9 @@ Normal CLI usage auto-applies pending SQLite migrations when the database is ope
    cp examples/context/*.md ~/Documents/zdrowskit/ContextFiles/
    ```
 2. Edit them with your real data — at minimum `me.md` and `strategy.md`
-3. Add your API key to `.env` (plus Telegram credentials — see [Notifications](#notifications)):
+3. Add your API keys to `.env` (plus Telegram credentials — see [Notifications](#notifications)). The defaults call DeepSeek with Anthropic as the cross-provider fallback, so set both keys to enable fallback:
    ```
+   DEEPSEEK_API_KEY=sk-...
    ANTHROPIC_API_KEY=sk-ant-...
    ```
 4. Generate your first report:
