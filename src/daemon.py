@@ -24,20 +24,17 @@ import sys
 import threading
 import time
 from contextlib import contextmanager
-from datetime import date, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Iterator
 
 from config import (
     CONTEXT_DEBOUNCE_S,
-    EVENING_HOUR_END,
-    EVENING_HOUR_START,
     HEALTH_DEBOUNCE_S,
     LOCK_FILE,
     LOG_FILE,
     SCHEDULED_CHECK_INTERVAL_S,
     STATE_FILE,
-    TRAINING_DAYS,
 )
 from config import AUTOEXPORT_DATA_DIR as ICLOUD_HEALTH_DIR
 
@@ -807,7 +804,7 @@ class ZdrowskitDaemon:
     # ------------------------------------------------------------------
 
     def _scheduled_check_loop(self) -> None:
-        """Background thread: periodic checks for morning reports and evening missed sessions."""
+        """Background thread: periodic checks for scheduled reports."""
         from notification_prefs import evaluate_nudge_delivery, scheduled_report_due
 
         while True:
@@ -832,38 +829,6 @@ class ZdrowskitDaemon:
 
             if scheduled_report_due(prefs, "midweek_report", now=now):
                 self._runners._run_midweek_report()
-
-            # Evening: check for missed sessions on training days
-            if EVENING_HOUR_START <= now.hour < EVENING_HOUR_END:
-                if now.weekday() not in TRAINING_DAYS:
-                    continue
-                today_str = date.today().isoformat()
-                if self._state.get("last_missed_session_date") == today_str:
-                    continue
-                try:
-                    conn = sqlite3.connect(str(self.db))
-                    row = conn.execute(
-                        "SELECT COUNT(*) FROM workout WHERE date = ?", (today_str,)
-                    ).fetchone()
-                    conn.close()
-                    has_workout = row[0] > 0 if row else False
-                    if not has_workout:
-                        logger.info(
-                            "Evening check: no workout on training day %s", today_str
-                        )
-                        self._state["last_missed_session_date"] = today_str
-                        _save_state(self._state)
-                        self._runners._run_nudge(
-                            "missed_session",
-                            trigger_context=(
-                                f"No workout has been logged today ({today_str}, "
-                                f"{date.today().strftime('%A')}), and the evening "
-                                "check is firing because today is a scheduled "
-                                "training day."
-                            ),
-                        )
-                except Exception as exc:
-                    logger.error("Evening check DB query failed: %s", exc)
 
     # ------------------------------------------------------------------
     # Main loop

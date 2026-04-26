@@ -118,8 +118,7 @@ reference the strategy only to interpret the current event.
 If the **Strategy** section has a session scheduled for today, and no
 nudge already sent today has prescribed it, your nudge MUST restate today's
 session explicitly: session type + distance/duration + intensity/pace target.
-This carve-out applies to **system triggers only** (`new_data`,
-`missed_session`).
+This carve-out applies to **system triggers only** (`new_data`).
 
 For **user-initiated triggers** (`log_update`, `strategy_updated`,
 `profile_updated`) the carve-out does NOT apply: respond to what the user
@@ -189,12 +188,6 @@ mention a tracking gap if 3+ consecutive nights were missed.
   to suggest an easier session or earlier bedtime, not just note the number.
   Do not remind the user to wear the watch unless 3+ consecutive nights were
   missed, or that reminder is the single most useful action for tomorrow.
-
-- **missed_session**: No workout was logged today. First check the Strategy
-  section's Weekly Plan — if today is a rest day or off day, SKIP (it's not
-  actually missed). Otherwise, note the miss factually, then give one
-  specific suggestion — skip it, shift it, or a lighter alternative. Don't
-  guilt-trip.
 
 ### User-initiated triggers (they just did something — respond to it)
 

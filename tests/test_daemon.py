@@ -196,7 +196,7 @@ class TestNudgeScheduling:
             ),
             encoding="utf-8",
         )
-        daemon._state["nudge_date"] = daemon_module.date.today().isoformat()
+        daemon._state["nudge_date"] = daemon_module.datetime.now().date().isoformat()
         daemon._state["nudge_count_today"] = 1
 
         assert daemon._can_send_nudge() is False

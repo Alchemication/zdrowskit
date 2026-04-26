@@ -86,9 +86,6 @@ Examples:
 
     uv run python main.py nudge --trigger strategy_updated
         Send a nudge via Telegram acknowledging a strategy.md edit.
-
-    uv run python main.py nudge --trigger missed_session
-        Send a missed-session reminder via Telegram.
 """
 
 from __future__ import annotations
@@ -291,7 +288,6 @@ def main() -> None:
             "new_data",
             "log_update",
             "strategy_updated",
-            "missed_session",
         ],
         default="new_data",
         help="What triggered the nudge (default: new_data)",

@@ -6,7 +6,7 @@ Your watch collects thousands of data points a week. Apple shows you rings. zdro
 
 - **Personalised weekly reports** — not generic summaries, but analysis that knows your goals, your plan, your injuries, what you wrote in your journal last Tuesday, and how this season compares to prior years
 - **Coaching proposals** — every Monday after the weekly report, the coach reviews the completed week and proposes concrete changes to your training plan or goals, with diff-first Approve/Reject buttons in Telegram
-- **Reactive nudges** — skipped a session? New data synced? The coach notices and says something useful (or stays quiet if there's nothing to say)
+- **Reactive nudges** — new data synced or context changed? The coach notices and says something useful (or stays quiet if there's nothing to say)
 - **Remembers you week to week** — a freeform journal captures *why* things happened (travel, illness, life), and the coach appends its own memory after each report. No cold starts.
 - **Ask anything about your data** — "What's my fastest 1km pace?", "How's my HRV trending since January?", "Do I sleep worse after evening runs?" — if the data exists, it'll find the answer and chart it
 
@@ -187,7 +187,7 @@ uv run python main.py daemon-restart      # restart the background daemon
 uv run python main.py daemon-stop         # stop the background daemon
 ```
 
-Run any command with `--help` for the full flag list — e.g. `insights --week last --telegram`, `nudge --trigger missed_session`, `llm-log --id 42 --feedback`, `events --since 3d --category nudge`. LLM evals have their own runner, see [LLM evals](#llm-evals).
+Run any command with `--help` for the full flag list — e.g. `insights --week last --telegram`, `nudge --trigger log_update`, `llm-log --id 42 --feedback`, `events --since 3d --category nudge`. LLM evals have their own runner, see [LLM evals](#llm-evals).
 
 Override the default iCloud data directory with `--data-dir` or the `HEALTH_DATA_DIR` env var.
 
@@ -276,7 +276,7 @@ Each notification type is a distinct LLM call with its own prompt, context, tool
 |---------|---------|---------|-----------|--------|-------|----------------|
 | **Insights** | Full weekly report | Scheduled (default: Mon 10am) or manual `/review` | 1×/week | ~450 words | `run_sql` | `<chart>` (0+), `<memory>` (always 1, appended to `history.md`) |
 | **Coach** | Weekly strategy review, only when proposals exist | After insights (silent on no-change weeks) | 1×/week | ~300 words | `run_sql`, `update_context` (`strategy` only) | `SKIP` if no changes warranted; bundled message with inline Accept/Reject buttons per edit |
-| **Nudge** | Short reactive next-action nudge | Data sync, file edit, missed session | Up to 3/day by default | 80 words | `run_sql` | `SKIP` if nothing changes; `<chart>` (0–1) |
+| **Nudge** | Short reactive next-action nudge | Data sync, file edit | Up to 3/day by default | 80 words | `run_sql` | `SKIP` if nothing changes; `<chart>` (0–1) |
 | **Chat** | Interactive conversation — answer the current message, ask anything, get charts | Your Telegram message | On demand | 150 words | `run_sql` (up to 5/turn), `update_context` (any file) | `<chart>` (optional), `update_context` (at most 1) |
 
 ### Notification preferences via Telegram
@@ -314,7 +314,6 @@ What can be changed:
 |-------|----------|-------------|
 | Health data synced via iCloud | 3 min | One data observation + suggestion for today/tomorrow |
 | `log.md` / `strategy.md` / `me.md` edited | 60 sec | Responds to the change — acknowledges, flags tension, or confirms |
-| 8–9 PM, no workout on a training day | — | Factual note + one suggestion (skip, shift, lighter alternative) |
 | Monday 8–9 AM | scheduled | Full weekly report, then coaching review |
 | Thursday 9–10 AM | scheduled | Mid-week progress report |
 

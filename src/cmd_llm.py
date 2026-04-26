@@ -1330,7 +1330,6 @@ def cmd_nudge(
     # Trigger-specific emoji header for visual distinction in Telegram.
     _TRIGGER_HEADERS: dict[str, str] = {
         "new_data": "\U0001f4ca Data Sync",
-        "missed_session": "\U0001f3cb\ufe0f Missed Session",
         "log_update": "\U0001f4dd Log Update",
         "strategy_updated": "\U0001f9ed Strategy Update",
     }

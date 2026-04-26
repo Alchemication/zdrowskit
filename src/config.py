@@ -266,18 +266,8 @@ MAX_NUDGES_PER_DAY: int = 3
 MIN_NUDGE_INTERVAL_S: int = 90 * 60
 """Minimum gap between consecutive nudges."""
 
-TRAINING_DAYS: set[int] = {0, 1, 2, 3, 4, 5, 6}
-"""Weekdays (Mon=0..Sun=6) eligible for nudges. Currently every day —
-the user catches up on weekends."""
-
 SCHEDULED_CHECK_INTERVAL_S: int = 30 * 60
 """How often the scheduled-check loop wakes to evaluate report cadence."""
-
-EVENING_HOUR_START: int = 20
-"""Inclusive lower bound (24h) of the evening nudge window."""
-
-EVENING_HOUR_END: int = 21
-"""Exclusive upper bound (24h) of the evening nudge window."""
 
 COACH_SUPPRESSION_S: int = 3600
 """±1 hour suppression around scheduled reports — no nudges fire inside
