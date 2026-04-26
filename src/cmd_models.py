@@ -8,14 +8,16 @@ from typing import Any
 
 from model_prefs import (
     FEATURE_LABELS,
-    apply_chat_opus_preset,
     doctor_findings,
     model_label,
+    reasoning_label,
+    reset_all_routes,
     reset_feature_route,
     resolve_model_route,
     routes_summary,
     set_feature_route,
     set_profile_route,
+    temperature_label,
 )
 
 
@@ -25,14 +27,14 @@ def cmd_models(args: argparse.Namespace) -> None:
     if action is None:
         _show_status(json_output=args.json)
         return
-    if action == "preset":
-        if args.name != "chat-opus":
-            raise SystemExit("Unknown preset. Use: chat-opus")
-        apply_chat_opus_preset()
-        print("Applied preset: chat-opus")
-        _show_feature("chat")
-        return
     if action == "reset":
+        if getattr(args, "all", False):
+            reset_all_routes()
+            print("Reset all routes to defaults.")
+            _show_status(json_output=False)
+            return
+        if not getattr(args, "feature", None):
+            raise SystemExit("Pass a feature name or --all.")
         reset_feature_route(args.feature)
         print(f"Reset {args.feature}.")
         _show_feature(args.feature)
@@ -46,7 +48,7 @@ def cmd_models(args: argparse.Namespace) -> None:
         set_feature_route(
             args.feature,
             primary=args.primary,
-            fallback=args.fallback,
+            fallback=_parse_fallback(args.fallback),
             reasoning_effort=_parse_reasoning(args.reasoning),
             temperature=_parse_temperature(args.temperature),
         )
@@ -67,10 +69,8 @@ def cmd_models(args: argparse.Namespace) -> None:
 
 def _show_feature(feature: str) -> None:
     route = resolve_model_route(feature)
-    print(
-        f"{FEATURE_LABELS.get(feature, feature)}: "
-        f"{route.primary} -> {route.fallback or 'none'}"
-    )
+    fallback = route.fallback or f"auto ({route.profile} profile)"
+    print(f"{FEATURE_LABELS.get(feature, feature)}: {route.primary} -> {fallback}")
 
 
 def _show_status(*, json_output: bool) -> None:
@@ -92,17 +92,16 @@ def _show_status(*, json_output: bool) -> None:
     for route in routes:
         params = []
         if "reasoning_effort" in route.params:
-            params.append(f"reasoning={route.reasoning_effort or 'none'}")
+            params.append(f"reasoning={reasoning_label(route.reasoning_effort)}")
         if "temperature" in route.params:
-            params.append(
-                "temperature=omit"
-                if route.temperature is None
-                else f"temperature={route.temperature:g}"
-            )
+            params.append(f"temperature={temperature_label(route.temperature)}")
+        fallback = (
+            model_label(route.fallback) if route.fallback else f"auto ({route.profile})"
+        )
         table.add_row(
             FEATURE_LABELS.get(route.feature, route.feature),
             model_label(route.primary),
-            model_label(route.fallback) if route.fallback else "none",
+            fallback,
             ", ".join(params) or "-",
             route.profile,
         )
@@ -118,6 +117,14 @@ def _route_to_dict(route: Any) -> dict[str, Any]:
         "params": route.params,
         "source": route.source,
     }
+
+
+def _parse_fallback(value: str | None) -> str | None | object:
+    if value is None:
+        return ...
+    if value in {"auto", ""}:
+        return None
+    return value
 
 
 def _parse_reasoning(value: str | None) -> str | None | object:

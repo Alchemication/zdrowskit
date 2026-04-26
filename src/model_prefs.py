@@ -4,6 +4,13 @@ The preference file stores user-facing routing choices separately from
 ``.env``. Environment variables still seed the built-in defaults, while this
 module resolves the effective model, fallback, and small provider quirks for
 each feature at call time.
+
+A feature's stored ``fallback`` key has three meanings:
+
+* **absent** or ``null`` — fall through to the profile's fallback at resolve
+  time. Persisting ``null`` lets the user override a built-in feature-level
+  fallback (e.g. ``chat``) without mutating the defaults.
+* **string** — explicit per-feature fallback override.
 """
 
 from __future__ import annotations
@@ -71,6 +78,23 @@ TELEGRAM_FEATURE_GROUPS: dict[str, tuple[str, ...]] = {
     "utilities": ("notify", "log_flow", "add_clone"),
 }
 
+# Capability tier shown next to each model in Telegram buttons. Helps users
+# pick something appropriate for the feature without memorising provider
+# pricing.
+MODEL_TIERS: dict[str, str] = {
+    PRIMARY_PRO_MODEL: "pro",
+    FALLBACK_PRO_MODEL: "premium",
+    PRIMARY_FLASH_MODEL: "flash",
+    FALLBACK_FLASH_MODEL: "lite",
+    ANTHROPIC_OPUS_MODEL: "premium",
+    ANTHROPIC_OPUS_4_7_MODEL: "premium",
+    ANTHROPIC_HAIKU_MODEL: "lite",
+}
+
+# Reasoning and temperature pickers exposed in the Telegram /models flow.
+REASONING_CHOICES: tuple[str | None, ...] = (None, "low", "medium", "high")
+TEMPERATURE_CHOICES: tuple[float | None, ...] = (None, 0.0, 0.3, 0.7, 1.0)
+
 
 @dataclass(frozen=True)
 class ModelRoute:
@@ -119,8 +143,6 @@ def default_model_prefs() -> dict[str, Any]:
                 "profile": "pro",
                 "primary": ANTHROPIC_OPUS_4_7_MODEL,
                 "fallback": DEFAULT_CHAT_MODEL,
-                "reasoning_effort": None,
-                "temperature": None,
             },
             "notify": {"profile": "flash", "primary": DEFAULT_NOTIFY_MODEL},
             "log_flow": {"profile": "flash", "primary": DEFAULT_LOG_FLOW_MODEL},
@@ -164,8 +186,25 @@ def selectable_models() -> list[str]:
 
 
 def model_label(model: str) -> str:
-    """Return a compact label for Telegram buttons and tables."""
+    """Return a compact label for tables (no tier annotation)."""
     return model.split("/", 1)[1] if "/" in model else model
+
+
+def model_button_label(model: str) -> str:
+    """Return a Telegram-button label with capability tier annotation."""
+    short = model_label(model).removeprefix("claude-")
+    tier = MODEL_TIERS.get(model)
+    return f"{short} · {tier}" if tier else short
+
+
+def reasoning_label(value: str | None) -> str:
+    """Return a Telegram-friendly label for a reasoning effort value."""
+    return "off" if value is None else value
+
+
+def temperature_label(value: float | None) -> str:
+    """Return a Telegram-friendly label for a temperature value."""
+    return "omit" if value is None else f"{value:g}"
 
 
 def _prefs_path(path: Path | None = None) -> Path:
@@ -245,9 +284,23 @@ def resolve_model_route(
     profile_cfg = dict(prefs["profiles"].get(profile, {}))
 
     primary = str(feature_cfg.get("primary") or profile_cfg.get("primary"))
-    fallback = feature_cfg.get("fallback", profile_cfg.get("fallback"))
-    if fallback is not None:
-        fallback = str(fallback)
+    raw_fallback = feature_cfg.get("fallback")
+    if raw_fallback is None:
+        # Missing or explicit ``null`` both mean "fall through to profile".
+        raw_fallback = profile_cfg.get("fallback")
+    fallback = str(raw_fallback) if raw_fallback else None
+
+    # Effective reasoning/temperature: per-feature override wins; otherwise
+    # the primary model's documented requirements apply (Opus 4.7 must omit
+    # temperature and run with reasoning off); otherwise leave to call_llm
+    # to apply its global defaults.
+    primary_defaults = _primary_model_defaults(primary)
+    params: dict[str, Any] = {}
+    for key in ("reasoning_effort", "temperature"):
+        if key in feature_cfg:
+            params[key] = feature_cfg[key]
+        elif key in primary_defaults:
+            params[key] = primary_defaults[key]
 
     source = "feature" if "primary" in feature_cfg else f"profile:{profile}"
     return ModelRoute(
@@ -255,15 +308,18 @@ def resolve_model_route(
         primary=primary,
         fallback=fallback,
         profile=profile,
-        reasoning_effort=feature_cfg.get("reasoning_effort"),
-        temperature=feature_cfg.get("temperature"),
-        params={
-            key: feature_cfg[key]
-            for key in ("reasoning_effort", "temperature")
-            if key in feature_cfg
-        },
+        reasoning_effort=params.get("reasoning_effort"),
+        temperature=params.get("temperature"),
+        params=params,
         source=source,
     )
+
+
+def _primary_model_defaults(primary: str) -> dict[str, Any]:
+    """Return reasoning/temperature defaults forced by the primary model."""
+    if primary == ANTHROPIC_OPUS_4_7_MODEL:
+        return {"reasoning_effort": None, "temperature": None}
+    return {}
 
 
 def routes_summary(
@@ -276,29 +332,71 @@ def routes_summary(
     return [resolve_model_route(feature, prefs=prefs) for feature in FEATURES]
 
 
+def profile_fallback_for(
+    feature: str,
+    *,
+    prefs: dict[str, Any] | None = None,
+    path: Path | None = None,
+) -> str | None:
+    """Return the profile-level fallback for ``feature`` (no per-feature override)."""
+    if feature not in FEATURES:
+        raise ValueError(f"Unknown model feature: {feature}")
+    prefs = prefs or load_model_prefs(path)
+    profile_name = prefs["features"][feature].get("profile") or _default_profile(
+        feature
+    )
+    profile_cfg = prefs["profiles"].get(profile_name, {})
+    raw = profile_cfg.get("fallback")
+    return str(raw) if raw else None
+
+
+def _normalize_primary_params(entry: dict[str, Any], primary: str) -> None:
+    """Reset reasoning/temperature when primary model family changes.
+
+    Switching to Opus 4.7 forces both off (the model omits temperature and
+    has reasoning controls disabled by spec). Switching to anything else
+    drops Opus-specific overrides so the route picks up the global call
+    defaults again.
+    """
+    if primary == ANTHROPIC_OPUS_4_7_MODEL:
+        entry["reasoning_effort"] = None
+        entry["temperature"] = None
+    else:
+        entry.pop("reasoning_effort", None)
+        entry.pop("temperature", None)
+
+
 def set_feature_route(
     feature: str,
     *,
-    primary: str,
+    primary: str | object = ...,
     fallback: str | None | object = ...,
     reasoning_effort: str | None | object = ...,
     temperature: float | None | object = ...,
     path: Path | None = None,
 ) -> dict[str, Any]:
-    """Persist a feature-level route override."""
+    """Persist a feature-level route override.
+
+    Sentinels:
+        ``...`` means "leave unchanged". ``None`` for ``fallback`` clears the
+        per-feature override so the profile fallback applies. ``None`` for
+        reasoning/temperature is an explicit "off / omit" value.
+    """
     if feature not in FEATURES:
         raise ValueError(f"Unknown model feature: {feature}")
     prefs = load_model_prefs(path)
     entry = dict(prefs["features"].get(feature, {}))
-    entry["primary"] = primary
-    if primary == ANTHROPIC_OPUS_4_7_MODEL:
-        entry.setdefault("reasoning_effort", None)
-        entry.setdefault("temperature", None)
+    primary_changed = False
+    if primary is not ...:
+        primary_changed = entry.get("primary") != primary
+        entry["primary"] = primary  # type: ignore[assignment]
+    if primary_changed:
+        _normalize_primary_params(entry, str(entry["primary"]))
     if fallback is not ...:
-        if fallback is None:
-            entry["fallback"] = None
-        else:
-            entry["fallback"] = fallback
+        # ``None`` persists as JSON null and means "use profile fallback".
+        # The resolver treats null and missing identically, but storing
+        # null lets us override built-in feature-level fallbacks (e.g. chat).
+        entry["fallback"] = fallback  # type: ignore[assignment]
     if reasoning_effort is not ...:
         entry["reasoning_effort"] = reasoning_effort
     if temperature is not ...:
@@ -338,17 +436,10 @@ def update_multiple_features(
             raise ValueError(f"Unknown model feature: {feature}")
         entry = dict(prefs["features"].get(feature, {}))
         entry["primary"] = primary
-        if primary == ANTHROPIC_OPUS_4_7_MODEL:
-            entry["reasoning_effort"] = None
-            entry["temperature"] = None
-        else:
-            entry.pop("reasoning_effort", None)
-            entry.pop("temperature", None)
+        _normalize_primary_params(entry, primary)
         if fallback is not ...:
-            if fallback is None:
-                entry["fallback"] = None
-            else:
-                entry["fallback"] = fallback
+            # ``None`` persists as null and means "use profile fallback".
+            entry["fallback"] = fallback  # type: ignore[assignment]
         prefs["features"][feature] = entry
     save_model_prefs(prefs, path)
 
@@ -367,10 +458,9 @@ def reset_feature_route(
     return prefs
 
 
-def apply_chat_opus_preset(path: Path | None = None) -> dict[str, Any]:
-    """Apply the built-in low-latency Opus chat preset."""
-    prefs = load_model_prefs(path)
-    prefs["features"]["chat"] = default_model_prefs()["features"]["chat"]
+def reset_all_routes(path: Path | None = None) -> dict[str, Any]:
+    """Reset every feature and both profiles to built-in defaults."""
+    prefs = default_model_prefs()
     save_model_prefs(prefs, path)
     return prefs
 
@@ -383,23 +473,42 @@ def doctor_findings(
     """Return actionable model-routing warnings."""
     prefs = prefs or load_model_prefs(path)
     findings: list[str] = []
-    for profile, cfg in prefs["profiles"].items():
-        if cfg.get("primary") == cfg.get("fallback"):
-            findings.append(f"{profile} primary and fallback are the same.")
+    for profile_name, cfg in prefs["profiles"].items():
+        if cfg.get("primary") and cfg.get("primary") == cfg.get("fallback"):
+            findings.append(
+                f"{profile_name} profile primary and fallback are the same model."
+            )
 
-    for provider, env_name in {
+    routes = routes_summary(prefs=prefs)
+    for route in routes:
+        if route.fallback and route.primary == route.fallback:
+            findings.append(
+                f"{FEATURE_LABELS.get(route.feature, route.feature)} primary and "
+                "fallback are the same model."
+            )
+
+    provider_envs = {
         "anthropic/": "ANTHROPIC_API_KEY",
         "deepseek/": "DEEPSEEK_API_KEY",
-    }.items():
-        if any(
-            route.primary.startswith(provider) for route in routes_summary(prefs=prefs)
-        ):
+        "openai/": "OPENAI_API_KEY",
+        "gemini/": "GEMINI_API_KEY",
+    }
+    used_models: set[str] = set()
+    for route in routes:
+        used_models.add(route.primary)
+        if route.fallback:
+            used_models.add(route.fallback)
+    for provider, env_name in provider_envs.items():
+        if any(model.startswith(provider) for model in used_models):
             if not os.environ.get(env_name):
                 findings.append(f"{env_name} is not set.")
 
     chat = resolve_model_route("chat", prefs=prefs)
-    if chat.primary == ANTHROPIC_OPUS_4_7_MODEL and chat.temperature is not None:
-        findings.append("Chat Opus 4.7 should omit temperature.")
+    if chat.primary == ANTHROPIC_OPUS_4_7_MODEL:
+        if chat.temperature is not None:
+            findings.append("Chat Opus 4.7 should omit temperature.")
+        if chat.reasoning_effort is not None:
+            findings.append("Chat Opus 4.7 should run with reasoning off.")
     return findings
 
 

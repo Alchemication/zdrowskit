@@ -396,47 +396,47 @@ def main() -> None:
     _add_db(p_llm_log)
 
     # models
+    feature_choices = [
+        "insights",
+        "coach",
+        "nudge",
+        "chat",
+        "notify",
+        "log_flow",
+        "add_clone",
+        "verification",
+        "verification_rewrite",
+    ]
     p_models = sub.add_parser("models", help="Show or change LLM model routing")
     p_models.add_argument("--json", action="store_true", help="Output JSON")
     models_sub = p_models.add_subparsers(dest="models_cmd")
-    p_models_preset = models_sub.add_parser("preset", help="Apply a named preset")
-    p_models_preset.add_argument("name", choices=["chat-opus"])
-    p_models_reset = models_sub.add_parser("reset", help="Reset a feature route")
+    p_models_reset = models_sub.add_parser(
+        "reset",
+        help="Reset a feature route or all routes",
+    )
     p_models_reset.add_argument(
         "feature",
-        choices=[
-            "insights",
-            "coach",
-            "nudge",
-            "chat",
-            "notify",
-            "log_flow",
-            "add_clone",
-            "verification",
-            "verification_rewrite",
-        ],
+        nargs="?",
+        choices=feature_choices,
+        help="Feature to reset (omit when using --all)",
+    )
+    p_models_reset.add_argument(
+        "--all",
+        action="store_true",
+        help="Reset every feature and both profiles to built-in defaults",
     )
     p_models_profile = models_sub.add_parser("profile", help="Set a profile route")
     p_models_profile.add_argument("profile", choices=["pro", "flash"])
     p_models_profile.add_argument("--primary", required=True, metavar="MODEL")
     p_models_profile.add_argument("--fallback", required=True, metavar="MODEL")
     p_models_set = models_sub.add_parser("set", help="Set a feature route")
-    p_models_set.add_argument(
-        "feature",
-        choices=[
-            "insights",
-            "coach",
-            "nudge",
-            "chat",
-            "notify",
-            "log_flow",
-            "add_clone",
-            "verification",
-            "verification_rewrite",
-        ],
-    )
+    p_models_set.add_argument("feature", choices=feature_choices)
     p_models_set.add_argument("primary", metavar="MODEL")
-    p_models_set.add_argument("--fallback", metavar="MODEL")
+    p_models_set.add_argument(
+        "--fallback",
+        metavar="MODEL",
+        help="Explicit fallback model, or 'auto' to defer to the profile fallback",
+    )
     p_models_set.add_argument(
         "--reasoning",
         choices=["none", "low", "medium", "high"],

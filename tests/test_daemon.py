@@ -1301,13 +1301,12 @@ class TestModelsFlow:
         text = daemon._poller.send_message_with_keyboard.call_args.args[0]
         buttons = daemon._poller.send_message_with_keyboard.call_args.args[1]
         assert "Model routes:" in text
-        assert any(button["text"] == "Chat" for row in buttons for button in row)
-        assert any(
-            button["text"] == "Use Opus for chat" for row in buttons for button in row
-        )
-        assert any(button["text"] == "❌ cancel" for row in buttons for button in row)
+        labels = [button["text"] for row in buttons for button in row]
+        assert any("Chat" in label for label in labels)
+        assert any("Reset all" in label for label in labels)
+        assert any(label == "❌ cancel" for label in labels)
 
-    def test_models_cancel_edits_message(self, tmp_path: Path) -> None:
+    def test_models_cancel_clears_keyboard(self, tmp_path: Path) -> None:
         daemon = _make_daemon(tmp_path)
         daemon._chat._poller = MagicMock()
 
@@ -1323,9 +1322,33 @@ class TestModelsFlow:
             "cb_model_cancel", "Cancelled."
         )
         daemon._poller.edit_message.assert_called_with(901, "Cancelled.")
+        daemon._poller.edit_message_reply_markup.assert_called_with(901, None)
 
-    def test_models_chat_preset_persists_opus_route(self, tmp_path: Path) -> None:
-        from config import ANTHROPIC_OPUS_4_7_MODEL
+    def test_models_chat_group_panel_offers_reasoning_and_temperature(
+        self, tmp_path: Path
+    ) -> None:
+        daemon = _make_daemon(tmp_path)
+        daemon._chat._poller = MagicMock()
+        prefs_path = tmp_path / "model_prefs.json"
+
+        with patch("model_prefs.MODEL_PREFS_PATH", prefs_path):
+            daemon._handle_telegram_callback(
+                {
+                    "id": "cb_group_chat",
+                    "data": "model_group:chat",
+                    "message": {"message_id": 902},
+                }
+            )
+
+        daemon._poller.edit_message_with_keyboard.assert_called_once()
+        kb = daemon._poller.edit_message_with_keyboard.call_args.args[2]
+        labels = [button["text"] for row in kb for button in row]
+        assert any("Reasoning" in label for label in labels)
+        assert any("Temperature" in label for label in labels)
+        assert any("Change model" in label for label in labels)
+        assert any("Reset" in label for label in labels)
+
+    def test_models_set_reasoning_persists_choice(self, tmp_path: Path) -> None:
         from model_prefs import resolve_model_route
 
         daemon = _make_daemon(tmp_path)
@@ -1335,16 +1358,101 @@ class TestModelsFlow:
         with patch("model_prefs.MODEL_PREFS_PATH", prefs_path):
             daemon._handle_telegram_callback(
                 {
-                    "id": "cb_preset",
-                    "data": "model_preset:chat_opus",
+                    "id": "cb_reason",
+                    "data": "model_set_reasoning:chat:medium",
+                    "message": {"message_id": 902},
+                }
+            )
+            route = resolve_model_route("chat")
+
+        assert route.reasoning_effort == "medium"
+
+    def test_models_set_temperature_persists_choice(self, tmp_path: Path) -> None:
+        from model_prefs import resolve_model_route
+
+        daemon = _make_daemon(tmp_path)
+        daemon._chat._poller = MagicMock()
+        prefs_path = tmp_path / "model_prefs.json"
+
+        with patch("model_prefs.MODEL_PREFS_PATH", prefs_path):
+            daemon._handle_telegram_callback(
+                {
+                    "id": "cb_temp",
+                    "data": "model_set_temperature:chat:0.3",
+                    "message": {"message_id": 902},
+                }
+            )
+            route = resolve_model_route("chat")
+
+        assert route.temperature == 0.3
+
+    def test_models_reset_all_restores_defaults(self, tmp_path: Path) -> None:
+        from config import ANTHROPIC_OPUS_4_7_MODEL, PRIMARY_PRO_MODEL
+        from model_prefs import resolve_model_route, set_feature_route
+
+        daemon = _make_daemon(tmp_path)
+        daemon._chat._poller = MagicMock()
+        prefs_path = tmp_path / "model_prefs.json"
+
+        with patch("model_prefs.MODEL_PREFS_PATH", prefs_path):
+            set_feature_route("chat", primary=PRIMARY_PRO_MODEL)
+            daemon._handle_telegram_callback(
+                {
+                    "id": "cb_reset_all",
+                    "data": "model_reset_all",
                     "message": {"message_id": 902},
                 }
             )
             route = resolve_model_route("chat")
 
         assert route.primary == ANTHROPIC_OPUS_4_7_MODEL
-        assert route.temperature is None
-        daemon._poller.edit_message_with_keyboard.assert_called_once()
+
+    def test_models_auto_fallback_falls_through_to_profile(
+        self, tmp_path: Path
+    ) -> None:
+        from config import (
+            ANTHROPIC_OPUS_4_7_MODEL,
+            FALLBACK_PRO_MODEL,
+            PRIMARY_PRO_MODEL,
+        )
+        from model_prefs import resolve_model_route, selectable_models
+
+        daemon = _make_daemon(tmp_path)
+        daemon._chat._poller = MagicMock()
+        prefs_path = tmp_path / "model_prefs.json"
+        models = selectable_models()
+        primary_idx = models.index(ANTHROPIC_OPUS_4_7_MODEL)
+
+        with patch("model_prefs.MODEL_PREFS_PATH", prefs_path):
+            daemon._handle_telegram_callback(
+                {
+                    "id": "cb_primary",
+                    "data": f"model_primary:nudges:{primary_idx}",
+                    "message": {"message_id": 903},
+                }
+            )
+            daemon._handle_telegram_callback(
+                {
+                    "id": "cb_fallback",
+                    "data": f"model_fallback:nudges:{primary_idx}:auto",
+                    "message": {"message_id": 903},
+                }
+            )
+            token = next(iter(daemon._model_flow._pending))
+            daemon._handle_telegram_callback(
+                {
+                    "id": "cb_accept",
+                    "data": f"model_accept:{token}",
+                    "message": {"message_id": 903},
+                }
+            )
+            route = resolve_model_route("nudge")
+
+        # "Auto" applies the profile fallback (resolved at read time, not stored).
+        assert route.primary == ANTHROPIC_OPUS_4_7_MODEL
+        assert route.fallback == FALLBACK_PRO_MODEL
+        # The "pro" profile's primary remains the configured default.
+        assert resolve_model_route("insights").primary == PRIMARY_PRO_MODEL
 
     def test_models_primary_fallback_accept_flow(self, tmp_path: Path) -> None:
         from config import ANTHROPIC_HAIKU_MODEL, PRIMARY_FLASH_MODEL
@@ -1384,6 +1492,22 @@ class TestModelsFlow:
 
         assert route.primary == PRIMARY_FLASH_MODEL
         assert route.fallback == ANTHROPIC_HAIKU_MODEL
+
+    def test_models_malformed_callback_logs_warning(self, tmp_path: Path) -> None:
+        daemon = _make_daemon(tmp_path)
+        daemon._chat._poller = MagicMock()
+
+        daemon._handle_telegram_callback(
+            {
+                "id": "cb_bad",
+                "data": "model_primary:nudges:notanint",
+                "message": {"message_id": 904},
+            }
+        )
+
+        daemon._poller.answer_callback_query.assert_called_with(
+            "cb_bad", "Invalid action."
+        )
 
 
 class TestFailureCapture:

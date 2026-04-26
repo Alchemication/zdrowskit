@@ -40,8 +40,16 @@ Under the hood: SQLite for storage, [litellm](https://github.com/BerriAI/litellm
 
 **Model defaults and fallback policy:** model routing is managed in
 `~/Documents/zdrowskit/model_prefs.json` and can be changed with
-`uv run python main.py models` or Telegram `/models`. Insights, coach, and
-nudges default to `deepseek/deepseek-v4-pro` with
+`uv run python main.py models` or Telegram `/models`. The Telegram panel
+groups features (Chat / Reports / Coach / Nudges / Utilities) and tags every
+model button with its capability tier (premium / pro / flash / lite). Chat
+also exposes Reasoning and Temperature controls; other groups inherit
+sensible defaults from their primary model. A `Reset all` button on the main
+panel and `uv run python main.py models reset --all` restore everything to
+built-in defaults. Picking the `Auto` fallback (or `--fallback auto` from the
+CLI) defers to the profile's fallback so future profile changes propagate.
+
+Insights, coach, and nudges default to `deepseek/deepseek-v4-pro` with
 `anthropic/claude-opus-4-6` fallback. Chat defaults to
 `anthropic/claude-opus-4-7` with reasoning off and temperature omitted,
 falling back to DeepSeek Pro. Lightweight utility surfaces — `/notify`
