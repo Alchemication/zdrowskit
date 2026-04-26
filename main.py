@@ -106,6 +106,7 @@ from cmd_db import cmd_db
 from cmd_events import CATEGORIES as EVENT_CATEGORIES, cmd_events
 from cmd_llm import cmd_coach, cmd_insights, cmd_nudge
 from cmd_llm_log import cmd_llm_log
+from cmd_models import cmd_models
 from commands import (
     cmd_context,
     cmd_daemon_restart,
@@ -115,8 +116,8 @@ from commands import (
     cmd_status,
     cmd_telegram_setup,
 )
-from config import DEFAULT_COACH_MODEL, DEFAULT_INSIGHTS_MODEL, DEFAULT_NUDGE_MODEL
 from log import setup_logging
+from model_prefs import resolve_model_route
 from store import default_db_path
 
 
@@ -215,9 +216,9 @@ def main() -> None:
     )
     p_insights.add_argument(
         "--model",
-        default=DEFAULT_INSIGHTS_MODEL,
+        default=None,
         metavar="MODEL",
-        help=f"litellm model string (default: {DEFAULT_INSIGHTS_MODEL})",
+        help=f"litellm model string (default: {resolve_model_route('insights').primary})",
     )
     p_insights.add_argument(
         "--week",
@@ -304,9 +305,9 @@ def main() -> None:
     )
     p_nudge.add_argument(
         "--model",
-        default=DEFAULT_NUDGE_MODEL,
+        default=None,
         metavar="MODEL",
-        help=f"litellm model string (default: {DEFAULT_NUDGE_MODEL})",
+        help=f"litellm model string (default: {resolve_model_route('nudge').primary})",
     )
     p_nudge.add_argument(
         "--email",
@@ -339,9 +340,9 @@ def main() -> None:
     )
     p_coach.add_argument(
         "--model",
-        default=DEFAULT_COACH_MODEL,
+        default=None,
         metavar="MODEL",
-        help=f"litellm model string (default: {DEFAULT_COACH_MODEL})",
+        help=f"litellm model string (default: {resolve_model_route('coach').primary})",
     )
     p_coach.add_argument(
         "--reasoning-effort",
@@ -393,6 +394,60 @@ def main() -> None:
     )
     p_llm_log.add_argument("--json", action="store_true", help="Output JSON")
     _add_db(p_llm_log)
+
+    # models
+    p_models = sub.add_parser("models", help="Show or change LLM model routing")
+    p_models.add_argument("--json", action="store_true", help="Output JSON")
+    models_sub = p_models.add_subparsers(dest="models_cmd")
+    p_models_preset = models_sub.add_parser("preset", help="Apply a named preset")
+    p_models_preset.add_argument("name", choices=["chat-opus"])
+    p_models_reset = models_sub.add_parser("reset", help="Reset a feature route")
+    p_models_reset.add_argument(
+        "feature",
+        choices=[
+            "insights",
+            "coach",
+            "nudge",
+            "chat",
+            "notify",
+            "log_flow",
+            "add_clone",
+            "verification",
+            "verification_rewrite",
+        ],
+    )
+    p_models_profile = models_sub.add_parser("profile", help="Set a profile route")
+    p_models_profile.add_argument("profile", choices=["pro", "flash"])
+    p_models_profile.add_argument("--primary", required=True, metavar="MODEL")
+    p_models_profile.add_argument("--fallback", required=True, metavar="MODEL")
+    p_models_set = models_sub.add_parser("set", help="Set a feature route")
+    p_models_set.add_argument(
+        "feature",
+        choices=[
+            "insights",
+            "coach",
+            "nudge",
+            "chat",
+            "notify",
+            "log_flow",
+            "add_clone",
+            "verification",
+            "verification_rewrite",
+        ],
+    )
+    p_models_set.add_argument("primary", metavar="MODEL")
+    p_models_set.add_argument("--fallback", metavar="MODEL")
+    p_models_set.add_argument(
+        "--reasoning",
+        choices=["none", "low", "medium", "high"],
+        help="Override reasoning effort for this feature",
+    )
+    p_models_set.add_argument(
+        "--temperature",
+        metavar="VALUE",
+        help="Override temperature as a float, or 'omit'",
+    )
+    models_sub.add_parser("doctor", help="Check model routing for likely issues")
 
     # events
     p_events = sub.add_parser(
@@ -452,6 +507,7 @@ def main() -> None:
         "nudge": cmd_nudge,
         "coach": _cli_coach,
         "llm-log": cmd_llm_log,
+        "models": cmd_models,
         "events": cmd_events,
         "daemon-restart": cmd_daemon_restart,
         "daemon-stop": cmd_daemon_stop,

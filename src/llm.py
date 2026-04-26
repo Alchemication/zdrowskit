@@ -308,7 +308,7 @@ def _dedupe_models(models: list[str]) -> list[str]:
     return deduped
 
 
-def _fallback_chain(model: str) -> list[str]:
+def _fallback_chain(model: str, fallback_models: list[str] | None = None) -> list[str]:
     """Return the provider-crossing fallback chain for *model*.
 
     Pro-class primary models fall back to the configured Pro fallback, and
@@ -316,6 +316,8 @@ def _fallback_chain(model: str) -> list[str]:
     The chain also works in reverse so Anthropic calls cross back to DeepSeek.
     Unknown providers fall back to the general default model.
     """
+    if fallback_models is not None:
+        return _dedupe_models([model, *fallback_models])
     if model == PRIMARY_PRO_MODEL:
         return _dedupe_models([model, FALLBACK_PRO_MODEL])
     if model == PRIMARY_FLASH_MODEL:
@@ -392,6 +394,7 @@ def _effective_params_for_model(
 def _call_with_retry(
     kwargs: dict,
     model: str,
+    fallback_models: list[str] | None = None,
 ) -> tuple:
     """Call litellm.completion with retries and provider fallback.
 
@@ -403,12 +406,14 @@ def _call_with_retry(
     Args:
         kwargs: litellm.completion keyword arguments (may be mutated for fallback).
         model: Primary model string.
+        fallback_models: Optional explicit fallback models. When omitted,
+            provider-crossing fallback is inferred from configured profiles.
 
     Returns:
         A (response, effective_model) tuple.
     """
     last_exc: Exception | None = None
-    chain = _fallback_chain(model)
+    chain = _fallback_chain(model, fallback_models=fallback_models)
     for model_index, candidate in enumerate(chain):
         for attempt, delay in enumerate(_RETRY_DELAYS + [None]):
             try:
@@ -502,6 +507,7 @@ def call_llm(
     temperature: float | None = 0.7,
     reasoning_effort: str | None = None,
     tools: list[dict] | None = None,
+    fallback_models: list[str] | None = None,
     conn: sqlite3.Connection | None = None,
     request_type: str = "",
     metadata: dict | None = None,
@@ -521,6 +527,7 @@ def call_llm(
             deprecated the field).
         reasoning_effort: Optional reasoning effort hint (model-dependent).
         tools: Optional list of tool definitions for function calling.
+        fallback_models: Explicit fallback chain after the requested model.
         conn: Open DB connection for logging. None to skip logging.
         request_type: Product-level call type, e.g. "insights" or "nudge".
         metadata: Product context dict stored alongside the call.
@@ -546,7 +553,7 @@ def call_llm(
 
     requested_model = model
     t0 = time.perf_counter()
-    response, model = _call_with_retry(kwargs, model)
+    response, model = _call_with_retry(kwargs, model, fallback_models=fallback_models)
     latency = time.perf_counter() - t0
     usage = response.usage
 

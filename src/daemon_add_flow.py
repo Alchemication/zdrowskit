@@ -92,7 +92,6 @@ def find_workout_clone(
     Returns:
         Dict with workout column values suitable for ``insert_manual_workout``.
     """
-    from config import DEFAULT_ADD_CLONE_MODEL
     from llm import call_llm
     from store import _WORKOUT_CLONE_COLUMNS
 
@@ -165,11 +164,15 @@ def find_workout_clone(
     ]
 
     try:
+        from model_prefs import resolve_model_route
+
+        route = resolve_model_route("add_clone").call_kwargs()
+        temperature = route.pop("temperature", 0.2)
         result = call_llm(
             messages,
-            model=DEFAULT_ADD_CLONE_MODEL,
+            **route,
             max_tokens=512,
-            temperature=0.2,
+            temperature=temperature,
             conn=conn,
             request_type="add_clone",
         )

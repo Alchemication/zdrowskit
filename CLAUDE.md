@@ -17,6 +17,7 @@ uv run python main.py db status       # migration status for the SQLite DB
 uv run python main.py db schema       # print the live SQLite schema
 uv run python main.py context         # show context files and their status
 uv run python main.py llm-log         # query LLM call history (add --stats, --id N, --json)
+uv run python main.py models          # inspect/change feature model routing
 uv run python main.py events          # system event log (add --category, --kind, --since 3d)
 uv run python main.py telegram-setup  # register bot /commands for Telegram autocomplete + menu
 uv run python main.py daemon-restart  # restart the background launchd daemon
@@ -28,6 +29,8 @@ uv run python -m evals.run            # run feedback-derived LLM evals (real mod
 Preferred LLM tracing path for debugging: use `uv run python main.py llm-log --id N` to inspect the full stored trace for one call, including messages, tool use, and final response.
 
 Telegram bot commands now include `/notify` for showing/changing notification preferences. These preferences live in `~/Documents/zdrowskit/notification_prefs.json`, separate from `ContextFiles/`, and daemon notification scheduling should consult them before making LLM notification calls.
+
+Telegram bot commands also include `/models` for button-based model routing. Model preferences live in `~/Documents/zdrowskit/model_prefs.json`; chat defaults to `anthropic/claude-opus-4-7` with reasoning off and temperature omitted, while insights/coach/nudges default to DeepSeek Pro with Anthropic Opus fallback.
 
 Database access should go through `store.open_db()` or `store.connect_db(..., migrate=True)` so pending SQLite migrations are applied automatically. Avoid raw `sqlite3.connect(...)` unless you intentionally need a migration-free connection.
 Database schema changes must be implemented as new timestamped migration files in `src/db/migrations/`. Do not add ad-hoc runtime `ALTER TABLE`, column-existence checks, or other schema-patching logic in application code.

@@ -42,6 +42,7 @@ class TestTelegramBotCommands:
                 "description": "Recent system events (nudges, imports, …)",
             },
             {"command": "notify", "description": "Notification settings"},
+            {"command": "models", "description": "Model routing settings"},
             {"command": "context", "description": "View context files"},
             {"command": "clear", "description": "Reset chat memory"},
             {"command": "tutorial", "description": "Guided tour of zdrowskit"},

@@ -32,22 +32,23 @@ Storage is local — SQLite on your machine, no third-party sync. The processing
 
 - **Apple Watch + iPhone** — zdrowskit reads Apple Health data. That's the only supported source right now. You need the [Auto Export](https://apps.apple.com/app/myhealth-export-to-icloud/id6737380982) iOS app to get data out of HealthKit into iCloud Drive as JSON.
 - **Mac** — the daemon watches your iCloud Drive folder, so it needs to run on a Mac where iCloud syncs. The rest of the stack (Python, SQLite) runs anywhere, but the data pipeline assumes macOS paths.
-- **A capable LLM** — this isn't a simple summariser. The coach writes personalised reports, decides when to stay quiet, generates SQL queries against your data, and produces chart code. That requires real intelligence. **Default: DeepSeek V4 Pro**, with Anthropic Opus 4.6 as the cross-provider fallback. **Minimum: Claude Sonnet 4.6 or equivalent** — anything below that and the reports get generic, the queries get unreliable, and the charts break. Any model provider works — zdrowskit uses [litellm](https://github.com/BerriAI/litellm) so you can swap in OpenAI, Google, or any compatible API.
+- **A capable LLM** — this isn't a simple summariser. The coach writes personalised reports, decides when to stay quiet, generates SQL queries against your data, and produces chart code. That requires real intelligence. **Default: DeepSeek V4 Pro** for async judgement surfaces, with Anthropic Opus 4.6 as the cross-provider fallback. Telegram chat defaults to Anthropic Opus 4.7 with reasoning off for lower latency. **Minimum: Claude Sonnet 4.6 or equivalent** — anything below that and the reports get generic, the queries get unreliable, and the charts break. Any model provider works — zdrowskit uses [litellm](https://github.com/BerriAI/litellm) so you can swap in OpenAI, Google, or any compatible API.
 - **Python 3.11+** and [uv](https://github.com/astral-sh/uv)
 - **Telegram bot** (for notifications and chat)
 
 Under the hood: SQLite for storage, [litellm](https://github.com/BerriAI/litellm) for provider-agnostic LLM calls, [Plotly](https://plotly.com/python/) + Kaleido for charts, [watchdog](https://github.com/gorakhargosh/watchdog) for filesystem events, Telegram Bot API for delivery.
 
-**Model defaults and fallback policy:** high-judgement surfaces — insights,
-coach, nudges, and chat — default to `deepseek/deepseek-v4-pro`. Lightweight
-utility surfaces — `/notify` interpretation, `/log` flow building, and `/add`
-workout clone selection — default to `deepseek/deepseek-v4-flash`. If a
-DeepSeek Pro call fails, zdrowskit falls back to `anthropic/claude-opus-4-6`;
-if DeepSeek Flash fails, it falls back to `anthropic/claude-haiku-4-5`.
-Anthropic calls cross the other way: Opus/Sonnet fall back to DeepSeek Pro,
-while Haiku falls back to DeepSeek Flash. Logged LLM calls record the effective
-model, and fallback calls include `requested_model` and `fallback_used` in
-params/metadata.
+**Model defaults and fallback policy:** model routing is managed in
+`~/Documents/zdrowskit/model_prefs.json` and can be changed with
+`uv run python main.py models` or Telegram `/models`. Insights, coach, and
+nudges default to `deepseek/deepseek-v4-pro` with
+`anthropic/claude-opus-4-6` fallback. Chat defaults to
+`anthropic/claude-opus-4-7` with reasoning off and temperature omitted,
+falling back to DeepSeek Pro. Lightweight utility surfaces — `/notify`
+interpretation, `/log` flow building, and `/add` workout clone selection —
+default to `deepseek/deepseek-v4-flash` with `anthropic/claude-haiku-4-5`
+fallback. Logged LLM calls record the effective model, and fallback calls
+include `requested_model` and `fallback_used` in params/metadata.
 
 The defaults live in `src/config.py` and can be overridden from `.env`:
 
@@ -56,6 +57,7 @@ ZDROWSKIT_PRIMARY_PRO_MODEL=deepseek/deepseek-v4-pro
 ZDROWSKIT_FALLBACK_PRO_MODEL=anthropic/claude-opus-4-6
 ZDROWSKIT_PRIMARY_FLASH_MODEL=deepseek/deepseek-v4-flash
 ZDROWSKIT_FALLBACK_FLASH_MODEL=anthropic/claude-haiku-4-5
+ZDROWSKIT_ANTHROPIC_OPUS_4_7_MODEL=anthropic/claude-opus-4-7
 
 ZDROWSKIT_INSIGHTS_MODEL=deepseek/deepseek-v4-pro
 ZDROWSKIT_COACH_MODEL=deepseek/deepseek-v4-pro
@@ -171,6 +173,7 @@ uv run python main.py nudge               # short reactive nudge
 uv run python main.py context             # show context files and their status
 uv run python main.py events              # system event log (fires, skips, imports)
 uv run python main.py llm-log             # inspect stored LLM call traces
+uv run python main.py models              # inspect/change model routing
 uv run python main.py telegram-setup      # register bot /commands for Telegram menu
 uv run python main.py daemon-restart      # restart the background daemon
 uv run python main.py daemon-stop         # stop the background daemon

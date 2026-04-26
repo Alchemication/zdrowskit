@@ -361,6 +361,8 @@ class TelegramChatHandler:
             args = text.split(maxsplit=1)
             request_text = args[1].strip() if len(args) > 1 else ""
             self._daemon._notify_flow.handle_command(request_text, message_id)
+        elif cmd == "/models":
+            self._daemon._model_flow.handle_command(message_id)
         elif cmd == "/log":
             self._daemon._log_flow.handle_command(message_id)
         elif cmd == "/status":
@@ -623,6 +625,9 @@ class TelegramChatHandler:
         elif data.startswith("notify_"):
             self._daemon._notify_flow.handle_callback(cb_id, data, msg_id)
 
+        elif data.startswith("model_"):
+            self._daemon._model_flow.handle_callback(cb_id, data, msg_id)
+
         elif data.startswith("log_"):
             self._daemon._log_flow.handle_callback(cb_id, data, msg_id)
 
@@ -863,6 +868,7 @@ class TelegramChatHandler:
             format_recent_nudges,
             render_health_data,
         )
+        from model_prefs import resolve_model_route
         from tools import all_chat_tools, execute_tool
 
         ctx = load_context(self._daemon.context_dir, prompt_file="chat_prompt")
@@ -906,13 +912,22 @@ class TelegramChatHandler:
         tools = all_chat_tools()
         query_rows: list[dict] = []
         deferred_edits: list = []
+        route = (
+            {"model": self._daemon.model}
+            if self._daemon.model
+            else resolve_model_route("chat").call_kwargs()
+        )
+        temperature = route.pop("temperature", 0.7)
+        reasoning_effort = route.pop("reasoning_effort", None)
 
         result = None
         for _iteration in range(MAX_TOOL_ITERATIONS):
             result = call_llm(
                 messages,
-                model=self._daemon.model,
+                **route,
                 tools=tools,
+                temperature=temperature,
+                reasoning_effort=reasoning_effort,
                 conn=conn,
                 request_type="chat",
                 max_tokens=MAX_TOKENS_CHAT,
@@ -1000,8 +1015,10 @@ class TelegramChatHandler:
                     )
             result = call_llm(
                 messages,
-                model=self._daemon.model,
+                **route,
                 tools=None,
+                temperature=temperature,
+                reasoning_effort=reasoning_effort,
                 conn=conn,
                 request_type="chat",
                 max_tokens=MAX_TOKENS_CHAT,

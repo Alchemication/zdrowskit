@@ -37,6 +37,7 @@ CONTEXT_DIR: Path = Path.home() / "Documents" / "zdrowskit" / "ContextFiles"
 NOTIFICATION_PREFS_PATH: Path = (
     Path.home() / "Documents" / "zdrowskit" / "notification_prefs.json"
 )
+MODEL_PREFS_PATH: Path = Path.home() / "Documents" / "zdrowskit" / "model_prefs.json"
 PROMPTS_DIR: Path = Path(__file__).resolve().parent / "prompts"
 REPORTS_DIR: Path = Path.home() / "Documents" / "zdrowskit" / "Reports"
 NUDGES_DIR: Path = Path.home() / "Documents" / "zdrowskit" / "Nudges"
@@ -124,6 +125,12 @@ ANTHROPIC_OPUS_MODEL: str = os.environ.get(
     "anthropic/claude-opus-4-6",
 )
 """High-capability Anthropic fallback paired with DeepSeek Pro."""
+
+ANTHROPIC_OPUS_4_7_MODEL: str = os.environ.get(
+    "ZDROWSKIT_ANTHROPIC_OPUS_4_7_MODEL",
+    "anthropic/claude-opus-4-7",
+)
+"""Low-latency high-capability Anthropic model used by the chat preset."""
 
 ANTHROPIC_HAIKU_MODEL: str = os.environ.get(
     "ZDROWSKIT_ANTHROPIC_HAIKU_MODEL",

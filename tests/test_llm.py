@@ -12,6 +12,7 @@ import pytest
 
 from config import (
     ANTHROPIC_HAIKU_MODEL,
+    ANTHROPIC_OPUS_4_7_MODEL,
     ANTHROPIC_OPUS_MODEL,
     DEEPSEEK_FLASH_MODEL,
     DEEPSEEK_PRO_MODEL,
@@ -949,6 +950,20 @@ class TestCallLlm:
         assert kwargs["temperature"] == 0.7
 
     @patch("llm.litellm")
+    def test_temperature_omitted_when_none(self, mock_litellm: MagicMock) -> None:
+        mock_litellm.completion.return_value = self._mock_response()
+        mock_litellm.completion_cost.return_value = None
+
+        call_llm(
+            [{"role": "user", "content": "test"}],
+            model=ANTHROPIC_OPUS_4_7_MODEL,
+            temperature=None,
+        )
+
+        kwargs = mock_litellm.completion.call_args[1]
+        assert "temperature" not in kwargs
+
+    @patch("llm.litellm")
     def test_logs_to_db(
         self, mock_litellm: MagicMock, in_memory_db: sqlite3.Connection
     ) -> None:
@@ -992,6 +1007,26 @@ class TestCallLlm:
         assert metadata["effective_model"] == DEEPSEEK_PRO_MODEL
         assert metadata["fallback_used"] is True
         assert metadata["week"] == "last"
+
+    @patch("llm.litellm")
+    def test_explicit_fallback_chain_is_used(self, mock_litellm: MagicMock) -> None:
+        mock_litellm.completion.side_effect = [
+            Exception("primary unavailable"),
+            self._mock_response("fallback ok"),
+        ]
+        mock_litellm.completion_cost.return_value = None
+
+        result = call_llm(
+            [{"role": "user", "content": "test"}],
+            model=ANTHROPIC_OPUS_4_7_MODEL,
+            fallback_models=[DEEPSEEK_PRO_MODEL],
+        )
+
+        seen_models = [
+            call.kwargs["model"] for call in mock_litellm.completion.call_args_list
+        ]
+        assert seen_models == [ANTHROPIC_OPUS_4_7_MODEL, DEEPSEEK_PRO_MODEL]
+        assert result.model == DEEPSEEK_PRO_MODEL
 
     @patch("llm.litellm")
     def test_db_logging_failure_swallowed(self, mock_litellm: MagicMock) -> None:

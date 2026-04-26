@@ -1288,6 +1288,104 @@ class TestTelegramCommands:
         assert "me" in sent
 
 
+class TestModelsFlow:
+    def test_models_command_shows_button_panel(self, tmp_path: Path) -> None:
+        daemon = _make_daemon(tmp_path)
+        daemon._chat._poller = MagicMock()
+        prefs_path = tmp_path / "model_prefs.json"
+
+        with patch("model_prefs.MODEL_PREFS_PATH", prefs_path):
+            daemon._handle_command("/models", 90)
+
+        daemon._poller.send_message_with_keyboard.assert_called_once()
+        text = daemon._poller.send_message_with_keyboard.call_args.args[0]
+        buttons = daemon._poller.send_message_with_keyboard.call_args.args[1]
+        assert "Model routes:" in text
+        assert any(button["text"] == "Chat" for row in buttons for button in row)
+        assert any(
+            button["text"] == "Use Opus for chat" for row in buttons for button in row
+        )
+        assert any(button["text"] == "❌ cancel" for row in buttons for button in row)
+
+    def test_models_cancel_edits_message(self, tmp_path: Path) -> None:
+        daemon = _make_daemon(tmp_path)
+        daemon._chat._poller = MagicMock()
+
+        daemon._handle_telegram_callback(
+            {
+                "id": "cb_model_cancel",
+                "data": "model_cancel",
+                "message": {"message_id": 901},
+            }
+        )
+
+        daemon._poller.answer_callback_query.assert_called_with(
+            "cb_model_cancel", "Cancelled."
+        )
+        daemon._poller.edit_message.assert_called_with(901, "Cancelled.")
+
+    def test_models_chat_preset_persists_opus_route(self, tmp_path: Path) -> None:
+        from config import ANTHROPIC_OPUS_4_7_MODEL
+        from model_prefs import resolve_model_route
+
+        daemon = _make_daemon(tmp_path)
+        daemon._chat._poller = MagicMock()
+        prefs_path = tmp_path / "model_prefs.json"
+
+        with patch("model_prefs.MODEL_PREFS_PATH", prefs_path):
+            daemon._handle_telegram_callback(
+                {
+                    "id": "cb_preset",
+                    "data": "model_preset:chat_opus",
+                    "message": {"message_id": 902},
+                }
+            )
+            route = resolve_model_route("chat")
+
+        assert route.primary == ANTHROPIC_OPUS_4_7_MODEL
+        assert route.temperature is None
+        daemon._poller.edit_message_with_keyboard.assert_called_once()
+
+    def test_models_primary_fallback_accept_flow(self, tmp_path: Path) -> None:
+        from config import ANTHROPIC_HAIKU_MODEL, PRIMARY_FLASH_MODEL
+        from model_prefs import resolve_model_route, selectable_models
+
+        daemon = _make_daemon(tmp_path)
+        daemon._chat._poller = MagicMock()
+        prefs_path = tmp_path / "model_prefs.json"
+        models = selectable_models()
+        primary_idx = models.index(PRIMARY_FLASH_MODEL)
+        fallback_idx = models.index(ANTHROPIC_HAIKU_MODEL)
+
+        with patch("model_prefs.MODEL_PREFS_PATH", prefs_path):
+            daemon._handle_telegram_callback(
+                {
+                    "id": "cb_primary",
+                    "data": f"model_primary:nudges:{primary_idx}",
+                    "message": {"message_id": 903},
+                }
+            )
+            daemon._handle_telegram_callback(
+                {
+                    "id": "cb_fallback",
+                    "data": f"model_fallback:nudges:{primary_idx}:{fallback_idx}",
+                    "message": {"message_id": 903},
+                }
+            )
+            token = next(iter(daemon._model_flow._pending))
+            daemon._handle_telegram_callback(
+                {
+                    "id": "cb_accept",
+                    "data": f"model_accept:{token}",
+                    "message": {"message_id": 903},
+                }
+            )
+            route = resolve_model_route("nudge")
+
+        assert route.primary == PRIMARY_FLASH_MODEL
+        assert route.fallback == ANTHROPIC_HAIKU_MODEL
+
+
 class TestFailureCapture:
     """Tests for _capture_last_error and _notify_user_failure.
 

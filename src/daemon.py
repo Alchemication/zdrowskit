@@ -235,11 +235,11 @@ class ZdrowskitDaemon:
         context_dir: Path to the context .md files directory.
     """
 
-    def __init__(self, model: str, db: Path, context_dir: Path) -> None:
+    def __init__(self, model: str | None, db: Path, context_dir: Path) -> None:
         """Initialise the daemon.
 
         Args:
-            model: litellm model string.
+            model: Optional legacy global litellm model override.
             db: Path to the SQLite database.
             context_dir: Path to the ContextFiles directory.
         """
@@ -266,12 +266,14 @@ class ZdrowskitDaemon:
         )
         from daemon_add_flow import AddFlowHandler
         from daemon_log_flow import LogFlowHandler
+        from daemon_model_flow import ModelFlowHandler
         from daemon_notify_flow import NotifyFlowHandler
         from daemon_runners import DaemonRunnerHandler
         from daemon_telegram_chat import TelegramChatHandler
 
         self._add_flow = AddFlowHandler(self)
         self._notify_flow = NotifyFlowHandler(self)
+        self._model_flow = ModelFlowHandler(self)
         self._log_flow = LogFlowHandler(self)
         self._chat = TelegramChatHandler(self)
         self._runners = DaemonRunnerHandler(self)
@@ -988,7 +990,6 @@ def main() -> None:
     load_dotenv()
 
     from config import CONTEXT_DIR
-    from config import DEFAULT_CHAT_MODEL
     from store import default_db_path
 
     parser = argparse.ArgumentParser(
@@ -1008,8 +1009,8 @@ def main() -> None:
     parser.add_argument(
         "--model",
         metavar="MODEL",
-        default=DEFAULT_CHAT_MODEL,
-        help=f"litellm model string for LLM calls (default: {DEFAULT_CHAT_MODEL})",
+        default=None,
+        help="Legacy global litellm model override for all LLM calls",
     )
     args = parser.parse_args()
 

@@ -27,10 +27,8 @@ from charts import (
 )
 from config import (
     CONTEXT_DIR,
-    DEFAULT_COACH_MODEL,
     DEFAULT_LOG_FLOW_MODEL,
     DEFAULT_NOTIFY_MODEL,
-    DEFAULT_NUDGE_MODEL,
     ENABLE_LLM_VERIFICATION,
     MAX_TOKENS_COACH,
     MAX_TOKENS_INSIGHTS,
@@ -42,8 +40,6 @@ from config import (
     NUDGES_DIR,
     NOTIFICATION_PREFS_PATH,
     REPORTS_DIR,
-    VERIFICATION_MODEL,
-    VERIFICATION_REWRITE_MODEL,
     VERIFY_COACH,
     VERIFY_INSIGHTS,
     VERIFY_NUDGE,
@@ -58,6 +54,7 @@ from llm_health import (
     render_health_data,
 )
 from milestones import compute_milestones
+from model_prefs import resolve_model_route
 from notification_prefs import (
     DEFAULT_NOTIFICATION_PREFS,
     active_temporary_mutes,
@@ -156,6 +153,13 @@ def _normalize_reasoning_effort(value: str | None) -> str | None:
     if value is None or value == "none":
         return None
     return value
+
+
+def _route_kwargs(feature: str, explicit_model: str | None = None) -> dict:
+    """Return model-routing kwargs for a feature unless explicitly overridden."""
+    if explicit_model:
+        return {"model": explicit_model}
+    return resolve_model_route(feature).call_kwargs()
 
 
 def _print_explain(
@@ -307,7 +311,7 @@ def interpret_notify_request(
     prefs: dict[str, Any],
     now: datetime | None = None,
     clarification_answer: str | None = None,
-    model: str = NOTIFY_MODEL,
+    model: str | None = None,
 ) -> dict[str, Any]:
     """Interpret a Telegram /notify request into a structured payload."""
     now = now or datetime.now().astimezone()
@@ -347,12 +351,14 @@ def interpret_notify_request(
     )
 
     conn = open_db(Path(db))
+    route = _route_kwargs("notify", model)
+    temperature = route.pop("temperature", 0)
     try:
         result = call_llm(
             messages,
-            model=model,
+            **route,
             max_tokens=512,
-            temperature=0,
+            temperature=temperature,
             conn=conn,
             request_type="notify",
             metadata={
@@ -507,7 +513,7 @@ def build_log_flow(
     *,
     db: str | Path,
     now: datetime | None = None,
-    model: str = LOG_FLOW_MODEL,
+    model: str | None = None,
 ) -> LogFlow:
     """Ask the LLM to design an adaptive /log interview for today.
 
@@ -541,11 +547,13 @@ def build_log_flow(
             today=today,
         )
 
+        route = _route_kwargs("log_flow", model)
+        temperature = route.pop("temperature", 0)
         result = call_llm(
             messages,
-            model=model,
+            **route,
             max_tokens=512,
-            temperature=0,
+            temperature=temperature,
             conn=conn,
             request_type="log_flow",
             metadata={"date": today.isoformat()},
@@ -572,7 +580,7 @@ def build_log_step_followup(
     prior_answer: list[str],
     db: str | Path,
     now: datetime | None = None,
-    model: str = LOG_FLOW_MODEL,
+    model: str | None = None,
 ) -> LogFlowStep | None:
     """Design a reactive follow-up step given the user's step-1 answer.
 
@@ -610,11 +618,13 @@ def build_log_step_followup(
             today=today,
         )
 
+        route = _route_kwargs("log_flow", model)
+        temperature = route.pop("temperature", 0)
         result = call_llm(
             messages,
-            model=model,
+            **route,
             max_tokens=512,
-            temperature=0,
+            temperature=temperature,
             conn=conn,
             request_type="log_flow_followup",
             metadata={
@@ -756,6 +766,8 @@ def _apply_verification(
     """
     if not _verification_enabled(kind):
         return draft
+    verifier_route = resolve_model_route("verification")
+    rewrite_route = resolve_model_route("verification_rewrite")
 
     result = verify_and_rewrite(
         kind=kind,
@@ -764,8 +776,8 @@ def _apply_verification(
         source_messages=source_messages,
         conn=conn,
         metadata=metadata,
-        model=VERIFICATION_MODEL,
-        rewrite_model=VERIFICATION_REWRITE_MODEL,
+        model=verifier_route.primary,
+        rewrite_model=rewrite_route.primary,
         max_revisions=MAX_VERIFICATION_REVISIONS,
         strict=strict,
     )
@@ -856,16 +868,24 @@ def cmd_insights(
     reasoning_effort = _normalize_reasoning_effort(
         getattr(args, "reasoning_effort", "medium")
     )
+    route = _route_kwargs("insights", getattr(args, "model", None))
+    model = route["model"]
+    fallback_models = route.get("fallback_models")
+    if "reasoning_effort" in route:
+        reasoning_effort = route["reasoning_effort"]
+    temperature = route.get("temperature", 0.7)
 
-    logger.info("Calling %s (reasoning=%s) ...", args.model, reasoning_effort or "off")
+    logger.info("Calling %s (reasoning=%s) ...", model, reasoning_effort or "off")
     for iteration in range(max_iterations):
         try:
             result = call_llm(
                 messages,
-                model=args.model,
+                model=model,
                 max_tokens=MAX_TOKENS_INSIGHTS,
+                temperature=temperature,
                 tools=tools,
                 reasoning_effort=reasoning_effort,
+                fallback_models=fallback_models,
                 conn=conn,
                 request_type="insights",
                 metadata={
@@ -934,16 +954,18 @@ def cmd_insights(
         # reasoning_effort (Anthropic extended thinking). For DeepSeek and
         # others the param is stripped upstream, so a second pass with
         # effort=None is identical and just doubles cost — skip it.
-        if reasoning_effort is not None and _model_accepts_reasoning_effort(args.model):
+        if reasoning_effort is not None and _model_accepts_reasoning_effort(model):
             synthesis_attempts.append(("final_synthesis_no_reasoning", None))
         for label, effort in synthesis_attempts:
             try:
                 result = call_llm(
                     messages,
-                    model=args.model,
+                    model=model,
                     max_tokens=MAX_TOKENS_INSIGHTS,
+                    temperature=temperature,
                     tools=None,
                     reasoning_effort=effort,
+                    fallback_models=fallback_models,
                     conn=conn,
                     request_type="insights",
                     metadata={
@@ -989,10 +1011,12 @@ def cmd_insights(
         try:
             result = call_llm(
                 concise_messages,
-                model=args.model,
+                model=model,
                 max_tokens=MAX_TOKENS_INSIGHTS,
+                temperature=temperature,
                 tools=None,
                 reasoning_effort=None,
+                fallback_models=fallback_models,
                 conn=conn,
                 request_type="insights",
                 metadata={
@@ -1159,7 +1183,10 @@ def cmd_nudge(
 
     from tools import execute_run_sql, run_sql_tool
 
-    model = getattr(args, "model", DEFAULT_NUDGE_MODEL)
+    route = _route_kwargs("nudge", getattr(args, "model", None))
+    model = route["model"]
+    fallback_models = route.get("fallback_models")
+    temperature = route.get("temperature", 0.7)
     tools = run_sql_tool()
     max_iterations = MAX_TOOL_ITERATIONS_NUDGE
 
@@ -1170,7 +1197,9 @@ def cmd_nudge(
                 messages,
                 model=model,
                 max_tokens=MAX_TOKENS_NUDGE,
+                temperature=temperature,
                 tools=tools,
+                fallback_models=fallback_models,
                 conn=conn,
                 request_type="nudge",
                 metadata={"trigger_type": _trigger, "iteration": iteration},
@@ -1243,7 +1272,9 @@ def cmd_nudge(
                 messages,
                 model=model,
                 max_tokens=MAX_TOKENS_NUDGE,
+                temperature=temperature,
                 tools=None,
+                fallback_models=fallback_models,
                 conn=conn,
                 request_type="nudge",
                 metadata={"trigger_type": _trigger, "iteration": "final_synthesis"},
@@ -1418,7 +1449,9 @@ def cmd_coach(
         logger.error("Failed to render coach_prompt.md template: %s", e)
         sys.exit(1)
 
-    model = getattr(args, "model", DEFAULT_COACH_MODEL)
+    route = _route_kwargs("coach", getattr(args, "model", None))
+    model = route["model"]
+    fallback_models = route.get("fallback_models")
     tools = run_sql_tool() + context_update_tool(allowed_files=["strategy"])
     raw_edits: list[ContextEdit] = []
     narrative_parts: list[str] = []
@@ -1426,6 +1459,9 @@ def cmd_coach(
     reasoning_effort = _normalize_reasoning_effort(
         getattr(args, "reasoning_effort", "medium")
     )
+    if "reasoning_effort" in route:
+        reasoning_effort = route["reasoning_effort"]
+    temperature = route.get("temperature", 0.7)
 
     logger.info(
         "Calling %s for coaching review (reasoning=%s) ...",
@@ -1438,8 +1474,10 @@ def cmd_coach(
                 messages,
                 model=model,
                 max_tokens=MAX_TOKENS_COACH,
+                temperature=temperature,
                 tools=tools,
                 reasoning_effort=reasoning_effort,
+                fallback_models=fallback_models,
                 conn=conn,
                 request_type="coach",
                 metadata={
@@ -1518,8 +1556,10 @@ def cmd_coach(
                 messages,
                 model=model,
                 max_tokens=MAX_TOKENS_COACH,
+                temperature=temperature,
                 tools=None,
                 reasoning_effort=reasoning_effort,
+                fallback_models=fallback_models,
                 conn=conn,
                 request_type="coach",
                 metadata={
