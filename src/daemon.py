@@ -251,6 +251,7 @@ class ZdrowskitDaemon:
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
         self._health_timer: threading.Timer | None = None
+        self._health_debounce_count = 0
         self._context_timers: dict[str, threading.Timer] = {}
         self._context_fire_times: dict[str, float] = {}
         self._pending_rejection_reasons = self._restore_pending_reason_map(
@@ -478,12 +479,23 @@ class ZdrowskitDaemon:
 
     def _schedule_health(self) -> None:
         """Schedule a health trigger, debouncing rapid file events."""
+        record_detected = False
         with self._lock:
+            if not self._health_timer:
+                record_detected = True
             if self._health_timer:
                 self._health_timer.cancel()
+            self._health_debounce_count += 1
             self._health_timer = threading.Timer(HEALTH_DEBOUNCE_S, self._fire_health)
             self._health_timer.daemon = True
             self._health_timer.start()
+        if record_detected:
+            self._record_event(
+                "import",
+                "detected",
+                f"Health data change detected; import scheduled in {HEALTH_DEBOUNCE_S}s",
+                {"debounce_s": HEALTH_DEBOUNCE_S},
+            )
         logger.debug("Health trigger scheduled in %ds", HEALTH_DEBOUNCE_S)
 
     def _schedule_context(self, stem: str) -> None:
@@ -512,6 +524,16 @@ class ZdrowskitDaemon:
     def _fire_health(self) -> None:
         """Handle a health data trigger: import data, then nudge."""
         logger.info("Health trigger fired")
+        with self._lock:
+            file_events = self._health_debounce_count or 1
+            self._health_debounce_count = 0
+            self._health_timer = None
+        self._record_event(
+            "import",
+            "started",
+            "Health data debounce settled; running import",
+            {"debounce_s": HEALTH_DEBOUNCE_S, "file_events": file_events},
+        )
         before = self._runners._data_snapshot()
         self._runners._run_import()
         after = self._runners._data_snapshot()

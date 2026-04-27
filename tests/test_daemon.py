@@ -17,6 +17,7 @@ from context_edit import (
     new_feedback_entry,
 )
 from daemon import ZdrowskitDaemon
+from events import query_events
 from notification_prefs import load_notification_prefs
 from store import log_llm_call, open_db
 
@@ -61,6 +62,67 @@ class TestWeeklyReportScheduling:
 
 
 class TestNudgeScheduling:
+    def test_health_file_change_records_detected_event_before_debounce(
+        self, tmp_path: Path
+    ) -> None:
+        daemon = _make_daemon(tmp_path)
+
+        class FakeTimer:
+            instances: list["FakeTimer"] = []
+
+            def __init__(self, interval: float, callback) -> None:
+                self.interval = interval
+                self.callback = callback
+                self.cancelled = False
+                self.started = False
+                FakeTimer.instances.append(self)
+
+            def cancel(self) -> None:
+                self.cancelled = True
+
+            def start(self) -> None:
+                self.started = True
+
+        with patch.object(daemon_module.threading, "Timer", FakeTimer):
+            daemon._schedule_health()
+            daemon._schedule_health()
+
+        conn = open_db(tmp_path / "test.db")
+        rows = query_events(conn, category="import")
+
+        assert len(rows) == 1
+        assert rows[0]["kind"] == "detected"
+        assert "import scheduled" in rows[0]["summary"]
+        assert rows[0]["details"]["debounce_s"] == daemon_module.HEALTH_DEBOUNCE_S
+        assert daemon._health_debounce_count == 2
+        assert len(FakeTimer.instances) == 2
+        assert FakeTimer.instances[0].cancelled is True
+        assert FakeTimer.instances[1].started is True
+
+    def test_health_fire_records_started_event_with_debounced_count(
+        self, tmp_path: Path
+    ) -> None:
+        daemon = _make_daemon(tmp_path)
+        daemon._health_debounce_count = 3
+
+        with (
+            patch.object(daemon._runners, "_data_snapshot", side_effect=[{}, {}]),
+            patch.object(daemon._runners, "_run_import"),
+            patch.object(
+                daemon._runners, "_format_data_delta", return_value="No new rows"
+            ),
+            patch.object(daemon._runners, "_run_nudge"),
+        ):
+            daemon._fire_health()
+
+        conn = open_db(tmp_path / "test.db")
+        rows = query_events(conn, category="import")
+
+        assert rows[0]["kind"] == "started"
+        assert rows[0]["details"]["file_events"] == 3
+        assert rows[0]["details"]["debounce_s"] == daemon_module.HEALTH_DEBOUNCE_S
+        assert daemon._health_debounce_count == 0
+
     def test_run_nudge_queues_before_10am(self, tmp_path: Path) -> None:
         daemon = _make_daemon(tmp_path)
         fake_now = daemon_module.datetime(2026, 4, 5, 9, 30)

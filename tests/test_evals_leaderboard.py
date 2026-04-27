@@ -103,6 +103,7 @@ class TestRecording:
     def test_record_run_skips_duplicate_by_default(self, tmp_path: Path) -> None:
         runs_path = tmp_path / "runs.jsonl"
         markdown_path = tmp_path / "leaderboard.md"
+        html_path = tmp_path / "leaderboard.html"
         result = _eval_result("case-1", passed=True)
 
         first = leaderboard.record_run(
@@ -114,6 +115,7 @@ class TestRecording:
             feature_filter="chat",
             runs_path=runs_path,
             markdown_path=markdown_path,
+            html_path=html_path,
             repo_context={"git_sha": "abc", "dirty": False},
         )
         second = leaderboard.record_run(
@@ -125,6 +127,7 @@ class TestRecording:
             feature_filter="chat",
             runs_path=runs_path,
             markdown_path=markdown_path,
+            html_path=html_path,
             repo_context={"git_sha": "abc", "dirty": False},
         )
 
@@ -135,10 +138,12 @@ class TestRecording:
         assert second.recorded is False
         assert second.duplicate_of == first.record["run_id"]
         assert len(lines) == 1
+        assert html_path.exists()
 
     def test_record_run_force_duplicate_appends(self, tmp_path: Path) -> None:
         runs_path = tmp_path / "runs.jsonl"
         markdown_path = tmp_path / "leaderboard.md"
+        html_path = tmp_path / "leaderboard.html"
         result = _eval_result("case-1", passed=True)
 
         leaderboard.record_run(
@@ -150,6 +155,7 @@ class TestRecording:
             feature_filter="chat",
             runs_path=runs_path,
             markdown_path=markdown_path,
+            html_path=html_path,
             repo_context={"git_sha": "abc", "dirty": False},
         )
         forced = leaderboard.record_run(
@@ -162,6 +168,7 @@ class TestRecording:
             allow_duplicate=True,
             runs_path=runs_path,
             markdown_path=markdown_path,
+            html_path=html_path,
             repo_context={"git_sha": "abc", "dirty": False},
         )
 
@@ -272,9 +279,11 @@ class TestCli:
         result = _eval_result(case.id, passed=True)
         runs_path = tmp_path / "runs.jsonl"
         markdown_path = tmp_path / "leaderboard.md"
+        html_path = tmp_path / "leaderboard.html"
 
         monkeypatch.setattr(leaderboard, "RUNS_PATH", runs_path)
         monkeypatch.setattr(leaderboard, "MARKDOWN_PATH", markdown_path)
+        monkeypatch.setattr(leaderboard, "HTML_PATH", html_path)
         monkeypatch.setattr(
             leaderboard,
             "get_repo_context",
@@ -301,6 +310,7 @@ class TestCli:
         assert len(lines) == 1
         assert "Recorded leaderboard run" in out
         assert markdown_path.exists()
+        assert html_path.exists()
 
     def test_eval_run_duplicate_skip_and_force_append(
         self,
@@ -312,9 +322,11 @@ class TestCli:
         result = _eval_result(case.id, passed=True)
         runs_path = tmp_path / "runs.jsonl"
         markdown_path = tmp_path / "leaderboard.md"
+        html_path = tmp_path / "leaderboard.html"
 
         monkeypatch.setattr(leaderboard, "RUNS_PATH", runs_path)
         monkeypatch.setattr(leaderboard, "MARKDOWN_PATH", markdown_path)
+        monkeypatch.setattr(leaderboard, "HTML_PATH", html_path)
         monkeypatch.setattr(
             leaderboard,
             "get_repo_context",
