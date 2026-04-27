@@ -72,7 +72,7 @@ class TestLogFlowSnapshot:
 
         def fake_call_llm(_messages: list[dict], **kwargs: object) -> LLMResult:
             model = str(kwargs["model"])
-            assert kwargs["max_tokens"] == 1024
+            assert kwargs["max_tokens"] == 4096
             seen_models.append(model)
             if model == "primary-model":
                 return LLMResult(
