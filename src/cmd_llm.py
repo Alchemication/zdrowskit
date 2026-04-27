@@ -1460,7 +1460,14 @@ def cmd_nudge(
         else:
             logger.warning("Nudge chart '%s' failed to render, skipping", block.title)
 
-    nudge_text = strip_charts(raw_text)
+    nudge_text = strip_charts(raw_text).strip()
+    if not nudge_text:
+        logger.warning(
+            "Nudge final text was empty after chart stripping; treating as SKIP "
+            "(trigger: %s)",
+            _trigger,
+        )
+        return CommandResult(llm_call_id=result.llm_call_id)
 
     # Trigger-specific emoji header for visual distinction in Telegram.
     _TRIGGER_HEADERS: dict[str, str] = {

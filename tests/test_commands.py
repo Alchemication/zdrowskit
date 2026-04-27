@@ -1308,6 +1308,53 @@ class TestCmdNudge:
         save_nudge.assert_not_called()
         send_telegram.assert_not_called()
 
+    def test_chart_only_nudge_skips_without_sending(
+        self,
+        in_memory_db,
+        capsys,
+    ) -> None:
+        args = SimpleNamespace(
+            db="ignored.db",
+            model="test-model",
+            months=1,
+            trigger="new_data",
+            email=False,
+            telegram=True,
+        )
+        chart_only_result = LLMResult(
+            text=(
+                '<chart title="HRV">\n'
+                "import plotly.graph_objects as go\n"
+                "fig = go.Figure()\n"
+                "</chart>"
+            ),
+            model="test-model",
+            input_tokens=1,
+            output_tokens=12,
+            total_tokens=13,
+            latency_s=0.1,
+            llm_call_id=31,
+        )
+
+        with ExitStack() as stack:
+            for ctx in self._patch_nudge_context(in_memory_db):
+                stack.enter_context(ctx)
+            stack.enter_context(
+                patch("cmd_llm.call_llm", return_value=chart_only_result)
+            )
+            save_nudge = stack.enter_context(patch("cmd_llm._save_nudge"))
+            send_telegram = stack.enter_context(patch("cmd_llm.send_telegram"))
+            send_photo = stack.enter_context(patch("cmd_llm.send_telegram_photo"))
+            stack.enter_context(patch("cmd_llm.render_chart", return_value=b"png"))
+            result = cmd_nudge(args)
+
+        assert capsys.readouterr().out == ""
+        assert result.text is None
+        assert result.llm_call_id == 31
+        save_nudge.assert_not_called()
+        send_telegram.assert_not_called()
+        send_photo.assert_not_called()
+
     def test_retries_when_model_returns_meta_text_instead_of_final_nudge(
         self,
         in_memory_db,

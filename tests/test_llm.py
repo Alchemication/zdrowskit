@@ -361,6 +361,8 @@ class TestCharts:
         assert "Scheduled-session carve-out" in normalized
         assert "session scheduled for today" in normalized
         assert "MUST restate today's session" in normalized
+        assert "(`new_data`)" in normalized
+        assert "missed_session" not in normalized
 
     def test_nudge_prompt_strategy_updated_blocks_cheerleader_acknowledgment(
         self,
