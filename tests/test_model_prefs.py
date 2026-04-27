@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 
 from config import (
+    ANTHROPIC_HAIKU_MODEL,
     ANTHROPIC_OPUS_4_7_MODEL,
+    DEEPSEEK_FLASH_MODEL,
     FALLBACK_PRO_MODEL,
     PRIMARY_FLASH_MODEL,
     PRIMARY_PRO_MODEL,
@@ -32,6 +34,12 @@ class TestModelPrefs:
         assert route.fallback == PRIMARY_PRO_MODEL
         assert route.call_kwargs()["reasoning_effort"] is None
         assert route.call_kwargs()["temperature"] is None
+
+    def test_log_flow_defaults_to_haiku_with_deepseek_flash_fallback(self, tmp_path):
+        route = resolve_model_route("log_flow", path=tmp_path / "models.json")
+
+        assert route.primary == ANTHROPIC_HAIKU_MODEL
+        assert route.fallback == DEEPSEEK_FLASH_MODEL
 
     def test_feature_override_and_reset(self, tmp_path):
         path = tmp_path / "models.json"

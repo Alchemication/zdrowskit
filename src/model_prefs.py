@@ -145,7 +145,11 @@ def default_model_prefs() -> dict[str, Any]:
                 "fallback": DEFAULT_CHAT_MODEL,
             },
             "notify": {"profile": "flash", "primary": DEFAULT_NOTIFY_MODEL},
-            "log_flow": {"profile": "flash", "primary": DEFAULT_LOG_FLOW_MODEL},
+            "log_flow": {
+                "profile": "flash",
+                "primary": DEFAULT_LOG_FLOW_MODEL,
+                "fallback": PRIMARY_FLASH_MODEL,
+            },
             "add_clone": {"profile": "flash", "primary": DEFAULT_ADD_CLONE_MODEL},
             "verification": {"profile": "pro", "primary": VERIFICATION_MODEL},
             "verification_rewrite": {

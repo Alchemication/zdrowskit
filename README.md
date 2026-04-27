@@ -73,6 +73,7 @@ ZDROWSKIT_NUDGE_MODEL=deepseek/deepseek-v4-pro
 ZDROWSKIT_CHAT_MODEL=deepseek/deepseek-v4-pro
 ZDROWSKIT_NOTIFY_MODEL=deepseek/deepseek-v4-flash
 ZDROWSKIT_LOG_FLOW_MODEL=anthropic/claude-haiku-4-5
+# /log uses deepseek/deepseek-v4-flash as its feature-level fallback
 ZDROWSKIT_ADD_CLONE_MODEL=deepseek/deepseek-v4-flash
 ```
 
