@@ -162,6 +162,30 @@ def _route_kwargs(feature: str, explicit_model: str | None = None) -> dict:
     return resolve_model_route(feature).call_kwargs()
 
 
+def _single_model_attempts(route: dict) -> list[dict]:
+    """Expand a route into one-model attempts for validation-aware retries."""
+    raw_models = [route.get("model"), *(route.get("fallback_models") or [])]
+    seen: set[str] = set()
+    models: list[str] = []
+    for raw_model in raw_models:
+        if not isinstance(raw_model, str) or not raw_model or raw_model in seen:
+            continue
+        seen.add(raw_model)
+        models.append(raw_model)
+
+    attempts: list[dict] = []
+    for model in models:
+        attempt = {
+            key: value for key, value in route.items() if key != "fallback_models"
+        }
+        attempt["model"] = model
+        # call_llm's built-in fallback only handles transport/provider errors.
+        # These attempts need to validate the response body before moving on.
+        attempt["fallback_models"] = []
+        attempts.append(attempt)
+    return attempts
+
+
 def _print_explain(
     context: dict[str, str],
     context_dir: Path,
@@ -509,6 +533,27 @@ def _coerce_log_flow_step(raw: Any, index: int) -> LogFlowStep:
     )
 
 
+def _fallback_log_flow(today_snapshot: str) -> LogFlow:
+    """Return a deterministic initial flow when model JSON is unusable."""
+    if "Today workouts: (none logged)" in today_snapshot:
+        options = ["rest day", "solid", "tired", "off"]
+    else:
+        options = ["solid", "easy", "tired legs", "off"]
+    return LogFlow(
+        steps=[
+            LogFlowStep(
+                id="state",
+                question="How did today feel?",
+                options=options,
+                multi_select=False,
+                optional=False,
+            )
+        ],
+        llm_call_id=None,
+        model="deterministic-fallback",
+    )
+
+
 def build_log_flow(
     *,
     db: str | Path,
@@ -519,7 +564,7 @@ def build_log_flow(
 
     Reads me.md, strategy.md, the entire log.md (self-trimmed by history.md
     pipeline), and a lean snapshot of today's DB signals, then returns a
-    validated 1–3 step flow.
+    validated one-step flow.
     """
     now = now or datetime.now().astimezone()
     today = now.date()
@@ -549,29 +594,52 @@ def build_log_flow(
 
         route = _route_kwargs("log_flow", model)
         temperature = route.pop("temperature", 0)
-        result = call_llm(
-            messages,
-            **route,
-            max_tokens=512,
-            temperature=temperature,
-            conn=conn,
-            request_type="log_flow",
-            metadata={"date": today.isoformat()},
+        attempts = _single_model_attempts(route)
+        last_error: Exception | None = None
+        for attempt in attempts:
+            try:
+                result = call_llm(
+                    messages,
+                    **attempt,
+                    max_tokens=1024,
+                    temperature=temperature,
+                    conn=conn,
+                    request_type="log_flow",
+                    metadata={"date": today.isoformat()},
+                )
+                payload = _extract_json_object(result.text)
+                raw_steps = payload.get("steps")
+                if not isinstance(raw_steps, list) or not raw_steps:
+                    raise ValueError("Log flow must include a non-empty 'steps' array")
+                if len(raw_steps) > MAX_LOG_FLOW_INITIAL_STEPS:
+                    raise ValueError(
+                        f"Log flow returned {len(raw_steps)} steps "
+                        f"(max {MAX_LOG_FLOW_INITIAL_STEPS} for the initial call)"
+                    )
+                steps = [
+                    _coerce_log_flow_step(raw, i) for i, raw in enumerate(raw_steps)
+                ]
+                return LogFlow(
+                    steps=steps,
+                    llm_call_id=result.llm_call_id,
+                    model=result.model,
+                )
+            except Exception as exc:
+                last_error = exc
+                logger.warning(
+                    "log_flow attempt with %s failed validation/call: %s",
+                    attempt.get("model", "(unknown)"),
+                    exc,
+                    exc_info=True,
+                )
+
+        logger.error(
+            "All log_flow model attempts failed; using deterministic fallback: %s",
+            last_error,
         )
+        return _fallback_log_flow(context["today_snapshot"])
     finally:
         conn.close()
-
-    payload = _extract_json_object(result.text)
-    raw_steps = payload.get("steps")
-    if not isinstance(raw_steps, list) or not raw_steps:
-        raise ValueError("Log flow must include a non-empty 'steps' array")
-    if len(raw_steps) > MAX_LOG_FLOW_INITIAL_STEPS:
-        raise ValueError(
-            f"Log flow returned {len(raw_steps)} steps "
-            f"(max {MAX_LOG_FLOW_INITIAL_STEPS} for the initial call)"
-        )
-    steps = [_coerce_log_flow_step(raw, i) for i, raw in enumerate(raw_steps)]
-    return LogFlow(steps=steps, llm_call_id=result.llm_call_id, model=result.model)
 
 
 def build_log_step_followup(
@@ -620,27 +688,45 @@ def build_log_step_followup(
 
         route = _route_kwargs("log_flow", model)
         temperature = route.pop("temperature", 0)
-        result = call_llm(
-            messages,
-            **route,
-            max_tokens=512,
-            temperature=temperature,
-            conn=conn,
-            request_type="log_flow_followup",
-            metadata={
-                "date": today.isoformat(),
-                "prior_step_id": prior_step.id,
-                "prior_answer": prior_answer,
-            },
+        attempts = _single_model_attempts(route)
+        last_error: Exception | None = None
+        for attempt in attempts:
+            try:
+                result = call_llm(
+                    messages,
+                    **attempt,
+                    max_tokens=1024,
+                    temperature=temperature,
+                    conn=conn,
+                    request_type="log_flow_followup",
+                    metadata={
+                        "date": today.isoformat(),
+                        "prior_step_id": prior_step.id,
+                        "prior_answer": prior_answer,
+                    },
+                )
+                payload = _extract_json_object(result.text)
+                raw_step = payload.get("step")
+                if raw_step is None:
+                    return None
+                return _coerce_log_flow_step(raw_step, 1)
+            except Exception as exc:
+                last_error = exc
+                logger.warning(
+                    "log_flow_followup attempt with %s failed validation/call: %s",
+                    attempt.get("model", "(unknown)"),
+                    exc,
+                    exc_info=True,
+                )
+
+        logger.error(
+            "All log_flow_followup model attempts failed; committing without "
+            "follow-up: %s",
+            last_error,
         )
+        return None
     finally:
         conn.close()
-
-    payload = _extract_json_object(result.text)
-    raw_step = payload.get("step")
-    if raw_step is None:
-        return None
-    return _coerce_log_flow_step(raw_step, 1)
 
 
 def _looks_like_nonfinal_nudge(text: str) -> bool:

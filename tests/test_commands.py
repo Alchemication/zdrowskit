@@ -13,6 +13,7 @@ from cmd_db import cmd_db
 from cmd_llm import (
     _apply_verification,
     _query_today_snapshot,
+    build_log_flow,
     cmd_coach,
     cmd_insights,
     cmd_nudge,
@@ -63,6 +64,55 @@ class TestLogFlowSnapshot:
         )
         snapshot = _query_today_snapshot(in_memory_db, date(2026, 4, 20))
         assert "Last night: 7.50h, 94% efficiency" in snapshot
+
+    def test_build_log_flow_retries_fallback_after_empty_primary_response(
+        self, in_memory_db: sqlite3.Connection
+    ) -> None:
+        seen_models: list[str] = []
+
+        def fake_call_llm(_messages: list[dict], **kwargs: object) -> LLMResult:
+            model = str(kwargs["model"])
+            seen_models.append(model)
+            if model == "primary-model":
+                return LLMResult(
+                    text="",
+                    model="primary-model",
+                    input_tokens=1,
+                    output_tokens=1024,
+                    total_tokens=1025,
+                    latency_s=0.1,
+                )
+            return LLMResult(
+                text=(
+                    '{"steps":[{"id":"state","question":"How did today feel?",'
+                    '"options":["rest day","solid"],"multi_select":false,'
+                    '"optional":false}]}'
+                ),
+                model="fallback-model",
+                input_tokens=1,
+                output_tokens=20,
+                total_tokens=21,
+                latency_s=0.1,
+            )
+
+        with (
+            patch("cmd_llm.load_context", return_value={"prompt": "x", "soul": "y"}),
+            patch("cmd_llm.open_db", return_value=in_memory_db),
+            patch("cmd_llm.build_messages", return_value=[]),
+            patch(
+                "cmd_llm._route_kwargs",
+                return_value={
+                    "model": "primary-model",
+                    "fallback_models": ["fallback-model"],
+                },
+            ),
+            patch("cmd_llm.call_llm", side_effect=fake_call_llm),
+        ):
+            flow = build_log_flow(db="ignored.db")
+
+        assert seen_models == ["primary-model", "fallback-model"]
+        assert flow.model == "fallback-model"
+        assert flow.steps[0].options == ["rest day", "solid"]
 
 
 class TestVerificationGate:
