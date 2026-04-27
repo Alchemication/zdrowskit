@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 import json
+from contextlib import AbstractContextManager, ExitStack
 from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
@@ -21,7 +22,7 @@ from cmd_llm import (
 )
 from cmd_llm_log import cmd_llm_log
 from commands import TELEGRAM_BOT_COMMANDS
-from config import MAX_TOKENS_INSIGHTS
+from config import MAX_TOKENS_INSIGHTS, MAX_TOKENS_NUDGE
 from llm import LLMResult
 from llm_verify import VerificationResult
 from store import log_feedback, log_llm_call, open_db
@@ -1104,6 +1105,32 @@ class TestCmdLlmLog:
 
 
 class TestCmdNudge:
+    @staticmethod
+    def _patch_nudge_context(
+        in_memory_db: sqlite3.Connection,
+    ) -> tuple[AbstractContextManager[object], ...]:
+        return (
+            patch("cmd_llm.load_context", return_value={"prompt": "x", "soul": "y"}),
+            patch("cmd_llm.open_db", return_value=in_memory_db),
+            patch(
+                "cmd_llm.build_llm_data",
+                return_value={
+                    "current_week": {"summary": {"week_label": "2026-W14"}, "days": []},
+                    "history": [],
+                    "week_complete": False,
+                    "week_label": "2026-W14",
+                },
+            ),
+            patch(
+                "cmd_llm.build_messages",
+                return_value=[
+                    {"role": "system", "content": "s"},
+                    {"role": "user", "content": "u"},
+                ],
+            ),
+            patch("tools.run_sql_tool", return_value=[{"type": "function"}]),
+        )
+
     def test_verifier_fail_turns_nudge_into_skip(
         self,
         in_memory_db,
@@ -1162,6 +1189,122 @@ class TestCmdNudge:
 
         assert capsys.readouterr().out == ""
         assert cmd_result.text is None
+        save_nudge.assert_not_called()
+        send_telegram.assert_not_called()
+
+    def test_empty_nudge_retries_fallback_before_sending(
+        self,
+        in_memory_db,
+        capsys,
+    ) -> None:
+        args = SimpleNamespace(
+            db="ignored.db",
+            model=None,
+            months=1,
+            trigger="new_data",
+            email=False,
+            telegram=False,
+        )
+        empty_result = LLMResult(
+            text="",
+            model="primary-model",
+            input_tokens=1,
+            output_tokens=MAX_TOKENS_NUDGE,
+            total_tokens=MAX_TOKENS_NUDGE + 1,
+            latency_s=0.1,
+            llm_call_id=20,
+        )
+        retry_result = LLMResult(
+            text="**Rest today.** Keep it boring and recover.",
+            model="fallback-model",
+            input_tokens=1,
+            output_tokens=12,
+            total_tokens=13,
+            latency_s=0.1,
+            llm_call_id=21,
+        )
+        seen_kwargs: list[dict[str, object]] = []
+
+        def fake_call_llm(_messages: list[dict], **kwargs: object) -> LLMResult:
+            seen_kwargs.append(kwargs)
+            return [empty_result, retry_result][len(seen_kwargs) - 1]
+
+        with ExitStack() as stack:
+            for ctx in self._patch_nudge_context(in_memory_db):
+                stack.enter_context(ctx)
+            stack.enter_context(
+                patch(
+                    "cmd_llm._route_kwargs",
+                    return_value={
+                        "model": "primary-model",
+                        "fallback_models": ["fallback-model"],
+                    },
+                )
+            )
+            stack.enter_context(patch("cmd_llm.call_llm", side_effect=fake_call_llm))
+            save_nudge = stack.enter_context(patch("cmd_llm._save_nudge"))
+            send_telegram = stack.enter_context(
+                patch("cmd_llm.send_telegram", return_value=123)
+            )
+            result = cmd_nudge(args)
+
+        captured = capsys.readouterr()
+        assert len(seen_kwargs) == 2
+        assert seen_kwargs[0]["model"] == "primary-model"
+        assert seen_kwargs[0]["max_tokens"] == MAX_TOKENS_NUDGE
+        assert seen_kwargs[1]["model"] == "fallback-model"
+        assert seen_kwargs[1]["max_tokens"] == MAX_TOKENS_NUDGE
+        assert seen_kwargs[1]["tools"] is None
+        assert seen_kwargs[1]["fallback_models"] == []
+        assert isinstance(seen_kwargs[1]["metadata"], dict)
+        assert seen_kwargs[1]["metadata"]["iteration"] == "empty_retry"
+        assert seen_kwargs[1]["metadata"]["retry_after_llm_call_id"] == 20
+        assert result.llm_call_id == 21
+        assert result.telegram_message_id == 123
+        assert "**Rest today.**" in captured.out
+        assert save_nudge.call_args.args[0].startswith("**📊 Data Sync**")
+        assert send_telegram.call_args.args[0].startswith("**📊 Data Sync**")
+
+    def test_empty_nudge_without_successful_retry_skips_without_sending(
+        self,
+        in_memory_db,
+        capsys,
+    ) -> None:
+        args = SimpleNamespace(
+            db="ignored.db",
+            model=None,
+            months=1,
+            trigger="new_data",
+            email=False,
+            telegram=False,
+        )
+        empty_result = LLMResult(
+            text="",
+            model="primary-model",
+            input_tokens=1,
+            output_tokens=MAX_TOKENS_NUDGE,
+            total_tokens=MAX_TOKENS_NUDGE + 1,
+            latency_s=0.1,
+            llm_call_id=30,
+        )
+
+        with ExitStack() as stack:
+            for ctx in self._patch_nudge_context(in_memory_db):
+                stack.enter_context(ctx)
+            stack.enter_context(
+                patch(
+                    "cmd_llm._route_kwargs",
+                    return_value={"model": "primary-model", "fallback_models": []},
+                )
+            )
+            stack.enter_context(patch("cmd_llm.call_llm", return_value=empty_result))
+            save_nudge = stack.enter_context(patch("cmd_llm._save_nudge"))
+            send_telegram = stack.enter_context(patch("cmd_llm.send_telegram"))
+            result = cmd_nudge(args)
+
+        assert capsys.readouterr().out == ""
+        assert result.text is None
+        assert result.llm_call_id == 30
         save_nudge.assert_not_called()
         send_telegram.assert_not_called()
 

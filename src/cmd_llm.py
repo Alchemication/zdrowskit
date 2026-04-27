@@ -83,6 +83,10 @@ _NUDGE_NONFINAL_RETRY = (
     "final user-facing nudge now: one short message (maximum 80 words) or "
     "SKIP. Do not mention checking, reviewing, or deciding whether to send."
 )
+_NUDGE_EMPTY_RETRY = (
+    "Your previous nudge response was empty. Output the final user-facing "
+    "nudge now, or output exactly SKIP. No preamble."
+)
 NOTIFY_MODEL = DEFAULT_NOTIFY_MODEL
 LOG_FLOW_MODEL = DEFAULT_LOG_FLOW_MODEL
 
@@ -1371,6 +1375,50 @@ def cmd_nudge(
             sys.exit(1)
 
     raw_text = result.text.strip()
+    if not raw_text:
+        retry_models: list[str] = []
+        seen_models = {model}
+        for fallback_model in fallback_models or []:
+            if not isinstance(fallback_model, str) or fallback_model in seen_models:
+                continue
+            seen_models.add(fallback_model)
+            retry_models.append(fallback_model)
+
+        for retry_model in retry_models:
+            logger.warning(
+                "Nudge returned empty final text; retrying with fallback %s",
+                retry_model,
+            )
+            source_llm_call_id = result.llm_call_id
+            try:
+                result = call_llm(
+                    [*messages, {"role": "user", "content": _NUDGE_EMPTY_RETRY}],
+                    model=retry_model,
+                    max_tokens=MAX_TOKENS_NUDGE,
+                    temperature=temperature,
+                    tools=None,
+                    fallback_models=[],
+                    conn=conn,
+                    request_type="nudge",
+                    metadata={
+                        "trigger_type": _trigger,
+                        "iteration": "empty_retry",
+                        "retry_after_llm_call_id": source_llm_call_id,
+                    },
+                )
+            except Exception as e:
+                logger.error("Nudge empty-response retry failed: %s", e)
+                continue
+            raw_text = result.text.strip()
+            if raw_text:
+                break
+
+        if not raw_text:
+            logger.warning(
+                "Nudge returned empty final text; treating as SKIP (trigger: %s)",
+                _trigger,
+            )
+            return CommandResult(llm_call_id=result.llm_call_id)
 
     # Check for SKIP as the entire response OR as a standalone line.
     if raw_text.upper() == "SKIP" or "\nSKIP\n" in f"\n{raw_text}\n":

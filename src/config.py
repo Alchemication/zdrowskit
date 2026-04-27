@@ -104,7 +104,7 @@ MAX_TOKENS_CHAT: int = 4096
 """Output token budget for interactive chat. Kept responsive, but high enough
 for chart-generating answers."""
 
-MAX_TOKENS_NUDGE: int = 1024
+MAX_TOKENS_NUDGE: int = 4096
 """Output token budget for nudges. Nudges should be short, but tool-repair
 turns need enough room to finish cleanly."""
 
