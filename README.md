@@ -72,7 +72,7 @@ ZDROWSKIT_COACH_MODEL=deepseek/deepseek-v4-pro
 ZDROWSKIT_NUDGE_MODEL=deepseek/deepseek-v4-pro
 ZDROWSKIT_CHAT_MODEL=deepseek/deepseek-v4-pro
 ZDROWSKIT_NOTIFY_MODEL=deepseek/deepseek-v4-flash
-ZDROWSKIT_LOG_FLOW_MODEL=deepseek/deepseek-v4-flash
+ZDROWSKIT_LOG_FLOW_MODEL=anthropic/claude-haiku-4-5
 ZDROWSKIT_ADD_CLONE_MODEL=deepseek/deepseek-v4-flash
 ```
 

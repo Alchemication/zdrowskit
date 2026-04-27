@@ -92,6 +92,7 @@ LOG_FLOW_MODEL = DEFAULT_LOG_FLOW_MODEL
 MAX_LOG_FLOW_INITIAL_STEPS = 1
 MAX_LOG_FLOW_STEPS = 2
 MAX_LOG_FLOW_OPTIONS_PER_STEP = 8
+MAX_LOG_FLOW_TOKENS = 1024
 
 
 @dataclass
@@ -601,7 +602,7 @@ def build_log_flow(
                 result = call_llm(
                     messages,
                     **attempt,
-                    max_tokens=1024,
+                    max_tokens=MAX_LOG_FLOW_TOKENS,
                     temperature=temperature,
                     conn=conn,
                     request_type="log_flow",
@@ -695,7 +696,7 @@ def build_log_step_followup(
                 result = call_llm(
                     messages,
                     **attempt,
-                    max_tokens=1024,
+                    max_tokens=MAX_LOG_FLOW_TOKENS,
                     temperature=temperature,
                     conn=conn,
                     request_type="log_flow_followup",

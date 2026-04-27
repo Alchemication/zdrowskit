@@ -81,11 +81,11 @@ class TestFeatureDefaultModels:
         assert DEFAULT_NUDGE_MODEL == PRIMARY_PRO_MODEL
         assert DEFAULT_CHAT_MODEL == PRIMARY_PRO_MODEL
 
-    def test_lightweight_utility_surfaces_default_to_deepseek_flash(self) -> None:
+    def test_lightweight_utility_surfaces_default_models(self) -> None:
         assert PRIMARY_FLASH_MODEL == DEEPSEEK_FLASH_MODEL
         assert FALLBACK_FLASH_MODEL == ANTHROPIC_HAIKU_MODEL
         assert DEFAULT_NOTIFY_MODEL == PRIMARY_FLASH_MODEL
-        assert DEFAULT_LOG_FLOW_MODEL == PRIMARY_FLASH_MODEL
+        assert DEFAULT_LOG_FLOW_MODEL == ANTHROPIC_HAIKU_MODEL
         assert DEFAULT_ADD_CLONE_MODEL == PRIMARY_FLASH_MODEL
 
 
