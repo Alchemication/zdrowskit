@@ -275,7 +275,7 @@ Each notification type is a distinct LLM call with its own prompt, context, tool
 
 | Channel | Purpose | Trigger | Frequency | Length | Tools | Special output |
 |---------|---------|---------|-----------|--------|-------|----------------|
-| **Insights** | Full weekly report | Scheduled (default: Mon 10am) or manual `/review` | 1×/week | ~450 words | `run_sql` | `<chart>` (0+), `<memory>` (always 1, appended to `history.md`) |
+| **Insights** | Full weekly report | Scheduled (default: Mon 10am) or manual `/review` | 1×/week | ~450 words | `run_sql` | `<chart>` (default 1, skip if misleading), `<memory>` (always 1, appended to `history.md`) |
 | **Coach** | Weekly strategy review, only when proposals exist | After insights (silent on no-change weeks) | 1×/week | ~300 words | `run_sql`, `update_context` (`strategy` only) | `SKIP` if no changes warranted; bundled message with inline Accept/Reject buttons per edit |
 | **Nudge** | Short reactive next-action nudge | Data sync, file edit | Up to 3/day by default | 80 words | `run_sql` | `SKIP` if nothing changes; `<chart>` (0–1) |
 | **Chat** | Interactive conversation — answer the current message, ask anything, get charts | Your Telegram message | On demand | 150 words | `run_sql` (up to 5/turn), `update_context` (any file) | `<chart>` (optional), `update_context` (at most 1) |

@@ -179,12 +179,21 @@ notable, shrink it to one line or drop it. Always express pace in mm:ss/km forma
 in the report — they break on mobile. Use the day-by-day text format shown
 above for the Training Review and bulleted lists everywhere else.**
 
-### Charts (optional, 0–3)
+### Charts (default 1, maximum 3)
 
-Most reports need no chart. Include one only when a visual genuinely
-clarifies a trend or comparison better than words. The `data` dict in chart
-code includes per-day data at `data["current_week"]["days"]` (richer than
-the compact health-data section) and `data["history"]` — a list of
+Include exactly one meaningful chart in a normal weekly report unless the
+available data is genuinely too thin or the visual would be misleading. The
+chart should answer the most useful coaching question for this specific week,
+not decorate the report. Prefer a nuanced relationship or comparison over a
+generic metric plot: training load vs recovery, sleep vs training density,
+easy-run HR drift, tempo execution vs target, post-illness rebound, or current
+volume vs recent trend. If the compact weekly context does not expose the best
+relationship clearly enough, use the SQL tool before the final report to gather
+the extra data you need.
+
+The `data` dict in chart code includes per-day data at
+`data["current_week"]["days"]` (richer than the compact health-data section)
+and `data["history"]` — a list of
 `{{"summary": <weekly summary dict>}}` items with fields like
 `week_label`, `total_run_km`, `run_count`, `lift_count`, `avg_hrv_ms`,
 `avg_resting_hr`, `avg_sleep_total_h`. The `week_label` is verbose
