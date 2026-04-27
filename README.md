@@ -350,15 +350,16 @@ Each channel sees what the others recently said so the LLM avoids redundancy:
 - **Coach:** runs at most once per calendar day
 - **No replay after mute:** skipped nudges/reports are not replayed after a temporary mute expires
 
-### Optional LLM verification
+### LLM verification
 
-Post-generation verification can be enabled for reports, coach reviews, and
-nudges. This adds a separate verifier call and, when the issue is fixable, one
-bounded rewrite call before the output is saved or sent. It is off by default
-for controlled eval rollouts.
+Post-generation verification runs by default for async LLM outputs: reports,
+coach reviews, and nudges. This adds a separate verifier call and, when the
+issue is fixable, one bounded rewrite call before the output is saved or sent.
+Chat remains unverified because it is interactive and latency-sensitive.
 
 ```env
-ZDROWSKIT_ENABLE_LLM_VERIFICATION=1
+# Optional overrides:
+ZDROWSKIT_ENABLE_LLM_VERIFICATION=0
 ZDROWSKIT_VERIFICATION_MODEL=deepseek/deepseek-v4-pro
 ZDROWSKIT_VERIFICATION_REWRITE_MODEL=deepseek/deepseek-v4-flash
 ZDROWSKIT_MAX_VERIFICATION_REVISIONS=1

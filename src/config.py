@@ -210,8 +210,13 @@ DEFAULT_ADD_CLONE_MODEL: str = os.environ.get(
 )
 """Default model for /add workout clone selection."""
 
-ENABLE_LLM_VERIFICATION: bool = _env_bool("ZDROWSKIT_ENABLE_LLM_VERIFICATION", False)
-"""Global feature flag for post-generation LLM verification."""
+ENABLE_LLM_VERIFICATION: bool = _env_bool("ZDROWSKIT_ENABLE_LLM_VERIFICATION", True)
+"""Global feature flag for post-generation LLM verification.
+
+Enabled by default for async LLM surfaces (insights, coach, nudges), where
+latency is less important than avoiding weak or unsupported outputs. Set
+``ZDROWSKIT_ENABLE_LLM_VERIFICATION=0`` to disable locally.
+"""
 
 VERIFY_INSIGHTS: bool = _env_bool("ZDROWSKIT_VERIFY_INSIGHTS", True)
 """When LLM verification is enabled, verify weekly insights reports."""

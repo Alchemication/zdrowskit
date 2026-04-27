@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import os
 import sqlite3
 from pathlib import Path
 
 import pytest
+
+os.environ.setdefault("ZDROWSKIT_ENABLE_LLM_VERIFICATION", "0")
 
 from db.migrations import apply_migrations
 from models import DailySnapshot, WorkoutSnapshot
