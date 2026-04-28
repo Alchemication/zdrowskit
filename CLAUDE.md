@@ -32,6 +32,8 @@ Telegram bot commands now include `/notify` for showing/changing notification pr
 
 Telegram bot commands also include `/models` for button-based model routing. Model preferences live in `~/Documents/zdrowskit/model_prefs.json`. The Telegram panel groups features (Chat/Reports/Coach/Nudges/Utilities), tags every model button with its capability tier, and exposes Reasoning/Temperature pickers under the Chat group. `Reset all` (Telegram) and `uv run python main.py models reset --all` (CLI) restore defaults. Picking `Auto` for the fallback (or `--fallback auto`) persists JSON `null` and defers to the profile fallback at resolve time. Chat defaults to `anthropic/claude-opus-4-7` with reasoning off and temperature omitted, while insights/coach/nudges default to DeepSeek Pro with Anthropic Opus fallback.
 
+DeepSeek Pro thinking mode defaults to enabled/high unless explicitly disabled. Verifier calls intentionally pass `extra_body={"thinking": {"type": "disabled"}}` and `response_format={"type": "json_object"}` via `src/llm_verify.py`; keep provider-specific params model-aware in `src/llm.py` so Anthropic fallbacks omit DeepSeek-only fields. Draft/rewrite calls do not globally disable DeepSeek thinking unless config/call sites explicitly request it.
+
 Database access should go through `store.open_db()` or `store.connect_db(..., migrate=True)` so pending SQLite migrations are applied automatically. Avoid raw `sqlite3.connect(...)` unless you intentionally need a migration-free connection.
 Database schema changes must be implemented as new timestamped migration files in `src/db/migrations/`. Do not add ad-hoc runtime `ALTER TABLE`, column-existence checks, or other schema-patching logic in application code.
 
