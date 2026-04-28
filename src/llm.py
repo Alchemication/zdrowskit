@@ -24,6 +24,7 @@ from typing import Any
 import litellm
 
 from config import (
+    DEEPSEEK_EXTRA_BODY,
     DEFAULT_MODEL,
     FALLBACK_FLASH_MODEL,
     FALLBACK_PRO_MODEL,
@@ -560,7 +561,8 @@ def call_llm(
             deprecated the field).
         reasoning_effort: Optional reasoning effort hint (model-dependent).
         response_format: Optional OpenAI-compatible response format hint.
-        extra_body: Optional provider-specific request body extras.
+        extra_body: Optional provider-specific request body extras. When omitted,
+            DeepSeek model attempts receive the configured DeepSeek default.
         tools: Optional list of tool definitions for function calling.
         fallback_models: Explicit fallback chain after the requested model.
         conn: Open DB connection for logging. None to skip logging.
@@ -585,8 +587,9 @@ def call_llm(
         kwargs["reasoning_effort"] = reasoning_effort
     if response_format is not None:
         kwargs["response_format"] = response_format
-    if extra_body is not None:
-        kwargs["extra_body"] = extra_body
+    effective_extra_body = extra_body if extra_body is not None else DEEPSEEK_EXTRA_BODY
+    if effective_extra_body is not None:
+        kwargs["extra_body"] = effective_extra_body
     if tools is not None:
         kwargs["tools"] = tools
 
@@ -626,13 +629,16 @@ def call_llm(
     )
 
     if conn and request_type:
+        logged_extra_body = effective_extra_body
+        if extra_body is None and not _model_accepts_extra_body(model):
+            logged_extra_body = None
         params = _effective_params_for_model(
             model=model,
             max_tokens=max_tokens,
             temperature=temperature,
             reasoning_effort=reasoning_effort,
             response_format=response_format,
-            extra_body=extra_body,
+            extra_body=logged_extra_body,
             requested_model=requested_model,
         )
         log_metadata = dict(metadata or {})

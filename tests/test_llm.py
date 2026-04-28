@@ -14,6 +14,7 @@ from config import (
     ANTHROPIC_HAIKU_MODEL,
     ANTHROPIC_OPUS_4_7_MODEL,
     ANTHROPIC_OPUS_MODEL,
+    DEEPSEEK_EXTRA_BODY,
     DEEPSEEK_FLASH_MODEL,
     DEEPSEEK_PRO_MODEL,
     DEFAULT_ADD_CLONE_MODEL,
@@ -917,6 +918,51 @@ class TestCallLlm:
         assert "reasoning_effort" not in kwargs
 
     @patch("llm.litellm")
+    def test_deepseek_default_extra_body_applied(self, mock_litellm: MagicMock) -> None:
+        mock_litellm.completion.return_value = self._mock_response()
+        mock_litellm.completion_cost.return_value = None
+
+        call_llm(
+            [{"role": "user", "content": "test"}],
+            model=DEEPSEEK_FLASH_MODEL,
+        )
+
+        kwargs = mock_litellm.completion.call_args[1]
+        assert kwargs["extra_body"] == DEEPSEEK_EXTRA_BODY
+
+    @patch("llm.litellm")
+    def test_explicit_extra_body_overrides_deepseek_default(
+        self, mock_litellm: MagicMock
+    ) -> None:
+        mock_litellm.completion.return_value = self._mock_response()
+        mock_litellm.completion_cost.return_value = None
+        explicit = {"thinking": {"type": "enabled"}}
+
+        call_llm(
+            [{"role": "user", "content": "test"}],
+            model=DEEPSEEK_FLASH_MODEL,
+            extra_body=explicit,
+        )
+
+        kwargs = mock_litellm.completion.call_args[1]
+        assert kwargs["extra_body"] == explicit
+
+    @patch("llm.litellm")
+    def test_deepseek_extra_body_omitted_for_anthropic_primary(
+        self, mock_litellm: MagicMock
+    ) -> None:
+        mock_litellm.completion.return_value = self._mock_response()
+        mock_litellm.completion_cost.return_value = None
+
+        call_llm(
+            [{"role": "user", "content": "test"}],
+            model=ANTHROPIC_OPUS_MODEL,
+        )
+
+        kwargs = mock_litellm.completion.call_args[1]
+        assert "extra_body" not in kwargs
+
+    @patch("llm.litellm")
     def test_reasoning_effort_forces_temperature_to_one(
         self, mock_litellm: MagicMock
     ) -> None:
@@ -980,6 +1026,27 @@ class TestCallLlm:
         row = in_memory_db.execute("SELECT * FROM llm_call").fetchone()
         assert row is not None
         assert row["request_type"] == "insights"
+        params = json.loads(row["params_json"])
+        assert params["extra_body"] == DEEPSEEK_EXTRA_BODY
+
+    @patch("llm.litellm")
+    def test_anthropic_logging_omits_implicit_deepseek_extra_body(
+        self, mock_litellm: MagicMock, in_memory_db: sqlite3.Connection
+    ) -> None:
+        mock_litellm.completion.return_value = self._mock_response()
+        mock_litellm.completion_cost.return_value = 0.02
+
+        call_llm(
+            [{"role": "user", "content": "test"}],
+            model=ANTHROPIC_OPUS_MODEL,
+            conn=in_memory_db,
+            request_type="insights",
+        )
+
+        row = in_memory_db.execute("SELECT * FROM llm_call").fetchone()
+        params = json.loads(row["params_json"])
+        assert "extra_body" not in params
+        assert "requested_extra_body" not in params
 
     @patch("llm.litellm")
     def test_logs_requested_model_when_fallback_used(
@@ -1003,6 +1070,7 @@ class TestCallLlm:
 
         params = json.loads(row["params_json"])
         metadata = json.loads(row["metadata_json"])
+        assert params["extra_body"] == DEEPSEEK_EXTRA_BODY
         assert params["requested_model"] == ANTHROPIC_OPUS_MODEL
         assert params["fallback_used"] is True
         assert metadata["requested_model"] == ANTHROPIC_OPUS_MODEL
@@ -1028,6 +1096,11 @@ class TestCallLlm:
             call.kwargs["model"] for call in mock_litellm.completion.call_args_list
         ]
         assert seen_models == [ANTHROPIC_OPUS_4_7_MODEL, DEEPSEEK_PRO_MODEL]
+        assert "extra_body" not in mock_litellm.completion.call_args_list[0].kwargs
+        assert (
+            mock_litellm.completion.call_args_list[1].kwargs["extra_body"]
+            == DEEPSEEK_EXTRA_BODY
+        )
         assert result.model == DEEPSEEK_PRO_MODEL
 
     @patch("llm.litellm")
