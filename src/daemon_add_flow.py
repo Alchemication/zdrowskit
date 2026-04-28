@@ -37,6 +37,8 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from config import MAX_TOKENS_ADD_CLONE
+
 if TYPE_CHECKING:
     from daemon import ZdrowskitDaemon
 
@@ -171,7 +173,7 @@ def find_workout_clone(
         result = call_llm(
             messages,
             **route,
-            max_tokens=512,
+            max_tokens=MAX_TOKENS_ADD_CLONE,
             temperature=temperature,
             conn=conn,
             request_type="add_clone",

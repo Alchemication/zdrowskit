@@ -5,6 +5,12 @@ from __future__ import annotations
 import json
 import sqlite3
 
+from config import (
+    MAX_TOKENS_VERIFICATION,
+    MAX_TOKENS_VERIFICATION_REWRITE,
+    VERIFICATION_EXTRA_BODY,
+    VERIFICATION_RESPONSE_FORMAT,
+)
 from events import query_events
 from llm import LLMResult
 from llm_verify import (
@@ -154,8 +160,14 @@ class TestVerifyAndRewrite:
             ),
             "Monday had a 5 km run.",
         ]
+        seen_max_tokens = []
+        seen_response_formats = []
+        seen_extra_bodies = []
 
         def fake_call_llm(messages, **kwargs):
+            seen_max_tokens.append(kwargs["max_tokens"])
+            seen_response_formats.append(kwargs.get("response_format"))
+            seen_extra_bodies.append(kwargs.get("extra_body"))
             text = outputs.pop(0)
             row_id = log_llm_call(
                 kwargs["conn"],
@@ -199,6 +211,12 @@ class TestVerifyAndRewrite:
             "insights_verify",
             "insights_rewrite",
         ]
+        assert seen_max_tokens == [
+            MAX_TOKENS_VERIFICATION,
+            MAX_TOKENS_VERIFICATION_REWRITE,
+        ]
+        assert seen_response_formats == [VERIFICATION_RESPONSE_FORMAT, None]
+        assert seen_extra_bodies == [VERIFICATION_EXTRA_BODY, None]
         verify_metadata = json.loads(rows[0]["metadata_json"])
         assert verify_metadata["source_llm_call_id"] == 123
         assert verify_metadata["verdict"] == "revise"
@@ -236,6 +254,80 @@ class TestVerifyAndRewrite:
 
         assert result.verdict == "fail"
         assert result.issues[0].severity == "critical"
+
+    def test_empty_verifier_response_reports_token_budget(
+        self,
+        in_memory_db: sqlite3.Connection,
+        monkeypatch,
+    ) -> None:
+        source_id = log_llm_call(
+            in_memory_db,
+            request_type="nudge",
+            model="source-model",
+            messages=[],
+            response_text="Draft nudge.",
+            metadata={},
+        )
+
+        def fake_call_llm(messages, **kwargs):
+            row_id = log_llm_call(
+                kwargs["conn"],
+                request_type=kwargs["request_type"],
+                model=kwargs["model"],
+                messages=messages,
+                response_text="",
+                metadata=kwargs["metadata"],
+            )
+            return LLMResult(
+                text="",
+                model=kwargs["model"],
+                input_tokens=10,
+                output_tokens=kwargs["max_tokens"],
+                total_tokens=10 + kwargs["max_tokens"],
+                latency_s=0.1,
+                max_tokens=kwargs["max_tokens"],
+                llm_call_id=row_id,
+            )
+
+        monkeypatch.setattr("llm_verify.call_llm", fake_call_llm)
+
+        result = verify_and_rewrite(
+            kind="nudge",
+            draft="Draft nudge.",
+            evidence={},
+            source_messages=[],
+            conn=in_memory_db,
+            metadata={"source_llm_call_id": source_id},
+            model="verify-model",
+            rewrite_model="rewrite-model",
+            max_revisions=1,
+        )
+
+        assert result.verdict == "fail"
+        assert result.issues[0].severity == "critical"
+        assert "empty response" in result.issues[0].problem
+        assert f"max_tokens={MAX_TOKENS_VERIFICATION}" in result.issues[0].problem
+        assert "ZDROWSKIT_MAX_TOKENS_VERIFICATION" in result.issues[0].correction
+
+        source = in_memory_db.execute(
+            "SELECT metadata_json FROM llm_call WHERE id = ?",
+            (source_id,),
+        ).fetchone()
+        source_metadata = json.loads(source["metadata_json"])
+        issue = source_metadata["nudge_verification"]["issues"][0]
+        assert "empty response" in issue["problem"]
+        assert issue["evidence"] == (
+            f"output_tokens={MAX_TOKENS_VERIFICATION}, "
+            f"max_tokens={MAX_TOKENS_VERIFICATION}"
+        )
+
+        verifier = in_memory_db.execute(
+            "SELECT metadata_json FROM llm_call WHERE id = ?",
+            (result.verifier_call_id,),
+        ).fetchone()
+        verifier_metadata = json.loads(verifier["metadata_json"])
+        assert verifier_metadata["verdict"] == "fail"
+        assert verifier_metadata["critical_count"] == 1
 
 
 class TestExtractToolEvidence:

@@ -32,7 +32,9 @@ from config import (
     ENABLE_LLM_VERIFICATION,
     MAX_TOKENS_COACH,
     MAX_TOKENS_INSIGHTS,
+    MAX_TOKENS_LOG_FLOW,
     MAX_TOKENS_NUDGE,
+    MAX_TOKENS_NOTIFY,
     MAX_VERIFICATION_REVISIONS,
     MAX_TOOL_ITERATIONS_COACH,
     MAX_TOOL_ITERATIONS_INSIGHTS,
@@ -96,7 +98,6 @@ LOG_FLOW_MODEL = DEFAULT_LOG_FLOW_MODEL
 MAX_LOG_FLOW_INITIAL_STEPS = 1
 MAX_LOG_FLOW_STEPS = 2
 MAX_LOG_FLOW_OPTIONS_PER_STEP = 8
-MAX_LOG_FLOW_TOKENS = 4096
 
 
 @dataclass
@@ -386,7 +387,7 @@ def interpret_notify_request(
         result = call_llm(
             messages,
             **route,
-            max_tokens=512,
+            max_tokens=MAX_TOKENS_NOTIFY,
             temperature=temperature,
             conn=conn,
             request_type="notify",
@@ -606,7 +607,7 @@ def build_log_flow(
                 result = call_llm(
                     messages,
                     **attempt,
-                    max_tokens=MAX_LOG_FLOW_TOKENS,
+                    max_tokens=MAX_TOKENS_LOG_FLOW,
                     temperature=temperature,
                     conn=conn,
                     request_type="log_flow",
@@ -700,7 +701,7 @@ def build_log_step_followup(
                 result = call_llm(
                     messages,
                     **attempt,
-                    max_tokens=MAX_LOG_FLOW_TOKENS,
+                    max_tokens=MAX_TOKENS_LOG_FLOW,
                     temperature=temperature,
                     conn=conn,
                     request_type="log_flow_followup",

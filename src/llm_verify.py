@@ -15,8 +15,12 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from config import (
+    MAX_TOKENS_VERIFICATION,
+    MAX_TOKENS_VERIFICATION_REWRITE,
     MAX_VERIFICATION_REVISIONS,
     PROMPTS_DIR,
+    VERIFICATION_EXTRA_BODY,
+    VERIFICATION_RESPONSE_FORMAT,
     VERIFICATION_MODEL,
     VERIFICATION_REWRITE_MODEL,
 )
@@ -278,6 +282,73 @@ def _record_source_verification(
     )
 
 
+def _finalize_failed_verification(
+    conn: sqlite3.Connection,
+    *,
+    kind: VerificationKind,
+    source_llm_call_id: int | None,
+    result: VerificationResult,
+    strict: bool,
+) -> VerificationResult:
+    """Persist a verifier failure consistently and return it."""
+    _update_call_metadata(
+        conn,
+        result.verifier_call_id,
+        _verification_summary_metadata(result),
+    )
+    _record_source_verification(
+        conn,
+        kind=kind,
+        source_llm_call_id=source_llm_call_id,
+        result=result,
+    )
+    _emit_verification_event(
+        conn,
+        kind=kind,
+        result=result,
+        source_llm_call_id=source_llm_call_id,
+        strict=strict,
+    )
+    return result
+
+
+def _empty_verifier_result(
+    *,
+    verifier_result: Any,
+    max_tokens: int,
+) -> VerificationResult:
+    """Build a precise failure result for empty verifier responses."""
+    output_tokens = getattr(verifier_result, "output_tokens", 0)
+    result_max_tokens = getattr(verifier_result, "max_tokens", None) or max_tokens
+    hit_limit = output_tokens >= result_max_tokens
+    if hit_limit:
+        problem = (
+            "Verifier returned an empty response after hitting "
+            f"max_tokens={result_max_tokens}; it likely exhausted its output "
+            "budget before emitting strict JSON."
+        )
+    else:
+        problem = "Verifier returned an empty response instead of strict JSON."
+    return VerificationResult(
+        verdict="fail",
+        verifier_call_id=getattr(verifier_result, "llm_call_id", None),
+        issues=[
+            VerificationIssue(
+                severity="critical",
+                quote="",
+                problem=problem,
+                correction=(
+                    "Increase ZDROWSKIT_MAX_TOKENS_VERIFICATION or route "
+                    "verification to a model that reliably emits strict JSON."
+                ),
+                evidence=(
+                    f"output_tokens={output_tokens}, max_tokens={result_max_tokens}"
+                ),
+            )
+        ],
+    )
+
+
 def _has_markdown_table(text: str) -> bool:
     """Return True when text contains a markdown table separator row."""
     return bool(
@@ -498,13 +569,33 @@ def verify_and_rewrite(
         verifier_result = call_llm(
             verifier_messages,
             model=model,
-            max_tokens=2048,
+            max_tokens=MAX_TOKENS_VERIFICATION,
             temperature=0,
+            response_format=VERIFICATION_RESPONSE_FORMAT,
+            extra_body=VERIFICATION_EXTRA_BODY,
             conn=conn,
             request_type=f"{kind}_verify",
             metadata={**metadata, "stage": "verify"},
         )
         verifier_call_id = verifier_result.llm_call_id
+        if not verifier_result.text.strip():
+            logger.warning(
+                "%s verifier returned empty response (output_tokens=%d, max_tokens=%d)",
+                kind,
+                verifier_result.output_tokens,
+                verifier_result.max_tokens or MAX_TOKENS_VERIFICATION,
+            )
+            result = _empty_verifier_result(
+                verifier_result=verifier_result,
+                max_tokens=MAX_TOKENS_VERIFICATION,
+            )
+            return _finalize_failed_verification(
+                conn,
+                kind=kind,
+                source_llm_call_id=source_llm_call_id,
+                result=result,
+                strict=strict,
+            )
         parsed = parse_verification_result(verifier_result.text)
         parsed.verifier_call_id = verifier_call_id
     except Exception as exc:
@@ -521,20 +612,13 @@ def verify_and_rewrite(
                 )
             ],
         )
-        _record_source_verification(
+        return _finalize_failed_verification(
             conn,
             kind=kind,
             source_llm_call_id=source_llm_call_id,
             result=result,
-        )
-        _emit_verification_event(
-            conn,
-            kind=kind,
-            result=result,
-            source_llm_call_id=source_llm_call_id,
             strict=strict,
         )
-        return result
 
     if guard_issues:
         parsed.issues = [*guard_issues, *parsed.issues]
@@ -603,7 +687,7 @@ def verify_and_rewrite(
         rewrite_result = call_llm(
             rewrite_messages,
             model=rewrite_model,
-            max_tokens=max(1024, min(4096, len(draft) // 2 + 512)),
+            max_tokens=MAX_TOKENS_VERIFICATION_REWRITE,
             temperature=0,
             conn=conn,
             request_type=f"{kind}_rewrite",

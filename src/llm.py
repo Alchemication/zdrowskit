@@ -27,6 +27,7 @@ from config import (
     DEFAULT_MODEL,
     FALLBACK_FLASH_MODEL,
     FALLBACK_PRO_MODEL,
+    MAX_TOKENS_DEFAULT,
     PRIMARY_FLASH_MODEL,
     PRIMARY_PRO_MODEL,
 )
@@ -296,6 +297,16 @@ def _model_accepts_reasoning_effort(model: str) -> bool:
     )
 
 
+def _model_accepts_response_format(model: str) -> bool:
+    """Return True when we should pass OpenAI-style response_format."""
+    return _is_deepseek_model(model)
+
+
+def _model_accepts_extra_body(model: str) -> bool:
+    """Return True when provider-specific extra_body should be passed."""
+    return _is_deepseek_model(model)
+
+
 def _dedupe_models(models: list[str]) -> list[str]:
     """Remove duplicate model ids while preserving order."""
     seen: set[str] = set()
@@ -347,6 +358,8 @@ def _completion_kwargs_for_model(kwargs: dict, model: str) -> dict:
     """Return LiteLLM kwargs adjusted for a specific attempted model."""
     adjusted = {k: v for k, v in kwargs.items() if k != "model"}
     requested_reasoning = adjusted.pop("reasoning_effort", None)
+    requested_response_format = adjusted.pop("response_format", None)
+    requested_extra_body = adjusted.pop("extra_body", None)
     has_temperature = "temperature" in adjusted
     requested_temperature = adjusted.pop("temperature", None)
 
@@ -361,6 +374,10 @@ def _completion_kwargs_for_model(kwargs: dict, model: str) -> dict:
             adjusted["temperature"] = effective_temperature
     if effective_reasoning is not None:
         adjusted["reasoning_effort"] = effective_reasoning
+    if requested_response_format is not None and _model_accepts_response_format(model):
+        adjusted["response_format"] = requested_response_format
+    if requested_extra_body is not None and _model_accepts_extra_body(model):
+        adjusted["extra_body"] = requested_extra_body
     adjusted["model"] = model
     return adjusted
 
@@ -371,6 +388,8 @@ def _effective_params_for_model(
     max_tokens: int,
     temperature: float | None,
     reasoning_effort: str | None,
+    response_format: dict[str, Any] | None,
+    extra_body: dict[str, Any] | None,
     requested_model: str,
 ) -> dict[str, Any]:
     """Return call params as they were effectively sent to the final model."""
@@ -385,6 +404,18 @@ def _effective_params_for_model(
     elif reasoning_effort is not None:
         params["requested_reasoning_effort"] = reasoning_effort
         params["reasoning_effort_omitted_for_model"] = True
+    if response_format is not None:
+        if _model_accepts_response_format(model):
+            params["response_format"] = response_format
+        else:
+            params["requested_response_format"] = response_format
+            params["response_format_omitted_for_model"] = True
+    if extra_body is not None:
+        if _model_accepts_extra_body(model):
+            params["extra_body"] = extra_body
+        else:
+            params["requested_extra_body"] = extra_body
+            params["extra_body_omitted_for_model"] = True
     if requested_model != model:
         params["requested_model"] = requested_model
         params["fallback_used"] = True
@@ -503,9 +534,11 @@ def _tool_calls_to_dicts(tool_calls: Any) -> list[dict[str, Any]]:
 def call_llm(
     messages: list[dict[str, Any]],
     model: str = DEFAULT_MODEL,
-    max_tokens: int = 4096,
+    max_tokens: int = MAX_TOKENS_DEFAULT,
     temperature: float | None = 0.7,
     reasoning_effort: str | None = None,
+    response_format: dict[str, Any] | None = None,
+    extra_body: dict[str, Any] | None = None,
     tools: list[dict] | None = None,
     fallback_models: list[str] | None = None,
     conn: sqlite3.Connection | None = None,
@@ -526,6 +559,8 @@ def call_llm(
             entirely for models that reject it (e.g. claude-opus-4-7, which
             deprecated the field).
         reasoning_effort: Optional reasoning effort hint (model-dependent).
+        response_format: Optional OpenAI-compatible response format hint.
+        extra_body: Optional provider-specific request body extras.
         tools: Optional list of tool definitions for function calling.
         fallback_models: Explicit fallback chain after the requested model.
         conn: Open DB connection for logging. None to skip logging.
@@ -548,6 +583,10 @@ def call_llm(
         kwargs["temperature"] = temperature
     if reasoning_effort is not None:
         kwargs["reasoning_effort"] = reasoning_effort
+    if response_format is not None:
+        kwargs["response_format"] = response_format
+    if extra_body is not None:
+        kwargs["extra_body"] = extra_body
     if tools is not None:
         kwargs["tools"] = tools
 
@@ -592,6 +631,8 @@ def call_llm(
             max_tokens=max_tokens,
             temperature=temperature,
             reasoning_effort=reasoning_effort,
+            response_format=response_format,
+            extra_body=extra_body,
             requested_model=requested_model,
         )
         log_metadata = dict(metadata or {})

@@ -51,6 +51,14 @@ def _env_bool(name: str, default: bool) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _env_int(name: str, default: int) -> int:
+    """Return an int from an environment variable."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return int(raw.strip())
+
+
 MAX_HISTORY_ENTRIES: int = 8
 """Maximum number of entries to retain in history.md."""
 
@@ -92,21 +100,42 @@ MAX_TOOL_ITERATIONS_NUDGE: int = 5
 """Maximum tool-call loop iterations for nudges. Nudges are async, but should
 still stay focused on one small actionable observation."""
 
-MAX_TOKENS_INSIGHTS: int = 8192
+MAX_TOKENS_DEFAULT: int = _env_int("ZDROWSKIT_MAX_TOKENS_DEFAULT", 4096)
+"""Default output token budget for uncategorised LLM calls."""
+
+MAX_TOKENS_INSIGHTS: int = _env_int("ZDROWSKIT_MAX_TOKENS_INSIGHTS", 8192)
 """Output token budget for weekly insights reports. Reports are async and can
 include chart code, so the cap is higher than interactive chat."""
 
-MAX_TOKENS_COACH: int = 8192
+MAX_TOKENS_COACH: int = _env_int("ZDROWSKIT_MAX_TOKENS_COACH", 8192)
 """Output token budget for coaching reviews. Coach runs are async and may need
 room for narrative plus context-edit proposals."""
 
-MAX_TOKENS_CHAT: int = 4096
+MAX_TOKENS_CHAT: int = _env_int("ZDROWSKIT_MAX_TOKENS_CHAT", 4096)
 """Output token budget for interactive chat. Kept responsive, but high enough
 for chart-generating answers."""
 
-MAX_TOKENS_NUDGE: int = 4096
+MAX_TOKENS_NUDGE: int = _env_int("ZDROWSKIT_MAX_TOKENS_NUDGE", 4096)
 """Output token budget for nudges. Nudges should be short, but tool-repair
 turns need enough room to finish cleanly."""
+
+MAX_TOKENS_NOTIFY: int = _env_int("ZDROWSKIT_MAX_TOKENS_NOTIFY", 512)
+"""Output token budget for /notify preference interpretation."""
+
+MAX_TOKENS_LOG_FLOW: int = _env_int("ZDROWSKIT_MAX_TOKENS_LOG_FLOW", 4096)
+"""Output token budget for /log tap-flow generation and follow-up steps."""
+
+MAX_TOKENS_ADD_CLONE: int = _env_int("ZDROWSKIT_MAX_TOKENS_ADD_CLONE", 512)
+"""Output token budget for /add historical workout clone selection."""
+
+MAX_TOKENS_VERIFICATION: int = _env_int("ZDROWSKIT_MAX_TOKENS_VERIFICATION", 4096)
+"""Output token budget for evidence-bound verifier passes."""
+
+MAX_TOKENS_VERIFICATION_REWRITE: int = _env_int(
+    "ZDROWSKIT_MAX_TOKENS_VERIFICATION_REWRITE",
+    4096,
+)
+"""Output token budget for bounded verification rewrites."""
 
 DEEPSEEK_PRO_MODEL: str = os.environ.get(
     "ZDROWSKIT_DEEPSEEK_PRO_MODEL",
@@ -243,6 +272,27 @@ MAX_VERIFICATION_REVISIONS: int = int(
     os.environ.get("ZDROWSKIT_MAX_VERIFICATION_REVISIONS", "1")
 )
 """Maximum bounded rewrite attempts after a verifier returns revise."""
+
+VERIFY_JSON_MODE: bool = _env_bool("ZDROWSKIT_VERIFY_JSON_MODE", True)
+"""When True, request provider JSON mode for verifier calls that support it."""
+
+VERIFICATION_RESPONSE_FORMAT: dict[str, str] | None = (
+    {"type": "json_object"} if VERIFY_JSON_MODE else None
+)
+"""Structured response format requested for verifier calls."""
+
+VERIFY_DEEPSEEK_THINKING: str = os.environ.get(
+    "ZDROWSKIT_VERIFY_DEEPSEEK_THINKING",
+    "disabled",
+).strip()
+"""DeepSeek thinking mode for verifier calls: 'disabled', 'enabled', or empty."""
+
+VERIFICATION_EXTRA_BODY: dict[str, object] | None = (
+    {"thinking": {"type": VERIFY_DEEPSEEK_THINKING}}
+    if VERIFY_DEEPSEEK_THINKING in {"enabled", "disabled"}
+    else None
+)
+"""Provider-specific request body extras for verifier calls."""
 
 
 # ---------------------------------------------------------------------------

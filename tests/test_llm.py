@@ -1182,6 +1182,62 @@ class TestCallWithRetry:
         assert kwargs["temperature"] == 0.7
         assert "reasoning_effort" not in kwargs
 
+    def test_deepseek_attempt_keeps_response_format(self) -> None:
+        response_format = {"type": "json_object"}
+
+        kwargs = _completion_kwargs_for_model(
+            {
+                "model": DEEPSEEK_PRO_MODEL,
+                "messages": [],
+                "max_tokens": 10,
+                "response_format": response_format,
+            },
+            DEEPSEEK_PRO_MODEL,
+        )
+
+        assert kwargs["response_format"] == response_format
+
+    def test_deepseek_attempt_keeps_extra_body(self) -> None:
+        extra_body = {"thinking": {"type": "disabled"}}
+
+        kwargs = _completion_kwargs_for_model(
+            {
+                "model": DEEPSEEK_PRO_MODEL,
+                "messages": [],
+                "max_tokens": 10,
+                "extra_body": extra_body,
+            },
+            DEEPSEEK_PRO_MODEL,
+        )
+
+        assert kwargs["extra_body"] == extra_body
+
+    def test_anthropic_attempt_omits_response_format(self) -> None:
+        kwargs = _completion_kwargs_for_model(
+            {
+                "model": DEEPSEEK_PRO_MODEL,
+                "messages": [],
+                "max_tokens": 10,
+                "response_format": {"type": "json_object"},
+            },
+            ANTHROPIC_OPUS_MODEL,
+        )
+
+        assert "response_format" not in kwargs
+
+    def test_anthropic_attempt_omits_extra_body(self) -> None:
+        kwargs = _completion_kwargs_for_model(
+            {
+                "model": DEEPSEEK_PRO_MODEL,
+                "messages": [],
+                "max_tokens": 10,
+                "extra_body": {"thinking": {"type": "disabled"}},
+            },
+            ANTHROPIC_OPUS_MODEL,
+        )
+
+        assert "extra_body" not in kwargs
+
     def test_anthropic_attempt_keeps_reasoning_effort_and_temperature_one(self) -> None:
         kwargs = _completion_kwargs_for_model(
             {
