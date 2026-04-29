@@ -1,5 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+Template only. Do not copy this file directly.
+
+Run this from the repo root to generate a user-specific plist with your
+checkout path, uv path, HOME, and log location:
+
+    uv run python main.py daemon-install
+-->
 <plist version="1.0">
 <dict>
     <key>Label</key>
@@ -7,46 +15,33 @@
 
     <key>ProgramArguments</key>
     <array>
-        <!-- Adjust the path below if your project is in a different location -->
-        <string>/Users/adamsky/.local/bin/uv</string>
+        <string>__UV_PATH__</string>
         <string>run</string>
         <string>python</string>
-        <string>/Users/adamsky/Projects/zdrowskit/src/daemon.py</string>
+        <string>__PROJECT_DIR__/src/daemon.py</string>
     </array>
 
     <key>WorkingDirectory</key>
-    <string>/Users/adamsky/Projects/zdrowskit</string>
+    <string>__PROJECT_DIR__</string>
 
-    <!-- Keep the daemon running; launchd will restart it if it exits -->
     <key>KeepAlive</key>
     <true/>
 
-    <!-- Start automatically at login -->
     <key>RunAtLoad</key>
     <true/>
 
-    <!-- Prevent system sleep while the daemon is running -->
-    <key>PreventsSleep</key>
-    <true/>
-
-    <!-- Logs — both stdout and stderr go here; daemon also writes to daemon.log -->
     <key>StandardOutPath</key>
-    <string>/Users/adamsky/Library/Logs/zdrowskit.daemon.log</string>
+    <string>__HOME__/Library/Logs/zdrowskit.daemon.log</string>
 
     <key>StandardErrorPath</key>
-    <string>/Users/adamsky/Library/Logs/zdrowskit.daemon.log</string>
+    <string>__HOME__/Library/Logs/zdrowskit.daemon.log</string>
 
-    <!--
-        Environment variables.
-        The daemon loads .env itself via python-dotenv, so only PATH needs to
-        be set here to ensure `uv` and Python resolve correctly.
-    -->
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>/Users/adamsky/.local/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <string>__PATH__</string>
         <key>HOME</key>
-        <string>/Users/adamsky</string>
+        <string>__HOME__</string>
     </dict>
 </dict>
 </plist>

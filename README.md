@@ -33,8 +33,14 @@ Storage is local — SQLite on your machine, no third-party sync. The processing
 - **Apple Watch + iPhone** — zdrowskit reads Apple Health data. That's the only supported source right now. You need the [Auto Export](https://apps.apple.com/app/myhealth-export-to-icloud/id6737380982) iOS app to get data out of HealthKit into iCloud Drive as JSON.
 - **Mac** — the daemon watches your iCloud Drive folder, so it needs to run on a Mac where iCloud syncs. The rest of the stack (Python, SQLite) runs anywhere, but the data pipeline assumes macOS paths.
 - **A capable LLM** — this isn't a simple summariser. The coach writes personalised reports, decides when to stay quiet, generates SQL queries against your data, and produces chart code. That requires real intelligence. **Default: DeepSeek V4 Pro** for async judgement surfaces, with Anthropic Opus 4.6 as the cross-provider fallback. Telegram chat defaults to Anthropic Opus 4.7 with reasoning off for lower latency. **Minimum: Claude Sonnet 4.6 or equivalent** — anything below that and the reports get generic, the queries get unreliable, and the charts break. Any model provider works — zdrowskit uses [litellm](https://github.com/BerriAI/litellm) so you can swap in OpenAI, Google, or any compatible API.
-- **Python 3.11+** and [uv](https://github.com/astral-sh/uv)
+- **Python 3.12+** and [uv](https://github.com/astral-sh/uv)
 - **Telegram bot** (for notifications and chat)
+
+**Current limitation:** zdrowskit is designed for one health profile per macOS
+user account. Running separate profiles on separate Mac user accounts is the
+clean path. Multiple always-on daemon instances under the same macOS user
+account are not supported yet, though the path/config work now in place would
+make that possible later if there is demand.
 
 Under the hood: SQLite for storage, [litellm](https://github.com/BerriAI/litellm) for provider-agnostic LLM calls, [Plotly](https://plotly.com/python/) + Kaleido for charts, [watchdog](https://github.com/gorakhargosh/watchdog) for filesystem events, Telegram Bot API for delivery.
 
@@ -140,12 +146,18 @@ Do this once per automation (Metrics and Workouts). The import is idempotent —
 
 ## Quick start
 
-**Prerequisites:** Python 3.11+ and [uv](https://github.com/astral-sh/uv).
+**Prerequisites:** Python 3.12+ and [uv](https://github.com/astral-sh/uv).
 
 ```bash
 # Clone and install
 git clone <repo-url> && cd zdrowskit
 uv sync
+
+# Create .env and first-run context files under ~/Documents/zdrowskit
+uv run python main.py setup
+
+# Check local setup without calling external APIs
+uv run python main.py doctor
 
 # Import your Apple Health data (see "Getting your data out" above)
 uv run python main.py import
@@ -165,10 +177,9 @@ Normal CLI usage auto-applies pending SQLite migrations when the database is ope
 
 ### Setting up insights (LLM reports)
 
-1. Copy the example user context files:
+1. Create the first-run files:
    ```bash
-   mkdir -p ~/Documents/zdrowskit/ContextFiles
-   cp examples/context/*.md ~/Documents/zdrowskit/ContextFiles/
+   uv run python main.py setup
    ```
 2. Edit them with your real data — at minimum `me.md` and `strategy.md`
 3. Add your API keys to `.env` (plus Telegram credentials — see [Notifications](#notifications)). The defaults call DeepSeek with Anthropic as the cross-provider fallback, so set both keys to enable fallback:
@@ -194,10 +205,13 @@ uv run python main.py insights            # personalised weekly report via LLM
 uv run python main.py coach               # coaching review with plan/goal proposals
 uv run python main.py nudge               # short reactive nudge
 uv run python main.py context             # show context files and their status
+uv run python main.py setup               # create .env + first-run context files
+uv run python main.py doctor              # check local setup readiness
 uv run python main.py events              # system event log (fires, skips, imports)
 uv run python main.py llm-log             # inspect stored LLM call traces
 uv run python main.py models              # inspect/change model routing
 uv run python main.py telegram-setup      # register bot /commands for Telegram menu
+uv run python main.py daemon-install      # generate + load launchd daemon plist
 uv run python main.py daemon-restart      # restart the background daemon
 uv run python main.py daemon-stop         # stop the background daemon
 ```
@@ -215,11 +229,14 @@ The daemon watches your iCloud health data folder and context files. When someth
 uv run python src/daemon.py --foreground
 
 # Install as a background service (starts automatically at login)
-cp launchd/com.zdrowskit.daemon.plist ~/Library/LaunchAgents/
-launchctl load ~/Library/LaunchAgents/com.zdrowskit.daemon.plist
+uv run python main.py daemon-install
 ```
 
 What it watches and when it acts is covered in the [Notifications](#notifications) section — triggers, suppression rules, and cross-channel awareness.
+
+The checked-in plist under `launchd/` is a placeholder template. `daemon-install`
+generates the real plist with your checkout path, `uv` path, `HOME`, and log
+location. It currently installs one daemon instance for the current macOS user.
 
 **State file:** `~/Documents/zdrowskit/.daemon_state.json` tracks rate limits, recent nudge history, coach summaries, the deferred nudge queue, and pending Telegram reason prompts for feedback / proposal rejection.
 
@@ -256,14 +273,12 @@ tail -f ~/Library/Logs/zdrowskit.daemon.log
 **Updating the plist** (full reload required after editing `launchd/com.zdrowskit.daemon.plist`):
 ```bash
 launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.zdrowskit.daemon.plist
-cp launchd/com.zdrowskit.daemon.plist ~/Library/LaunchAgents/
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.zdrowskit.daemon.plist
+uv run python main.py daemon-install
 ```
 
 **Install from scratch** (first time or after a reset):
 ```bash
-cp launchd/com.zdrowskit.daemon.plist ~/Library/LaunchAgents/
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.zdrowskit.daemon.plist
+uv run python main.py daemon-install
 ```
 
 ## Context files

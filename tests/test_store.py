@@ -475,13 +475,20 @@ class TestConnectDb:
 
 class TestDefaultDbPath:
     def test_returns_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("ZDROWSKIT_DB", raising=False)
         monkeypatch.delenv("zdrowskit_DB", raising=False)
         path = default_db_path()
         assert path.name == "health.db"
         assert "zdrowskit" in str(path)
 
     def test_respects_env_var(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("zdrowskit_DB", "/tmp/custom.db")
+        monkeypatch.setenv("ZDROWSKIT_DB", "/tmp/custom.db")
         path = default_db_path()
         assert path.name == "custom.db"
         assert str(path).endswith("/tmp/custom.db")
+
+    def test_respects_legacy_env_var(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("ZDROWSKIT_DB", raising=False)
+        monkeypatch.setenv("zdrowskit_DB", "/tmp/legacy.db")
+        path = default_db_path()
+        assert path.name == "legacy.db"

@@ -20,12 +20,17 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
+import platform
+import shutil
 import sys
 from pathlib import Path
+from xml.sax.saxutils import escape as xml_escape
 
 from aggregator import summarise
 from assembler import assemble
 from config import (
+    APP_HOME,
     CONTEXT_DIR,
     resolve_data_dir,
 )
@@ -46,6 +51,10 @@ from store import (
 )
 
 logger = logging.getLogger(__name__)
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+LAUNCHD_LABEL = "com.zdrowskit.daemon"
+LAUNCHD_PLIST = f"{LAUNCHD_LABEL}.plist"
 
 
 # ---------------------------------------------------------------------------
@@ -223,6 +232,215 @@ def cmd_context(args: argparse.Namespace) -> None:
 
     console.print(table)
     console.print(f"\n[dim]Context directory:[/dim] {context_dir}")
+
+
+def _copy_file_if_needed(src: Path, dst: Path, *, force: bool = False) -> str:
+    """Copy *src* to *dst* when missing, returning a short status label."""
+    existed = dst.exists()
+    if existed and not force:
+        return "exists"
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(src, dst)
+    return "updated" if existed else "created"
+
+
+def _env_has_any_model_key() -> bool:
+    """Return True when at least one supported LLM provider key is configured."""
+    return any(
+        os.environ.get(name)
+        for name in ("DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY")
+    )
+
+
+def cmd_setup(args: argparse.Namespace) -> None:
+    """Create first-run files and print the remaining manual setup steps.
+
+    Args:
+        args: Parsed CLI arguments with force and skip_env attributes.
+    """
+    force = bool(getattr(args, "force", False))
+    skip_env = bool(getattr(args, "skip_env", False))
+
+    print("Setting up zdrowskit")
+    APP_HOME.mkdir(parents=True, exist_ok=True)
+    (APP_HOME / "Reports").mkdir(parents=True, exist_ok=True)
+    (APP_HOME / "Nudges").mkdir(parents=True, exist_ok=True)
+    print(f"  app home: {APP_HOME}")
+
+    examples_dir = REPO_ROOT / "examples" / "context"
+    if not examples_dir.exists():
+        print(f"  context: missing bundled examples at {examples_dir}")
+        sys.exit(1)
+
+    CONTEXT_DIR.mkdir(parents=True, exist_ok=True)
+    for src in sorted(examples_dir.glob("*.md")):
+        status = _copy_file_if_needed(src, CONTEXT_DIR / src.name, force=force)
+        print(f"  {status:7} {CONTEXT_DIR / src.name}")
+
+    if not skip_env:
+        env_example = REPO_ROOT / ".env_example"
+        env_path = REPO_ROOT / ".env"
+        if env_example.exists():
+            status = _copy_file_if_needed(env_example, env_path, force=False)
+            print(f"  {status:7} {env_path}")
+        else:
+            print(f"  skipped .env: .env_example not found at {env_example}")
+
+    print("\nNext steps:")
+    print(f"  1. Edit {CONTEXT_DIR / 'me.md'}")
+    print(f"  2. Edit {CONTEXT_DIR / 'strategy.md'}")
+    print("  3. Add at least one LLM API key to .env")
+    print("  4. Set up Auto Export on iPhone, then run: uv run python main.py import")
+    print("\nCheck readiness any time with: uv run python main.py doctor")
+
+
+def cmd_doctor(args: argparse.Namespace) -> None:  # noqa: ARG001
+    """Print a local readiness checklist without calling external services."""
+    checks: list[tuple[str, bool, str, bool]] = []
+    checks.append(
+        ("Python 3.12+", sys.version_info >= (3, 12), platform.python_version(), True)
+    )
+    checks.append(
+        (
+            "uv on PATH",
+            shutil.which("uv") is not None,
+            shutil.which("uv") or "missing",
+            True,
+        )
+    )
+
+    env_path = REPO_ROOT / ".env"
+    checks.append((".env file", env_path.exists(), str(env_path), True))
+    checks.append(("app home", APP_HOME.exists(), str(APP_HOME), True))
+    checks.append(("context dir", CONTEXT_DIR.exists(), str(CONTEXT_DIR), True))
+
+    for name in ("me.md", "strategy.md", "log.md", "history.md"):
+        path = CONTEXT_DIR / name
+        checks.append((f"context {name}", path.exists(), str(path), True))
+
+    data_dir = resolve_data_dir(None)
+    checks.append(("Auto Export data dir", data_dir.exists(), str(data_dir), True))
+    checks.append(
+        ("LLM API key", _env_has_any_model_key(), "DEEPSEEK/ANTHROPIC/OPENAI", True)
+    )
+
+    telegram_ready = bool(
+        os.environ.get("TELEGRAM_BOT_TOKEN") and os.environ.get("TELEGRAM_CHAT_ID")
+    )
+    checks.append(
+        ("Telegram config", telegram_ready, "optional but needed for bot", False)
+    )
+
+    print("zdrowskit doctor")
+    failed = 0
+    for label, ok, detail, required in checks:
+        marker = "ok" if ok else ("!!" if required else "--")
+        if required and not ok:
+            failed += 1
+        print(f"  [{marker}] {label:22} {detail}")
+
+    if failed:
+        print("\nSome checks need attention. Run `uv run python main.py setup` first.")
+        sys.exit(1)
+    print("\nAll local checks passed.")
+
+
+def _render_launchd_plist(*, uv_path: Path, project_dir: Path, home: Path) -> str:
+    """Return a launchd plist for this checkout and user."""
+    daemon_path = project_dir / "src" / "daemon.py"
+    log_file = home / "Library" / "Logs" / "zdrowskit.daemon.log"
+    path_value = (
+        f"{uv_path.parent}:{home}/.local/bin:/opt/homebrew/bin:"
+        "/usr/local/bin:/usr/bin:/bin"
+    )
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>{LAUNCHD_LABEL}</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>{xml_escape(str(uv_path))}</string>
+        <string>run</string>
+        <string>python</string>
+        <string>{xml_escape(str(daemon_path))}</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>{xml_escape(str(project_dir))}</string>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>{xml_escape(str(log_file))}</string>
+
+    <key>StandardErrorPath</key>
+    <string>{xml_escape(str(log_file))}</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>{xml_escape(path_value)}</string>
+        <key>HOME</key>
+        <string>{xml_escape(str(home))}</string>
+    </dict>
+</dict>
+</plist>
+"""
+
+
+def cmd_daemon_install(args: argparse.Namespace) -> None:
+    """Generate and optionally load the per-user launchd plist.
+
+    Args:
+        args: Parsed CLI arguments with no_start attribute.
+    """
+    import subprocess
+
+    uv = shutil.which("uv")
+    if uv is None:
+        print("uv not found on PATH. Install uv first, then retry daemon-install.")
+        sys.exit(1)
+
+    launch_agents = Path.home() / "Library" / "LaunchAgents"
+    launch_agents.mkdir(parents=True, exist_ok=True)
+    plist = launch_agents / LAUNCHD_PLIST
+    plist.write_text(
+        _render_launchd_plist(
+            uv_path=Path(uv),
+            project_dir=REPO_ROOT,
+            home=Path.home(),
+        ),
+        encoding="utf-8",
+    )
+    print(f"Wrote {plist}")
+
+    if getattr(args, "no_start", False):
+        print("Not starting daemon because --no-start was provided.")
+        return
+
+    uid = subprocess.check_output(["id", "-u"]).decode().strip()
+    domain = f"gui/{uid}"
+    target = f"{domain}/{LAUNCHD_LABEL}"
+    subprocess.run(["launchctl", "bootout", target], capture_output=True, text=True)
+    result = subprocess.run(
+        ["launchctl", "bootstrap", domain, str(plist)],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        print(f"Failed to start daemon: {result.stderr.strip()}")
+        print(
+            f"Plist is installed at {plist}; try `uv run python main.py daemon-restart`."
+        )
+        sys.exit(1)
+    print(f"Daemon installed and started ({target})")
 
 
 def cmd_daemon_restart(args: argparse.Namespace) -> None:  # noqa: ARG001

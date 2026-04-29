@@ -21,11 +21,55 @@ from cmd_llm import (
     interpret_notify_request,
 )
 from cmd_llm_log import cmd_llm_log
-from commands import TELEGRAM_BOT_COMMANDS
+import commands as commands_module
+from commands import TELEGRAM_BOT_COMMANDS, cmd_setup
 from config import MAX_TOKENS_INSIGHTS, MAX_TOKENS_NUDGE
 from llm import LLMResult
 from llm_verify import VerificationResult
 from store import log_feedback, log_llm_call, open_db
+
+
+class TestSetupCommand:
+    def test_setup_creates_context_and_env_without_overwriting(
+        self, tmp_path: Path, monkeypatch, capsys
+    ) -> None:
+        repo = tmp_path / "repo"
+        examples = repo / "examples" / "context"
+        examples.mkdir(parents=True)
+        (examples / "me.md").write_text("# Example profile\n", encoding="utf-8")
+        (examples / "strategy.md").write_text("# Example strategy\n", encoding="utf-8")
+        (repo / ".env_example").write_text("DEEPSEEK_API_KEY=\n", encoding="utf-8")
+
+        app_home = tmp_path / "home" / "zdrowskit"
+        context_dir = app_home / "ContextFiles"
+        context_dir.mkdir(parents=True)
+        (context_dir / "me.md").write_text("# Existing profile\n", encoding="utf-8")
+
+        monkeypatch.setattr(commands_module, "REPO_ROOT", repo)
+        monkeypatch.setattr(commands_module, "APP_HOME", app_home)
+        monkeypatch.setattr(commands_module, "CONTEXT_DIR", context_dir)
+
+        cmd_setup(SimpleNamespace(force=False, skip_env=False))
+
+        assert (context_dir / "me.md").read_text(encoding="utf-8") == (
+            "# Existing profile\n"
+        )
+        assert (context_dir / "strategy.md").exists()
+        assert (repo / ".env").read_text(encoding="utf-8") == "DEEPSEEK_API_KEY=\n"
+        output = capsys.readouterr().out
+        assert "exists" in output
+        assert "created" in output
+
+    def test_launchd_plist_render_uses_current_user_paths(self, tmp_path: Path) -> None:
+        plist = commands_module._render_launchd_plist(
+            uv_path=tmp_path / "bin" / "uv",
+            project_dir=tmp_path / "project",
+            home=tmp_path / "home",
+        )
+
+        assert "/Users/adamsky" not in plist
+        assert str(tmp_path / "project" / "src" / "daemon.py") in plist
+        assert str(tmp_path / "bin" / "uv") in plist
 
 
 class TestTelegramBotCommands:

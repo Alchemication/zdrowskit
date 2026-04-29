@@ -35,8 +35,8 @@ from config import (
     LOG_FILE,
     SCHEDULED_CHECK_INTERVAL_S,
     STATE_FILE,
+    resolve_data_dir,
 )
-from config import AUTOEXPORT_DATA_DIR as ICLOUD_HEALTH_DIR
 
 # Re-exported so tests and external callers can keep importing these names
 # from ``daemon`` after the /notify flow moved into ``daemon_notify_flow``.
@@ -232,17 +232,25 @@ class ZdrowskitDaemon:
         context_dir: Path to the context .md files directory.
     """
 
-    def __init__(self, model: str | None, db: Path, context_dir: Path) -> None:
+    def __init__(
+        self,
+        model: str | None,
+        db: Path,
+        context_dir: Path,
+        health_dir: Path | None = None,
+    ) -> None:
         """Initialise the daemon.
 
         Args:
             model: Optional legacy global litellm model override.
             db: Path to the SQLite database.
             context_dir: Path to the ContextFiles directory.
+            health_dir: Path to the Auto Export data directory.
         """
         self.model = model
         self.db = db
         self.context_dir = context_dir
+        self.health_dir = health_dir or resolve_data_dir(None)
 
         self._state = _load_state()
         from config import NOTIFICATION_PREFS_PATH
@@ -875,24 +883,24 @@ class ZdrowskitDaemon:
         self._lock_file.write(str(os.getpid()))
         self._lock_file.flush()
 
-        if not ICLOUD_HEALTH_DIR.exists():
+        if not self.health_dir.exists():
             logger.warning(
                 "iCloud health dir not found: %s — health triggers disabled",
-                ICLOUD_HEALTH_DIR,
+                self.health_dir,
             )
 
         logger.info("zdrowskit daemon starting")
-        logger.info("Health data dir : %s", ICLOUD_HEALTH_DIR)
+        logger.info("Health data dir : %s", self.health_dir)
         logger.info("Context dir     : %s", self.context_dir)
         logger.info("Database        : %s", self.db)
         logger.info("State file      : %s", STATE_FILE)
 
         observer = Observer()
 
-        if ICLOUD_HEALTH_DIR.exists():
+        if self.health_dir.exists():
             observer.schedule(
                 _make_health_handler(self._schedule_health, self._schedule_health),
-                str(ICLOUD_HEALTH_DIR),
+                str(self.health_dir),
                 recursive=True,
             )
 
@@ -970,11 +978,8 @@ def main() -> None:
     """Entry point: parse args and start the daemon."""
     import argparse
 
-    from dotenv import load_dotenv
-
     # Add src/ to path so project modules resolve when run directly
     sys.path.insert(0, str(Path(__file__).parent))
-    load_dotenv()
 
     from config import CONTEXT_DIR
     from store import default_db_path
@@ -994,6 +999,11 @@ def main() -> None:
         help="Path to SQLite database",
     )
     parser.add_argument(
+        "--data-dir",
+        metavar="PATH",
+        help="Path to Auto Export health data folder",
+    )
+    parser.add_argument(
         "--model",
         metavar="MODEL",
         default=None,
@@ -1007,6 +1017,7 @@ def main() -> None:
         model=args.model,
         db=Path(args.db),
         context_dir=CONTEXT_DIR,
+        health_dir=resolve_data_dir(args.data_dir),
     )
     daemon.run()
 

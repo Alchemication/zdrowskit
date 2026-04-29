@@ -24,7 +24,6 @@ from config import (
     COACH_SUPPRESSION_S,
     MIN_NUDGE_INTERVAL_S,
 )
-from config import AUTOEXPORT_DATA_DIR as ICLOUD_HEALTH_DIR
 
 if TYPE_CHECKING:
     from cmd_llm import CoachProposal, CommandResult
@@ -385,13 +384,13 @@ class DaemonRunnerHandler:
         from commands import cmd_import
 
         args = types.SimpleNamespace(
-            data_dir=str(ICLOUD_HEALTH_DIR),
+            data_dir=str(self._d.health_dir),
             source="autoexport",
             db=str(self._d.db),
         )
         before = self._data_snapshot()
         try:
-            logger.info("Importing health data from %s", ICLOUD_HEALTH_DIR)
+            logger.info("Importing health data from %s", self._d.health_dir)
             cmd_import(args)
         except SystemExit:
             logger.error("Import failed — proceeding with existing DB data")

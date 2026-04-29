@@ -24,24 +24,25 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
+from config import APP_HOME
 from db.migrations import apply_migrations
 from models import DailySnapshot, WorkoutSnapshot, WorkoutSplit
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_DB = Path.home() / "Documents" / "zdrowskit" / "health.db"
+_DEFAULT_DB = APP_HOME / "health.db"
 
 
 def default_db_path() -> Path:
     """Return the default database path.
 
     Returns:
-        Path to ~/.local/share/zdrowskit/health.db, or the value of the
-        zdrowskit_DB environment variable if set.
+        Path to the default app database, or the value of the ZDROWSKIT_DB
+        environment variable if set.
     """
     import os
 
-    env = os.environ.get("zdrowskit_DB")
+    env = os.environ.get("ZDROWSKIT_DB") or os.environ.get("zdrowskit_DB")
     if env:
         return Path(env).expanduser().resolve()
     return _DEFAULT_DB

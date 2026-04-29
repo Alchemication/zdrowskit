@@ -28,19 +28,26 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
+APP_HOME: Path = Path(
+    os.environ.get("ZDROWSKIT_HOME", "~/Documents/zdrowskit")
+).expanduser()
+"""Root directory for user-owned zdrowskit state and context files."""
+
 AUTOEXPORT_DATA_DIR: Path = (
     Path.home()
     / "Library/Mobile Documents/iCloud~com~ifunography~HealthExport/Documents"
 )
 """iCloud path where Auto Export app exports land."""
-CONTEXT_DIR: Path = Path.home() / "Documents" / "zdrowskit" / "ContextFiles"
-NOTIFICATION_PREFS_PATH: Path = (
-    Path.home() / "Documents" / "zdrowskit" / "notification_prefs.json"
-)
-MODEL_PREFS_PATH: Path = Path.home() / "Documents" / "zdrowskit" / "model_prefs.json"
+CONTEXT_DIR: Path = APP_HOME / "ContextFiles"
+NOTIFICATION_PREFS_PATH: Path = APP_HOME / "notification_prefs.json"
+MODEL_PREFS_PATH: Path = APP_HOME / "model_prefs.json"
 PROMPTS_DIR: Path = Path(__file__).resolve().parent / "prompts"
-REPORTS_DIR: Path = Path.home() / "Documents" / "zdrowskit" / "Reports"
-NUDGES_DIR: Path = Path.home() / "Documents" / "zdrowskit" / "Nudges"
+REPORTS_DIR: Path = APP_HOME / "Reports"
+NUDGES_DIR: Path = APP_HOME / "Nudges"
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -315,10 +322,10 @@ VERIFICATION_EXTRA_BODY: dict[str, object] | None = (
 LOG_FILE: Path = Path.home() / "Library/Logs/zdrowskit.daemon.log"
 """Daemon log file (stderr/stdout sink under launchd)."""
 
-LOCK_FILE: Path = Path.home() / "Documents/zdrowskit/.daemon.lock"
+LOCK_FILE: Path = APP_HOME / ".daemon.lock"
 """Single-instance lock file held by the daemon while running."""
 
-STATE_FILE: Path = Path.home() / "Documents/zdrowskit/.daemon_state.json"
+STATE_FILE: Path = APP_HOME / ".daemon_state.json"
 """Persistent rate-limit and queue state for the daemon."""
 
 HEALTH_DEBOUNCE_S: int = 180

@@ -106,10 +106,13 @@ from cmd_llm_log import cmd_llm_log
 from cmd_models import cmd_models
 from commands import (
     cmd_context,
+    cmd_daemon_install,
     cmd_daemon_restart,
     cmd_daemon_stop,
+    cmd_doctor,
     cmd_import,
     cmd_report,
+    cmd_setup,
     cmd_status,
     cmd_telegram_setup,
 )
@@ -132,7 +135,7 @@ def main() -> None:
         "--db",
         metavar="PATH",
         default=db_default,
-        help=f"Path to SQLite database (default: {db_default}, or zdrowskit_DB env var)",
+        help=f"Path to SQLite database (default: {db_default}, or ZDROWSKIT_DB env var)",
     )
 
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -196,6 +199,20 @@ def main() -> None:
     sub.add_parser(
         "context", help="Show context files used by insights and their status"
     )
+
+    # first-run setup
+    p_setup = sub.add_parser("setup", help="Create first-run files and directories")
+    p_setup.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite bundled context examples in the context directory",
+    )
+    p_setup.add_argument(
+        "--skip-env",
+        action="store_true",
+        help="Do not create .env from .env_example",
+    )
+    sub.add_parser("doctor", help="Check local setup without calling external APIs")
 
     # insights
     p_insights = sub.add_parser(
@@ -269,6 +286,14 @@ def main() -> None:
     _add_db(p_insights)
 
     # daemon
+    p_daemon_install = sub.add_parser(
+        "daemon-install", help="Generate and load the launchd daemon plist"
+    )
+    p_daemon_install.add_argument(
+        "--no-start",
+        action="store_true",
+        help="Write the plist but do not load/start it",
+    )
     sub.add_parser("daemon-restart", help="Restart the background daemon service")
     sub.add_parser("daemon-stop", help="Stop the background daemon service")
 
@@ -499,12 +524,15 @@ def main() -> None:
         "status": cmd_status,
         "db": cmd_db,
         "context": cmd_context,
+        "setup": cmd_setup,
+        "doctor": cmd_doctor,
         "insights": cmd_insights,
         "nudge": cmd_nudge,
         "coach": _cli_coach,
         "llm-log": cmd_llm_log,
         "models": cmd_models,
         "events": cmd_events,
+        "daemon-install": cmd_daemon_install,
         "daemon-restart": cmd_daemon_restart,
         "daemon-stop": cmd_daemon_stop,
         "telegram-setup": cmd_telegram_setup,
