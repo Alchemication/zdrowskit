@@ -2,7 +2,7 @@
 
 Apple's built-in health export dumps everything into a single massive XML file. On any non-trivial data size, this crashes or overheats the iPhone, so it is not a real solution for this project.
 
-The workaround is a third-party iOS app that reads HealthKit directly and writes structured JSON to iCloud Drive. zdrowskit uses [Auto Export](https://apps.apple.com/app/myhealth-export-to-icloud/id6737380982). It works on iOS 26, while some alternatives do not yet. The Basic tier unlocks Shortcut actions; Premium is needed for scheduled Automations.
+The workaround is a third-party iOS app that reads HealthKit directly and writes structured JSON to iCloud Drive. zdrowskit uses [Auto Export](https://apps.apple.com/app/myhealth-export-to-icloud/id6737380982). It works on iOS 26, while some alternatives do not yet. The Basic tier unlocks Shortcut actions; Premium (a one-time purchase, still cheap) is needed for scheduled Automations.
 
 One universal constraint: iOS requires the phone to be unlocked for any health data export. Automations silently skip when the phone is locked.
 

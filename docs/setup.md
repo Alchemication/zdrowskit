@@ -10,7 +10,7 @@ This guide covers local installation, first-run files, and the first LLM report.
 - LLM API keys for the providers you want to use
 - Telegram bot credentials if you want notifications and chat
 
-## Quick Start
+## First Run
 
 ```bash
 # Clone and install
@@ -33,30 +33,26 @@ uv run python main.py status
 uv run python main.py db status
 uv run python main.py db schema
 
-# Get a weekly report
+# Get a weekly report (no LLM)
 uv run python main.py report
 ```
 
 Normal CLI usage auto-applies pending SQLite migrations when the database is opened. Use `uv run python main.py db status` when you want to inspect schema state explicitly.
 
-## Setting Up Insights
+## Enabling LLM Reports
 
-1. Create the first-run files:
+After the first run above, to enable personalised LLM-generated reports:
 
-   ```bash
-   uv run python main.py setup
-   ```
+1. Edit the files created by `setup` with your real data. At minimum, fill in `me.md` and `strategy.md` under `~/Documents/zdrowskit/ContextFiles/`.
 
-2. Edit them with your real data. At minimum, fill in `me.md` and `strategy.md` under `~/Documents/zdrowskit/ContextFiles/`.
-
-3. Add your API keys to `.env`. The defaults call DeepSeek with Anthropic as the cross-provider fallback, so set both keys to enable fallback:
+2. Add your API keys to `.env`. The defaults call DeepSeek with Anthropic as the cross-provider fallback, so set both keys to enable fallback:
 
    ```env
    DEEPSEEK_API_KEY=sk-...
    ANTHROPIC_API_KEY=sk-ant-...
    ```
 
-4. Generate your first report:
+3. Generate your first report:
 
    ```bash
    uv run python main.py insights
@@ -69,5 +65,3 @@ Reports and coach reviews also include auto-computed seasonal baselines, lifetim
 ## Data and Privacy
 
 Your raw data is stored locally in SQLite. LLM calls send selected context, metrics, workouts, and journal excerpts to your configured provider. If health data leaving your machine for an LLM API is a dealbreaker, this is not the right setup.
-
-Under the hood: SQLite for storage, [litellm](https://github.com/BerriAI/litellm) for provider-agnostic LLM calls, [Plotly](https://plotly.com/python/) + Kaleido for charts, [watchdog](https://github.com/gorakhargosh/watchdog) for filesystem events, and Telegram Bot API for delivery.

@@ -12,9 +12,11 @@ Your watch collects thousands of data points a week. Apple shows you rings. zdro
 
 It is a Telegram conversation, not a dashboard: reply to a report, update your goals mid-chat, get a chart on demand.
 
-Your raw data stays local in SQLite on your machine. LLM calls do send the relevant slice of your data to the configured provider. See [LLM setup](docs/llm.md) for model and API details.
+Your raw data stays local in SQLite on your machine. LLM calls do send the relevant slice of your data to the configured provider. If your health data leaving the machine for an LLM API is a dealbreaker, this is not the tool for you. See [LLM setup](docs/llm.md) for model and API details.
 
 Built by Adam Napora (adamsky). *Zdrowie* is Polish for health. *Kit* is the tool.
+
+Under the hood: SQLite for storage, [litellm](https://github.com/BerriAI/litellm) for provider-agnostic LLM calls, [Plotly](https://plotly.com/python/) + Kaleido for charts, [watchdog](https://github.com/gorakhargosh/watchdog) for filesystem events, and Telegram Bot API for delivery.
 
 ## How It Works
 
@@ -35,9 +37,21 @@ Storage is local. Processing is not fully local: coaching calls send selected me
 - A capable LLM provider API key
 - Telegram bot for notifications and chat
 
-Current limitation: zdrowskit is designed for one health profile per macOS user account. Running separate profiles on separate Mac user accounts is the clean path.
+## Current Limitations
+
+- **Apple ecosystem only** — works only with Apple Watch + iPhone + iCloud Drive. No Garmin, Fitbit, or Android. Adding another data source would mean a new parser and import path.
+- **Single user, tied to one Apple ID** — each instance is bound to one Apple ID's HealthKit + iCloud Drive. This is a personal tool, not a multi-tenant service.
+- **Third-party export app required** — Apple's built-in XML export crashes on real-world data sizes, so [Auto Export](https://apps.apple.com/app/myhealth-export-to-icloud/id6737380982) is needed. Premium tier (a one-time purchase, still cheap) is required for scheduled automations.
+- **macOS-only daemon** — the always-on watcher assumes macOS iCloud paths and `launchctl`. CLI commands run anywhere Python runs; the daemon does not.
+- **Not real time** — iOS only exports HealthKit data while the phone is unlocked, and Auto Export runs on a schedule. Data arrives in batches with minutes of latency, not seconds.
+- **Sleep data is nightly totals** — Auto Export emits pre-aggregated sleep with no per-segment breakdown, which rules out sleep-stage analysis.
+- **Single profile per macOS user** — multiple always-on daemons on one user account are not supported. Running separate profiles on separate macOS user accounts is the clean path today.
+- **Manual context bootstrap** — `setup` creates `me.md` and `strategy.md` templates, but you have to fill in your profile, goals, and weekly plan by hand. A guided LLM-driven onboarding (ask → confirm → write) would remove most of this friction but does not exist yet.
+- **Cost target ~€1/week** — the goal is to stay under one euro per week of LLM spend by routing async surfaces (insights, coach, nudge) through DeepSeek V4 Pro and falling back to Anthropic only when needed. Achievable in current testing. Routing everything through Claude Opus is much more expensive.
 
 ## Quick Start
+
+Before you start: `import` does nothing until Auto Export has synced Apple Health data to iCloud Drive. If you have not done that yet, set it up first — see [Apple Health data export](docs/apple-health.md).
 
 ```bash
 git clone <repo-url> && cd zdrowskit
@@ -50,7 +64,7 @@ uv run python main.py status
 uv run python main.py insights --week last
 ```
 
-For the full first-run flow, see [Setup](docs/setup.md). For Apple Health export setup and historical backfill, see [Apple Health data export](docs/apple-health.md).
+For the full first-run flow, see [Setup](docs/setup.md).
 
 ## Common Commands
 

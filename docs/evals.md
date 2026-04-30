@@ -26,12 +26,13 @@ uv run python -m evals.run chat_log_life_disruption     # one case
 uv run python -m evals.run --feature chat               # feature filter
 uv run python -m evals.run --details                    # debug failed cases
 uv run python -m evals.run --record                     # persist a run to evals/leaderboard/runs.jsonl
-uv run python -m evals.run --no-temperature             # omit temperature, required by claude-opus-4-7
 uv run python -m evals.leaderboard render               # rebuild evals/leaderboard.md from raw history
 uv run python -m evals.leaderboard render-html          # rebuild evals/leaderboard.html with filters and sortable views
 ```
 
 These evals call the configured real model and may use network/API quota.
+
+Some models reject a `temperature` parameter (for example `claude-opus-4-7`). For those, pass `--no-temperature` to omit it from the request.
 
 ## Leaderboard
 

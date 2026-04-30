@@ -74,9 +74,3 @@ Updating the plist requires a full reload after editing `launchd/com.zdrowskit.d
 launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.zdrowskit.daemon.plist
 uv run python main.py daemon-install
 ```
-
-Install from scratch:
-
-```bash
-uv run python main.py daemon-install
-```
