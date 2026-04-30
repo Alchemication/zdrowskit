@@ -448,6 +448,54 @@ class TestFindWorkoutClone:
             result = find_workout_clone(db, "Outdoor Run", "run", duration_min=60)
             assert result["duration_min"] == 60
 
+    def test_llm_history_is_filtered_to_requested_type(
+        self, db: sqlite3.Connection
+    ) -> None:
+        """The clone prompt should not include unrelated recent workout types."""
+        _seed_workouts(db)
+        mock_result = MagicMock()
+        mock_result.text = json.dumps(
+            {
+                "type": "Traditional Strength Training",
+                "category": "lift",
+                "duration_min": 55,
+                "source_note": "cloned from strength",
+            }
+        )
+
+        with patch("llm.call_llm", return_value=mock_result) as mock_call:
+            from daemon_add_flow import find_workout_clone
+
+            find_workout_clone(db, "Traditional Strength Training", "lift")
+
+            messages = mock_call.call_args.args[0]
+            user_message = messages[1]["content"]
+            assert "Traditional Strength Training" in user_message
+            assert "Outdoor Run" not in user_message
+
+    def test_llm_result_forces_requested_type_and_category(
+        self, db: sqlite3.Connection
+    ) -> None:
+        """Wrong type/category echoed by the LLM should not be persisted."""
+        _seed_workouts(db)
+        mock_result = MagicMock()
+        mock_result.text = json.dumps(
+            {
+                "type": "Outdoor Run",
+                "category": "run",
+                "duration_min": 55,
+                "source_note": "bad echo",
+            }
+        )
+
+        with patch("llm.call_llm", return_value=mock_result):
+            from daemon_add_flow import find_workout_clone
+
+            result = find_workout_clone(db, "Traditional Strength Training", "lift")
+
+            assert result["type"] == "Traditional Strength Training"
+            assert result["category"] == "lift"
+
 
 # -----------------------------------------------------------------------
 # /add flow state machine

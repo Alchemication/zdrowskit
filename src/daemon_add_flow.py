@@ -37,7 +37,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from config import MAX_TOKENS_ADD_CLONE
+from config import MAX_TOKENS_ADD_CLONE, PROMPTS_DIR
 
 if TYPE_CHECKING:
     from daemon import ZdrowskitDaemon
@@ -46,6 +46,7 @@ logger = logging.getLogger(__name__)
 
 
 _PENDING_ADD_TTL_S = 600  # 10 min
+_ADD_CLONE_HISTORY_LIMIT = 20
 
 
 @dataclass
@@ -69,6 +70,53 @@ class PendingAdd:
     saved_table: str | None = None  # "manual_workout" or "manual_sleep"
 
 
+def _load_add_clone_prompt(columns: tuple[str, ...]) -> str:
+    """Load the /add workout clone system prompt."""
+    prompt = (PROMPTS_DIR / "add_clone_prompt.md").read_text(encoding="utf-8")
+    return prompt.format(columns=", ".join(columns))
+
+
+def _fetch_workout_clone_candidates(
+    conn: sqlite3.Connection,
+    workout_type: str,
+    category: str,
+    limit: int = _ADD_CLONE_HISTORY_LIMIT,
+) -> list[sqlite3.Row]:
+    """Fetch relevant clone candidates, preferring exact workout type."""
+    rows = conn.execute(
+        """
+        SELECT * FROM workout_all
+        WHERE type = ?
+        ORDER BY date DESC, start_utc DESC
+        LIMIT ?
+        """,
+        (workout_type, limit),
+    ).fetchall()
+    if rows:
+        return rows
+
+    rows = conn.execute(
+        """
+        SELECT * FROM workout_all
+        WHERE category = ?
+        ORDER BY date DESC, start_utc DESC
+        LIMIT ?
+        """,
+        (category, limit),
+    ).fetchall()
+    if rows:
+        return rows
+
+    return conn.execute(
+        """
+        SELECT * FROM workout_all
+        ORDER BY date DESC, start_utc DESC
+        LIMIT ?
+        """,
+        (limit,),
+    ).fetchall()
+
+
 def find_workout_clone(
     conn: sqlite3.Connection,
     workout_type: str,
@@ -78,10 +126,9 @@ def find_workout_clone(
 ) -> dict:
     """Find the best historical workout to clone via LLM.
 
-    Queries recent workouts and asks a lightweight LLM to pick (or
-    synthesize) the best match for the requested type at the requested
-    duration. Falls back to the most recent same-type workout on LLM
-    failure.
+    Queries recent same-type workouts and asks a lightweight LLM to pick
+    the best match for the requested duration. Falls back to same-category
+    history only when no exact type history exists.
 
     Args:
         conn: Open database connection.
@@ -97,13 +144,7 @@ def find_workout_clone(
     from llm import call_llm
     from store import _WORKOUT_CLONE_COLUMNS
 
-    rows = conn.execute(
-        """
-        SELECT * FROM workout_all
-        ORDER BY date DESC
-        LIMIT 20
-        """,
-    ).fetchall()
+    rows = _fetch_workout_clone_candidates(conn, workout_type, category)
 
     if not rows:
         return {
@@ -132,28 +173,7 @@ def find_workout_clone(
     messages = [
         {
             "role": "system",
-            "content": (
-                "You are a fitness data assistant. The user wants to manually "
-                "log a workout. Based on their recent history, pick the single "
-                "best workout to clone as a template, or synthesize one from "
-                "partial matches if no exact type match exists.\n\n"
-                "Return ONLY a JSON object with these fields:\n"
-                + ", ".join(_WORKOUT_CLONE_COLUMNS)
-                + ", source_note\n\n"
-                "source_note should briefly explain your choice "
-                '(e.g. "cloned from Apr 1 Outdoor Run" or '
-                '"scaled from 5K tempo to 2K distance").\n\n'
-                "Rules:\n"
-                "- Copy HR and sensor fields from the source workout as-is.\n"
-                "- If scaling duration/distance, scale active_energy_kj proportionally.\n"
-                "- If the user specified a duration, match it exactly in the "
-                "returned duration_min.\n"
-                "- Pick an analog that reflects a TYPICAL session of this "
-                "type — a separate deterministic layer applies feel-based "
-                "adjustments on top, so do NOT factor in effort/feel here.\n"
-                "- counts_as_lift should be 1 for strength workouts, 0 otherwise.\n"
-                "- Return valid JSON only, no markdown fences."
-            ),
+            "content": _load_add_clone_prompt(_WORKOUT_CLONE_COLUMNS),
         },
         {
             "role": "user",
@@ -185,8 +205,8 @@ def find_workout_clone(
                 text = text[:-3]
             text = text.strip()
         clone = json.loads(text)
-        clone.setdefault("type", workout_type)
-        clone.setdefault("category", category)
+        clone["type"] = workout_type
+        clone["category"] = category
         if duration_min is not None:
             clone["duration_min"] = duration_min
         else:
