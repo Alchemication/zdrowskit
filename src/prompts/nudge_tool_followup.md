@@ -1,0 +1,1 @@
+Use the tool results above to write the final nudge now. Output only one short user-facing message (maximum 80 words) or SKIP. Do not mention checking data, reviewing notifications, or that something is genuinely new. No headers; the app adds them.

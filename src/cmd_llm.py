@@ -48,7 +48,7 @@ from config import (
 )
 from context_edit import ContextEdit, EditPreviewError, build_edit_preview
 from llm import LLMResult, call_llm, extract_memory, _model_accepts_reasoning_effort
-from llm_context import append_history, build_messages, load_context
+from llm_context import append_history, build_messages, load_context, load_prompt_text
 from llm_health import (
     build_llm_data,
     build_review_facts,
@@ -74,21 +74,9 @@ from llm_verify import (
 
 logger = logging.getLogger(__name__)
 
-_NUDGE_TOOL_FOLLOWUP = (
-    "Use the tool results above to write the final nudge now. Output only one "
-    "short user-facing message (maximum 80 words) or SKIP. Do not mention "
-    "checking data, reviewing notifications, or that something is genuinely "
-    "new. No headers; the app adds them."
-)
-_NUDGE_NONFINAL_RETRY = (
-    "That was internal reasoning, not a finished nudge. Rewrite it as the "
-    "final user-facing nudge now: one short message (maximum 80 words) or "
-    "SKIP. Do not mention checking, reviewing, or deciding whether to send."
-)
-_NUDGE_EMPTY_RETRY = (
-    "Your previous nudge response was empty. Output the final user-facing "
-    "nudge now, or output exactly SKIP. No preamble."
-)
+_NUDGE_TOOL_FOLLOWUP = load_prompt_text("nudge_tool_followup")
+_NUDGE_NONFINAL_RETRY = load_prompt_text("nudge_nonfinal_retry")
+_NUDGE_EMPTY_RETRY = load_prompt_text("nudge_empty_retry")
 NOTIFY_MODEL = DEFAULT_NOTIFY_MODEL
 LOG_FLOW_MODEL = DEFAULT_LOG_FLOW_MODEL
 
@@ -950,7 +938,7 @@ def cmd_insights(
             week_complete=week_complete,
         )
     except (KeyError, ValueError) as e:
-        logger.error("Failed to render prompt.md template: %s", e)
+        logger.error("Failed to render insights_prompt.md template: %s", e)
         sys.exit(1)
 
     from tools import execute_run_sql, run_sql_tool
@@ -1037,7 +1025,7 @@ def cmd_insights(
                         "role": "tool",
                         "tool_call_id": tc.id,
                         "content": json.dumps(
-                            {"error": "tool budget exhausted, synthesize now"}
+                            {"error": load_prompt_text("tool_budget_synthesize")}
                         ),
                     }
                 )
@@ -1092,12 +1080,7 @@ def cmd_insights(
             *messages,
             {
                 "role": "user",
-                "content": (
-                    "Your previous report hit the output token limit. Produce the final "
-                    "report again from the data above in under 450 words. Include all "
-                    "required report sections and end with a short <memory> block. "
-                    "Do not include charts or extra analysis."
-                ),
+                "content": load_prompt_text("insights_truncation_retry"),
             },
         ]
         try:
@@ -1355,7 +1338,7 @@ def cmd_nudge(
                     "role": "tool",
                     "tool_call_id": tc.id,
                     "content": json.dumps(
-                        {"error": "tool budget exhausted, answer or SKIP now"}
+                        {"error": load_prompt_text("tool_budget_nudge")}
                     ),
                 }
             )
@@ -1689,7 +1672,7 @@ def cmd_coach(
                     "role": "tool",
                     "tool_call_id": tc.id,
                     "content": json.dumps(
-                        {"error": "tool budget exhausted, synthesize now"}
+                        {"error": load_prompt_text("tool_budget_synthesize")}
                     ),
                 }
             )

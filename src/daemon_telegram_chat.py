@@ -870,6 +870,7 @@ class TelegramChatHandler:
         )
         from model_prefs import resolve_model_route
         from tools import all_chat_tools, execute_tool
+        from llm_context import load_prompt_text
 
         ctx = load_context(self._daemon.context_dir, prompt_file="chat_prompt")
 
@@ -1009,7 +1010,7 @@ class TelegramChatHandler:
                             "role": "tool",
                             "tool_call_id": tc.id,
                             "content": _json.dumps(
-                                {"error": "tool budget exhausted, answer now"}
+                                {"error": load_prompt_text("tool_budget_chat")}
                             ),
                         }
                     )

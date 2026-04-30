@@ -28,44 +28,33 @@ logger = logging.getLogger(__name__)
 
 CONTEXT_FILES = ["me", "strategy", "log", "history", "coach_feedback"]
 
-DEFAULT_SOUL = (
-    "You are a knowledgeable, no-nonsense health and fitness coach. "
-    "You speak directly, use data to support your observations, "
-    "and never pad your reports with filler. When something looks off "
-    "you say so. When progress is real you acknowledge it briefly and move on. "
-    "Use markdown formatting with headers, bullet points, and bold for key numbers."
-)
+DEFAULT_SOUL_PROMPT = "default_soul.md"
+SCHEMA_REFERENCE_PROMPT = "schema_reference.md"
+WEEK_STATUS_FULL_PROMPT = "week_status_full.md"
+WEEK_STATUS_PARTIAL_PROMPT = "week_status_partial.md"
 
-SCHEMA_REFERENCE = """### Database schema (for run_sql)
 
-**daily** — one row per calendar day, PK: `date` (YYYY-MM-DD)
+def load_prompt_text(
+    prompt_name: str,
+    prompts_dir: Path = PROMPTS_DIR,
+) -> str:
+    """Read a prompt text file from ``src/prompts``.
 
-- Activity: `steps`, `distance_km`, `active_energy_kj`, `exercise_min`, `stand_hours`, `flights_climbed`
-- Cardiac: `resting_hr`, `hrv_ms`, `walking_hr_avg`, `hr_day_min`, `hr_day_max`, `vo2max`, `recovery_index`
-- Mobility: `walking_speed_kmh`, `walking_step_length_cm`, `walking_asymmetry_pct`, `walking_double_support_pct`, `stair_speed_up_ms`, `stair_speed_down_ms`, `running_stride_length_m`, `running_power_w`, `running_speed_kmh`
-- Note: `daily.running_speed_kmh` is a day-level Apple mobility metric. It is useful for broad daily movement context, but for run-session pace, distance, elevation, or running trends, prefer `workout_all`.
+    Args:
+        prompt_name: Prompt filename or stem. Stems get a ``.md`` suffix.
+        prompts_dir: Directory containing prompt files.
 
-**workout_all** — one row per session, FK: `date`, with `source` (`'import'` or `'manual'`)
+    Returns:
+        Prompt file contents.
 
-- Identity: `type`, `category` (`run` / `lift` / `walk` / `cycle` / `other`)
-- Core fields: `duration_min`, `hr_min`, `hr_avg`, `hr_max`, `active_energy_kj`, `intensity_kcal_per_hr_kg`
-- Environment: `temperature_c`, `humidity_pct`
-- GPX fields: `gpx_distance_km`, `gpx_elevation_gain_m`, `gpx_avg_speed_ms`, `gpx_max_speed_p95_ms`
-- Pace tip: `duration_min / gpx_distance_km` = min/km when `gpx_distance_km IS NOT NULL`
-- Use `workout_all` as the canonical source for workout questions: runs, pace, splits/proxies, distance, elevation, workout HR, and session trends.
-
-**workout_split** — one row per completed 1 km split for imported route-based runs
-
-- Key: (`start_utc`, `km_index`) where `km_index` is 1-based within the workout
-- Columns: `pace_min_km`, `avg_speed_ms`, `elevation_gain_m`, `elevation_loss_m`
-- Join tip: join `workout_split.start_utc` to imported sessions in `workout` (or to `workout_all` on `start_utc`, noting that manual workouts will not have split rows)
-- Use `workout_split` for within-run pacing: late-run fade, fastest contiguous 5 km / 10 km segments, and elevation-adjusted pacing checks.
-
-**sleep_all** — one row per night, keyed by `date`, with `source` (`'import'` or `'manual'`)
-
-- Columns: `sleep_total_h`, `sleep_in_bed_h`, `sleep_efficiency_pct`, `sleep_deep_h`, `sleep_core_h`, `sleep_rem_h`, `sleep_awake_h`
-- Stored under **night-start date**
-- Stage columns are NULL for manual entries"""
+    Raises:
+        FileNotFoundError: If the prompt file is missing.
+    """
+    filename = prompt_name if prompt_name.endswith(".md") else f"{prompt_name}.md"
+    path = prompts_dir / filename
+    if not path.exists():
+        raise FileNotFoundError(f"Required prompt template missing: {path}")
+    return path.read_text(encoding="utf-8")
 
 
 def _recent_history(content: str, n: int) -> str:
@@ -91,7 +80,7 @@ def _recent_history(content: str, n: int) -> str:
 
 def load_context(
     context_dir: Path,
-    prompt_file: str = "prompt",
+    prompt_file: str = "insights_prompt",
     prompts_dir: Path = PROMPTS_DIR,
     *,
     max_history: int | None = None,
@@ -99,16 +88,17 @@ def load_context(
 ) -> dict[str, str]:
     """Read prompt templates and user context files.
 
-    Prompt templates (prompt.md, nudge_prompt.md, chat_prompt.md, soul.md)
-    are loaded from *prompts_dir* (shipped with the repo in ``src/prompts/``).
+    Prompt templates (insights_prompt.md, nudge_prompt.md, chat_prompt.md,
+    soul.md) are loaded from *prompts_dir* (shipped with the repo in
+    ``src/prompts/``).
     User context files (me.md, strategy.md, log.md, history.md) are
     loaded from *context_dir*.
 
     Args:
         context_dir: Directory containing user context files.
         prompt_file: Stem of the prompt template file to load (default
-            ``"prompt"``). Use ``"chat_prompt"`` for interactive chat
-            or ``"nudge_prompt"`` for nudges.
+            ``"insights_prompt"``). Use ``"chat_prompt"`` for interactive
+            chat or ``"nudge_prompt"`` for nudges.
         prompts_dir: Directory containing prompt template files.
         max_history: Override MAX_HISTORY_ENTRIES for this call.
         max_log: Override MAX_LOG_ENTRIES for this call.
@@ -128,10 +118,7 @@ def load_context(
     result: dict[str, str] = {}
 
     # Load prompt template from prompts_dir
-    prompt_path = prompts_dir / f"{prompt_file}.md"
-    if not prompt_path.exists():
-        raise FileNotFoundError(f"Required prompt template missing: {prompt_path}")
-    result["prompt"] = prompt_path.read_text(encoding="utf-8")
+    result["prompt"] = load_prompt_text(prompt_file, prompts_dir)
 
     # Load soul.md from prompts_dir
     soul_path = prompts_dir / "soul.md"
@@ -185,20 +172,20 @@ def build_messages(
     Returns:
         A list of message dicts ready for litellm.completion().
     """
-    system_content = context.get("soul", DEFAULT_SOUL)
+    system_content = context.get("soul")
     if system_content == "(not provided)":
-        system_content = DEFAULT_SOUL
+        system_content = None
+    if system_content is None:
+        system_content = load_prompt_text(DEFAULT_SOUL_PROMPT)
 
     if today is None:
         today = date.today()
     if week_complete:
-        week_status = "This is a full week review (Mon–Sun complete)."
+        week_status = load_prompt_text(WEEK_STATUS_FULL_PROMPT)
     else:
         weekday = today.strftime("%A")
-        week_status = (
-            f"This is a mid-week progress check (Mon–{weekday}). "
-            "The week is not over — do not flag missing sessions for days "
-            "that haven't happened yet."
+        week_status = load_prompt_text(WEEK_STATUS_PARTIAL_PROMPT).format(
+            weekday=weekday
         )
 
     template = context["prompt"]
@@ -214,7 +201,7 @@ def build_messages(
             "baselines": baselines or "(not computed)",
             "milestones": milestones or "(not computed)",
             "review_facts": context.get("review_facts", "(not provided)"),
-            "schema_reference": SCHEMA_REFERENCE,
+            "schema_reference": load_prompt_text(SCHEMA_REFERENCE_PROMPT),
             "today": today.isoformat(),
             "weekday": today.strftime("%A"),
             "week_status": week_status,

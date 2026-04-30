@@ -10,6 +10,8 @@ Open DBs via `store.open_db()` or `store.connect_db(..., migrate=True)` — thes
 
 Schema changes go in new timestamped migration files under `src/db/migrations/`. No ad-hoc `ALTER TABLE`, column-existence checks, or schema-patching in application code.
 
+Natural-language LLM prompts live in `src/prompts/`; keep tool schemas beside tool code.
+
 ## Collaboration Style
 
 Challenge my ideas early. If an approach is over-engineered, fragile, or has a simpler alternative — say so directly with reasoning. Flag knowledge gaps, hidden trade-offs, or narrowed thinking. Be pragmatic; save me from wasting time on something that could be done better.

@@ -1,0 +1,1 @@
+That was internal reasoning, not a finished nudge. Rewrite it as the final user-facing nudge now: one short message (maximum 80 words) or SKIP. Do not mention checking, reviewing, or deciding whether to send.

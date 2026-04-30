@@ -110,7 +110,7 @@ class TestRecentHistory:
 
 class TestLoadContext:
     def test_loads_all_files(self, tmp_path: Path) -> None:
-        (tmp_path / "prompt.md").write_text("Hello {me}")
+        (tmp_path / "insights_prompt.md").write_text("Hello {me}")
         (tmp_path / "soul.md").write_text("Be direct.")
         (tmp_path / "me.md").write_text("Runner, 30y")
         ctx = load_context(tmp_path, prompts_dir=tmp_path)
@@ -120,17 +120,17 @@ class TestLoadContext:
 
     def test_missing_prompt_raises(self, tmp_path: Path) -> None:
         (tmp_path / "soul.md").write_text("Be direct.")
-        with pytest.raises(FileNotFoundError, match="prompt.md"):
+        with pytest.raises(FileNotFoundError, match="insights_prompt.md"):
             load_context(tmp_path, prompts_dir=tmp_path)
 
     def test_optional_files_default(self, tmp_path: Path) -> None:
-        (tmp_path / "prompt.md").write_text("template")
+        (tmp_path / "insights_prompt.md").write_text("template")
         ctx = load_context(tmp_path, prompts_dir=tmp_path)
         assert ctx["strategy"] == "(not provided)"
         assert ctx["log"] == "(not provided)"
 
     def test_history_trimmed(self, tmp_path: Path) -> None:
-        (tmp_path / "prompt.md").write_text("template")
+        (tmp_path / "insights_prompt.md").write_text("template")
         entries = "\n\n".join(f"## 2026-03-{i:02d}\n\nEntry {i}" for i in range(1, 20))
         (tmp_path / "history.md").write_text(entries)
         ctx = load_context(tmp_path, prompts_dir=tmp_path)
@@ -140,7 +140,7 @@ class TestLoadContext:
         assert "## 2026-03-01" not in ctx["history"]
 
     def test_log_trimmed(self, tmp_path: Path) -> None:
-        (tmp_path / "prompt.md").write_text("template")
+        (tmp_path / "insights_prompt.md").write_text("template")
         entries = "\n\n".join(f"## 2026-03-{i:02d}\n\nLog {i}" for i in range(1, 12))
         (tmp_path / "log.md").write_text(entries)
         ctx = load_context(tmp_path, prompts_dir=tmp_path)
@@ -150,7 +150,7 @@ class TestLoadContext:
         assert "## 2026-03-06" not in ctx["log"]
 
     def test_max_log_zero_disables_trimming(self, tmp_path: Path) -> None:
-        (tmp_path / "prompt.md").write_text("template")
+        (tmp_path / "insights_prompt.md").write_text("template")
         entries = "\n\n".join(f"## 2026-03-{i:02d}\n\nLog {i}" for i in range(1, 12))
         (tmp_path / "log.md").write_text(entries)
         ctx = load_context(tmp_path, prompts_dir=tmp_path, max_log=0)
@@ -158,7 +158,7 @@ class TestLoadContext:
         assert "## 2026-03-01" in ctx["log"]
 
     def test_coach_feedback_trimmed(self, tmp_path: Path) -> None:
-        (tmp_path / "prompt.md").write_text("template")
+        (tmp_path / "insights_prompt.md").write_text("template")
         entries = "\n\n".join(
             f"## 2026-03-{i:02d}\n\nFeedback ID: cf_{i}\nDecision: rejected"
             for i in range(1, 12)
@@ -171,6 +171,25 @@ class TestLoadContext:
 
 
 class TestRepoPrompts:
+    def test_support_prompts_live_in_prompts_dir(self) -> None:
+        names = [
+            "default_soul.md",
+            "schema_reference.md",
+            "week_status_full.md",
+            "week_status_partial.md",
+            "nudge_tool_followup.md",
+            "nudge_nonfinal_retry.md",
+            "nudge_empty_retry.md",
+            "insights_truncation_retry.md",
+            "verify_rewrite_prompt.md",
+            "tool_budget_synthesize.md",
+            "tool_budget_nudge.md",
+            "tool_budget_chat.md",
+        ]
+
+        for name in names:
+            assert (PROMPTS_DIR / name).read_text(encoding="utf-8").strip()
+
     def test_soul_prompt_leaves_formatting_to_task_prompts(self) -> None:
         soul = (PROMPTS_DIR / "soul.md").read_text(encoding="utf-8")
         assert "Follow the task-specific instructions exactly" in soul
@@ -315,7 +334,7 @@ class TestCharts:
 
     def test_other_tool_prompts_share_run_query_routing_note(self) -> None:
         """Report/coach/nudge should reinforce the shared workout-vs-daily split."""
-        for prompt_name in ("prompt.md", "coach_prompt.md", "nudge_prompt.md"):
+        for prompt_name in ("insights_prompt.md", "coach_prompt.md", "nudge_prompt.md"):
             prompt = (PROMPTS_DIR / prompt_name).read_text(encoding="utf-8")
             assert "Query routing:" in prompt
             assert "Use `workout_all` for workout/session questions" in prompt
@@ -324,7 +343,7 @@ class TestCharts:
             assert "prefer `workout_all`, not `daily.running_speed_kmh`" in prompt
 
     def test_report_prompt_sets_non_inline_chart_contract(self) -> None:
-        prompt = (PROMPTS_DIR / "prompt.md").read_text(encoding="utf-8")
+        prompt = (PROMPTS_DIR / "insights_prompt.md").read_text(encoding="utf-8")
         normalized = " ".join(prompt.split())
 
         assert "Figure 1" in prompt
@@ -412,7 +431,7 @@ class TestCharts:
         assert "set all as default" in msgs[1]["content"]
 
     def test_weekly_report_prompt_states_report_role_and_boundaries(self) -> None:
-        prompt = (PROMPTS_DIR / "prompt.md").read_text(encoding="utf-8")
+        prompt = (PROMPTS_DIR / "insights_prompt.md").read_text(encoding="utf-8")
         assert (
             "Purpose: this is a weekly report that interprets what happened" in prompt
         )
@@ -423,7 +442,7 @@ class TestCharts:
     def test_weekly_report_prompt_requires_run_sql_before_training_review(self) -> None:
         """The Training Review template needs per-workout fields the summary
         layer does not contain. The prompt must say so explicitly."""
-        prompt = (PROMPTS_DIR / "prompt.md").read_text(encoding="utf-8")
+        prompt = (PROMPTS_DIR / "insights_prompt.md").read_text(encoding="utf-8")
         normalized = " ".join(prompt.split())
         assert "MUST call `run_sql` before drafting the Training Review" in normalized
         assert "compact summary view" in normalized

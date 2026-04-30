@@ -18,7 +18,6 @@ from config import (
     MAX_TOKENS_VERIFICATION,
     MAX_TOKENS_VERIFICATION_REWRITE,
     MAX_VERIFICATION_REVISIONS,
-    PROMPTS_DIR,
     VERIFICATION_EXTRA_BODY,
     VERIFICATION_RESPONSE_FORMAT,
     VERIFICATION_MODEL,
@@ -26,6 +25,7 @@ from config import (
 )
 from events import record_event
 from llm import call_llm
+from llm_context import load_prompt_text
 
 logger = logging.getLogger(__name__)
 
@@ -401,7 +401,7 @@ def _messages_for_verifier(
     metadata: dict[str, Any],
 ) -> list[dict[str, str]]:
     """Build verifier messages from the surface prompt and evidence packet."""
-    system = (PROMPTS_DIR / _PROMPT_BY_KIND[kind]).read_text(encoding="utf-8")
+    system = load_prompt_text(_PROMPT_BY_KIND[kind])
     user_payload = {
         "draft": draft,
         "evidence": evidence,
@@ -436,14 +436,7 @@ def _messages_for_rewriter(
     return [
         {
             "role": "system",
-            "content": (
-                "You rewrite generated health-coaching text after an audit. "
-                "Preserve the original structure and tone. Apply only the "
-                "listed corrections — including length cuts when the audit "
-                "says the draft is too long. Do not add new claims. Do not "
-                "include explanations, audit notes, or JSON. For nudges, "
-                "output either the final nudge text or exactly SKIP."
-            ),
+            "content": load_prompt_text("verify_rewrite_prompt"),
         },
         {
             "role": "user",
