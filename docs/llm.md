@@ -34,6 +34,40 @@ Lightweight utility surfaces, including `/notify` interpretation, `/log` flow bu
 
 Logged LLM calls record the effective model, and fallback calls include `requested_model` and `fallback_used` in params/metadata.
 
+## Cost Projection
+
+Providers bill in USD per million tokens. Prices below were checked on 2026-04-30 against [DeepSeek pricing](https://api-docs.deepseek.com/quick_start/pricing/) and [Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pricing).
+
+Current default routes:
+
+| Feature | Primary | Normal cadence |
+|---|---|---:|
+| Weekly + midweek reports | `deepseek/deepseek-v4-pro` | 2/week |
+| Coach review | `deepseek/deepseek-v4-pro` | 1/week |
+| Nudges | `deepseek/deepseek-v4-pro` | up to 3/day |
+| Verification | `deepseek/deepseek-v4-pro` | reports, coach, nudges |
+| Verification rewrites | `deepseek/deepseek-v4-flash` | only when verifier asks |
+| Chat | `anthropic/claude-opus-4-7` | on demand |
+
+Using recent logged token sizes from this app, the always-on daemon lands around:
+
+| Workload | Projected cost |
+|---|---:|
+| Reports, including verification | ~$0.04/week |
+| Coach review | ~$0.01/week |
+| Nudges at the 3/day cap, including verification | ~$0.23/week |
+| **Daemon total at default caps** | **~$0.30/week** |
+
+This assumes DeepSeek Pro succeeds and Anthropic fallback is rare. If every Pro-class call used Anthropic Opus instead, the same daemon workload would be several dollars per week. If DeepSeek Pro returns to list pricing after the current promo, the default daemon projection rises to roughly `$1.10/week`.
+
+Chat is separate because it is user-driven. A typical Opus 4.7 chat turn with tools can cost around `$0.08`; routing chat to DeepSeek Flash is usually under one cent per turn, but quality may drop for harder analysis.
+
+Inspect actual spend from your local DB:
+
+```bash
+uv run python main.py llm-log --stats
+```
+
 ## Environment Overrides
 
 The defaults live in `src/config.py` and can be overridden from `.env`:

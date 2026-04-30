@@ -74,13 +74,20 @@ class _TokenPricingWindow:
 
 
 # Verified against https://api-docs.deepseek.com/quick_start/pricing/ on
-# 2026-04-25. Keep this narrow so it is easy to delete once LiteLLM catches up.
+# 2026-04-30. Keep this narrow so it is easy to delete once LiteLLM catches up.
 _DEEPSEEK_V4_PRICING: dict[str, list[_TokenPricingWindow]] = {
     "deepseek-v4-flash": [
         _TokenPricingWindow(
             effective_from=datetime(2026, 4, 25, tzinfo=UTC),
-            effective_until=None,
+            effective_until=datetime(2026, 4, 26, 12, 15, tzinfo=UTC),
             input_cache_hit_per_1m=0.028,
+            input_cache_miss_per_1m=0.14,
+            output_per_1m=0.28,
+        ),
+        _TokenPricingWindow(
+            effective_from=datetime(2026, 4, 26, 12, 15, tzinfo=UTC),
+            effective_until=None,
+            input_cache_hit_per_1m=0.0028,
             input_cache_miss_per_1m=0.14,
             output_per_1m=0.28,
         )
@@ -88,15 +95,22 @@ _DEEPSEEK_V4_PRICING: dict[str, list[_TokenPricingWindow]] = {
     "deepseek-v4-pro": [
         _TokenPricingWindow(
             effective_from=datetime(2026, 4, 25, tzinfo=UTC),
-            effective_until=datetime(2026, 5, 5, 15, 59, tzinfo=UTC),
+            effective_until=datetime(2026, 4, 26, 12, 15, tzinfo=UTC),
             input_cache_hit_per_1m=0.03625,
             input_cache_miss_per_1m=0.435,
             output_per_1m=0.87,
         ),
         _TokenPricingWindow(
-            effective_from=datetime(2026, 5, 5, 15, 59, tzinfo=UTC),
+            effective_from=datetime(2026, 4, 26, 12, 15, tzinfo=UTC),
+            effective_until=datetime(2026, 5, 31, 15, 59, tzinfo=UTC),
+            input_cache_hit_per_1m=0.003625,
+            input_cache_miss_per_1m=0.435,
+            output_per_1m=0.87,
+        ),
+        _TokenPricingWindow(
+            effective_from=datetime(2026, 5, 31, 15, 59, tzinfo=UTC),
             effective_until=None,
-            input_cache_hit_per_1m=0.145,
+            input_cache_hit_per_1m=0.0145,
             input_cache_miss_per_1m=1.74,
             output_per_1m=3.48,
         ),

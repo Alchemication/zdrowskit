@@ -37,17 +37,9 @@ Storage is local. Processing is not fully local: coaching calls send selected me
 - A capable LLM provider API key
 - Telegram bot for notifications and chat
 
-## Current Limitations
+## Current Caveats
 
-- **Apple ecosystem only** — works only with Apple Watch + iPhone + iCloud Drive. No Garmin, Fitbit, or Android. Adding another data source would mean a new parser and import path.
-- **Single user, tied to one Apple ID** — each instance is bound to one Apple ID's HealthKit + iCloud Drive. This is a personal tool, not a multi-tenant service.
-- **Third-party export app required** — Apple's built-in XML export crashes on real-world data sizes, so [Auto Export](https://apps.apple.com/app/myhealth-export-to-icloud/id6737380982) is needed. Premium tier (a one-time purchase, still cheap) is required for scheduled automations.
-- **macOS-only daemon** — the always-on watcher assumes macOS iCloud paths and `launchctl`. CLI commands run anywhere Python runs; the daemon does not.
-- **Not real time** — iOS only exports HealthKit data while the phone is unlocked, and Auto Export runs on a schedule. Data arrives in batches with minutes of latency, not seconds.
-- **Sleep data is nightly totals** — Auto Export emits pre-aggregated sleep with no per-segment breakdown, which rules out sleep-stage analysis.
-- **Single profile per macOS user** — multiple always-on daemons on one user account are not supported. Running separate profiles on separate macOS user accounts is the clean path today.
-- **Manual context bootstrap** — `setup` creates `me.md` and `strategy.md` templates, but you have to fill in your profile, goals, and weekly plan by hand. A guided LLM-driven onboarding (ask → confirm → write) would remove most of this friction but does not exist yet.
-- **Cost target ~€1/week** — the goal is to stay under one euro per week of LLM spend by routing async surfaces (insights, coach, nudge) through DeepSeek V4 Pro and falling back to Anthropic only when needed. Achievable in current testing. Routing everything through Claude Opus is much more expensive.
+zdrowskit is personal, Apple-first, and not fully local because LLM calls send selected health context to your provider. See [Limitations](docs/limitations.md) for the full list.
 
 ## Quick Start
 
@@ -96,6 +88,7 @@ Run any command with `--help` for the full flag list. See [Commands](docs/comman
 | [Context files](docs/context-files.md) | `me.md`, `strategy.md`, `log.md`, generated memory files |
 | [Notifications](docs/notifications.md) | Notification types, preferences, triggers, suppression, rate limits |
 | [LLM setup](docs/llm.md) | Model defaults, fallbacks, environment variables, verification, tracing |
+| [Limitations](docs/limitations.md) | Platform assumptions, export constraints, local/LLM privacy boundary |
 | [Testing](docs/testing.md) | pytest, ruff, fixtures, coverage |
 | [LLM evals](docs/evals.md) | Feedback-derived eval workflow and leaderboard |
 

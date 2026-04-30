@@ -843,7 +843,7 @@ class TestCallLlm:
             model="deepseek/deepseek-v4-flash",
         )
 
-        assert result.cost == pytest.approx(0.00448)
+        assert result.cost == pytest.approx(0.004228)
 
     def test_direct_deepseek_v4_pro_pricing_window(self) -> None:
         response = self._mock_response(
@@ -855,16 +855,16 @@ class TestCallLlm:
         discounted = _deepseek_v4_cost(
             response,
             "deepseek/deepseek-v4-pro",
-            at=datetime(2026, 5, 5, 15, 58, tzinfo=UTC),
+            at=datetime(2026, 5, 31, 15, 58, tzinfo=UTC),
         )
         list_price = _deepseek_v4_cost(
             response,
             "deepseek/deepseek-v4-pro",
-            at=datetime(2026, 5, 5, 15, 59, tzinfo=UTC),
+            at=datetime(2026, 5, 31, 15, 59, tzinfo=UTC),
         )
 
-        assert discounted == pytest.approx(1.34125)
-        assert list_price == pytest.approx(5.365)
+        assert discounted == pytest.approx(1.308625)
+        assert list_price == pytest.approx(5.2345)
 
     @patch("llm.litellm")
     def test_raw_message_preserves_reasoning_content(
