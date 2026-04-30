@@ -259,17 +259,22 @@ def run_case(
         source_llm_call_id=case.source_llm_call_id,
     )
     try:
-        if case.feature != "chat":
+        if case.feature == "chat":
+            execution = _run_chat_case(
+                case,
+                model=model,
+                max_tool_iterations=max_tool_iterations,
+                reasoning_effort=reasoning_effort,
+                temperature=temperature,
+                cache=cache,
+                refresh_cache=refresh_cache,
+            )
+        elif case.feature == "nudge_verify":
+            from evals.run_nudge_verify import run_nudge_verify_case
+
+            execution, result.model = run_nudge_verify_case(case)
+        else:
             raise ValueError(f"Unsupported eval feature: {case.feature}")
-        execution = _run_chat_case(
-            case,
-            model=model,
-            max_tool_iterations=max_tool_iterations,
-            reasoning_effort=reasoning_effort,
-            temperature=temperature,
-            cache=cache,
-            refresh_cache=refresh_cache,
-        )
         result.execution = execution
         result.assertions = run_assertions(case.assertions, execution)
     except Exception as exc:
@@ -577,8 +582,22 @@ def _case_from_dict(raw: dict[str, Any], path: Path) -> EvalCase:
     fixture = raw["fixture"]
     if not isinstance(fixture, dict):
         raise ValueError(f"{path} fixture must be an object")
-    if "today" not in fixture or "context" not in fixture or "turns" not in fixture:
-        raise ValueError(f"{path} fixture must include today, context, and turns")
+    feature = str(raw["feature"])
+    if feature == "chat":
+        if not all(key in fixture for key in ("today", "context", "turns")):
+            raise ValueError(
+                f"{path} chat fixture must include today, context, and turns"
+            )
+    elif feature == "nudge_verify":
+        if not all(
+            key in fixture for key in ("draft", "evidence", "source_messages")
+        ):
+            raise ValueError(
+                f"{path} nudge_verify fixture must include draft, evidence, "
+                "and source_messages"
+            )
+    else:
+        raise ValueError(f"{path} unsupported feature: {feature}")
     return EvalCase(
         id=str(raw["id"]),
         feature=str(raw["feature"]),
