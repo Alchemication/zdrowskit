@@ -30,7 +30,7 @@ Notification preferences:
 ~/Documents/zdrowskit/notification_prefs.json
 ```
 
-This stores notification overrides and temporary mutes set via Telegram `/notify`. Delete it to fall back to built-in defaults.
+Set via Telegram `/notify` — see [Notifications](notifications.md). Delete the file to fall back to built-in defaults.
 
 Logs:
 

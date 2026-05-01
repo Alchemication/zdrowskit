@@ -64,10 +64,4 @@ Telegram commands include:
 - `Reset all` restores built-in defaults.
 - Picking `Auto` for fallback stores JSON `null` and defers to the profile fallback at resolve time.
 
-Model preferences live in:
-
-```text
-~/Documents/zdrowskit/model_prefs.json
-```
-
-For model defaults, environment overrides, and fallback behavior, see [LLM setup](llm.md).
+For model defaults, the `model_prefs.json` location, environment overrides, and fallback behavior, see [LLM setup](llm.md).

@@ -45,12 +45,7 @@ After the first run above, to enable personalised LLM-generated reports:
 
 1. Edit the files created by `setup` with your real data. At minimum, fill in `me.md` and `strategy.md` under `~/Documents/zdrowskit/ContextFiles/`.
 
-2. Add your API keys to `.env`. The defaults call DeepSeek with Anthropic as the cross-provider fallback, so set both keys to enable fallback:
-
-   ```env
-   DEEPSEEK_API_KEY=sk-...
-   ANTHROPIC_API_KEY=sk-ant-...
-   ```
+2. Add your API keys to `.env`. Defaults call DeepSeek with Anthropic as the cross-provider fallback — see [LLM setup](llm.md#api-keys) for keys and overrides.
 
 3. Generate your first report:
 
@@ -61,7 +56,3 @@ After the first run above, to enable personalised LLM-generated reports:
 The LLM reads your profile, goals, training plan, and weekly journal alongside your health data. After each run it appends a brief memory to `history.md` so it can track your progress across weeks.
 
 Reports and coach reviews also include auto-computed seasonal baselines, lifetime milestones, and split-derived run pacing when route data is available.
-
-## Data and Privacy
-
-Your raw data is stored locally in SQLite. LLM calls send selected context, metrics, workouts, and journal excerpts to your configured provider. If health data leaving your machine for an LLM API is a dealbreaker, this is not the right setup.

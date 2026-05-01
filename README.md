@@ -26,8 +26,6 @@ Three loops run continuously:
 - **Coach out** - scheduled reports, weekly coaching reviews, midweek check-ins, and reactive nudges each use their own prompt, tools, and LLM call.
 - **Two-way chat** - Telegram messages can query your full health history through SQL, render charts, and propose context-file edits with Approve/Reject buttons.
 
-Storage is local. Processing is not fully local: coaching calls send selected metrics, workouts, and context snippets to your configured LLM provider.
-
 ## Requirements
 
 - Apple Watch + iPhone
@@ -39,7 +37,7 @@ Storage is local. Processing is not fully local: coaching calls send selected me
 
 ## Current Caveats
 
-zdrowskit is personal, Apple-first, and not fully local because LLM calls send selected health context to your provider. See [Limitations](docs/limitations.md) for the full list.
+zdrowskit is personal and Apple-first. See [Limitations](docs/limitations.md) for the full list, including the local-storage / LLM-API boundary.
 
 ## Quick Start
 
