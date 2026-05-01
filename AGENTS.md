@@ -4,7 +4,7 @@ Always use `uv run`, never plain `python`. Full command list: `docs/commands.md`
 
 Debug LLM behavior with `uv run python main.py llm-log --id N` — full stored trace (messages, tool use, response) for one call.
 
-`src/llm.py`: the DeepSeek thinking-disabled `extra_body` default applies only to DeepSeek calls, never to Anthropic fallbacks. Verifier calls in `src/llm_verify.py` inherit `ZDROWSKIT_DEEPSEEK_THINKING` unless `ZDROWSKIT_VERIFY_DEEPSEEK_THINKING` overrides it.
+`src/llm.py`: the DeepSeek thinking-enabled `extra_body` default applies only to DeepSeek calls, never to Anthropic fallbacks. Verifier calls in `src/llm_verify.py` inherit `ZDROWSKIT_DEEPSEEK_THINKING` unless `ZDROWSKIT_VERIFY_DEEPSEEK_THINKING` overrides it.
 
 Open DBs via `store.open_db()` or `store.connect_db(..., migrate=True)` — these auto-apply pending migrations. Use raw `sqlite3.connect()` only when you specifically need to skip migration.
 

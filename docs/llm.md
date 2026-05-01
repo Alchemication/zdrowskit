@@ -88,8 +88,9 @@ ZDROWSKIT_LOG_FLOW_MODEL=anthropic/claude-haiku-4-5
 # /log uses deepseek/deepseek-v4-flash as its feature-level fallback
 ZDROWSKIT_ADD_CLONE_MODEL=deepseek/deepseek-v4-flash
 
-# DeepSeek V4 defaults to thinking enabled/high; app calls disable it by default.
-ZDROWSKIT_DEEPSEEK_THINKING=disabled
+# DeepSeek V4 defaults to thinking enabled/high; app calls keep it on for reliability.
+# Set to "disabled" per-surface (env override) when latency/cost matters more than depth.
+ZDROWSKIT_DEEPSEEK_THINKING=enabled
 
 ZDROWSKIT_MAX_TOKENS_DEFAULT=4096
 ZDROWSKIT_MAX_TOKENS_INSIGHTS=8192
@@ -127,7 +128,7 @@ ZDROWSKIT_VERIFICATION_MODEL=deepseek/deepseek-v4-pro
 ZDROWSKIT_VERIFICATION_REWRITE_MODEL=deepseek/deepseek-v4-flash
 ZDROWSKIT_VERIFY_JSON_MODE=1
 # Defaults to ZDROWSKIT_DEEPSEEK_THINKING when unset.
-ZDROWSKIT_VERIFY_DEEPSEEK_THINKING=disabled
+ZDROWSKIT_VERIFY_DEEPSEEK_THINKING=enabled
 ZDROWSKIT_MAX_TOKENS_VERIFICATION=4096
 ZDROWSKIT_MAX_TOKENS_VERIFICATION_REWRITE=4096
 ZDROWSKIT_MAX_VERIFICATION_REVISIONS=1

@@ -158,7 +158,7 @@ DEEPSEEK_FLASH_MODEL: str = os.environ.get(
 
 DEEPSEEK_THINKING: str = os.environ.get(
     "ZDROWSKIT_DEEPSEEK_THINKING",
-    "disabled",
+    "enabled",
 ).strip()
 """Default DeepSeek V4 thinking mode for app calls: 'disabled', 'enabled', or empty."""
 
