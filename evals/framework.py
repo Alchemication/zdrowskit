@@ -589,9 +589,7 @@ def _case_from_dict(raw: dict[str, Any], path: Path) -> EvalCase:
                 f"{path} chat fixture must include today, context, and turns"
             )
     elif feature == "nudge_verify":
-        if not all(
-            key in fixture for key in ("draft", "evidence", "source_messages")
-        ):
+        if not all(key in fixture for key in ("draft", "evidence", "source_messages")):
             raise ValueError(
                 f"{path} nudge_verify fixture must include draft, evidence, "
                 "and source_messages"

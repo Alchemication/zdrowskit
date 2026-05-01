@@ -34,6 +34,11 @@ These evals call the configured real model and may use network/API quota.
 
 Some models reject a `temperature` parameter (for example `claude-opus-4-7`). For those, pass `--no-temperature` to omit it from the request.
 
+## Supported features
+
+- `chat` — exercises the full chat tool loop end-to-end, taking the model from `--model`.
+- `nudge_verify` — exercises the production verifier path (`verify_and_rewrite` with the rewriter disabled). Models, JSON mode, and the deepseek thinking flag are resolved from `src/config.py` at runtime, so A/B these via env vars (`ZDROWSKIT_VERIFICATION_MODEL`, `ZDROWSKIT_VERIFY_DEEPSEEK_THINKING`, …) rather than `--model`.
+
 ## Leaderboard
 
 Recorded leaderboard runs live in `evals/leaderboard/runs.jsonl`. The generated Markdown snapshot lives in `evals/leaderboard.md`.

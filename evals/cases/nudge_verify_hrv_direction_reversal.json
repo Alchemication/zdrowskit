@@ -59,6 +59,14 @@
         "re:not\\s+a\\s+decline",
         "re:actually\\s+higher\\s+than"
       ]
+    },
+    {
+      "type": "text_absent",
+      "name": "verifier_did_not_fail_with_empty_response",
+      "patterns": [
+        "re:Verifier\\s+returned\\s+an\\s+empty\\s+response",
+        "re:Verifier\\s+failed\\s+or\\s+returned\\s+malformed\\s+JSON"
+      ]
     }
   ],
   "notes": "Real regression derived from feedback #30 / verifier call #601 (source nudge call #600). The original draft said HRV is 'still declining' (today 41.6 < yesterday 44.9 — correct). The verifier flagged this as a major issue with high confidence and produced a correction asserting HRV went 'up slightly from yesterday’s 44.9' — an arithmetic reversal. Working hypothesis: disabling the deepseek thinking mode for the verifier degraded its numeric reasoning. Run twice (with ZDROWSKIT_VERIFY_DEEPSEEK_THINKING unset vs =enabled) to A/B the hypothesis. Assertions check the verifier output JSON (verdict + issues) for the specific reversal phrasings; passing means the verifier did not introduce the bad correction."

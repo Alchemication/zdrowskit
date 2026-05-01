@@ -101,9 +101,7 @@ def run_nudge_verify_case(case: Any) -> tuple[Any, str]:
     )
 
 
-def _call_usage(
-    conn: Any, call_id: int | None
-) -> tuple[int, int, int, float | None]:
+def _call_usage(conn: Any, call_id: int | None) -> tuple[int, int, int, float | None]:
     """Pull token + cost stats for the verifier call from the temp DB."""
     if call_id is None:
         return 0, 0, 0, None
