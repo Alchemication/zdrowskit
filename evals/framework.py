@@ -43,7 +43,6 @@ EVAL_TEMPERATURE = 0.0
 DEFAULT_JUDGE_MODEL = "anthropic/claude-sonnet-4-6"
 EVAL_JUDGE_MAX_TOKENS = 800
 EVAL_JUDGE_TEMPERATURE = 0.0
-JUDGE_PROMPT_VERSION = 1
 
 
 class JudgeAssertionResult(BaseModel):
@@ -342,19 +341,20 @@ def run_judge_assertions(
     """Evaluate optional semantic assertions with one structured judge call."""
     if not case.judge_assertions:
         return []
+    raw_text = _call_judge_for_eval(
+        case,
+        execution,
+        cache=cache,
+        refresh_cache=refresh_cache,
+    )
     try:
-        judge_response = _call_judge_for_eval(
-            case,
-            execution,
-            cache=cache,
-            refresh_cache=refresh_cache,
-        )
+        judge_response = JudgeResponse.model_validate_json(raw_text)
     except ValidationError as exc:
         return [
             AssertionResult(
                 name="judge_response_valid",
                 passed=False,
-                detail=f"Pydantic validation failed: {exc}",
+                detail=_judge_validation_detail(exc, raw_text),
             )
         ]
     results_by_name: dict[str, JudgeAssertionResult] = {}
@@ -367,6 +367,15 @@ def run_judge_assertions(
     expected_names = [str(assertion["name"]) for assertion in case.judge_assertions]
     assertion_results: list[AssertionResult] = []
     for name in expected_names:
+        if name in duplicate_names:
+            assertion_results.append(
+                AssertionResult(
+                    name=name,
+                    passed=False,
+                    detail="Judge returned multiple results for this assertion.",
+                )
+            )
+            continue
         judged = results_by_name.get(name)
         if judged is None:
             assertion_results.append(
@@ -391,14 +400,6 @@ def run_judge_assertions(
                 detail=f"Unexpected judge result(s): {extra_names}",
             )
         )
-    if duplicate_names:
-        assertion_results.append(
-            AssertionResult(
-                name="judge_no_duplicate_results",
-                passed=False,
-                detail=f"Duplicate judge result(s): {sorted(duplicate_names)}",
-            )
-        )
     return assertion_results
 
 
@@ -409,6 +410,14 @@ def _judge_failure_detail(result: JudgeAssertionResult) -> str:
     if evidence:
         parts.append(f"evidence: {evidence}")
     return "; ".join(part for part in parts if part)
+
+
+def _judge_validation_detail(exc: ValidationError, raw_text: str) -> str:
+    """Format a Pydantic validation failure with a snippet of the raw output."""
+    snippet = raw_text.strip().replace("\n", " ")
+    if len(snippet) > 500:
+        snippet = snippet[:500] + "…"
+    return f"Pydantic validation failed: {exc}; raw: {snippet!r}"
 
 
 def _response_format_cache_key(
@@ -965,8 +974,8 @@ def _call_judge_for_eval(
     *,
     cache: EvalCache | None,
     refresh_cache: bool,
-) -> JudgeResponse:
-    """Run the semantic judge once and parse its structured response."""
+) -> str:
+    """Run the semantic judge once and return its raw response text."""
     judge_model = os.environ.get("ZDROWSKIT_EVAL_JUDGE_MODEL", DEFAULT_JUDGE_MODEL)
     messages = [
         {
@@ -1004,27 +1013,12 @@ def _call_judge_for_eval(
         cache=cache,
         refresh_cache=refresh_cache,
     )
-    return JudgeResponse.model_validate_json(result.text)
+    return result.text
 
 
 def _judge_system_prompt() -> str:
     """Return the generic semantic judge prompt."""
-    return (
-        "You are an eval judge. Evaluate the candidate response against the "
-        "supplied assertions.\n\n"
-        "Rules:\n"
-        "- Judge only the candidate response.\n"
-        "- Evaluate each assertion independently.\n"
-        "- Treat an assertion as passed only when it is clearly satisfied.\n"
-        "- If the response is ambiguous, incomplete, or only weakly implies "
-        "the assertion, mark it failed.\n"
-        "- Do not reward style, tone, or extra helpfulness unless the "
-        "assertion asks for it.\n"
-        "- Use concise evidence from the candidate response.\n"
-        "- Copy assertion names exactly.\n"
-        "- Return one result for every supplied assertion and no extra results.\n"
-        f"- Judge prompt version: {JUDGE_PROMPT_VERSION}."
-    )
+    return (PROMPTS_DIR / "eval_judge_prompt.md").read_text(encoding="utf-8")
 
 
 def _build_context(fixture: dict[str, Any]) -> dict[str, str]:

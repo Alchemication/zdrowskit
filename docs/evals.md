@@ -35,6 +35,8 @@ Cases may define optional `judge_assertions`:
 
 If `judge_assertions` is absent, no judge call is made. Judge output uses a Pydantic response schema; invalid structured output fails the judge assertion path. The default judge model is `anthropic/claude-sonnet-4-6`; override with `ZDROWSKIT_EVAL_JUDGE_MODEL`.
 
+The judge runs **only when every deterministic assertion passes**. This keeps judge cost off the failure path, but it has a side effect: if a case currently fails on a deterministic assertion, fixing that failure can newly expose a previously-hidden judge failure on the same response. When iterating on a regression, expect the failure surface to migrate from deterministic to semantic as you converge.
+
 ## Running Evals
 
 ```bash

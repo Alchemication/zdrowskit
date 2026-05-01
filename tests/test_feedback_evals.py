@@ -139,18 +139,29 @@ class TestCaseLoading:
 
         real = cases["chat_tempo_end_counts"]
         negative = cases["chat_tempo_short_warmup_negative"]
+        positive = cases["chat_tempo_progressive_positive"]
 
         assert real.case_kind == "real_regression"
         assert negative.case_kind == "synthetic_negative"
+        assert positive.case_kind == "synthetic_positive"
         assert real.source_feedback_id == 31
         assert negative.source_feedback_id == 31
+        assert positive.source_feedback_id == 31
         assert real.source_llm_call_id == 608
         assert negative.source_llm_call_id == 608
+        assert positive.source_llm_call_id == 608
         assert real.derived_from["feedback_id"] == 31
         assert negative.derived_from["llm_call_id"] == 608
+        assert positive.derived_from["llm_call_id"] == 608
         assert real.fixture["today"] == "2026-05-01"
         assert negative.fixture["today"] == "2026-05-01"
+        assert positive.fixture["today"] == "2026-05-01"
         assert [item["name"] for item in real.judge_assertions] == [
+            "accepts_valid_tempo_structure",
+            "does_not_invent_warmup_problem",
+            "alternative_is_framed_as_preference",
+        ]
+        assert [item["name"] for item in positive.judge_assertions] == [
             "accepts_valid_tempo_structure",
             "does_not_invent_warmup_problem",
             "alternative_is_framed_as_preference",
@@ -158,6 +169,7 @@ class TestCaseLoading:
         assert negative.judge_assertions == []
         assert "3 easy + 2 tempo" in real.notes
         assert "short warmups" in negative.notes
+        assert "generalize" in positive.notes
 
 
 class TestChatRunner:
@@ -710,7 +722,7 @@ class TestChatRunner:
                 max_tokens=512,
             )
         )
-        monkeypatch.setattr(run_nudge_verify.llm_verify, "call_llm", mock_call)
+        monkeypatch.setattr(run_nudge_verify, "call_llm", mock_call)
         cache = EvalCache(tmp_path / "eval-cache.sqlite")
 
         first = run_case(case, cache=cache)
@@ -726,6 +738,197 @@ class TestChatRunner:
         assert second.execution.cache_misses == 0
         assert second.execution.input_tokens == 100
         assert mock_call.call_count == 1
+
+    def test_chat_case_fails_when_judge_omits_an_assertion(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        case = next(case for case in load_cases() if case.id == "chat_tempo_end_counts")
+        judge_text = json.dumps(
+            {
+                "results": [
+                    {
+                        "name": "accepts_valid_tempo_structure",
+                        "reason": "Plan counts.",
+                        "evidence": "yes",
+                        "passed": True,
+                    },
+                    {
+                        "name": "does_not_invent_warmup_problem",
+                        "reason": "No warmup criticism.",
+                        "evidence": "3 km easy",
+                        "passed": True,
+                    },
+                ]
+            }
+        )
+        mock_call = MagicMock(
+            side_effect=[
+                _llm_result(
+                    "Yes, 3 km easy then 2 km tempo counts. "
+                    "2 easy -> 2 tempo -> 1 easy is cleaner quality.",
+                    tool_calls=[],
+                ),
+                _llm_result(judge_text, tool_calls=[]),
+            ]
+        )
+        monkeypatch.setattr(llm, "call_llm", mock_call)
+
+        result = run_case(case, model="test-model")
+
+        assert not result.passed
+        omitted = next(
+            (
+                f
+                for f in result.failures
+                if f.name == "alternative_is_framed_as_preference"
+            ),
+            None,
+        )
+        assert omitted is not None
+        assert "omitted" in omitted.detail
+
+    def test_chat_case_flags_extra_judge_results(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        case = next(case for case in load_cases() if case.id == "chat_tempo_end_counts")
+        judge_text = json.dumps(
+            {
+                "results": [
+                    {
+                        "name": "accepts_valid_tempo_structure",
+                        "reason": "Plan counts.",
+                        "evidence": "yes",
+                        "passed": True,
+                    },
+                    {
+                        "name": "does_not_invent_warmup_problem",
+                        "reason": "No warmup criticism.",
+                        "evidence": "3 km easy",
+                        "passed": True,
+                    },
+                    {
+                        "name": "alternative_is_framed_as_preference",
+                        "reason": "Framed as cleaner.",
+                        "evidence": "cleaner quality",
+                        "passed": True,
+                    },
+                    {
+                        "name": "made_up_assertion",
+                        "reason": "Bonus check.",
+                        "evidence": "n/a",
+                        "passed": True,
+                    },
+                ]
+            }
+        )
+        mock_call = MagicMock(
+            side_effect=[
+                _llm_result(
+                    "Yes, 3 km easy then 2 km tempo counts. "
+                    "2 easy -> 2 tempo -> 1 easy is cleaner quality.",
+                    tool_calls=[],
+                ),
+                _llm_result(judge_text, tool_calls=[]),
+            ]
+        )
+        monkeypatch.setattr(llm, "call_llm", mock_call)
+
+        result = run_case(case, model="test-model")
+
+        assert not result.passed
+        extras = next(
+            (f for f in result.failures if f.name == "judge_no_extra_results"),
+            None,
+        )
+        assert extras is not None
+        assert "made_up_assertion" in extras.detail
+
+    def test_chat_case_fails_duplicated_judge_assertion(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        case = next(case for case in load_cases() if case.id == "chat_tempo_end_counts")
+        judge_text = json.dumps(
+            {
+                "results": [
+                    {
+                        "name": "accepts_valid_tempo_structure",
+                        "reason": "Plan counts.",
+                        "evidence": "yes",
+                        "passed": True,
+                    },
+                    {
+                        "name": "accepts_valid_tempo_structure",
+                        "reason": "Conflicting second judgement.",
+                        "evidence": "no",
+                        "passed": False,
+                    },
+                    {
+                        "name": "does_not_invent_warmup_problem",
+                        "reason": "No warmup criticism.",
+                        "evidence": "3 km easy",
+                        "passed": True,
+                    },
+                    {
+                        "name": "alternative_is_framed_as_preference",
+                        "reason": "Framed as cleaner.",
+                        "evidence": "cleaner quality",
+                        "passed": True,
+                    },
+                ]
+            }
+        )
+        mock_call = MagicMock(
+            side_effect=[
+                _llm_result(
+                    "Yes, 3 km easy then 2 km tempo counts. "
+                    "2 easy -> 2 tempo -> 1 easy is cleaner quality.",
+                    tool_calls=[],
+                ),
+                _llm_result(judge_text, tool_calls=[]),
+            ]
+        )
+        monkeypatch.setattr(llm, "call_llm", mock_call)
+
+        result = run_case(case, model="test-model")
+
+        assert not result.passed
+        dup_failure = next(
+            (f for f in result.failures if f.name == "accepts_valid_tempo_structure"),
+            None,
+        )
+        assert dup_failure is not None
+        assert "multiple results" in dup_failure.detail
+        assert not any(f.name == "judge_no_duplicate_results" for f in result.failures)
+
+    def test_judge_validation_failure_includes_raw_output(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        case = next(case for case in load_cases() if case.id == "chat_tempo_end_counts")
+        raw_garbage = "this is definitely not json"
+        mock_call = MagicMock(
+            side_effect=[
+                _llm_result(
+                    "Yes, 3 km easy then 2 km tempo counts. "
+                    "2 easy -> 2 tempo -> 1 easy is cleaner quality.",
+                    tool_calls=[],
+                ),
+                _llm_result(raw_garbage, tool_calls=[]),
+            ]
+        )
+        monkeypatch.setattr(llm, "call_llm", mock_call)
+
+        result = run_case(case, model="test-model")
+
+        validation = next(
+            (f for f in result.failures if f.name == "judge_response_valid"),
+            None,
+        )
+        assert validation is not None
+        assert raw_garbage in validation.detail
 
 
 class TestAssertions:

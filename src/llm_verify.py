@@ -12,6 +12,7 @@ import logging
 import re
 import sqlite3
 from dataclasses import dataclass
+from collections.abc import Callable
 from typing import Any, Literal
 
 from config import (
@@ -24,8 +25,10 @@ from config import (
     VERIFICATION_REWRITE_MODEL,
 )
 from events import record_event
-from llm import call_llm
+from llm import LLMResult, call_llm
 from llm_context import load_prompt_text
+
+CallLLM = Callable[..., LLMResult]
 
 logger = logging.getLogger(__name__)
 
@@ -510,6 +513,7 @@ def verify_and_rewrite(
     rewrite_model: str = VERIFICATION_REWRITE_MODEL,
     max_revisions: int = MAX_VERIFICATION_REVISIONS,
     strict: bool = False,
+    _call_llm: CallLLM | None = None,
 ) -> VerificationResult:
     """Verify a draft and optionally perform one bounded rewrite.
 
@@ -527,10 +531,14 @@ def verify_and_rewrite(
         strict: When True, treat any non-pass verdict as fail and skip the
             rewriter. Used by surfaces where a partial rewrite could ship
             content (e.g. coach proposal diffs) the verifier never approved.
+        _call_llm: Test/eval seam for injecting a wrapped LLM caller (e.g. an
+            eval-cache wrapper). Defaults to the module-level ``call_llm`` so
+            tests can monkey-patch ``llm_verify.call_llm`` directly.
 
     Returns:
         VerificationResult. Malformed verifier JSON fails closed.
     """
+    invoke = _call_llm if _call_llm is not None else call_llm
     source_llm_call_id = _source_call_id(metadata)
     guard_issues = deterministic_verification_issues(kind, draft)
     if any(issue.severity == "critical" for issue in guard_issues):
@@ -559,7 +567,7 @@ def verify_and_rewrite(
     )
     verifier_call_id: int | None = None
     try:
-        verifier_result = call_llm(
+        verifier_result = invoke(
             verifier_messages,
             model=model,
             max_tokens=MAX_TOKENS_VERIFICATION,
@@ -677,7 +685,7 @@ def verify_and_rewrite(
         metadata=metadata,
     )
     try:
-        rewrite_result = call_llm(
+        rewrite_result = invoke(
             rewrite_messages,
             model=rewrite_model,
             max_tokens=MAX_TOKENS_VERIFICATION_REWRITE,
