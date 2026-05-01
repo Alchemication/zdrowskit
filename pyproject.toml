@@ -10,6 +10,7 @@ dependencies = [
     "markdown==3.10.2",
     "numpy==2.4.3",
     "plotly==6.6.0",
+    "pydantic==2.12.5",
     "python-dotenv==1.0.1",
     "resend==2.24.0",
     "rich==14.3.3",

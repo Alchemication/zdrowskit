@@ -16,7 +16,24 @@ uv run python main.py llm-log --id N
 - Keep synthetic cases tied to the original feedback using `source_feedback_id`, `source_llm_call_id`, and `derived_from.hypothesis`.
 - Prefer structured fixtures over pasted raw transcripts: pinned date, context snippets, conversation turns, and only the health data needed for the case.
 - Use deterministic assertions first: tool called/not called, argument matching, text contains/does-not-contain, max word count, and forbidden openings.
-- Avoid LLM-as-judge unless a future real feedback case genuinely cannot be evaluated deterministically.
+- Use `judge_assertions` only for narrow semantic invariants that deterministic checks would make brittle. The runner evaluates deterministic assertions first, then makes one structured judge call only when those pass.
+
+## LLM-as-Judge
+
+Cases may define optional `judge_assertions`:
+
+```json
+{
+  "judge_assertions": [
+    {
+      "name": "accepts_valid_tempo_structure",
+      "statement": "The response says or clearly implies that 3 km easy followed by the last 2 km at tempo counts as the prescribed 2 km tempo block."
+    }
+  ]
+}
+```
+
+If `judge_assertions` is absent, no judge call is made. Judge output uses a Pydantic response schema; invalid structured output fails the judge assertion path. The default judge model is `anthropic/claude-sonnet-4-6`; override with `ZDROWSKIT_EVAL_JUDGE_MODEL`.
 
 ## Running Evals
 

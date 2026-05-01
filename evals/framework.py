@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import re
 import sqlite3
 import sys
@@ -18,6 +19,8 @@ from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+
+from pydantic import BaseModel, Field, ValidationError
 
 _ROOT = Path(__file__).resolve().parent.parent
 _SRC = _ROOT / "src"
@@ -35,8 +38,33 @@ from tools import all_chat_tools  # noqa: E402
 CASES_DIR = Path(__file__).resolve().parent / "cases"
 DEFAULT_MODEL = llm.DEFAULT_MODEL
 DEFAULT_CACHE_PATH = Path(__file__).resolve().parent / ".cache.sqlite"
-EVAL_CACHE_SCHEMA_VERSION = 3
+EVAL_CACHE_SCHEMA_VERSION = 4
 EVAL_TEMPERATURE = 0.0
+DEFAULT_JUDGE_MODEL = "anthropic/claude-sonnet-4-6"
+EVAL_JUDGE_MAX_TOKENS = 800
+EVAL_JUDGE_TEMPERATURE = 0.0
+JUDGE_PROMPT_VERSION = 1
+
+
+class JudgeAssertionResult(BaseModel):
+    """Structured result for one semantic judge assertion."""
+
+    name: str = Field(description="Assertion name copied exactly.")
+    reason: str = Field(description="Brief explanation of the judgment.")
+    evidence: str = Field(
+        description="Short quote or paraphrase from the candidate response."
+    )
+    passed: bool = Field(
+        description="True only when the assertion is clearly satisfied."
+    )
+
+
+class JudgeResponse(BaseModel):
+    """Structured response for a semantic eval judge call."""
+
+    results: list[JudgeAssertionResult] = Field(
+        description="One result for every supplied assertion, with no extras."
+    )
 
 
 @dataclass(frozen=True)
@@ -52,6 +80,7 @@ class EvalCase:
     intent: str
     fixture: dict[str, Any]
     assertions: list[dict[str, Any]]
+    judge_assertions: list[dict[str, str]] = field(default_factory=list)
     notes: str = ""
 
 
@@ -272,11 +301,24 @@ def run_case(
         elif case.feature == "nudge_verify":
             from evals.run_nudge_verify import run_nudge_verify_case
 
-            execution, result.model = run_nudge_verify_case(case)
+            execution, result.model = run_nudge_verify_case(
+                case,
+                cache=cache,
+                refresh_cache=refresh_cache,
+            )
         else:
             raise ValueError(f"Unsupported eval feature: {case.feature}")
         result.execution = execution
         result.assertions = run_assertions(case.assertions, execution)
+        if all(assertion.passed for assertion in result.assertions):
+            result.assertions.extend(
+                run_judge_assertions(
+                    case,
+                    execution,
+                    cache=cache,
+                    refresh_cache=refresh_cache,
+                )
+            )
     except Exception as exc:
         result.error = f"{type(exc).__name__}: {exc}"
     return result
@@ -288,6 +330,102 @@ def run_assertions(
 ) -> list[AssertionResult]:
     """Evaluate deterministic assertions against a captured execution."""
     return [_evaluate_assertion(assertion, execution) for assertion in assertions]
+
+
+def run_judge_assertions(
+    case: EvalCase,
+    execution: EvalExecution,
+    *,
+    cache: EvalCache | None = None,
+    refresh_cache: bool = False,
+) -> list[AssertionResult]:
+    """Evaluate optional semantic assertions with one structured judge call."""
+    if not case.judge_assertions:
+        return []
+    try:
+        judge_response = _call_judge_for_eval(
+            case,
+            execution,
+            cache=cache,
+            refresh_cache=refresh_cache,
+        )
+    except ValidationError as exc:
+        return [
+            AssertionResult(
+                name="judge_response_valid",
+                passed=False,
+                detail=f"Pydantic validation failed: {exc}",
+            )
+        ]
+    results_by_name: dict[str, JudgeAssertionResult] = {}
+    duplicate_names: set[str] = set()
+    for item in judge_response.results:
+        if item.name in results_by_name:
+            duplicate_names.add(item.name)
+        results_by_name[item.name] = item
+
+    expected_names = [str(assertion["name"]) for assertion in case.judge_assertions]
+    assertion_results: list[AssertionResult] = []
+    for name in expected_names:
+        judged = results_by_name.get(name)
+        if judged is None:
+            assertion_results.append(
+                AssertionResult(
+                    name=name,
+                    passed=False,
+                    detail="Judge response omitted this assertion.",
+                )
+            )
+            continue
+        detail = "" if judged.passed else _judge_failure_detail(judged)
+        assertion_results.append(
+            AssertionResult(name=name, passed=judged.passed, detail=detail)
+        )
+
+    extra_names = sorted(set(results_by_name) - set(expected_names))
+    if extra_names:
+        assertion_results.append(
+            AssertionResult(
+                name="judge_no_extra_results",
+                passed=False,
+                detail=f"Unexpected judge result(s): {extra_names}",
+            )
+        )
+    if duplicate_names:
+        assertion_results.append(
+            AssertionResult(
+                name="judge_no_duplicate_results",
+                passed=False,
+                detail=f"Duplicate judge result(s): {sorted(duplicate_names)}",
+            )
+        )
+    return assertion_results
+
+
+def _judge_failure_detail(result: JudgeAssertionResult) -> str:
+    """Format a failed semantic judge result for result tables."""
+    parts = [result.reason.strip()]
+    evidence = result.evidence.strip()
+    if evidence:
+        parts.append(f"evidence: {evidence}")
+    return "; ".join(part for part in parts if part)
+
+
+def _response_format_cache_key(
+    response_format: dict[str, Any] | type[BaseModel] | None,
+) -> Any:
+    """Return a JSON-safe cache key fragment for a response format."""
+    if response_format is None:
+        return None
+    if isinstance(response_format, dict):
+        return response_format
+    if isinstance(response_format, type) and issubclass(response_format, BaseModel):
+        return {
+            "type": "pydantic",
+            "name": response_format.__name__,
+            "schema": response_format.model_json_schema(),
+        }
+    return str(response_format)
 
 
 def print_results(results: list[EvalResult]) -> None:
@@ -606,8 +744,33 @@ def _case_from_dict(raw: dict[str, Any], path: Path) -> EvalCase:
         intent=str(raw["intent"]),
         fixture=fixture,
         assertions=raw["assertions"],
+        judge_assertions=_judge_assertions_from_dict(raw, path),
         notes=str(raw.get("notes", "")),
     )
+
+
+def _judge_assertions_from_dict(
+    raw: dict[str, Any],
+    path: Path,
+) -> list[dict[str, str]]:
+    """Validate and normalize optional semantic judge assertions."""
+    judge_assertions = raw.get("judge_assertions", [])
+    if judge_assertions is None:
+        return []
+    if not isinstance(judge_assertions, list):
+        raise ValueError(f"{path} judge_assertions must be a list")
+    normalized: list[dict[str, str]] = []
+    for item in judge_assertions:
+        if not isinstance(item, dict):
+            raise ValueError(f"{path} judge_assertions entries must be objects")
+        name = item.get("name")
+        statement = item.get("statement")
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError(f"{path} judge assertion missing non-empty name")
+        if not isinstance(statement, str) or not statement.strip():
+            raise ValueError(f"{path} judge assertion {name!r} missing statement")
+        normalized.append({"name": name, "statement": statement})
+    return normalized
 
 
 def _run_chat_case(
@@ -753,6 +916,8 @@ def _call_llm_for_eval(
     metadata: dict[str, Any],
     cache: EvalCache | None,
     refresh_cache: bool,
+    response_format: dict[str, Any] | type[BaseModel] | None = None,
+    fallback_models: list[str] | None = None,
 ) -> tuple[llm.LLMResult, bool]:
     """Call the LLM for an eval case with optional request caching."""
     # Mirror call_llm's injection of DEEPSEEK_EXTRA_BODY for DeepSeek models so
@@ -768,6 +933,8 @@ def _call_llm_for_eval(
         "temperature": temperature,
         "reasoning_effort": reasoning_effort,
         "tools": tools,
+        "response_format": _response_format_cache_key(response_format),
+        "fallback_models": fallback_models,
         "extra_body": effective_extra_body,
     }
     if cache is not None and not refresh_cache:
@@ -782,12 +949,82 @@ def _call_llm_for_eval(
         temperature=temperature,
         reasoning_effort=reasoning_effort,
         tools=tools,
+        response_format=response_format,
+        fallback_models=fallback_models,
         request_type="",
         metadata=metadata,
     )
     if cache is not None:
         cache.put(request, result)
     return result, False
+
+
+def _call_judge_for_eval(
+    case: EvalCase,
+    execution: EvalExecution,
+    *,
+    cache: EvalCache | None,
+    refresh_cache: bool,
+) -> JudgeResponse:
+    """Run the semantic judge once and parse its structured response."""
+    judge_model = os.environ.get("ZDROWSKIT_EVAL_JUDGE_MODEL", DEFAULT_JUDGE_MODEL)
+    messages = [
+        {
+            "role": "system",
+            "content": _judge_system_prompt(),
+        },
+        {
+            "role": "user",
+            "content": json.dumps(
+                {
+                    "case_id": case.id,
+                    "intent": case.intent,
+                    "conversation_turns": case.fixture.get("turns", []),
+                    "candidate_response": execution.text,
+                    "assertions": case.judge_assertions,
+                },
+                indent=2,
+            ),
+        },
+    ]
+    result, _cache_hit = _call_llm_for_eval(
+        messages=messages,
+        model=judge_model,
+        max_tokens=EVAL_JUDGE_MAX_TOKENS,
+        reasoning_effort=None,
+        temperature=EVAL_JUDGE_TEMPERATURE,
+        tools=None,
+        response_format=JudgeResponse,
+        fallback_models=[],
+        metadata={
+            "eval_case_id": case.id,
+            "source_feedback_id": case.source_feedback_id,
+            "judge": True,
+        },
+        cache=cache,
+        refresh_cache=refresh_cache,
+    )
+    return JudgeResponse.model_validate_json(result.text)
+
+
+def _judge_system_prompt() -> str:
+    """Return the generic semantic judge prompt."""
+    return (
+        "You are an eval judge. Evaluate the candidate response against the "
+        "supplied assertions.\n\n"
+        "Rules:\n"
+        "- Judge only the candidate response.\n"
+        "- Evaluate each assertion independently.\n"
+        "- Treat an assertion as passed only when it is clearly satisfied.\n"
+        "- If the response is ambiguous, incomplete, or only weakly implies "
+        "the assertion, mark it failed.\n"
+        "- Do not reward style, tone, or extra helpfulness unless the "
+        "assertion asks for it.\n"
+        "- Use concise evidence from the candidate response.\n"
+        "- Copy assertion names exactly.\n"
+        "- Return one result for every supplied assertion and no extra results.\n"
+        f"- Judge prompt version: {JUDGE_PROMPT_VERSION}."
+    )
 
 
 def _build_context(fixture: dict[str, Any]) -> dict[str, str]:

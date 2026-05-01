@@ -1,0 +1,95 @@
+{
+  "id": "chat_tempo_end_counts",
+  "feature": "chat",
+  "case_kind": "real_regression",
+  "source_feedback_id": 31,
+  "source_llm_call_id": 608,
+  "derived_from": {
+    "feedback_id": 31,
+    "llm_call_id": 608,
+    "hypothesis": "When the user proposes 3 km easy followed by 2 km tempo, chat should recognize that the 3 km easy section is an adequate warmup and only flag the missing cooldown as the tradeoff."
+  },
+  "intent": "When the user asks whether 3 km slower plus the last 2 km faster counts for a 5 km run with 2 km tempo prescribed, chat should accept it and avoid false warmup criticism.",
+  "fixture": {
+    "today": "2026-05-01",
+    "context": {
+      "me": "# Profile\n\n- Adam, 42M, 81 kg.\n- Running focus: rebuild toward sub-25 5K while managing recovery.\n",
+      "strategy": "# Strategy\n\n## Weekly Plan\n\n**Week runs Monday -> Sunday.** Target: 3 runs + 2 strength sessions per week (~15 km+ total running).\n\n- Run days: ~5 km each.\n- Tempo session when recovery is good: 2 km @ 5:10-5:15/km inside a 5 km run.\n- Easy pace: 5:30-6:00/km.\n- Prefer not to stack run + strength on the same day.\n",
+      "log": "# Log\n\n- 2026-04-28 [run tempo-ish] - 3.0 km at 5:11/km avg; splits 5:09/5:04/5:12.\n",
+      "history": "# History\n\n- W18: tempo run now 5 weeks overdue; Friday is the window.\n",
+      "coach_feedback": "(not provided)",
+      "recent_nudges": "1. [2026-05-01T10:17 / new_data]\nHRV at **89 ms** this morning - that's the highest reading in months and a clean break from the 44-47 ms stretch. Sleep was solid at 7.5h / 98.8%. W18 has 1 run and no tempo yet. Today's the window: **5 km with 2 km tempo @ 5:10-5:15/km**. Don't let the good recovery go unused.",
+      "last_coach_summary": "[2026-04-07] The tempo run at **5:09/km** in W13 proved you have the legs. The problem isn't fitness - it's scheduling discipline."
+    },
+    "health_data": {
+      "current_week": {
+        "summary": {
+          "week_label": "W18",
+          "start_date": "2026-04-27",
+          "end_date": "2026-05-01",
+          "run_count": 1,
+          "lift_count": 2,
+          "total_run_km": 3.0,
+          "total_lift_min": 68,
+          "avg_hrv_ms": 53.7,
+          "avg_resting_hr": 49.0,
+          "avg_sleep_total_h": 7.7,
+          "avg_sleep_efficiency_pct": 95.6,
+          "sleep_nights_tracked": 5,
+          "sleep_nights_total": 5
+        },
+        "days": [
+          {
+            "date": "2026-05-01",
+            "workouts": [],
+            "hrv_ms": 72.1,
+            "resting_hr": 49,
+            "sleep_total_h": 7.5,
+            "sleep_efficiency_pct": 98.8
+          }
+        ]
+      },
+      "history": []
+    },
+    "turns": [
+      {
+        "role": "assistant",
+        "content": "HRV at **89 ms** this morning - that's the highest reading in months and a clean break from the 44-47 ms stretch. Sleep was solid at 7.5h / 98.8%. W18 has 1 run and no tempo yet. Today's the window: **5 km with 2 km tempo @ 5:10-5:15/km**. Don't let the good recovery go unused."
+      },
+      {
+        "role": "user",
+        "content": "Will it count if i run first 3 km slower and then last 2 faster? Or what is the best strategy?"
+      }
+    ]
+  },
+  "assertions": [
+    {
+      "type": "text_absent",
+      "name": "does_not_claim_warmup_missing",
+      "patterns": [
+        "skipping a proper warmup",
+        "skip a proper warmup",
+        "without a proper warmup",
+        "not enough warmup",
+        "warmup is too short",
+        "shocking the system",
+        "shock the system"
+      ]
+    }
+  ],
+  "judge_assertions": [
+    {
+      "name": "accepts_valid_tempo_structure",
+      "statement": "The response says or clearly implies that 3 km easy followed by the last 2 km at tempo counts as the prescribed 2 km tempo block."
+    },
+    {
+      "name": "does_not_invent_warmup_problem",
+      "statement": "The response does not criticize the user's 3 km easy plus 2 km tempo plan for lacking a proper warmup."
+    },
+    {
+      "name": "alternative_is_framed_as_preference",
+      "statement": "If the response recommends another structure, it frames that structure as preferable, cleaner, or optional rather than required for the workout to count."
+    }
+  ],
+  "notes": "Real regression derived from thumbs-down feedback #31 / llm_call #608. The failed reply correctly said 3 easy + 2 tempo counts, but then falsely criticized it as skipping warmup. The accurate tradeoff is that it lacks cooldown."
+}

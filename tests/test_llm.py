@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from pydantic import BaseModel
 
 from config import (
     ANTHROPIC_HAIKU_MODEL,
@@ -1304,7 +1305,7 @@ class TestCallWithRetry:
 
         assert kwargs["extra_body"] == extra_body
 
-    def test_anthropic_attempt_omits_response_format(self) -> None:
+    def test_anthropic_attempt_keeps_response_format(self) -> None:
         kwargs = _completion_kwargs_for_model(
             {
                 "model": DEEPSEEK_PRO_MODEL,
@@ -1315,7 +1316,23 @@ class TestCallWithRetry:
             ANTHROPIC_OPUS_MODEL,
         )
 
-        assert "response_format" not in kwargs
+        assert kwargs["response_format"] == {"type": "json_object"}
+
+    def test_anthropic_attempt_keeps_pydantic_response_format(self) -> None:
+        class TestSchema(BaseModel):
+            value: str
+
+        kwargs = _completion_kwargs_for_model(
+            {
+                "model": DEEPSEEK_PRO_MODEL,
+                "messages": [],
+                "max_tokens": 10,
+                "response_format": TestSchema,
+            },
+            ANTHROPIC_OPUS_MODEL,
+        )
+
+        assert kwargs["response_format"] is TestSchema
 
     def test_anthropic_attempt_omits_extra_body(self) -> None:
         kwargs = _completion_kwargs_for_model(

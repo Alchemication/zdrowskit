@@ -19,6 +19,7 @@ from evals.framework import (
     AssertionResult,
     EvalExecution,
     EvalResult,
+    JudgeResponse,
     load_cases,
     print_result_details,
     print_results,
@@ -26,6 +27,7 @@ from evals.framework import (
     run_case,
 )
 from evals import run as eval_run
+from evals import run_nudge_verify
 from evals.run import select_cases
 
 
@@ -131,6 +133,31 @@ class TestCaseLoading:
         assert case.derived_from["feedback_id"] == 12
         assert case.fixture["today"] == "2026-04-10"
         assert "thumbs-down feedback #12" in case.notes
+
+    def test_load_cases_reads_tempo_end_feedback_cases(self) -> None:
+        cases = {case.id: case for case in load_cases()}
+
+        real = cases["chat_tempo_end_counts"]
+        negative = cases["chat_tempo_short_warmup_negative"]
+
+        assert real.case_kind == "real_regression"
+        assert negative.case_kind == "synthetic_negative"
+        assert real.source_feedback_id == 31
+        assert negative.source_feedback_id == 31
+        assert real.source_llm_call_id == 608
+        assert negative.source_llm_call_id == 608
+        assert real.derived_from["feedback_id"] == 31
+        assert negative.derived_from["llm_call_id"] == 608
+        assert real.fixture["today"] == "2026-05-01"
+        assert negative.fixture["today"] == "2026-05-01"
+        assert [item["name"] for item in real.judge_assertions] == [
+            "accepts_valid_tempo_structure",
+            "does_not_invent_warmup_problem",
+            "alternative_is_framed_as_preference",
+        ]
+        assert negative.judge_assertions == []
+        assert "3 easy + 2 tempo" in real.notes
+        assert "short warmups" in negative.notes
 
 
 class TestChatRunner:
@@ -496,10 +523,14 @@ class TestChatRunner:
         monkeypatch.setattr(llm, "call_llm", mock_call)
         cache = EvalCache(tmp_path / "eval-cache.sqlite")
 
-        monkeypatch.setattr(llm, "DEEPSEEK_EXTRA_BODY", {"thinking": {"type": "enabled"}})
+        monkeypatch.setattr(
+            llm, "DEEPSEEK_EXTRA_BODY", {"thinking": {"type": "enabled"}}
+        )
         first = run_case(case, model="deepseek/deepseek-v4-pro", cache=cache)
 
-        monkeypatch.setattr(llm, "DEEPSEEK_EXTRA_BODY", {"thinking": {"type": "disabled"}})
+        monkeypatch.setattr(
+            llm, "DEEPSEEK_EXTRA_BODY", {"thinking": {"type": "disabled"}}
+        )
         second = run_case(case, model="deepseek/deepseek-v4-pro", cache=cache)
 
         assert first.execution is not None
@@ -520,10 +551,14 @@ class TestChatRunner:
         monkeypatch.setattr(llm, "call_llm", mock_call)
         cache = EvalCache(tmp_path / "eval-cache.sqlite")
 
-        monkeypatch.setattr(llm, "DEEPSEEK_EXTRA_BODY", {"thinking": {"type": "enabled"}})
+        monkeypatch.setattr(
+            llm, "DEEPSEEK_EXTRA_BODY", {"thinking": {"type": "enabled"}}
+        )
         first = run_case(case, model="anthropic/claude-opus-4-7", cache=cache)
 
-        monkeypatch.setattr(llm, "DEEPSEEK_EXTRA_BODY", {"thinking": {"type": "disabled"}})
+        monkeypatch.setattr(
+            llm, "DEEPSEEK_EXTRA_BODY", {"thinking": {"type": "disabled"}}
+        )
         second = run_case(case, model="anthropic/claude-opus-4-7", cache=cache)
 
         assert first.execution is not None
@@ -556,6 +591,140 @@ class TestChatRunner:
         assert first.execution.cache_misses == 1
         assert second.execution.cache_hits == 1
         assert second.execution.cache_misses == 0
+        assert mock_call.call_count == 1
+
+    def test_chat_case_runs_judge_after_deterministic_assertions_pass(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        case = next(case for case in load_cases() if case.id == "chat_tempo_end_counts")
+        judge_text = json.dumps(
+            {
+                "results": [
+                    {
+                        "name": "accepts_valid_tempo_structure",
+                        "reason": "The response explicitly says the plan counts.",
+                        "evidence": "yes, it counts",
+                        "passed": True,
+                    },
+                    {
+                        "name": "does_not_invent_warmup_problem",
+                        "reason": "The response does not criticize the warmup.",
+                        "evidence": "3 km easy",
+                        "passed": True,
+                    },
+                    {
+                        "name": "alternative_is_framed_as_preference",
+                        "reason": "The alternative is presented as cleaner.",
+                        "evidence": "cleaner quality",
+                        "passed": True,
+                    },
+                ]
+            }
+        )
+        mock_call = MagicMock(
+            side_effect=[
+                _llm_result(
+                    "Yes, 3 km easy then 2 km tempo counts. "
+                    "2 easy -> 2 tempo -> 1 easy is cleaner quality.",
+                    tool_calls=[],
+                ),
+                _llm_result(judge_text, tool_calls=[]),
+            ]
+        )
+        monkeypatch.setattr(llm, "call_llm", mock_call)
+
+        result = run_case(case, model="test-model")
+
+        assert result.passed
+        assert mock_call.call_count == 2
+        judge_kwargs = mock_call.call_args_list[1].kwargs
+        assert judge_kwargs["response_format"] is JudgeResponse
+        assert judge_kwargs["fallback_models"] == []
+
+    def test_chat_case_skips_judge_when_deterministic_assertion_fails(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        case = next(case for case in load_cases() if case.id == "chat_tempo_end_counts")
+        mock_call = MagicMock(
+            return_value=_llm_result(
+                "It counts, but you would be shocking the system.",
+                tool_calls=[],
+            )
+        )
+        monkeypatch.setattr(llm, "call_llm", mock_call)
+
+        result = run_case(case, model="test-model")
+
+        assert not result.passed
+        assert mock_call.call_count == 1
+        assert [failure.name for failure in result.failures] == [
+            "does_not_claim_warmup_missing"
+        ]
+
+    def test_chat_case_fails_when_judge_returns_invalid_json(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        case = next(case for case in load_cases() if case.id == "chat_tempo_end_counts")
+        mock_call = MagicMock(
+            side_effect=[
+                _llm_result(
+                    "Yes, 3 km easy then 2 km tempo counts. "
+                    "2 easy -> 2 tempo -> 1 easy is cleaner quality.",
+                    tool_calls=[],
+                ),
+                _llm_result("not json", tool_calls=[]),
+            ]
+        )
+        monkeypatch.setattr(llm, "call_llm", mock_call)
+
+        result = run_case(case, model="test-model")
+
+        assert not result.passed
+        assert any(
+            failure.name == "judge_response_valid" for failure in result.failures
+        )
+        assert mock_call.call_count == 2
+
+    def test_nudge_verify_case_reuses_cached_verifier_response(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        case = next(
+            case
+            for case in load_cases()
+            if case.id == "nudge_verify_hrv_direction_reversal"
+        )
+        mock_call = MagicMock(
+            return_value=llm.LLMResult(
+                text='{"verdict":"pass","issues":[],"confidence":"high"}',
+                model="test-verifier",
+                input_tokens=100,
+                output_tokens=10,
+                total_tokens=110,
+                latency_s=0.01,
+                cost=0.001,
+                max_tokens=512,
+            )
+        )
+        monkeypatch.setattr(run_nudge_verify.llm_verify, "call_llm", mock_call)
+        cache = EvalCache(tmp_path / "eval-cache.sqlite")
+
+        first = run_case(case, cache=cache)
+        second = run_case(case, cache=cache)
+
+        assert first.passed
+        assert second.passed
+        assert first.execution is not None
+        assert second.execution is not None
+        assert first.execution.cache_hits == 0
+        assert first.execution.cache_misses == 1
+        assert second.execution.cache_hits == 1
+        assert second.execution.cache_misses == 0
+        assert second.execution.input_tokens == 100
         assert mock_call.call_count == 1
 
 

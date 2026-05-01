@@ -13,6 +13,7 @@ import json
 import sys
 import tempfile
 import time
+from contextlib import contextmanager
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -26,8 +27,8 @@ from config import (  # noqa: E402
     VERIFICATION_MODEL,
     VERIFICATION_REWRITE_MODEL,
 )
-from llm_verify import VerificationResult, verify_and_rewrite  # noqa: E402
-from store import connect_db  # noqa: E402
+import llm_verify  # noqa: E402
+from store import connect_db, log_llm_call  # noqa: E402
 
 
 def _resolved_model_label() -> str:
@@ -40,7 +41,12 @@ def _resolved_model_label() -> str:
     return f"{VERIFICATION_MODEL} (thinking={thinking})"
 
 
-def run_nudge_verify_case(case: Any) -> tuple[Any, str]:
+def run_nudge_verify_case(
+    case: Any,
+    *,
+    cache: Any = None,
+    refresh_cache: bool = False,
+) -> tuple[Any, str]:
     """Run one ``nudge_verify`` case and return its execution + model label."""
     from evals.framework import EvalExecution  # local import to avoid cycle
 
@@ -58,21 +64,30 @@ def run_nudge_verify_case(case: Any) -> tuple[Any, str]:
     metadata.setdefault("source_feedback_id", case.source_feedback_id)
 
     started = time.perf_counter()
+    cache_hits = 0
+    cache_misses = 0
     with tempfile.TemporaryDirectory() as tmp:
         conn = connect_db(Path(tmp) / "eval.db", migrate=True)
         try:
-            result: VerificationResult = verify_and_rewrite(
-                kind=kind,
-                draft=draft,
-                evidence=evidence,
-                source_messages=source_messages,
-                conn=conn,
-                metadata=metadata,
-                model=VERIFICATION_MODEL,
-                rewrite_model=VERIFICATION_REWRITE_MODEL,
-                max_revisions=0,
-                strict=False,
-            )
+            with _cached_verifier_calls(
+                cache=cache,
+                refresh_cache=refresh_cache,
+                counters={"hits": 0, "misses": 0},
+            ) as counters:
+                result: llm_verify.VerificationResult = llm_verify.verify_and_rewrite(
+                    kind=kind,
+                    draft=draft,
+                    evidence=evidence,
+                    source_messages=source_messages,
+                    conn=conn,
+                    metadata=metadata,
+                    model=VERIFICATION_MODEL,
+                    rewrite_model=VERIFICATION_REWRITE_MODEL,
+                    max_revisions=0,
+                    strict=False,
+                )
+                cache_hits = counters["hits"]
+                cache_misses = counters["misses"]
             payload = {
                 "verdict": result.verdict,
                 "confidence": result.confidence,
@@ -96,8 +111,99 @@ def run_nudge_verify_case(case: Any) -> tuple[Any, str]:
             total_tokens=total_tokens,
             latency_s=time.perf_counter() - started,
             cost=cost,
+            cache_hits=cache_hits,
+            cache_misses=cache_misses,
         ),
         _resolved_model_label(),
+    )
+
+
+@contextmanager
+def _cached_verifier_calls(
+    *,
+    cache: Any,
+    refresh_cache: bool,
+    counters: dict[str, int],
+):
+    """Temporarily route verifier LLM calls through the eval cache."""
+    if cache is None:
+        yield counters
+        return
+
+    original_call_llm = llm_verify.call_llm
+
+    def cached_call_llm(messages: list[dict[str, Any]], **kwargs: Any):
+        request = _cache_request(messages, kwargs)
+        if not refresh_cache:
+            cached = cache.get(request)
+            if cached is not None:
+                counters["hits"] += 1
+                _log_cached_result(cached, messages, kwargs)
+                return cached
+
+        counters["misses"] += 1
+        result = original_call_llm(messages, **kwargs)
+        cache.put(request, result)
+        return result
+
+    llm_verify.call_llm = cached_call_llm
+    try:
+        yield counters
+    finally:
+        llm_verify.call_llm = original_call_llm
+
+
+def _cache_request(
+    messages: list[dict[str, Any]],
+    kwargs: dict[str, Any],
+) -> dict[str, Any]:
+    """Build the eval-cache request key for a verifier LLM call."""
+    from evals.framework import EVAL_CACHE_SCHEMA_VERSION
+
+    return {
+        "cache_schema_version": EVAL_CACHE_SCHEMA_VERSION,
+        "runner": "nudge_verify",
+        "model": kwargs.get("model"),
+        "messages": messages,
+        "max_tokens": kwargs.get("max_tokens"),
+        "temperature": kwargs.get("temperature"),
+        "response_format": kwargs.get("response_format"),
+        "extra_body": kwargs.get("extra_body"),
+        "fallback_models": kwargs.get("fallback_models"),
+    }
+
+
+def _log_cached_result(
+    cached: Any,
+    messages: list[dict[str, Any]],
+    kwargs: dict[str, Any],
+) -> None:
+    """Mirror call_llm logging for cached verifier results in the temp DB."""
+    conn = kwargs.get("conn")
+    request_type = kwargs.get("request_type")
+    if conn is None or not request_type:
+        return
+    params = {
+        "max_tokens": kwargs.get("max_tokens"),
+        "temperature": kwargs.get("temperature"),
+    }
+    if kwargs.get("response_format") is not None:
+        params["response_format"] = kwargs["response_format"]
+    if kwargs.get("extra_body") is not None:
+        params["extra_body"] = kwargs["extra_body"]
+    cached.llm_call_id = log_llm_call(
+        conn,
+        request_type=str(request_type),
+        model=str(getattr(cached, "model", kwargs.get("model", ""))),
+        messages=messages,
+        response_text=str(getattr(cached, "text", "")),
+        params=params,
+        input_tokens=int(getattr(cached, "input_tokens", 0) or 0),
+        output_tokens=int(getattr(cached, "output_tokens", 0) or 0),
+        total_tokens=int(getattr(cached, "total_tokens", 0) or 0),
+        latency_s=float(getattr(cached, "latency_s", 0.0) or 0.0),
+        cost=getattr(cached, "cost", None),
+        metadata=kwargs.get("metadata"),
     )
 
 

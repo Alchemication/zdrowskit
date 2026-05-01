@@ -22,6 +22,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import litellm
+from pydantic import BaseModel
 
 from config import (
     DEEPSEEK_EXTRA_BODY,
@@ -90,7 +91,7 @@ _DEEPSEEK_V4_PRICING: dict[str, list[_TokenPricingWindow]] = {
             input_cache_hit_per_1m=0.0028,
             input_cache_miss_per_1m=0.14,
             output_per_1m=0.28,
-        )
+        ),
     ],
     "deepseek-v4-pro": [
         _TokenPricingWindow(
@@ -313,8 +314,23 @@ def _model_accepts_reasoning_effort(model: str) -> bool:
 
 
 def _model_accepts_response_format(model: str) -> bool:
-    """Return True when we should pass OpenAI-style response_format."""
-    return _is_deepseek_model(model)
+    """Return True when we should pass structured response hints."""
+    return True
+
+
+def _response_format_for_log(response_format: Any) -> Any:
+    """Return a JSON-serializable representation of a response format."""
+    if response_format is None:
+        return None
+    if isinstance(response_format, dict):
+        return response_format
+    if isinstance(response_format, type) and issubclass(response_format, BaseModel):
+        return {
+            "type": "pydantic",
+            "name": response_format.__name__,
+            "schema": response_format.model_json_schema(),
+        }
+    return str(response_format)
 
 
 def _model_accepts_extra_body(model: str) -> bool:
@@ -403,7 +419,7 @@ def _effective_params_for_model(
     max_tokens: int,
     temperature: float | None,
     reasoning_effort: str | None,
-    response_format: dict[str, Any] | None,
+    response_format: dict[str, Any] | type[BaseModel] | None,
     extra_body: dict[str, Any] | None,
     requested_model: str,
 ) -> dict[str, Any]:
@@ -421,9 +437,11 @@ def _effective_params_for_model(
         params["reasoning_effort_omitted_for_model"] = True
     if response_format is not None:
         if _model_accepts_response_format(model):
-            params["response_format"] = response_format
+            params["response_format"] = _response_format_for_log(response_format)
         else:
-            params["requested_response_format"] = response_format
+            params["requested_response_format"] = _response_format_for_log(
+                response_format
+            )
             params["response_format_omitted_for_model"] = True
     if extra_body is not None:
         if _model_accepts_extra_body(model):
@@ -552,7 +570,7 @@ def call_llm(
     max_tokens: int = MAX_TOKENS_DEFAULT,
     temperature: float | None = 0.7,
     reasoning_effort: str | None = None,
-    response_format: dict[str, Any] | None = None,
+    response_format: dict[str, Any] | type[BaseModel] | None = None,
     extra_body: dict[str, Any] | None = None,
     tools: list[dict] | None = None,
     fallback_models: list[str] | None = None,
