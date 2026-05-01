@@ -482,6 +482,55 @@ class TestChatRunner:
         assert second.execution.text == "Fresh response"
         assert mock_call.call_count == 1
 
+    def test_deepseek_thinking_flip_invalidates_cache(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        case = next(
+            case for case in load_cases() if case.id == "chat_explicit_add_to_log"
+        )
+        first_response = _llm_result("Thinking on", tool_calls=[])
+        second_response = _llm_result("Thinking off", tool_calls=[])
+        mock_call = MagicMock(side_effect=[first_response, second_response])
+        monkeypatch.setattr(llm, "call_llm", mock_call)
+        cache = EvalCache(tmp_path / "eval-cache.sqlite")
+
+        monkeypatch.setattr(llm, "DEEPSEEK_EXTRA_BODY", {"thinking": {"type": "enabled"}})
+        first = run_case(case, model="deepseek/deepseek-v4-pro", cache=cache)
+
+        monkeypatch.setattr(llm, "DEEPSEEK_EXTRA_BODY", {"thinking": {"type": "disabled"}})
+        second = run_case(case, model="deepseek/deepseek-v4-pro", cache=cache)
+
+        assert first.execution is not None
+        assert second.execution is not None
+        assert first.execution.text == "Thinking on"
+        assert second.execution.text == "Thinking off"
+        assert mock_call.call_count == 2
+
+    def test_anthropic_model_unaffected_by_deepseek_thinking_flip(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        case = next(
+            case for case in load_cases() if case.id == "chat_explicit_add_to_log"
+        )
+        mock_call = MagicMock(return_value=_llm_result("Fresh response", tool_calls=[]))
+        monkeypatch.setattr(llm, "call_llm", mock_call)
+        cache = EvalCache(tmp_path / "eval-cache.sqlite")
+
+        monkeypatch.setattr(llm, "DEEPSEEK_EXTRA_BODY", {"thinking": {"type": "enabled"}})
+        first = run_case(case, model="anthropic/claude-opus-4-7", cache=cache)
+
+        monkeypatch.setattr(llm, "DEEPSEEK_EXTRA_BODY", {"thinking": {"type": "disabled"}})
+        second = run_case(case, model="anthropic/claude-opus-4-7", cache=cache)
+
+        assert first.execution is not None
+        assert second.execution is not None
+        assert second.execution.text == first.execution.text
+        assert mock_call.call_count == 1
+
     def test_cached_execution_preserves_latency_and_cost(
         self,
         monkeypatch: pytest.MonkeyPatch,

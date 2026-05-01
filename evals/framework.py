@@ -757,6 +757,11 @@ def _call_llm_for_eval(
     refresh_cache: bool,
 ) -> tuple[llm.LLMResult, bool]:
     """Call the LLM for an eval case with optional request caching."""
+    # Mirror call_llm's injection of DEEPSEEK_EXTRA_BODY for DeepSeek models so
+    # flipping ZDROWSKIT_DEEPSEEK_THINKING invalidates only affected entries.
+    effective_extra_body = (
+        llm.DEEPSEEK_EXTRA_BODY if llm._model_accepts_extra_body(model) else None
+    )
     request = {
         "cache_schema_version": EVAL_CACHE_SCHEMA_VERSION,
         "model": model,
@@ -765,6 +770,7 @@ def _call_llm_for_eval(
         "temperature": temperature,
         "reasoning_effort": reasoning_effort,
         "tools": tools,
+        "extra_body": effective_extra_body,
     }
     if cache is not None and not refresh_cache:
         cached = cache.get(request)
