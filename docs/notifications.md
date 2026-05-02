@@ -13,6 +13,14 @@ Each notification type is a distinct LLM call with its own prompt, context, tool
 
 Use `/notify` in Telegram to inspect and change notification behavior without editing files by hand.
 
+CLI equivalents:
+
+```bash
+uv run python main.py notify
+uv run python main.py notify reset all
+uv run python main.py notify reset nudges
+```
+
 Examples:
 
 - `/notify`

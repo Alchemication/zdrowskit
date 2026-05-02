@@ -104,6 +104,8 @@ from cmd_events import CATEGORIES as EVENT_CATEGORIES, cmd_events
 from cmd_llm import cmd_coach, cmd_insights, cmd_nudge
 from cmd_llm_log import cmd_llm_log
 from cmd_models import cmd_models
+from cmd_notify import RESET_TARGETS as NOTIFY_RESET_TARGETS
+from cmd_notify import cmd_notify
 from commands import (
     cmd_context,
     cmd_daemon_install,
@@ -416,6 +418,22 @@ def main() -> None:
     p_llm_log.add_argument("--json", action="store_true", help="Output JSON")
     _add_db(p_llm_log)
 
+    # notify
+    p_notify = sub.add_parser("notify", help="Show or reset notification settings")
+    notify_sub = p_notify.add_subparsers(dest="notify_cmd")
+    notify_sub.add_parser("show", help="Show current notification settings")
+    p_notify_reset = notify_sub.add_parser(
+        "reset",
+        help="Reset notification settings to built-in defaults",
+    )
+    p_notify_reset.add_argument(
+        "target",
+        nargs="?",
+        default="all",
+        choices=NOTIFY_RESET_TARGETS,
+        help="Notification target to reset (default: all)",
+    )
+
     # models
     feature_choices = [
         "insights",
@@ -530,6 +548,7 @@ def main() -> None:
         "nudge": cmd_nudge,
         "coach": _cli_coach,
         "llm-log": cmd_llm_log,
+        "notify": cmd_notify,
         "models": cmd_models,
         "events": cmd_events,
         "daemon-install": cmd_daemon_install,

@@ -14,6 +14,7 @@ uv run python main.py setup               # create .env + first-run context file
 uv run python main.py doctor              # check local setup readiness
 uv run python main.py events              # system event log: fires, skips, imports
 uv run python main.py llm-log             # inspect stored LLM call traces
+uv run python main.py notify              # inspect/reset notification settings
 uv run python main.py models              # inspect/change model routing
 uv run python main.py telegram-setup      # register bot /commands for Telegram menu
 uv run python main.py daemon-install      # generate + load launchd daemon plist
@@ -30,6 +31,7 @@ uv run python main.py llm-log --id 42 --feedback
 uv run python main.py events --since 3d --category nudge
 uv run python main.py db status
 uv run python main.py db schema
+uv run python main.py notify reset all
 ```
 
 LLM evals have their own runner. See [LLM evals](evals.md).
