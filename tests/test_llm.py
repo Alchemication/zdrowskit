@@ -403,9 +403,12 @@ class TestCharts:
         assert '"looks solid"' in normalized
         assert "If the only thing you would say is positive" in normalized
 
-    def test_notify_prompt_requires_json_only_output(self) -> None:
+    def test_notify_prompt_keeps_behavioral_rules_and_examples(self) -> None:
         prompt = (PROMPTS_DIR / "notify_prompt.md").read_text(encoding="utf-8")
-        assert "Return JSON only." in prompt
+        # Schema is now provided via the Pydantic NotifyResponse class; the
+        # prompt no longer hand-codes it. Behavioral rules and example payloads
+        # stay because they teach the LLM the supported paths/values.
+        assert "Return JSON only." not in prompt
         assert '`status = "needs_clarification"`' in prompt
         assert '"action":"mute_until"' in prompt
 
@@ -1333,6 +1336,52 @@ class TestCallWithRetry:
         )
 
         assert kwargs["response_format"] is TestSchema
+
+    def test_deepseek_attempt_downgrades_pydantic_to_json_object_with_hint(
+        self,
+    ) -> None:
+        class VerdictSchema(BaseModel):
+            verdict: str
+
+        original_messages = [
+            {"role": "system", "content": "Be concise."},
+            {"role": "user", "content": "Is sky blue?"},
+        ]
+
+        kwargs = _completion_kwargs_for_model(
+            {
+                "model": DEEPSEEK_PRO_MODEL,
+                "messages": original_messages,
+                "max_tokens": 10,
+                "response_format": VerdictSchema,
+            },
+            DEEPSEEK_PRO_MODEL,
+        )
+
+        assert kwargs["response_format"] == {"type": "json_object"}
+        assert "VerdictSchema" in kwargs["messages"][0]["content"]
+        assert "verdict" in kwargs["messages"][0]["content"]
+        # Original messages list must not be mutated.
+        assert original_messages[0] == {"role": "system", "content": "Be concise."}
+        assert kwargs["messages"][1] == {"role": "user", "content": "Is sky blue?"}
+
+    def test_deepseek_attempt_inserts_system_when_missing(self) -> None:
+        class S(BaseModel):
+            x: int
+
+        kwargs = _completion_kwargs_for_model(
+            {
+                "model": DEEPSEEK_PRO_MODEL,
+                "messages": [{"role": "user", "content": "What?"}],
+                "max_tokens": 10,
+                "response_format": S,
+            },
+            DEEPSEEK_PRO_MODEL,
+        )
+
+        assert kwargs["messages"][0]["role"] == "system"
+        assert "x" in kwargs["messages"][0]["content"]
+        assert kwargs["messages"][1] == {"role": "user", "content": "What?"}
 
     def test_anthropic_attempt_omits_extra_body(self) -> None:
         kwargs = _completion_kwargs_for_model(

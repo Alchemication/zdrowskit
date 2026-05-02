@@ -387,12 +387,14 @@ class TestFindWorkoutClone:
         mock_result = MagicMock()
         mock_result.text = json.dumps(
             {
-                "type": "Outdoor Run",
-                "category": "run",
-                "duration_min": 40,
-                "hr_avg": 153,
-                "active_energy_kj": 1750,
-                "gpx_distance_km": 5.0,
+                "values": {
+                    "type": "Outdoor Run",
+                    "category": "run",
+                    "duration_min": 40,
+                    "hr_avg": 153,
+                    "active_energy_kj": 1750,
+                    "gpx_distance_km": 5.0,
+                },
                 "source_note": "median of recent runs",
             }
         )
@@ -436,9 +438,11 @@ class TestFindWorkoutClone:
         mock_result = MagicMock()
         mock_result.text = json.dumps(
             {
-                "type": "Outdoor Run",
-                "category": "run",
-                "duration_min": 42,
+                "values": {
+                    "type": "Outdoor Run",
+                    "category": "run",
+                    "duration_min": 42,
+                },
                 "source_note": "cloned",
             }
         )
@@ -456,9 +460,11 @@ class TestFindWorkoutClone:
         mock_result = MagicMock()
         mock_result.text = json.dumps(
             {
-                "type": "Traditional Strength Training",
-                "category": "lift",
-                "duration_min": 55,
+                "values": {
+                    "type": "Traditional Strength Training",
+                    "category": "lift",
+                    "duration_min": 55,
+                },
                 "source_note": "cloned from strength",
             }
         )

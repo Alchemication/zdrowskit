@@ -35,7 +35,9 @@ import time
 from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
+from pydantic import BaseModel, Field
 
 from config import MAX_TOKENS_ADD_CLONE, PROMPTS_DIR
 
@@ -68,6 +70,28 @@ class PendingAdd:
     sleep_in_bed_h: float | None = None
     saved_id: int | None = None  # row id after save, for undo
     saved_table: str | None = None  # "manual_workout" or "manual_sleep"
+
+
+class AddCloneResponse(BaseModel):
+    """Structured /add workout-clone response.
+
+    The dynamic workout-column keys live inside ``values`` so the outer
+    envelope is stable and validatable. Unknown keys are dropped at the call
+    site against ``_WORKOUT_CLONE_COLUMNS``.
+    """
+
+    values: dict[str, Any] = Field(
+        description=(
+            "Workout column values for the cloned entry, keyed by column name "
+            "(see the prompt for the allowed keys)."
+        )
+    )
+    source_note: str = Field(
+        description=(
+            "Short provenance note explaining the choice "
+            "(e.g. 'cloned from Apr 1 Outdoor Run')."
+        )
+    )
 
 
 def _load_add_clone_prompt(columns: tuple[str, ...]) -> str:
@@ -195,6 +219,7 @@ def find_workout_clone(
             **route,
             max_tokens=MAX_TOKENS_ADD_CLONE,
             temperature=temperature,
+            response_format=AddCloneResponse,
             conn=conn,
             request_type="add_clone",
         )
@@ -204,7 +229,13 @@ def find_workout_clone(
             if text.endswith("```"):
                 text = text[:-3]
             text = text.strip()
-        clone = json.loads(text)
+        parsed = AddCloneResponse.model_validate_json(text)
+        clone: dict[str, Any] = {
+            col: parsed.values[col]
+            for col in _WORKOUT_CLONE_COLUMNS
+            if col in parsed.values
+        }
+        clone["source_note"] = parsed.source_note
         clone["type"] = workout_type
         clone["category"] = category
         if duration_min is not None:

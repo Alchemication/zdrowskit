@@ -11,16 +11,17 @@ import json
 import logging
 import re
 import sqlite3
-from dataclasses import dataclass
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from typing import Any, Literal
+
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 from config import (
     MAX_TOKENS_VERIFICATION,
     MAX_TOKENS_VERIFICATION_REWRITE,
     MAX_VERIFICATION_REVISIONS,
     VERIFICATION_EXTRA_BODY,
-    VERIFICATION_RESPONSE_FORMAT,
     VERIFICATION_MODEL,
     VERIFICATION_REWRITE_MODEL,
 )
@@ -48,23 +49,79 @@ _PROMPT_BY_KIND: dict[VerificationKind, str] = {
 }
 
 
-@dataclass
-class VerificationIssue:
-    """One concrete verifier finding."""
+class VerificationIssue(BaseModel):
+    """One concrete verifier finding.
 
-    severity: Literal["critical", "major", "minor"]
-    quote: str
-    problem: str
-    correction: str
-    evidence: str | None = None
+    Pydantic-backed so the verifier LLM can produce instances directly via
+    ``response_format``. Severity is constrained to a fixed vocabulary.
+    """
+
+    severity: Literal["critical", "major", "minor"] = Field(
+        description=(
+            "Issue severity. 'critical' = unsafe / unsupported claim, "
+            "'major' = misleading framing, 'minor' = stylistic nit."
+        )
+    )
+    quote: str = Field(description="Short quote from the draft being criticized.")
+    problem: str = Field(description="What is wrong with the quoted text.")
+    correction: str = Field(description="Concrete replacement or fix.")
+    evidence: str | None = Field(
+        default=None,
+        description="Supporting evidence from the source data, when available.",
+    )
+
+    @field_validator("quote", "problem", "correction", mode="after")
+    @classmethod
+    def _strip_string(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("evidence", mode="after")
+    @classmethod
+    def _normalize_evidence(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
+
+
+class _VerifierPayload(BaseModel):
+    """Strict verifier payload as produced by the LLM (no pipeline state)."""
+
+    verdict: Verdict = Field(
+        description=(
+            "Overall verdict. 'pass' = ship as-is, 'revise' = minor fixes, "
+            "'fail' = do not ship."
+        )
+    )
+    issues: list[VerificationIssue] = Field(
+        default_factory=list,
+        description="One entry per issue. Empty when verdict is 'pass'.",
+    )
+    confidence: Literal["high", "medium", "low", "unknown"] = Field(
+        default="unknown", description="Verifier's confidence in the verdict."
+    )
+
+    @model_validator(mode="after")
+    def _coerce_pass_with_issues(self) -> _VerifierPayload:
+        # Verifier sometimes reports 'pass' while still listing issues.
+        # Treat that as 'revise' so the rewriter is invoked.
+        if self.verdict == "pass" and self.issues:
+            self.verdict = "revise"
+        return self
 
 
 @dataclass
 class VerificationResult:
-    """Parsed verifier result and optional bounded rewrite."""
+    """Parsed verifier result and optional bounded rewrite.
+
+    Holds both the LLM payload (verdict / issues / confidence) and pipeline
+    state populated after the call (revised_text, verifier_call_id,
+    rewrite_call_id). Stays a dataclass because callers mutate these fields
+    in-place across the verify-and-rewrite flow.
+    """
 
     verdict: Verdict
-    issues: list[VerificationIssue]
+    issues: list[VerificationIssue] = field(default_factory=list)
     confidence: str = "unknown"
     revised_text: str | None = None
     verifier_call_id: int | None = None
@@ -128,36 +185,13 @@ def slim_source_messages(
     return slim
 
 
-def _loads_json_object(text: str) -> dict[str, Any]:
-    """Parse a strict JSON object, tolerating only a single fenced block."""
+def _strip_json_fences(text: str) -> str:
+    """Drop a single ```json``` fence wrapping the payload, if present."""
     candidate = text.strip()
     if candidate.startswith("```"):
         candidate = re.sub(r"^```(?:json)?\s*", "", candidate)
         candidate = re.sub(r"\s*```$", "", candidate).strip()
-    data = json.loads(candidate)
-    if not isinstance(data, dict):
-        raise ValueError("verifier returned JSON, but not an object")
-    return data
-
-
-def _coerce_issue(raw: object) -> VerificationIssue:
-    """Validate and coerce one raw issue object."""
-    if not isinstance(raw, dict):
-        raise ValueError("verification issue must be an object")
-    severity = raw.get("severity", "major")
-    if severity not in {"critical", "major", "minor"}:
-        raise ValueError(f"unsupported verification severity: {severity!r}")
-    return VerificationIssue(
-        severity=severity,
-        quote=str(raw.get("quote", "")).strip(),
-        problem=str(raw.get("problem", "")).strip(),
-        correction=str(raw.get("correction", "")).strip(),
-        evidence=(
-            str(raw["evidence"]).strip()
-            if raw.get("evidence") not in {None, ""}
-            else None
-        ),
-    )
+    return candidate
 
 
 def parse_verification_result(text: str) -> VerificationResult:
@@ -172,20 +206,15 @@ def parse_verification_result(text: str) -> VerificationResult:
     Raises:
         ValueError: If the payload is malformed or violates the contract.
     """
-    data = _loads_json_object(text)
-    verdict = data.get("verdict")
-    if verdict not in {"pass", "revise", "fail"}:
-        raise ValueError(f"unsupported verification verdict: {verdict!r}")
-    raw_issues = data.get("issues", [])
-    if not isinstance(raw_issues, list):
-        raise ValueError("verification issues must be a list")
-    issues = [_coerce_issue(raw) for raw in raw_issues]
-    if verdict == "pass" and issues:
-        verdict = "revise"
+    candidate = _strip_json_fences(text)
+    try:
+        payload = _VerifierPayload.model_validate_json(candidate)
+    except ValidationError as exc:
+        raise ValueError(f"verifier payload failed validation: {exc}") from exc
     return VerificationResult(
-        verdict=verdict,
-        issues=issues,
-        confidence=str(data.get("confidence", "unknown")).strip() or "unknown",
+        verdict=payload.verdict,
+        issues=list(payload.issues),
+        confidence=payload.confidence,
     )
 
 
@@ -432,7 +461,7 @@ def _messages_for_rewriter(
     payload = {
         "kind": kind,
         "original_draft": draft,
-        "issues": [issue.__dict__ for issue in issues],
+        "issues": [issue.model_dump() for issue in issues],
         "evidence": evidence,
         "metadata": metadata,
     }
@@ -572,7 +601,7 @@ def verify_and_rewrite(
             model=model,
             max_tokens=MAX_TOKENS_VERIFICATION,
             temperature=0,
-            response_format=VERIFICATION_RESPONSE_FORMAT,
+            response_format=_VerifierPayload,
             extra_body=VERIFICATION_EXTRA_BODY,
             conn=conn,
             request_type=f"{kind}_verify",

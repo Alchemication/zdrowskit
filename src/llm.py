@@ -13,6 +13,7 @@ Public API:
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import sqlite3
@@ -318,6 +319,49 @@ def _model_accepts_response_format(model: str) -> bool:
     return True
 
 
+def _model_supports_json_schema(model: str) -> bool:
+    """Return True when the provider accepts a Pydantic / JSON-schema response_format.
+
+    DeepSeek currently rejects ``{"type": "json_schema", ...}`` with a 400; only
+    legacy ``{"type": "json_object"}`` is honored. Anthropic, OpenAI, and Azure
+    all accept Pydantic classes via litellm's automatic JSON-schema conversion.
+    """
+    normalized = model.lower()
+    return (
+        normalized.startswith("anthropic/")
+        or normalized.startswith("openrouter/anthropic/")
+        or normalized.startswith("openai/")
+        or normalized.startswith("azure/")
+    )
+
+
+def _pydantic_schema_hint(cls: type[BaseModel]) -> str:
+    """Render *cls* as a JSON-schema instruction block for prompt injection."""
+    return (
+        "Return ONE JSON object that conforms to this JSON Schema. "
+        "Your entire response is exactly one JSON object — first character `{`, "
+        "last `}`, no fences, no prose.\n\n"
+        + json.dumps(cls.model_json_schema(), indent=2)
+    )
+
+
+def _inject_schema_hint(
+    messages: list[dict[str, Any]], hint: str
+) -> list[dict[str, Any]]:
+    """Return a copy of *messages* with *hint* appended to the system message.
+
+    If no system message exists, one is inserted at the front.
+    """
+    new_messages: list[dict[str, Any]] = [dict(m) for m in messages]
+    for msg in new_messages:
+        if msg.get("role") == "system":
+            existing = msg.get("content") or ""
+            msg["content"] = f"{existing}\n\n{hint}" if existing else hint
+            return new_messages
+    new_messages.insert(0, {"role": "system", "content": hint})
+    return new_messages
+
+
 def _response_format_for_log(response_format: Any) -> Any:
     """Return a JSON-serializable representation of a response format."""
     if response_format is None:
@@ -406,7 +450,17 @@ def _completion_kwargs_for_model(kwargs: dict, model: str) -> dict:
     if effective_reasoning is not None:
         adjusted["reasoning_effort"] = effective_reasoning
     if requested_response_format is not None and _model_accepts_response_format(model):
-        adjusted["response_format"] = requested_response_format
+        is_pydantic = isinstance(requested_response_format, type) and issubclass(
+            requested_response_format, BaseModel
+        )
+        if is_pydantic and not _model_supports_json_schema(model):
+            adjusted["response_format"] = {"type": "json_object"}
+            adjusted["messages"] = _inject_schema_hint(
+                adjusted.get("messages", []),
+                _pydantic_schema_hint(requested_response_format),
+            )
+        else:
+            adjusted["response_format"] = requested_response_format
     if requested_extra_body is not None and _model_accepts_extra_body(model):
         adjusted["extra_body"] = requested_extra_body
     adjusted["model"] = model
@@ -437,7 +491,16 @@ def _effective_params_for_model(
         params["reasoning_effort_omitted_for_model"] = True
     if response_format is not None:
         if _model_accepts_response_format(model):
-            params["response_format"] = _response_format_for_log(response_format)
+            is_pydantic = isinstance(response_format, type) and issubclass(
+                response_format, BaseModel
+            )
+            if is_pydantic and not _model_supports_json_schema(model):
+                params["response_format"] = {"type": "json_object"}
+                params["pydantic_schema_injected"] = _response_format_for_log(
+                    response_format
+                )
+            else:
+                params["response_format"] = _response_format_for_log(response_format)
         else:
             params["requested_response_format"] = _response_format_for_log(
                 response_format

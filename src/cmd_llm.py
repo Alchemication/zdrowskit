@@ -15,7 +15,9 @@ import sys
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
+
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 from baselines import compute_baselines
 from charts import (
@@ -88,16 +90,74 @@ MAX_LOG_FLOW_STEPS = 2
 MAX_LOG_FLOW_OPTIONS_PER_STEP = 8
 
 
-@dataclass
-class LogFlowStep:
-    """One step in the /log tap-through flow."""
+class LogFlowStep(BaseModel):
+    """One step in the /log tap-through flow.
 
-    id: str
-    question: str
-    options: list[str]
-    multi_select: bool = False
-    optional: bool = False
-    ask_end_date_if_selected: list[str] | None = None
+    Pydantic-backed so the LLM can produce instances directly via
+    ``response_format`` and so cross-field constraints (option count,
+    ask_end_date_if_selected membership) live with the schema rather than in
+    a separate coercion helper.
+    """
+
+    id: str = Field(description="Stable identifier for the step.")
+    question: str = Field(description="Prompt shown to the user above the buttons.")
+    options: list[str] = Field(
+        description=(
+            "Tappable options. At least one entry, at most "
+            f"{MAX_LOG_FLOW_OPTIONS_PER_STEP}."
+        )
+    )
+    multi_select: bool = Field(
+        default=False, description="True when the user can pick multiple options."
+    )
+    optional: bool = Field(
+        default=False, description="True when the user may skip without selecting."
+    )
+    ask_end_date_if_selected: list[str] | None = Field(
+        default=None,
+        description=(
+            "Options that, if selected, prompt for an end-date follow-up. "
+            "Each entry must appear in `options`."
+        ),
+    )
+
+    @field_validator("id", "question", mode="after")
+    @classmethod
+    def _strip_required(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("must be a non-empty string")
+        return cleaned
+
+    @field_validator("options", mode="after")
+    @classmethod
+    def _validate_options(cls, value: list[str]) -> list[str]:
+        if not value:
+            raise ValueError("must include at least one option")
+        if len(value) > MAX_LOG_FLOW_OPTIONS_PER_STEP:
+            raise ValueError(
+                f"too many options ({len(value)}); max {MAX_LOG_FLOW_OPTIONS_PER_STEP}"
+            )
+        cleaned: list[str] = []
+        for opt in value:
+            stripped = opt.strip()
+            if not stripped:
+                raise ValueError("options must be non-empty strings")
+            cleaned.append(stripped)
+        return cleaned
+
+    @model_validator(mode="after")
+    def _validate_end_date_membership(self) -> LogFlowStep:
+        if self.ask_end_date_if_selected is None:
+            return self
+        normalized = [x.strip() for x in self.ask_end_date_if_selected]
+        unknown = [x for x in normalized if x not in self.options]
+        if unknown:
+            raise ValueError(
+                f"ask_end_date_if_selected references unknown options: {unknown}"
+            )
+        self.ask_end_date_if_selected = normalized
+        return self
 
 
 @dataclass
@@ -107,6 +167,41 @@ class LogFlow:
     steps: list[LogFlowStep]
     llm_call_id: int | None = None
     model: str | None = None
+
+
+class _LogFlowPayload(BaseModel):
+    """Strict LLM payload for the initial /log tap-flow call."""
+
+    steps: list[LogFlowStep] = Field(
+        description=(
+            f"Initial tap-through. Exactly {MAX_LOG_FLOW_INITIAL_STEPS} step "
+            "for the first call; a follow-up may be appended later."
+        )
+    )
+
+    @field_validator("steps", mode="after")
+    @classmethod
+    def _bounded_initial_steps(cls, value: list[LogFlowStep]) -> list[LogFlowStep]:
+        if not value:
+            raise ValueError("must include at least one step")
+        if len(value) > MAX_LOG_FLOW_INITIAL_STEPS:
+            raise ValueError(
+                f"too many steps ({len(value)}); "
+                f"max {MAX_LOG_FLOW_INITIAL_STEPS} for the initial call"
+            )
+        return value
+
+
+class _LogFollowupPayload(BaseModel):
+    """Strict LLM payload for the reactive follow-up call."""
+
+    step: LogFlowStep | None = Field(
+        default=None,
+        description=(
+            "Tailored follow-up step, or null when the bullet should commit "
+            "without a follow-up."
+        ),
+    )
 
 
 @dataclass
@@ -307,19 +402,53 @@ def _print_explain(
         stderr.print(f"\n[dim]Report saved to:[/dim] [cyan]{report_path}[/cyan]")
 
 
-def _extract_json_object(text: str) -> dict[str, Any]:
-    """Parse a top-level JSON object from model output.
-
-    Accepts plain JSON or a fenced code block containing JSON.
-    """
+def _strip_json_fences(text: str) -> str:
+    """Drop a ```json``` fence wrapping the payload, if present."""
     candidate = text.strip()
     if candidate.startswith("```"):
         candidate = re.sub(r"^```(?:json)?\s*", "", candidate)
         candidate = re.sub(r"\s*```$", "", candidate)
-    data = json.loads(candidate)
-    if not isinstance(data, dict):
-        raise ValueError("Notify interpreter must return a JSON object")
-    return data
+    return candidate
+
+
+class NotifyResponse(BaseModel):
+    """Structured notify-request interpretation produced by the LLM.
+
+    Outer envelope only — ``changes`` items are dict-shaped and validated
+    semantically by :func:`validate_notification_changes`, since the legal
+    paths and value types depend on runtime constants.
+    """
+
+    status: Literal["proposal", "needs_clarification", "unsupported"] = Field(
+        description=(
+            "Overall interpretation. 'proposal' = clear and actionable, "
+            "'needs_clarification' = ambiguous (ask one question), "
+            "'unsupported' = capability not available."
+        )
+    )
+    intent: Literal[
+        "show", "set", "enable", "disable", "reset", "reset_all", "mute_until"
+    ] = Field(description="High-level user intent.")
+    changes: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description=(
+            "Concrete change items (see Change schema in the system prompt). "
+            "Empty for 'show' or 'needs_clarification'."
+        ),
+    )
+    summary: str = Field(
+        default="", description="Short one-line description of the proposal."
+    )
+    clarification_question: str | None = Field(
+        default=None,
+        description=(
+            "Single short question when status is 'needs_clarification'; "
+            "otherwise null."
+        ),
+    )
+    reason: str = Field(
+        default="", description="Short debug explanation of the interpretation."
+    )
 
 
 def interpret_notify_request(
@@ -377,6 +506,7 @@ def interpret_notify_request(
             **route,
             max_tokens=MAX_TOKENS_NOTIFY,
             temperature=temperature,
+            response_format=NotifyResponse,
             conn=conn,
             request_type="notify",
             metadata={
@@ -388,37 +518,29 @@ def interpret_notify_request(
     finally:
         conn.close()
 
-    payload = _extract_json_object(result.text)
-    status = payload.get("status")
-    intent = payload.get("intent")
-    if status not in {"proposal", "needs_clarification", "unsupported"}:
-        raise ValueError(f"Unsupported notify status: {status}")
-    if intent not in {
-        "show",
-        "set",
-        "enable",
-        "disable",
-        "reset",
-        "reset_all",
-        "mute_until",
-    }:
-        raise ValueError(f"Unsupported notify intent: {intent}")
+    try:
+        parsed = NotifyResponse.model_validate_json(_strip_json_fences(result.text))
+    except ValidationError as exc:
+        raise ValueError(f"Notify interpreter returned invalid payload: {exc}") from exc
 
-    payload["changes"] = validate_notification_changes(payload.get("changes", []))
-    if status == "needs_clarification":
-        question = payload.get("clarification_question")
-        if not isinstance(question, str) or not question.strip():
+    if parsed.status == "needs_clarification":
+        question = (parsed.clarification_question or "").strip()
+        if not question:
             raise ValueError("Notify clarification must include a question")
-        payload["clarification_question"] = question.strip()
+        clarification = question
     else:
-        payload["clarification_question"] = None
+        clarification = None
 
-    summary = payload.get("summary", "")
-    payload["summary"] = summary.strip() if isinstance(summary, str) else ""
-    reason = payload.get("reason", "")
-    payload["reason"] = reason.strip() if isinstance(reason, str) else ""
-    payload["llm_call_id"] = result.llm_call_id
-    payload["model"] = result.model
+    payload: dict[str, Any] = {
+        "status": parsed.status,
+        "intent": parsed.intent,
+        "changes": validate_notification_changes(parsed.changes),
+        "summary": parsed.summary.strip(),
+        "clarification_question": clarification,
+        "reason": parsed.reason.strip(),
+        "llm_call_id": result.llm_call_id,
+        "model": result.model,
+    }
     return payload
 
 
@@ -478,53 +600,6 @@ def _query_today_snapshot(conn, today: date) -> str:
         lines.append("Today workouts: (none logged)")
 
     return "\n".join(lines)
-
-
-def _coerce_log_flow_step(raw: Any, index: int) -> LogFlowStep:
-    """Validate and coerce a single raw step dict into a LogFlowStep."""
-    if not isinstance(raw, dict):
-        raise ValueError(f"Step {index} is not an object")
-    step_id = raw.get("id")
-    question = raw.get("question")
-    options = raw.get("options")
-    if not isinstance(step_id, str) or not step_id.strip():
-        raise ValueError(f"Step {index} missing 'id'")
-    if not isinstance(question, str) or not question.strip():
-        raise ValueError(f"Step {index} missing 'question'")
-    if not isinstance(options, list) or not options:
-        raise ValueError(f"Step {index} missing non-empty 'options'")
-    if len(options) > MAX_LOG_FLOW_OPTIONS_PER_STEP:
-        raise ValueError(
-            f"Step {index} has {len(options)} options "
-            f"(max {MAX_LOG_FLOW_OPTIONS_PER_STEP})"
-        )
-    clean_options: list[str] = []
-    for j, opt in enumerate(options):
-        if not isinstance(opt, str) or not opt.strip():
-            raise ValueError(f"Step {index} option {j} is not a non-empty string")
-        clean_options.append(opt.strip())
-    ask_end = raw.get("ask_end_date_if_selected")
-    if ask_end is not None:
-        if not isinstance(ask_end, list) or not all(
-            isinstance(x, str) for x in ask_end
-        ):
-            raise ValueError(
-                f"Step {index} 'ask_end_date_if_selected' must be a list of strings"
-            )
-        unknown = [x for x in ask_end if x not in clean_options]
-        if unknown:
-            raise ValueError(
-                f"Step {index} 'ask_end_date_if_selected' references unknown "
-                f"options: {unknown}"
-            )
-    return LogFlowStep(
-        id=step_id.strip(),
-        question=question.strip(),
-        options=clean_options,
-        multi_select=bool(raw.get("multi_select", False)),
-        optional=bool(raw.get("optional", False)),
-        ask_end_date_if_selected=[x.strip() for x in ask_end] if ask_end else None,
-    )
 
 
 def _fallback_log_flow(today_snapshot: str) -> LogFlow:
@@ -597,24 +672,16 @@ def build_log_flow(
                     **attempt,
                     max_tokens=MAX_TOKENS_LOG_FLOW,
                     temperature=temperature,
+                    response_format=_LogFlowPayload,
                     conn=conn,
                     request_type="log_flow",
                     metadata={"date": today.isoformat()},
                 )
-                payload = _extract_json_object(result.text)
-                raw_steps = payload.get("steps")
-                if not isinstance(raw_steps, list) or not raw_steps:
-                    raise ValueError("Log flow must include a non-empty 'steps' array")
-                if len(raw_steps) > MAX_LOG_FLOW_INITIAL_STEPS:
-                    raise ValueError(
-                        f"Log flow returned {len(raw_steps)} steps "
-                        f"(max {MAX_LOG_FLOW_INITIAL_STEPS} for the initial call)"
-                    )
-                steps = [
-                    _coerce_log_flow_step(raw, i) for i, raw in enumerate(raw_steps)
-                ]
+                payload = _LogFlowPayload.model_validate_json(
+                    _strip_json_fences(result.text)
+                )
                 return LogFlow(
-                    steps=steps,
+                    steps=list(payload.steps),
                     llm_call_id=result.llm_call_id,
                     model=result.model,
                 )
@@ -691,6 +758,7 @@ def build_log_step_followup(
                     **attempt,
                     max_tokens=MAX_TOKENS_LOG_FLOW,
                     temperature=temperature,
+                    response_format=_LogFollowupPayload,
                     conn=conn,
                     request_type="log_flow_followup",
                     metadata={
@@ -699,11 +767,10 @@ def build_log_step_followup(
                         "prior_answer": prior_answer,
                     },
                 )
-                payload = _extract_json_object(result.text)
-                raw_step = payload.get("step")
-                if raw_step is None:
-                    return None
-                return _coerce_log_flow_step(raw_step, 1)
+                payload = _LogFollowupPayload.model_validate_json(
+                    _strip_json_fences(result.text)
+                )
+                return payload.step
             except Exception as exc:
                 last_error = exc
                 logger.warning(

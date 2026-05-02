@@ -9,12 +9,12 @@ from config import (
     MAX_TOKENS_VERIFICATION,
     MAX_TOKENS_VERIFICATION_REWRITE,
     VERIFICATION_EXTRA_BODY,
-    VERIFICATION_RESPONSE_FORMAT,
 )
 from events import query_events
 from llm import LLMResult
 from llm_verify import (
     VerificationIssue,
+    _VerifierPayload,
     deterministic_verification_issues,
     extract_tool_evidence,
     parse_verification_result,
@@ -215,7 +215,7 @@ class TestVerifyAndRewrite:
             MAX_TOKENS_VERIFICATION,
             MAX_TOKENS_VERIFICATION_REWRITE,
         ]
-        assert seen_response_formats == [VERIFICATION_RESPONSE_FORMAT, None]
+        assert seen_response_formats == [_VerifierPayload, None]
         assert seen_extra_bodies == [VERIFICATION_EXTRA_BODY, None]
         verify_metadata = json.loads(rows[0]["metadata_json"])
         assert verify_metadata["source_llm_call_id"] == 123

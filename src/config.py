@@ -293,14 +293,6 @@ MAX_VERIFICATION_REVISIONS: int = int(
 )
 """Maximum bounded rewrite attempts after a verifier returns revise."""
 
-VERIFY_JSON_MODE: bool = _env_bool("ZDROWSKIT_VERIFY_JSON_MODE", True)
-"""When True, request provider JSON mode for verifier calls that support it."""
-
-VERIFICATION_RESPONSE_FORMAT: dict[str, str] | None = (
-    {"type": "json_object"} if VERIFY_JSON_MODE else None
-)
-"""Structured response format requested for verifier calls."""
-
 VERIFY_DEEPSEEK_THINKING: str = os.environ.get(
     "ZDROWSKIT_VERIFY_DEEPSEEK_THINKING",
     DEEPSEEK_THINKING,

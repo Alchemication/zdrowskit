@@ -13,7 +13,6 @@ import json
 import sys
 import tempfile
 import time
-from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -84,7 +83,7 @@ def run_nudge_verify_case(
             payload = {
                 "verdict": result.verdict,
                 "confidence": result.confidence,
-                "issues": [asdict(issue) for issue in result.issues],
+                "issues": [issue.model_dump() for issue in result.issues],
                 "verifier_call_id": result.verifier_call_id,
             }
             text = json.dumps(payload, ensure_ascii=False, indent=2)
@@ -163,7 +162,10 @@ class _CachingCallLLM:
         messages: list[dict[str, Any]],
         kwargs: dict[str, Any],
     ) -> dict[str, Any]:
-        from evals.framework import EVAL_CACHE_SCHEMA_VERSION
+        from evals.framework import (
+            EVAL_CACHE_SCHEMA_VERSION,
+            _response_format_cache_key,
+        )
 
         return {
             "cache_schema_version": EVAL_CACHE_SCHEMA_VERSION,
@@ -172,7 +174,9 @@ class _CachingCallLLM:
             "messages": messages,
             "max_tokens": kwargs.get("max_tokens"),
             "temperature": kwargs.get("temperature"),
-            "response_format": kwargs.get("response_format"),
+            "response_format": _response_format_cache_key(
+                kwargs.get("response_format")
+            ),
             "extra_body": kwargs.get("extra_body"),
             "fallback_models": kwargs.get("fallback_models"),
         }

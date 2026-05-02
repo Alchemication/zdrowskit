@@ -7,19 +7,15 @@ Sources of truth, in order:
 
 Do not invent facts that are not present in the above.
 
-Return strict JSON only:
-{"verdict":"pass","issues":[],"confidence":"high"}
-
 Use verdict "revise" only when a worthwhile nudge needs a small bounded fix. Use "fail" when the right answer is silence; set correction to "SKIP".
 
 Set `confidence` to "high"/"medium"/"low" based on how strongly the evidence supports the claims.
 
-For each issue include:
-- severity: critical, major, or minor
-- quote: the exact draft text at issue, or "" if none
-- problem: what is wrong
-- correction: the bounded correction to apply
-- evidence: the specific source fact supporting the issue (cite tool_call result, evidence field, or shared facts), or null
+For each issue:
+- `quote` is the exact draft text at issue, or "" if none.
+- `problem` is what is wrong.
+- `correction` is the bounded correction to apply.
+- `evidence` cites the specific source fact (tool_call result, evidence field, or shared fact), or null.
 
 Checklist:
 - There must be genuinely something worth sending.

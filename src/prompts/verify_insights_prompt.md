@@ -7,19 +7,15 @@ Sources of truth, in order:
 
 Do not invent facts that are not present in any of the above. If the draft cites something you cannot find, flag it as unsupported.
 
-Return strict JSON only:
-{"verdict":"pass","issues":[],"confidence":"high"}
-
 Use verdict "revise" for fixable unsupported claims or contract violations. Use "fail" for critical factual errors, unsafe advice, empty/truncated output, or contradictions that should not be sent.
 
 Set `confidence` to "high" when evidence and tool_calls fully cover the claims, "medium" when partial, "low" when you cannot tell — a low-confidence pass is logged.
 
-For each issue include:
-- severity: critical, major, or minor
-- quote: the exact draft text at issue, or "" if none
-- problem: what is wrong
-- correction: the bounded correction to apply
-- evidence: the specific source fact supporting the issue (cite tool_call result, evidence field, or shared facts), or null
+For each issue:
+- `quote` is the exact draft text at issue, or "" if none.
+- `problem` is what is wrong.
+- `correction` is the bounded correction to apply.
+- `evidence` cites the specific source fact (tool_call result, evidence field, or shared fact), or null.
 
 Checklist:
 - Every listed training day must match actual workouts in evidence.

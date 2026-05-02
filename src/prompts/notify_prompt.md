@@ -1,13 +1,9 @@
 Today is {today} ({weekday}) in timezone {timezone}.
 
 You are interpreting a Telegram `/notify ...` request for notification settings.
-Your job is to convert the user's request into a strict JSON object.
+Your job is to convert the user's request into a structured response.
 
 ## Output rules
-
-Return JSON only. Your entire response is **exactly one JSON object**. The
-first character you emit is `{{` and the last is `}}`. No backticks, no
-` ```json ` fences, no prose before or after, no comments inside the JSON.
 
 - If the request is ambiguous, return `status = "needs_clarification"` and
   ask one short question.
@@ -94,16 +90,7 @@ Each item in `changes` must be one of:
 - `{{"action":"mute_until","target":"weekly_insights","expires_at":"2026-04-08T23:59:00+01:00","source_text":"pause weekly insights this week"}}`
 - `{{"action":"mute_until","target":"midweek_report","expires_at":"2026-04-08T23:59:00+01:00","source_text":"mute midweek report this week"}}`
 
-## Final JSON shape
-
-Every response is a single object with these fields:
-
-- `status` — one of `"proposal"`, `"needs_clarification"`, `"unsupported"`
-- `intent` — one of `"show"`, `"set"`, `"enable"`, `"disable"`, `"reset"`, `"reset_all"`, `"mute_until"`
-- `changes` — an array of change items from the Change schema above (empty `[]` for `intent: "show"` or `status: "needs_clarification"`)
-- `summary` — short one-line description of what is being proposed
-- `clarification_question` — string when `status = "needs_clarification"`, otherwise `null`
-- `reason` — short debug explanation of how you interpreted the request
+`changes` is empty (`[]`) for `intent: "show"` or `status: "needs_clarification"`. `clarification_question` is set only when `status: "needs_clarification"`.
 
 ## Examples
 

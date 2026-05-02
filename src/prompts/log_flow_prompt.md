@@ -9,10 +9,6 @@ to plan a life-events or disruption step here.
 
 ## Output rules
 
-Return JSON only. Your entire response is **exactly one JSON object**. The
-first character you emit is `{{` and the last is `}}`. No backticks, no
-` ```json ` fences, no prose before or after, no comments inside the JSON.
-
 The user will tap through the flow you design. A deterministic writer turns
 the taps into one `- YYYY-MM-DD [tag1] [tag2] …` bullet appended to log.md.
 You are not writing the bullet — only the interview.
@@ -52,23 +48,6 @@ You are not writing the bullet — only the interview.
   dimensions need to coexist (e.g. `solid` + `sore`).
 - **`optional`** should be `false` — a bare bullet with no state tag
   carries no signal.
-
-## JSON schema
-
-```
-{{
-  "steps": [
-    {{
-      "id": "state",
-      "question": "<short question shown above the keyboard>",
-      "options": ["<opt1>", "<opt2>", ...],
-      "multi_select": <true|false>,
-      "optional": <true|false>,
-      "ask_end_date_if_selected": ["<opt>", ...]    // optional, omit if N/A
-    }}
-  ]
-}}
-```
 
 ## Context
 

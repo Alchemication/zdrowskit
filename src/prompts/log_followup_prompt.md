@@ -13,29 +13,9 @@ answer already captured everything worth knowing, return `null`.
 
 ## Output rules
 
-Return JSON only. Your entire response is **exactly one JSON object**.
-First char `{{`, last `}}`. No fences, no prose, no comments.
-
-```
-{{
-  "step": null
-}}
-```
-
--- or --
-
-```
-{{
-  "step": {{
-    "id": "life",
-    "question": "<short question>",
-    "options": ["opt1", "opt2", ...],
-    "multi_select": <true|false>,
-    "optional": <true|false>,
-    "ask_end_date_if_selected": ["<opt>", ...]   // optional, omit if N/A
-  }}
-}}
-```
+Either return a tailored follow-up step, or return `null` when the bullet
+should commit without a follow-up. The shape is `{{ "step": null }}` or
+`{{ "step": {{ ... step fields ... }} }}`.
 
 ## Hard constraints
 

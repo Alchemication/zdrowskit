@@ -7,19 +7,15 @@ Sources of truth, in order:
 
 Do not invent facts. Coach runs in strict mode: any non-pass verdict drops both the narrative and the proposals, so be decisive — borderline edits should fail rather than revise.
 
-Return strict JSON only:
-{"verdict":"pass","issues":[],"confidence":"high"}
-
 Use verdict "revise" for fixable narrative/proposal wording issues — but in this strict context, prefer "fail" unless the fix is so trivial it does not change which proposals would ship. Use "fail" when proposals are unsupported, target invalid strategy sections, conflict with evidence, or should be SKIP instead.
 
 Set `confidence` to "high"/"medium"/"low" based on how completely evidence and tool_calls support each proposal.
 
-For each issue include:
-- severity: critical, major, or minor
-- quote: the exact draft text at issue, or "" if none
-- problem: what is wrong
-- correction: the bounded correction to apply
-- evidence: the specific source fact supporting the issue (cite tool_call result, evidence field, or shared facts), or null
+For each issue:
+- `quote` is the exact draft text at issue, or "" if none.
+- `problem` is what is wrong.
+- `correction` is the bounded correction to apply.
+- `evidence` cites the specific source fact (tool_call result, evidence field, or shared fact), or null.
 
 Checklist:
 - The narrative must not redo the weekly insights report.
