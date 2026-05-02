@@ -56,7 +56,7 @@ Some models reject a `temperature` parameter (for example `claude-opus-4-7`). Fo
 ## Supported features
 
 - `chat` — exercises the full chat tool loop end-to-end, taking the model from `--model`.
-- `nudge_verify` — exercises the production verifier path (`verify_and_rewrite` with the rewriter disabled). Models, JSON mode, and the deepseek thinking flag are resolved from `src/config.py` at runtime, so A/B these via env vars (`ZDROWSKIT_VERIFICATION_MODEL`, `ZDROWSKIT_VERIFY_DEEPSEEK_THINKING`, …) rather than `--model`.
+- `nudge_verify` — exercises the production verifier path (`verify_and_rewrite` with the rewriter disabled). Models, the Pydantic response schema, and the DeepSeek thinking flag are resolved by the production path at runtime, so A/B model/thinking behavior via env vars (`ZDROWSKIT_VERIFICATION_MODEL`, `ZDROWSKIT_VERIFY_DEEPSEEK_THINKING`, …) rather than `--model`.
 
 ## Leaderboard
 

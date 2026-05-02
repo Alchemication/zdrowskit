@@ -2,9 +2,10 @@
 
 Exercises the production verifier path (``verify_and_rewrite`` with the
 rewriter disabled) against a fixture captured from a real verifier call.
-Models and provider extras (deepseek thinking flag, JSON mode, etc.)
-are resolved by ``src/config.py`` at runtime, so swapping them via env
-vars is the supported way to A/B verifier behaviour.
+Models, provider extras (deepseek thinking flag), and the structured
+response schema are resolved by the production verifier path at runtime,
+so swapping model/thinking env vars is the supported way to A/B verifier
+behaviour.
 """
 
 from __future__ import annotations
