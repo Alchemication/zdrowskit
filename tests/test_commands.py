@@ -118,6 +118,8 @@ class TestLogFlowSnapshot:
         def fake_call_llm(_messages: list[dict], **kwargs: object) -> LLMResult:
             model = str(kwargs["model"])
             assert kwargs["max_tokens"] == 4096
+            assert kwargs["temperature"] is None
+            assert kwargs["reasoning_effort"] == "high"
             seen_models.append(model)
             if model == "primary-model":
                 return LLMResult(
@@ -150,6 +152,8 @@ class TestLogFlowSnapshot:
                 return_value={
                     "model": "primary-model",
                     "fallback_models": ["fallback-model"],
+                    "reasoning_effort": "high",
+                    "temperature": None,
                 },
             ),
             patch("cmd_llm.call_llm", side_effect=fake_call_llm),
@@ -263,6 +267,52 @@ class TestVerificationGate:
         )
 
         assert captured["strict"] is True
+
+    def test_verifier_route_reasoning_threads_through(
+        self,
+        in_memory_db: sqlite3.Connection,
+        monkeypatch,
+    ) -> None:
+        monkeypatch.setattr("cmd_llm.ENABLE_LLM_VERIFICATION", True)
+        monkeypatch.setattr("cmd_llm.VERIFY_NUDGE", True)
+
+        captured: dict[str, object] = {}
+
+        def fake_verify(**kwargs):
+            captured.update(kwargs)
+            return VerificationResult(verdict="pass", issues=[])
+
+        monkeypatch.setattr("cmd_llm.verify_and_rewrite", fake_verify)
+        monkeypatch.setattr(
+            "cmd_llm.resolve_model_route",
+            lambda feature: SimpleNamespace(
+                primary=f"{feature}-model",
+                fallback="opus-fallback" if feature == "verification" else None,
+                temperature=None if feature == "verification" else None,
+                reasoning_effort=(
+                    "high"
+                    if feature in {"verification", "verification_rewrite"}
+                    else None
+                ),
+            ),
+        )
+
+        approved = _apply_verification(
+            kind="nudge",
+            draft="good nudge",
+            evidence={},
+            source_messages=[],
+            conn=in_memory_db,
+            metadata={},
+        )
+
+        assert approved == "good nudge"
+        assert captured["model"] == "verification-model"
+        assert captured["fallback_models"] == ["opus-fallback"]
+        assert captured["temperature"] is None
+        assert captured["reasoning_effort"] == "high"
+        assert captured["rewrite_temperature"] is None
+        assert captured["rewrite_reasoning_effort"] == "high"
 
 
 class TestCmdCoach:

@@ -163,11 +163,15 @@ class TestVerifyAndRewrite:
         seen_max_tokens = []
         seen_response_formats = []
         seen_extra_bodies = []
+        seen_temperatures = []
+        seen_reasoning = []
 
         def fake_call_llm(messages, **kwargs):
             seen_max_tokens.append(kwargs["max_tokens"])
             seen_response_formats.append(kwargs.get("response_format"))
             seen_extra_bodies.append(kwargs.get("extra_body"))
+            seen_temperatures.append(kwargs.get("temperature"))
+            seen_reasoning.append(kwargs.get("reasoning_effort"))
             text = outputs.pop(0)
             row_id = log_llm_call(
                 kwargs["conn"],
@@ -199,6 +203,10 @@ class TestVerifyAndRewrite:
             model="verify-model",
             rewrite_model="rewrite-model",
             max_revisions=1,
+            reasoning_effort="high",
+            temperature=None,
+            rewrite_reasoning_effort="high",
+            rewrite_temperature=None,
         )
 
         assert result.verdict == "revise"
@@ -217,11 +225,57 @@ class TestVerifyAndRewrite:
         ]
         assert seen_response_formats == [_VerifierPayload, None]
         assert seen_extra_bodies == [VERIFICATION_EXTRA_BODY, None]
+        assert seen_temperatures == [None, None]
+        assert seen_reasoning == ["high", "high"]
         verify_metadata = json.loads(rows[0]["metadata_json"])
         assert verify_metadata["source_llm_call_id"] == 123
         assert verify_metadata["verdict"] == "revise"
         assert verify_metadata["issue_count"] == 1
         assert verify_metadata["major_count"] == 1
+
+    def test_verifier_reasoning_effort_is_passed_to_llm(
+        self,
+        in_memory_db: sqlite3.Connection,
+        monkeypatch,
+    ) -> None:
+        seen_reasoning: list[str | None] = []
+        seen_temperature: list[float | None] = []
+        seen_fallback_models: list[list[str] | None] = []
+
+        def fake_call_llm(_messages, **kwargs):
+            seen_reasoning.append(kwargs.get("reasoning_effort"))
+            seen_temperature.append(kwargs.get("temperature"))
+            seen_fallback_models.append(kwargs.get("fallback_models"))
+            return LLMResult(
+                text='{"verdict":"pass","issues":[],"confidence":"high"}',
+                model=kwargs["model"],
+                input_tokens=1,
+                output_tokens=1,
+                total_tokens=2,
+                latency_s=0.1,
+            )
+
+        monkeypatch.setattr("llm_verify.call_llm", fake_call_llm)
+
+        result = verify_and_rewrite(
+            kind="nudge",
+            draft="Short nudge.",
+            evidence={},
+            source_messages=[],
+            conn=in_memory_db,
+            metadata={},
+            model="verify-model",
+            rewrite_model="rewrite-model",
+            fallback_models=["fallback-model"],
+            temperature=None,
+            reasoning_effort="high",
+            max_revisions=1,
+        )
+
+        assert result.verdict == "pass"
+        assert seen_reasoning == ["high"]
+        assert seen_temperature == [None]
+        assert seen_fallback_models == [["fallback-model"]]
 
     def test_malformed_verifier_json_fails_safely(
         self,

@@ -540,6 +540,11 @@ def verify_and_rewrite(
     metadata: dict[str, Any],
     model: str = VERIFICATION_MODEL,
     rewrite_model: str = VERIFICATION_REWRITE_MODEL,
+    fallback_models: list[str] | None = None,
+    temperature: float | None = 0,
+    reasoning_effort: str | None = None,
+    rewrite_temperature: float | None = 0,
+    rewrite_reasoning_effort: str | None = None,
     max_revisions: int = MAX_VERIFICATION_REVISIONS,
     strict: bool = False,
     _call_llm: CallLLM | None = None,
@@ -555,6 +560,16 @@ def verify_and_rewrite(
         metadata: Product metadata to store with verifier/rewrite calls.
         model: Verifier model.
         rewrite_model: Bounded rewriter model.
+        fallback_models: Optional explicit verifier fallback chain.
+        temperature: Verifier sampling temperature. Pass ``None`` to omit it
+            for model routes that reject the parameter.
+        reasoning_effort: Optional reasoning effort for verifier models that
+            accept it. DeepSeek verifier depth is controlled through
+            ``VERIFICATION_EXTRA_BODY`` instead.
+        rewrite_temperature: Rewriter sampling temperature. Pass ``None`` to
+            omit it for model routes that reject the parameter.
+        rewrite_reasoning_effort: Optional reasoning effort for rewriter models
+            that accept it.
         max_revisions: Maximum rewrite attempts; normally 0 or 1. The rewriter
             is also bypassed entirely when *strict* is True.
         strict: When True, treat any non-pass verdict as fail and skip the
@@ -600,9 +615,11 @@ def verify_and_rewrite(
             verifier_messages,
             model=model,
             max_tokens=MAX_TOKENS_VERIFICATION,
-            temperature=0,
+            temperature=temperature,
+            reasoning_effort=reasoning_effort,
             response_format=_VerifierPayload,
             extra_body=VERIFICATION_EXTRA_BODY,
+            fallback_models=fallback_models,
             conn=conn,
             request_type=f"{kind}_verify",
             metadata={**metadata, "stage": "verify"},
@@ -718,7 +735,8 @@ def verify_and_rewrite(
             rewrite_messages,
             model=rewrite_model,
             max_tokens=MAX_TOKENS_VERIFICATION_REWRITE,
-            temperature=0,
+            temperature=rewrite_temperature,
+            reasoning_effort=rewrite_reasoning_effort,
             conn=conn,
             request_type=f"{kind}_rewrite",
             metadata={

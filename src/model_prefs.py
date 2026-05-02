@@ -41,7 +41,7 @@ from config import (
     VERIFICATION_REWRITE_MODEL,
 )
 
-PREFS_VERSION = 2
+PREFS_VERSION = 6
 
 PRO_FEATURES: tuple[str, ...] = (
     "insights",
@@ -58,6 +58,17 @@ FLASH_FEATURES: tuple[str, ...] = (
 )
 FEATURES: tuple[str, ...] = PRO_FEATURES + FLASH_FEATURES
 ASYNC_QUALITY_FEATURES: tuple[str, ...] = ("insights", "coach", "nudge")
+FLASH_REASONING_FEATURES: tuple[str, ...] = (
+    "chat",
+    "log_flow",
+    "add_clone",
+    "verification_rewrite",
+)
+HIGH_REASONING_FEATURES: tuple[str, ...] = (
+    *ASYNC_QUALITY_FEATURES,
+    *FLASH_REASONING_FEATURES,
+    "verification",
+)
 
 FEATURE_LABELS: dict[str, str] = {
     "insights": "Reports",
@@ -143,20 +154,34 @@ def default_model_prefs() -> dict[str, Any]:
             "chat": {
                 "profile": "flash",
                 "primary": DEFAULT_CHAT_MODEL,
-                "reasoning_effort": None,
-                "temperature": 0.7,
+                "reasoning_effort": "high",
+                "temperature": None,
             },
             "notify": {"profile": "flash", "primary": DEFAULT_NOTIFY_MODEL},
             "log_flow": {
                 "profile": "flash",
                 "primary": DEFAULT_LOG_FLOW_MODEL,
-                "fallback": PRIMARY_FLASH_MODEL,
+                "reasoning_effort": "high",
+                "temperature": None,
             },
-            "add_clone": {"profile": "flash", "primary": DEFAULT_ADD_CLONE_MODEL},
-            "verification": {"profile": "pro", "primary": VERIFICATION_MODEL},
+            "add_clone": {
+                "profile": "flash",
+                "primary": DEFAULT_ADD_CLONE_MODEL,
+                "reasoning_effort": "high",
+                "temperature": None,
+            },
+            "verification": {
+                "profile": "pro",
+                "primary": VERIFICATION_MODEL,
+                "fallback": ANTHROPIC_OPUS_4_7_MODEL,
+                "reasoning_effort": "high",
+                "temperature": None,
+            },
             "verification_rewrite": {
                 "profile": "flash",
                 "primary": VERIFICATION_REWRITE_MODEL,
+                "reasoning_effort": "high",
+                "temperature": None,
             },
         },
     }
@@ -258,7 +283,7 @@ def load_model_prefs(path: Path | None = None) -> dict[str, Any]:
     if isinstance(raw_features, dict):
         for feature, override in raw_features.items():
             if feature in prefs["features"] and isinstance(override, dict):
-                if _is_legacy_v1_default_override(prefs_version, feature, override):
+                if _is_legacy_default_override(prefs_version, feature, override):
                     continue
                 clean = {
                     key: value
@@ -276,12 +301,12 @@ def load_model_prefs(path: Path | None = None) -> dict[str, Any]:
     return prefs
 
 
-def _is_legacy_v1_default_override(
+def _is_legacy_default_override(
     prefs_version: int,
     feature: str,
     override: dict[str, Any],
 ) -> bool:
-    """Return True for v1 entries that only persisted old built-in defaults."""
+    """Return True for entries that only persisted old built-in defaults."""
     if prefs_version >= PREFS_VERSION:
         return False
     if feature in ASYNC_QUALITY_FEATURES:
@@ -293,12 +318,50 @@ def _is_legacy_v1_default_override(
             and "temperature" not in override
         )
     if feature == "chat":
+        if (
+            override.get("profile") == "flash"
+            and override.get("primary") == PRIMARY_FLASH_MODEL
+            and "fallback" not in override
+            and override.get("reasoning_effort") in {None, "high"}
+            and override.get("temperature") in {None, 0.7}
+        ):
+            return True
         return (
             override.get("profile") == "pro"
             and override.get("primary") == ANTHROPIC_OPUS_4_7_MODEL
             and override.get("fallback") == PRIMARY_PRO_MODEL
             and override.get("reasoning_effort") is None
             and override.get("temperature") is None
+        )
+    if feature == "log_flow":
+        return (
+            override.get("profile") == "flash"
+            and override.get("primary") == ANTHROPIC_HAIKU_MODEL
+            and override.get("fallback") == PRIMARY_FLASH_MODEL
+            and override.get("reasoning_effort") in {None, "high"}
+            and override.get("temperature") is None
+        ) or (
+            override.get("profile") == "flash"
+            and override.get("primary") == PRIMARY_FLASH_MODEL
+            and "fallback" not in override
+            and override.get("reasoning_effort") in {None, "high"}
+            and override.get("temperature") is None
+        )
+    if feature in {"add_clone", "verification_rewrite"}:
+        return (
+            override.get("profile") == "flash"
+            and override.get("primary") == PRIMARY_FLASH_MODEL
+            and "fallback" not in override
+            and override.get("reasoning_effort") in {None, "high"}
+            and override.get("temperature") is None
+        )
+    if feature == "verification":
+        return (
+            override.get("profile") == "pro"
+            and override.get("primary") == PRIMARY_PRO_MODEL
+            and "fallback" not in override
+            and "reasoning_effort" not in override
+            and "temperature" not in override
         )
     return False
 
@@ -338,8 +401,8 @@ def resolve_model_route(
 
     # Effective reasoning/temperature: per-feature override wins; otherwise
     # feature/model defaults apply. Opus 4.7 must omit temperature; async
-    # judgment surfaces use high reasoning, while chat keeps reasoning off
-    # for latency.
+    # judgment surfaces use high Anthropic reasoning, while DeepSeek thinking
+    # is handled separately by llm.call_llm's extra_body default.
     primary_defaults = _feature_model_defaults(feature, primary)
     params: dict[str, Any] = {}
     for key in ("reasoning_effort", "temperature"):
@@ -365,7 +428,9 @@ def _feature_model_defaults(feature: str, primary: str) -> dict[str, Any]:
     """Return reasoning/temperature defaults for a feature/model pair."""
     if primary == ANTHROPIC_OPUS_4_7_MODEL:
         return {
-            "reasoning_effort": ("high" if feature in ASYNC_QUALITY_FEATURES else None),
+            "reasoning_effort": (
+                "high" if feature in HIGH_REASONING_FEATURES else None
+            ),
             "temperature": None,
         }
     return {}

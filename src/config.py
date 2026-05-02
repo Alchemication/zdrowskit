@@ -249,7 +249,7 @@ DEFAULT_NOTIFY_MODEL: str = os.environ.get(
 
 DEFAULT_LOG_FLOW_MODEL: str = os.environ.get(
     "ZDROWSKIT_LOG_FLOW_MODEL",
-    ANTHROPIC_HAIKU_MODEL,
+    PRIMARY_FLASH_MODEL,
 )
 """Default model for /log tap-flow generation."""
 

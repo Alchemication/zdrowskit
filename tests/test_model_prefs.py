@@ -41,14 +41,25 @@ class TestModelPrefs:
 
         assert route.primary == PRIMARY_FLASH_MODEL
         assert route.fallback == ANTHROPIC_HAIKU_MODEL
-        assert route.call_kwargs()["reasoning_effort"] is None
-        assert route.call_kwargs()["temperature"] == 0.7
+        assert route.call_kwargs()["reasoning_effort"] == "high"
+        assert route.call_kwargs()["temperature"] is None
 
-    def test_log_flow_defaults_to_haiku_with_deepseek_flash_fallback(self, tmp_path):
+    def test_log_flow_defaults_to_deepseek_flash_with_haiku_fallback(self, tmp_path):
         route = resolve_model_route("log_flow", path=tmp_path / "models.json")
 
-        assert route.primary == ANTHROPIC_HAIKU_MODEL
-        assert route.fallback == DEEPSEEK_FLASH_MODEL
+        assert route.primary == DEEPSEEK_FLASH_MODEL
+        assert route.fallback == ANTHROPIC_HAIKU_MODEL
+        assert route.call_kwargs()["reasoning_effort"] == "high"
+        assert route.call_kwargs()["temperature"] is None
+
+    def test_flash_utility_defaults_use_reasoning_without_temperature(self, tmp_path):
+        for feature in ("add_clone", "verification_rewrite"):
+            route = resolve_model_route(feature, path=tmp_path / "models.json")
+
+            assert route.primary == PRIMARY_FLASH_MODEL
+            assert route.fallback == ANTHROPIC_HAIKU_MODEL
+            assert route.call_kwargs()["reasoning_effort"] == "high"
+            assert route.call_kwargs()["temperature"] is None
 
     def test_feature_override_and_reset(self, tmp_path):
         path = tmp_path / "models.json"
@@ -133,6 +144,72 @@ class TestModelPrefs:
         assert nudge.primary == ANTHROPIC_OPUS_4_7_MODEL
         assert nudge.reasoning_effort == "high"
 
+    def test_legacy_default_chat_and_log_flow_routes_migrate_to_new_defaults(
+        self, tmp_path
+    ):
+        path = tmp_path / "models.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "version": 2,
+                    "features": {
+                        "chat": {
+                            "profile": "flash",
+                            "primary": PRIMARY_FLASH_MODEL,
+                            "reasoning_effort": None,
+                            "temperature": 0.7,
+                        },
+                        "log_flow": {
+                            "profile": "flash",
+                            "primary": ANTHROPIC_HAIKU_MODEL,
+                            "fallback": PRIMARY_FLASH_MODEL,
+                        },
+                    },
+                }
+            )
+        )
+
+        chat = resolve_model_route("chat", path=path)
+        log_flow = resolve_model_route("log_flow", path=path)
+
+        assert chat.primary == PRIMARY_FLASH_MODEL
+        assert chat.reasoning_effort == "high"
+        assert chat.temperature is None
+        assert log_flow.primary == PRIMARY_FLASH_MODEL
+        assert log_flow.fallback == ANTHROPIC_HAIKU_MODEL
+        assert log_flow.reasoning_effort == "high"
+        assert log_flow.temperature is None
+
+    def test_legacy_default_flash_utility_routes_migrate_to_new_defaults(
+        self, tmp_path
+    ):
+        path = tmp_path / "models.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "version": 5,
+                    "features": {
+                        "add_clone": {
+                            "profile": "flash",
+                            "primary": PRIMARY_FLASH_MODEL,
+                        },
+                        "verification_rewrite": {
+                            "profile": "flash",
+                            "primary": PRIMARY_FLASH_MODEL,
+                        },
+                    },
+                }
+            )
+        )
+
+        add_clone = resolve_model_route("add_clone", path=path)
+        verification_rewrite = resolve_model_route("verification_rewrite", path=path)
+
+        assert add_clone.reasoning_effort == "high"
+        assert add_clone.temperature is None
+        assert verification_rewrite.reasoning_effort == "high"
+        assert verification_rewrite.temperature is None
+
     def test_legacy_v1_explicit_async_override_is_preserved(self, tmp_path):
         path = tmp_path / "models.json"
         path.write_text(
@@ -168,8 +245,8 @@ class TestModelPrefs:
 
         route = resolve_model_route("chat", path=path)
         assert route.primary == PRIMARY_FLASH_MODEL
-        assert route.temperature == 0.7
-        assert route.reasoning_effort is None
+        assert route.reasoning_effort == "high"
+        assert route.temperature is None
 
     def test_reset_all_restores_every_feature(self, tmp_path):
         path = tmp_path / "models.json"
@@ -205,8 +282,8 @@ class TestModelPrefs:
 
         route = resolve_model_route("chat", path=path)
         assert route.primary == PRIMARY_PRO_MODEL
-        assert route.reasoning_effort is None
-        assert route.temperature == 0.7
+        assert route.reasoning_effort == "high"
+        assert route.temperature is None
 
     def test_explicit_reasoning_override_persists(self, tmp_path):
         path = tmp_path / "models.json"
@@ -219,6 +296,45 @@ class TestModelPrefs:
 
         route = resolve_model_route("coach", path=path)
         assert route.reasoning_effort == "medium"
+
+    def test_opus_verifier_defaults_to_high_reasoning(self, tmp_path):
+        path = tmp_path / "models.json"
+        set_feature_route("verification", primary=ANTHROPIC_OPUS_4_7_MODEL, path=path)
+
+        route = resolve_model_route("verification", path=path)
+
+        assert route.reasoning_effort == "high"
+        assert route.temperature is None
+
+    def test_verifier_defaults_to_opus_fallback_with_high_reasoning(self, tmp_path):
+        route = resolve_model_route("verification", path=tmp_path / "models.json")
+
+        assert route.primary == PRIMARY_PRO_MODEL
+        assert route.fallback == ANTHROPIC_OPUS_4_7_MODEL
+        assert route.reasoning_effort == "high"
+        assert route.temperature is None
+
+    def test_legacy_default_verifier_route_migrates_to_new_defaults(self, tmp_path):
+        path = tmp_path / "models.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "version": 3,
+                    "features": {
+                        "verification": {
+                            "profile": "pro",
+                            "primary": PRIMARY_PRO_MODEL,
+                        }
+                    },
+                }
+            )
+        )
+
+        route = resolve_model_route("verification", path=path)
+
+        assert route.fallback == ANTHROPIC_OPUS_4_7_MODEL
+        assert route.reasoning_effort == "high"
+        assert route.temperature is None
 
     def test_profile_fallback_for_returns_profile_fallback(self, tmp_path):
         path = tmp_path / "models.json"

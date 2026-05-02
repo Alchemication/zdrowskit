@@ -60,7 +60,7 @@ Telegram commands include:
 
 - Features are grouped as Chat, Reports, Coach, Nudges, and Utilities.
 - Every model button is tagged with its capability tier.
-- Chat exposes Reasoning and Temperature pickers.
+- Chat exposes Reasoning and Temperature.
 - `Reset all` restores built-in defaults.
 - Picking `Auto` for fallback stores JSON `null` and defers to the profile fallback at resolve time.
 

@@ -925,6 +925,11 @@ def _apply_verification(
         metadata=metadata,
         model=verifier_route.primary,
         rewrite_model=rewrite_route.primary,
+        fallback_models=[verifier_route.fallback] if verifier_route.fallback else None,
+        temperature=verifier_route.temperature,
+        reasoning_effort=verifier_route.reasoning_effort,
+        rewrite_temperature=rewrite_route.temperature,
+        rewrite_reasoning_effort=rewrite_route.reasoning_effort,
         max_revisions=MAX_VERIFICATION_REVISIONS,
         strict=strict,
     )
