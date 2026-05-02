@@ -26,7 +26,6 @@ import litellm
 from pydantic import BaseModel
 
 from config import (
-    DEEPSEEK_EXTRA_BODY,
     DEFAULT_MODEL,
     FALLBACK_FLASH_MODEL,
     FALLBACK_PRO_MODEL,
@@ -306,12 +305,26 @@ def _is_budget_model(model: str) -> bool:
     return "haiku" in normalized or "flash" in normalized
 
 
-def _model_accepts_reasoning_effort(model: str) -> bool:
-    """Return True when we should pass LiteLLM reasoning_effort to *model*."""
-    normalized = model.lower()
-    return normalized.startswith("anthropic/claude-") or normalized.startswith(
-        "openrouter/anthropic/claude-"
-    )
+# DeepSeek thinking mode is binary; high/max reasoning_effort engages it via
+# extra_body. Anything else (low/medium/none/None) sends no extra_body, leaving
+# thinking off. Anthropic models receive reasoning_effort natively.
+_DEEPSEEK_THINKING_ENABLED: dict[str, Any] = {"thinking": {"type": "enabled"}}
+
+
+def _reasoning_engaged(model: str, reasoning_effort: str | None) -> bool:
+    """Return True when *reasoning_effort* actually engages reasoning on *model*.
+
+    For Anthropic, any non-None / non-"none" effort engages extended thinking.
+    For DeepSeek, only "high" or "max" engages thinking mode. Other providers
+    ignore reasoning entirely.
+    """
+    if reasoning_effort in (None, "none"):
+        return False
+    if _is_anthropic_model(model):
+        return True
+    if _is_deepseek_model(model):
+        return reasoning_effort in {"high", "max"}
+    return False
 
 
 def _model_accepts_response_format(model: str) -> bool:
@@ -377,11 +390,6 @@ def _response_format_for_log(response_format: Any) -> Any:
     return str(response_format)
 
 
-def _model_accepts_extra_body(model: str) -> bool:
-    """Return True when provider-specific extra_body should be passed."""
-    return _is_deepseek_model(model)
-
-
 def _dedupe_models(models: list[str]) -> list[str]:
     """Remove duplicate model ids while preserving order."""
     seen: set[str] = set()
@@ -430,7 +438,13 @@ def _fallback_chain(model: str, fallback_models: list[str] | None = None) -> lis
 
 
 def _completion_kwargs_for_model(kwargs: dict, model: str) -> dict:
-    """Return LiteLLM kwargs adjusted for a specific attempted model."""
+    """Return LiteLLM kwargs adjusted for a specific attempted model.
+
+    Per-attempt translation: Anthropic receives ``reasoning_effort`` natively;
+    DeepSeek translates ``reasoning_effort`` of ``high`` or ``max`` into
+    ``extra_body={"thinking": {"type": "enabled"}}`` unless the caller passed
+    an explicit ``extra_body`` (which always wins).
+    """
     adjusted = {k: v for k, v in kwargs.items() if k != "model"}
     requested_reasoning = adjusted.pop("reasoning_effort", None)
     requested_response_format = adjusted.pop("response_format", None)
@@ -438,17 +452,15 @@ def _completion_kwargs_for_model(kwargs: dict, model: str) -> dict:
     has_temperature = "temperature" in adjusted
     requested_temperature = adjusted.pop("temperature", None)
 
-    effective_reasoning = (
-        requested_reasoning if _model_accepts_reasoning_effort(model) else None
-    )
+    anthropic_reasoning = requested_reasoning if _is_anthropic_model(model) else None
     if has_temperature:
         effective_temperature = (
-            1.0 if effective_reasoning is not None else requested_temperature
+            1.0 if anthropic_reasoning is not None else requested_temperature
         )
         if effective_temperature is not None:
             adjusted["temperature"] = effective_temperature
-    if effective_reasoning is not None:
-        adjusted["reasoning_effort"] = effective_reasoning
+    if anthropic_reasoning is not None:
+        adjusted["reasoning_effort"] = anthropic_reasoning
     if requested_response_format is not None and _model_accepts_response_format(model):
         is_pydantic = isinstance(requested_response_format, type) and issubclass(
             requested_response_format, BaseModel
@@ -461,8 +473,11 @@ def _completion_kwargs_for_model(kwargs: dict, model: str) -> dict:
             )
         else:
             adjusted["response_format"] = requested_response_format
-    if requested_extra_body is not None and _model_accepts_extra_body(model):
-        adjusted["extra_body"] = requested_extra_body
+    if _is_deepseek_model(model):
+        if requested_extra_body is not None:
+            adjusted["extra_body"] = requested_extra_body
+        elif _reasoning_engaged(model, requested_reasoning):
+            adjusted["extra_body"] = dict(_DEEPSEEK_THINKING_ENABLED)
     adjusted["model"] = model
     return adjusted
 
@@ -479,16 +494,12 @@ def _effective_params_for_model(
 ) -> dict[str, Any]:
     """Return call params as they were effectively sent to the final model."""
     params: dict[str, Any] = {"max_tokens": max_tokens}
-    effective_reasoning = (
-        reasoning_effort if _model_accepts_reasoning_effort(model) else None
-    )
+    anthropic_reasoning = reasoning_effort if _is_anthropic_model(model) else None
     if temperature is not None:
-        params["temperature"] = 1.0 if effective_reasoning is not None else temperature
-    if effective_reasoning is not None:
-        params["reasoning_effort"] = effective_reasoning
-    elif reasoning_effort is not None:
-        params["requested_reasoning_effort"] = reasoning_effort
-        params["reasoning_effort_omitted_for_model"] = True
+        params["temperature"] = 1.0 if anthropic_reasoning is not None else temperature
+    if reasoning_effort is not None:
+        # Always record the requested effort; transport differs by provider.
+        params["reasoning_effort"] = reasoning_effort
     if response_format is not None:
         if _model_accepts_response_format(model):
             is_pydantic = isinstance(response_format, type) and issubclass(
@@ -506,12 +517,17 @@ def _effective_params_for_model(
                 response_format
             )
             params["response_format_omitted_for_model"] = True
-    if extra_body is not None:
-        if _model_accepts_extra_body(model):
-            params["extra_body"] = extra_body
-        else:
-            params["requested_extra_body"] = extra_body
-            params["extra_body_omitted_for_model"] = True
+    effective_extra_body: dict[str, Any] | None = None
+    if _is_deepseek_model(model):
+        if extra_body is not None:
+            effective_extra_body = extra_body
+        elif _reasoning_engaged(model, reasoning_effort):
+            effective_extra_body = dict(_DEEPSEEK_THINKING_ENABLED)
+    elif extra_body is not None:
+        params["requested_extra_body"] = extra_body
+        params["extra_body_omitted_for_model"] = True
+    if effective_extra_body is not None:
+        params["extra_body"] = effective_extra_body
     if requested_model != model:
         params["requested_model"] = requested_model
         params["fallback_used"] = True
@@ -682,9 +698,8 @@ def call_llm(
         kwargs["reasoning_effort"] = reasoning_effort
     if response_format is not None:
         kwargs["response_format"] = response_format
-    effective_extra_body = extra_body if extra_body is not None else DEEPSEEK_EXTRA_BODY
-    if effective_extra_body is not None:
-        kwargs["extra_body"] = effective_extra_body
+    if extra_body is not None:
+        kwargs["extra_body"] = extra_body
     if tools is not None:
         kwargs["tools"] = tools
 
@@ -727,16 +742,13 @@ def call_llm(
         logged_messages = _completion_kwargs_for_model(kwargs, model).get(
             "messages", messages
         )
-        logged_extra_body = effective_extra_body
-        if extra_body is None and not _model_accepts_extra_body(model):
-            logged_extra_body = None
         params = _effective_params_for_model(
             model=model,
             max_tokens=max_tokens,
             temperature=temperature,
             reasoning_effort=reasoning_effort,
             response_format=response_format,
-            extra_body=logged_extra_body,
+            extra_body=extra_body,
             requested_model=requested_model,
         )
         log_metadata = dict(metadata or {})

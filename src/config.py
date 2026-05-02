@@ -156,19 +156,6 @@ DEEPSEEK_FLASH_MODEL: str = os.environ.get(
 )
 """Lower-cost DeepSeek model used by lightweight feature defaults."""
 
-DEEPSEEK_THINKING: str = os.environ.get(
-    "ZDROWSKIT_DEEPSEEK_THINKING",
-    "enabled",
-).strip()
-"""Default DeepSeek V4 thinking mode for app calls: 'disabled', 'enabled', or empty."""
-
-DEEPSEEK_EXTRA_BODY: dict[str, object] | None = (
-    {"thinking": {"type": DEEPSEEK_THINKING}}
-    if DEEPSEEK_THINKING in {"enabled", "disabled"}
-    else None
-)
-"""Default provider-specific request body extras for DeepSeek model attempts."""
-
 ANTHROPIC_OPUS_MODEL: str = os.environ.get(
     "ZDROWSKIT_ANTHROPIC_OPUS_MODEL",
     "anthropic/claude-opus-4-6",
@@ -292,19 +279,6 @@ MAX_VERIFICATION_REVISIONS: int = int(
     os.environ.get("ZDROWSKIT_MAX_VERIFICATION_REVISIONS", "1")
 )
 """Maximum bounded rewrite attempts after a verifier returns revise."""
-
-VERIFY_DEEPSEEK_THINKING: str = os.environ.get(
-    "ZDROWSKIT_VERIFY_DEEPSEEK_THINKING",
-    DEEPSEEK_THINKING,
-).strip()
-"""DeepSeek thinking mode for verifier calls: 'disabled', 'enabled', or empty."""
-
-VERIFICATION_EXTRA_BODY: dict[str, object] | None = (
-    {"thinking": {"type": VERIFY_DEEPSEEK_THINKING}}
-    if VERIFY_DEEPSEEK_THINKING in {"enabled", "disabled"}
-    else None
-)
-"""Provider-specific request body extras for verifier calls."""
 
 
 # ---------------------------------------------------------------------------

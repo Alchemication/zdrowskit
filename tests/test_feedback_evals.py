@@ -521,11 +521,13 @@ class TestChatRunner:
         assert second.execution.text == "Fresh response"
         assert mock_call.call_count == 1
 
-    def test_deepseek_thinking_flip_invalidates_cache(
+    def test_reasoning_effort_change_invalidates_cache_on_deepseek(
         self,
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
     ) -> None:
+        # Flipping reasoning_effort between high (engages DeepSeek thinking)
+        # and a non-engaging value must produce different cache entries.
         case = next(
             case for case in load_cases() if case.id == "chat_explicit_add_to_log"
         )
@@ -535,15 +537,18 @@ class TestChatRunner:
         monkeypatch.setattr(llm, "call_llm", mock_call)
         cache = EvalCache(tmp_path / "eval-cache.sqlite")
 
-        monkeypatch.setattr(
-            llm, "DEEPSEEK_EXTRA_BODY", {"thinking": {"type": "enabled"}}
+        first = run_case(
+            case,
+            model="deepseek/deepseek-v4-pro",
+            reasoning_effort="high",
+            cache=cache,
         )
-        first = run_case(case, model="deepseek/deepseek-v4-pro", cache=cache)
-
-        monkeypatch.setattr(
-            llm, "DEEPSEEK_EXTRA_BODY", {"thinking": {"type": "disabled"}}
+        second = run_case(
+            case,
+            model="deepseek/deepseek-v4-pro",
+            reasoning_effort="medium",
+            cache=cache,
         )
-        second = run_case(case, model="deepseek/deepseek-v4-pro", cache=cache)
 
         assert first.execution is not None
         assert second.execution is not None
@@ -551,11 +556,13 @@ class TestChatRunner:
         assert second.execution.text == "Thinking off"
         assert mock_call.call_count == 2
 
-    def test_anthropic_model_unaffected_by_deepseek_thinking_flip(
+    def test_anthropic_cache_partitions_by_reasoning_effort(
         self,
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
     ) -> None:
+        # Anthropic uses reasoning_effort natively; identical effort across
+        # runs must hit the cache.
         case = next(
             case for case in load_cases() if case.id == "chat_explicit_add_to_log"
         )
@@ -563,15 +570,18 @@ class TestChatRunner:
         monkeypatch.setattr(llm, "call_llm", mock_call)
         cache = EvalCache(tmp_path / "eval-cache.sqlite")
 
-        monkeypatch.setattr(
-            llm, "DEEPSEEK_EXTRA_BODY", {"thinking": {"type": "enabled"}}
+        first = run_case(
+            case,
+            model="anthropic/claude-opus-4-7",
+            reasoning_effort="high",
+            cache=cache,
         )
-        first = run_case(case, model="anthropic/claude-opus-4-7", cache=cache)
-
-        monkeypatch.setattr(
-            llm, "DEEPSEEK_EXTRA_BODY", {"thinking": {"type": "disabled"}}
+        second = run_case(
+            case,
+            model="anthropic/claude-opus-4-7",
+            reasoning_effort="high",
+            cache=cache,
         )
-        second = run_case(case, model="anthropic/claude-opus-4-7", cache=cache)
 
         assert first.execution is not None
         assert second.execution is not None

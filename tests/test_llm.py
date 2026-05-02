@@ -15,7 +15,6 @@ from config import (
     ANTHROPIC_HAIKU_MODEL,
     ANTHROPIC_OPUS_4_7_MODEL,
     ANTHROPIC_OPUS_MODEL,
-    DEEPSEEK_EXTRA_BODY,
     DEEPSEEK_FLASH_MODEL,
     DEEPSEEK_PRO_MODEL,
     DEFAULT_ADD_CLONE_MODEL,
@@ -940,29 +939,71 @@ class TestCallLlm:
         assert "reasoning_effort" not in kwargs
 
     @patch("llm.litellm")
-    def test_deepseek_default_extra_body_applied(self, mock_litellm: MagicMock) -> None:
-        mock_litellm.completion.return_value = self._mock_response()
-        mock_litellm.completion_cost.return_value = None
-
-        call_llm(
-            [{"role": "user", "content": "test"}],
-            model=DEEPSEEK_FLASH_MODEL,
-        )
-
-        kwargs = mock_litellm.completion.call_args[1]
-        assert kwargs["extra_body"] == DEEPSEEK_EXTRA_BODY
-
-    @patch("llm.litellm")
-    def test_explicit_extra_body_overrides_deepseek_default(
+    def test_deepseek_high_effort_engages_thinking(
         self, mock_litellm: MagicMock
     ) -> None:
         mock_litellm.completion.return_value = self._mock_response()
         mock_litellm.completion_cost.return_value = None
-        explicit = {"thinking": {"type": "enabled"}}
 
         call_llm(
             [{"role": "user", "content": "test"}],
             model=DEEPSEEK_FLASH_MODEL,
+            reasoning_effort="high",
+        )
+
+        kwargs = mock_litellm.completion.call_args[1]
+        assert kwargs["extra_body"] == {"thinking": {"type": "enabled"}}
+        # reasoning_effort is the user knob; DeepSeek does not accept it as a
+        # native LiteLLM param — the translation routes through extra_body.
+        assert "reasoning_effort" not in kwargs
+
+    @patch("llm.litellm")
+    def test_deepseek_max_effort_engages_thinking(
+        self, mock_litellm: MagicMock
+    ) -> None:
+        mock_litellm.completion.return_value = self._mock_response()
+        mock_litellm.completion_cost.return_value = None
+
+        call_llm(
+            [{"role": "user", "content": "test"}],
+            model=DEEPSEEK_FLASH_MODEL,
+            reasoning_effort="max",
+        )
+
+        kwargs = mock_litellm.completion.call_args[1]
+        assert kwargs["extra_body"] == {"thinking": {"type": "enabled"}}
+
+    @patch("llm.litellm")
+    def test_deepseek_low_effort_leaves_thinking_off(
+        self, mock_litellm: MagicMock
+    ) -> None:
+        # DeepSeek thinking is binary; low/medium are no-ops, so no extra_body
+        # should be sent.
+        mock_litellm.completion.return_value = self._mock_response()
+        mock_litellm.completion_cost.return_value = None
+
+        for effort in ("low", "medium", "none", None):
+            mock_litellm.reset_mock()
+            call_llm(
+                [{"role": "user", "content": "test"}],
+                model=DEEPSEEK_FLASH_MODEL,
+                reasoning_effort=effort,
+            )
+            kwargs = mock_litellm.completion.call_args[1]
+            assert "extra_body" not in kwargs, f"effort={effort!r}"
+
+    @patch("llm.litellm")
+    def test_explicit_extra_body_overrides_translation(
+        self, mock_litellm: MagicMock
+    ) -> None:
+        mock_litellm.completion.return_value = self._mock_response()
+        mock_litellm.completion_cost.return_value = None
+        explicit = {"thinking": {"type": "disabled"}}
+
+        call_llm(
+            [{"role": "user", "content": "test"}],
+            model=DEEPSEEK_FLASH_MODEL,
+            reasoning_effort="high",
             extra_body=explicit,
         )
 
@@ -970,19 +1011,19 @@ class TestCallLlm:
         assert kwargs["extra_body"] == explicit
 
     @patch("llm.litellm")
-    def test_deepseek_extra_body_omitted_for_anthropic_primary(
-        self, mock_litellm: MagicMock
-    ) -> None:
+    def test_anthropic_never_receives_extra_body(self, mock_litellm: MagicMock) -> None:
         mock_litellm.completion.return_value = self._mock_response()
         mock_litellm.completion_cost.return_value = None
 
         call_llm(
             [{"role": "user", "content": "test"}],
             model=ANTHROPIC_OPUS_MODEL,
+            reasoning_effort="high",
         )
 
         kwargs = mock_litellm.completion.call_args[1]
         assert "extra_body" not in kwargs
+        assert kwargs["reasoning_effort"] == "high"
 
     @patch("llm.litellm")
     def test_reasoning_effort_forces_temperature_to_one(
@@ -1049,7 +1090,27 @@ class TestCallLlm:
         assert row is not None
         assert row["request_type"] == "insights"
         params = json.loads(row["params_json"])
-        assert params["extra_body"] == DEEPSEEK_EXTRA_BODY
+        # Default call has no reasoning_effort; nothing should engage thinking.
+        assert "extra_body" not in params
+
+    @patch("llm.litellm")
+    def test_logs_translated_extra_body_for_deepseek_high_effort(
+        self, mock_litellm: MagicMock, in_memory_db: sqlite3.Connection
+    ) -> None:
+        mock_litellm.completion.return_value = self._mock_response()
+        mock_litellm.completion_cost.return_value = 0.02
+
+        call_llm(
+            [{"role": "user", "content": "test"}],
+            model=DEEPSEEK_PRO_MODEL,
+            reasoning_effort="high",
+            conn=in_memory_db,
+            request_type="insights",
+        )
+        row = in_memory_db.execute("SELECT * FROM llm_call").fetchone()
+        params = json.loads(row["params_json"])
+        assert params["extra_body"] == {"thinking": {"type": "enabled"}}
+        assert params["reasoning_effort"] == "high"
 
     @patch("llm.litellm")
     def test_anthropic_logging_omits_implicit_deepseek_extra_body(
@@ -1114,6 +1175,7 @@ class TestCallLlm:
         call_llm(
             [{"role": "user", "content": "test"}],
             model=ANTHROPIC_OPUS_MODEL,
+            reasoning_effort="high",
             conn=in_memory_db,
             request_type="insights",
             metadata={"week": "last"},
@@ -1123,7 +1185,8 @@ class TestCallLlm:
 
         params = json.loads(row["params_json"])
         metadata = json.loads(row["metadata_json"])
-        assert params["extra_body"] == DEEPSEEK_EXTRA_BODY
+        # Effort=high translates to DeepSeek thinking on the fallback attempt.
+        assert params["extra_body"] == {"thinking": {"type": "enabled"}}
         assert params["requested_model"] == ANTHROPIC_OPUS_MODEL
         assert params["fallback_used"] is True
         assert metadata["requested_model"] == ANTHROPIC_OPUS_MODEL
@@ -1142,6 +1205,7 @@ class TestCallLlm:
         result = call_llm(
             [{"role": "user", "content": "test"}],
             model=ANTHROPIC_OPUS_4_7_MODEL,
+            reasoning_effort="high",
             fallback_models=[DEEPSEEK_PRO_MODEL],
         )
 
@@ -1149,11 +1213,14 @@ class TestCallLlm:
             call.kwargs["model"] for call in mock_litellm.completion.call_args_list
         ]
         assert seen_models == [ANTHROPIC_OPUS_4_7_MODEL, DEEPSEEK_PRO_MODEL]
-        assert "extra_body" not in mock_litellm.completion.call_args_list[0].kwargs
-        assert (
-            mock_litellm.completion.call_args_list[1].kwargs["extra_body"]
-            == DEEPSEEK_EXTRA_BODY
-        )
+        # Anthropic attempt: native reasoning_effort, no extra_body.
+        anthropic_kwargs = mock_litellm.completion.call_args_list[0].kwargs
+        assert "extra_body" not in anthropic_kwargs
+        assert anthropic_kwargs["reasoning_effort"] == "high"
+        # DeepSeek fallback attempt: effort translated into extra_body.
+        deepseek_kwargs = mock_litellm.completion.call_args_list[1].kwargs
+        assert deepseek_kwargs["extra_body"] == {"thinking": {"type": "enabled"}}
+        assert "reasoning_effort" not in deepseek_kwargs
         assert result.model == DEEPSEEK_PRO_MODEL
 
     @patch("llm.litellm")
@@ -1323,7 +1390,9 @@ class TestCallWithRetry:
 
         assert kwargs["response_format"] == response_format
 
-    def test_deepseek_attempt_keeps_extra_body(self) -> None:
+    def test_deepseek_attempt_keeps_explicit_extra_body(self) -> None:
+        # Explicit caller-supplied extra_body always wins, including over the
+        # high-effort translation default.
         extra_body = {"thinking": {"type": "disabled"}}
 
         kwargs = _completion_kwargs_for_model(
@@ -1331,12 +1400,41 @@ class TestCallWithRetry:
                 "model": DEEPSEEK_PRO_MODEL,
                 "messages": [],
                 "max_tokens": 10,
+                "reasoning_effort": "high",
                 "extra_body": extra_body,
             },
             DEEPSEEK_PRO_MODEL,
         )
 
         assert kwargs["extra_body"] == extra_body
+
+    def test_deepseek_attempt_translates_high_effort_to_thinking(self) -> None:
+        kwargs = _completion_kwargs_for_model(
+            {
+                "model": DEEPSEEK_PRO_MODEL,
+                "messages": [],
+                "max_tokens": 10,
+                "reasoning_effort": "high",
+            },
+            DEEPSEEK_PRO_MODEL,
+        )
+
+        assert kwargs["extra_body"] == {"thinking": {"type": "enabled"}}
+        assert "reasoning_effort" not in kwargs
+
+    def test_deepseek_attempt_skips_thinking_for_low_effort(self) -> None:
+        kwargs = _completion_kwargs_for_model(
+            {
+                "model": DEEPSEEK_PRO_MODEL,
+                "messages": [],
+                "max_tokens": 10,
+                "reasoning_effort": "medium",
+            },
+            DEEPSEEK_PRO_MODEL,
+        )
+
+        assert "extra_body" not in kwargs
+        assert "reasoning_effort" not in kwargs
 
     def test_anthropic_attempt_keeps_response_format(self) -> None:
         kwargs = _completion_kwargs_for_model(

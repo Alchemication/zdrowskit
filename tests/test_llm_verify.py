@@ -8,7 +8,6 @@ import sqlite3
 from config import (
     MAX_TOKENS_VERIFICATION,
     MAX_TOKENS_VERIFICATION_REWRITE,
-    VERIFICATION_EXTRA_BODY,
 )
 from events import query_events
 from llm import LLMResult
@@ -169,6 +168,8 @@ class TestVerifyAndRewrite:
         def fake_call_llm(messages, **kwargs):
             seen_max_tokens.append(kwargs["max_tokens"])
             seen_response_formats.append(kwargs.get("response_format"))
+            # Verifier no longer passes extra_body; call_llm translates
+            # reasoning_effort into provider-specific transport.
             seen_extra_bodies.append(kwargs.get("extra_body"))
             seen_temperatures.append(kwargs.get("temperature"))
             seen_reasoning.append(kwargs.get("reasoning_effort"))
@@ -224,7 +225,7 @@ class TestVerifyAndRewrite:
             MAX_TOKENS_VERIFICATION_REWRITE,
         ]
         assert seen_response_formats == [_VerifierPayload, None]
-        assert seen_extra_bodies == [VERIFICATION_EXTRA_BODY, None]
+        assert seen_extra_bodies == [None, None]
         assert seen_temperatures == [None, None]
         assert seen_reasoning == ["high", "high"]
         verify_metadata = json.loads(rows[0]["metadata_json"])

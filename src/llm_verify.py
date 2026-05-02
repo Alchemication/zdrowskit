@@ -21,7 +21,6 @@ from config import (
     MAX_TOKENS_VERIFICATION,
     MAX_TOKENS_VERIFICATION_REWRITE,
     MAX_VERIFICATION_REVISIONS,
-    VERIFICATION_EXTRA_BODY,
     VERIFICATION_MODEL,
     VERIFICATION_REWRITE_MODEL,
 )
@@ -563,9 +562,9 @@ def verify_and_rewrite(
         fallback_models: Optional explicit verifier fallback chain.
         temperature: Verifier sampling temperature. Pass ``None`` to omit it
             for model routes that reject the parameter.
-        reasoning_effort: Optional reasoning effort for verifier models that
-            accept it. DeepSeek verifier depth is controlled through
-            ``VERIFICATION_EXTRA_BODY`` instead.
+        reasoning_effort: Optional reasoning effort. Drives Anthropic extended
+            thinking natively; on DeepSeek, ``high``/``max`` engage thinking
+            mode and other values leave it off.
         rewrite_temperature: Rewriter sampling temperature. Pass ``None`` to
             omit it for model routes that reject the parameter.
         rewrite_reasoning_effort: Optional reasoning effort for rewriter models
@@ -618,7 +617,6 @@ def verify_and_rewrite(
             temperature=temperature,
             reasoning_effort=reasoning_effort,
             response_format=_VerifierPayload,
-            extra_body=VERIFICATION_EXTRA_BODY,
             fallback_models=fallback_models,
             conn=conn,
             request_type=f"{kind}_verify",

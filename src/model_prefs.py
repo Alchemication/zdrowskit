@@ -322,8 +322,8 @@ def _is_legacy_default_override(
             override.get("profile") == "flash"
             and override.get("primary") == PRIMARY_FLASH_MODEL
             and "fallback" not in override
-            and override.get("reasoning_effort") in {None, "high"}
-            and override.get("temperature") in {None, 0.7}
+            and override.get("reasoning_effort") is None
+            and override.get("temperature") == 0.7
         ):
             return True
         return (
@@ -338,22 +338,22 @@ def _is_legacy_default_override(
             override.get("profile") == "flash"
             and override.get("primary") == ANTHROPIC_HAIKU_MODEL
             and override.get("fallback") == PRIMARY_FLASH_MODEL
-            and override.get("reasoning_effort") in {None, "high"}
-            and override.get("temperature") is None
+            and "reasoning_effort" not in override
+            and "temperature" not in override
         ) or (
             override.get("profile") == "flash"
             and override.get("primary") == PRIMARY_FLASH_MODEL
             and "fallback" not in override
-            and override.get("reasoning_effort") in {None, "high"}
-            and override.get("temperature") is None
+            and "reasoning_effort" not in override
+            and "temperature" not in override
         )
     if feature in {"add_clone", "verification_rewrite"}:
         return (
             override.get("profile") == "flash"
             and override.get("primary") == PRIMARY_FLASH_MODEL
             and "fallback" not in override
-            and override.get("reasoning_effort") in {None, "high"}
-            and override.get("temperature") is None
+            and "reasoning_effort" not in override
+            and "temperature" not in override
         )
     if feature == "verification":
         return (
@@ -401,8 +401,9 @@ def resolve_model_route(
 
     # Effective reasoning/temperature: per-feature override wins; otherwise
     # feature/model defaults apply. Opus 4.7 must omit temperature; async
-    # judgment surfaces use high Anthropic reasoning, while DeepSeek thinking
-    # is handled separately by llm.call_llm's extra_body default.
+    # judgment surfaces (and other reasoning-heavy features) get high effort
+    # by default — call_llm translates that to DeepSeek thinking when the
+    # primary is DeepSeek.
     primary_defaults = _feature_model_defaults(feature, primary)
     params: dict[str, Any] = {}
     for key in ("reasoning_effort", "temperature"):
@@ -424,6 +425,14 @@ def resolve_model_route(
     )
 
 
+def _is_deepseek_model_id(model: str) -> bool:
+    """Return True for DeepSeek LiteLLM model ids."""
+    normalized = model.lower()
+    return normalized.startswith("deepseek/") or normalized.startswith(
+        "openrouter/deepseek/"
+    )
+
+
 def _feature_model_defaults(feature: str, primary: str) -> dict[str, Any]:
     """Return reasoning/temperature defaults for a feature/model pair."""
     if primary == ANTHROPIC_OPUS_4_7_MODEL:
@@ -432,6 +441,15 @@ def _feature_model_defaults(feature: str, primary: str) -> dict[str, Any]:
                 "high" if feature in HIGH_REASONING_FEATURES else None
             ),
             "temperature": None,
+        }
+    if _is_deepseek_model_id(primary):
+        # DeepSeek thinking is binary; high effort engages it via call_llm's
+        # extra_body translation. Match the Opus 4.7 reasoning posture so
+        # judgment surfaces keep their thinking-on default.
+        return {
+            "reasoning_effort": (
+                "high" if feature in HIGH_REASONING_FEATURES else None
+            ),
         }
     return {}
 
@@ -469,12 +487,15 @@ def _normalize_primary_params(
 ) -> None:
     """Reset reasoning/temperature when primary model family changes.
 
-    Switching to Opus 4.7 omits temperature and chooses the route's default
-    reasoning posture. Switching to anything else drops Opus-specific overrides
-    so the route picks up the global call defaults again.
+    When the new primary has known per-feature defaults (Opus 4.7, DeepSeek)
+    the entry is reset to those. Otherwise any prior reasoning/temperature
+    overrides are dropped so the route picks up the global call defaults.
     """
-    if primary == ANTHROPIC_OPUS_4_7_MODEL:
-        entry.update(_feature_model_defaults(feature, primary))
+    defaults = _feature_model_defaults(feature, primary)
+    if defaults:
+        entry.pop("reasoning_effort", None)
+        entry.pop("temperature", None)
+        entry.update(defaults)
     else:
         entry.pop("reasoning_effort", None)
         entry.pop("temperature", None)

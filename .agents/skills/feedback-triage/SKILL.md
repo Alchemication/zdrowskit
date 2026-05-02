@@ -32,7 +32,7 @@ Before blaming the LLM, check whether the user's "you said X, now you say Y" com
 
 ## Decide what to do next
 
-- **Verifier introduced the bug** → almost always a model-quality issue. A/B against config knobs (e.g. `ZDROWSKIT_VERIFY_DEEPSEEK_THINKING=enabled` re-runs verifier with reasoning on). Capture as a `nudge_verify` real_regression if reproducible.
+- **Verifier introduced the bug** → almost always a model-quality issue. A/B by flipping the verifier route's `reasoning_effort` via `main.py models` or Telegram `/models` (on DeepSeek, `high` engages thinking; `medium` leaves it off). Capture as a `nudge_verify` real_regression if reproducible.
 - **Source draft already had it** → prompt or context issue. Capture as a `chat` or other surface real_regression if there's a chat trace; otherwise iterate on the prompt.
 - **Rewriter mangled a correct correction** → rewriter prompt issue.
 - **User-perception bug from data resync** → not an LLM eval target. Open a product/prompt issue instead.
@@ -47,6 +47,6 @@ When you know which surface and stage to capture, switch to the `llm-evals` skil
 
 ## Pitfalls to remember
 
-- **Multi-model pipelines**: the nudge pipeline uses three different model picks (draft / verify / rewrite) resolved from `src/config.py`. `--model` on the eval runner only flows to the chat path. For verifier evals, control models via env vars (`ZDROWSKIT_VERIFICATION_MODEL`, `ZDROWSKIT_VERIFY_DEEPSEEK_THINKING`, …).
+- **Multi-model pipelines**: the nudge pipeline uses three different model picks (draft / verify / rewrite) resolved from `src/config.py` and `src/model_prefs.py`. `--model` on the eval runner only flows to the chat path. For verifier evals, change the verifier model via `ZDROWSKIT_VERIFICATION_MODEL` and the reasoning posture via `main.py models` / Telegram `/models`.
 - **Empty-verifier-response false-pass**: if the verifier hits its output token cap, the failure path emits a "verifier returned empty" critical issue. `text_absent` assertions trivially pass against this — always include an explicit assertion rejecting that failure mode in `nudge_verify` cases.
 - **Verifier writes to the source call's metadata**: if you query the source call's metadata, the verification verdict is already there — no need to look it up separately.

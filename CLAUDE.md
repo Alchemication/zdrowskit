@@ -4,7 +4,7 @@ Always use `uv run`, never plain `python`. Full command list: `docs/commands.md`
 
 Debug LLM behavior with `uv run python main.py llm-log --id N` — full stored trace (messages, tool use, response) for one call.
 
-`src/llm.py`: the DeepSeek thinking-enabled `extra_body` default applies only to DeepSeek calls, never to Anthropic fallbacks. Verifier calls in `src/llm_verify.py` inherit `ZDROWSKIT_DEEPSEEK_THINKING` unless `ZDROWSKIT_VERIFY_DEEPSEEK_THINKING` overrides it.
+`src/llm.py`: `reasoning_effort` is the single reasoning knob — Anthropic gets it natively; DeepSeek translates `high`/`max` into `extra_body={"thinking": {"type": "enabled"}}` and treats anything else as off. Translation lives in `_completion_kwargs_for_model` so per-attempt fallback handles each provider correctly. Per-feature reasoning is set via `main.py models` / `src/model_prefs.py`.
 
 Open DBs via `store.open_db()` or `store.connect_db(..., migrate=True)` — these auto-apply pending migrations. Use raw `sqlite3.connect()` only when you specifically need to skip migration.
 

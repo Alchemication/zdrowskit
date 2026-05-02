@@ -38,7 +38,7 @@ from tools import all_chat_tools  # noqa: E402
 CASES_DIR = Path(__file__).resolve().parent / "cases"
 DEFAULT_MODEL = llm.DEFAULT_MODEL
 DEFAULT_CACHE_PATH = Path(__file__).resolve().parent / ".cache.sqlite"
-EVAL_CACHE_SCHEMA_VERSION = 4
+EVAL_CACHE_SCHEMA_VERSION = 5
 EVAL_TEMPERATURE = 0.0
 DEFAULT_JUDGE_MODEL = "anthropic/claude-sonnet-4-6"
 EVAL_JUDGE_MAX_TOKENS = 800
@@ -929,11 +929,9 @@ def _call_llm_for_eval(
     fallback_models: list[str] | None = None,
 ) -> tuple[llm.LLMResult, bool]:
     """Call the LLM for an eval case with optional request caching."""
-    # Mirror call_llm's injection of DEEPSEEK_EXTRA_BODY for DeepSeek models so
-    # flipping ZDROWSKIT_DEEPSEEK_THINKING invalidates only affected entries.
-    effective_extra_body = (
-        llm.DEEPSEEK_EXTRA_BODY if llm._model_accepts_extra_body(model) else None
-    )
+    # reasoning_effort drives both Anthropic native reasoning and DeepSeek
+    # thinking (translated inside call_llm), so it alone partitions the cache
+    # correctly across providers.
     request = {
         "cache_schema_version": EVAL_CACHE_SCHEMA_VERSION,
         "model": model,
@@ -944,7 +942,6 @@ def _call_llm_for_eval(
         "tools": tools,
         "response_format": _response_format_cache_key(response_format),
         "fallback_models": fallback_models,
-        "extra_body": effective_extra_body,
     }
     if cache is not None and not refresh_cache:
         cached = cache.get(request)

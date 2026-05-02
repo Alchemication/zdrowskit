@@ -22,7 +22,6 @@ if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
 from config import (  # noqa: E402
-    VERIFICATION_EXTRA_BODY,
     VERIFICATION_MODEL,
     VERIFICATION_REWRITE_MODEL,
 )
@@ -32,13 +31,8 @@ from store import connect_db  # noqa: E402
 
 
 def _resolved_model_label() -> str:
-    """Render the verifier model + thinking flag for result reporting."""
-    thinking = "inherit"
-    if isinstance(VERIFICATION_EXTRA_BODY, dict):
-        thinking_block = VERIFICATION_EXTRA_BODY.get("thinking")
-        if isinstance(thinking_block, dict):
-            thinking = str(thinking_block.get("type", thinking))
-    return f"{VERIFICATION_MODEL} (thinking={thinking})"
+    """Render the verifier model for result reporting."""
+    return VERIFICATION_MODEL
 
 
 def run_nudge_verify_case(
@@ -178,6 +172,6 @@ class _CachingCallLLM:
             "response_format": _response_format_cache_key(
                 kwargs.get("response_format")
             ),
-            "extra_body": kwargs.get("extra_body"),
+            "reasoning_effort": kwargs.get("reasoning_effort"),
             "fallback_models": kwargs.get("fallback_models"),
         }

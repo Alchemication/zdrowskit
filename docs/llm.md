@@ -24,13 +24,13 @@ uv run python main.py models
 
 or through Telegram `/models`.
 
-The Telegram panel groups features as Chat / Reports / Coach / Nudges / Utilities and tags every model button with its capability tier: premium / pro / flash / lite. Chat exposes Reasoning and Temperature controls. DeepSeek thinking is controlled by `ZDROWSKIT_DEEPSEEK_THINKING`; `reasoning_effort` is also kept on the chat route so Anthropic fallbacks receive the high-reasoning hint.
+The Telegram panel groups features as Chat / Reports / Coach / Nudges / Utilities and tags every model button with its capability tier: premium / pro / flash / lite. Chat exposes Reasoning and Temperature controls. `reasoning_effort` is the single reasoning knob: Anthropic gets it natively, and on DeepSeek, `high`/`max` translate into thinking mode (`extra_body={"thinking": {"type": "enabled"}}`) while `low`/`medium`/`none` leave thinking off.
 
 A `Reset all` button on the main panel and `uv run python main.py models reset --all` restore everything to built-in defaults. Picking the `Auto` fallback, or `--fallback auto` from the CLI, defers to the profile's fallback so future profile changes propagate.
 
-Insights, coach, and nudges default to `anthropic/claude-opus-4-7` with `reasoning_effort=high`, temperature omitted, and `deepseek/deepseek-v4-pro` fallback. Chat defaults to `deepseek/deepseek-v4-flash` with DeepSeek thinking enabled, `reasoning_effort=high`, temperature omitted, and `anthropic/claude-haiku-4-5` fallback.
+Insights, coach, and nudges default to `anthropic/claude-opus-4-7` with `reasoning_effort=high`, temperature omitted, and `deepseek/deepseek-v4-pro` fallback. Chat defaults to `deepseek/deepseek-v4-flash` with `reasoning_effort=high` (engages DeepSeek thinking), temperature omitted, and `anthropic/claude-haiku-4-5` fallback.
 
-Lightweight utility surfaces, including `/notify` interpretation, `/log` flow building, and `/add` workout clone selection, default to `deepseek/deepseek-v4-flash` with `anthropic/claude-haiku-4-5` fallback. `/log`, `/add`, and verifier rewrites use high reasoning with temperature omitted; `/notify` stays plain Flash.
+Lightweight utility surfaces, including `/notify` interpretation, `/log` flow building, and `/add` workout clone selection, default to `deepseek/deepseek-v4-flash` with `anthropic/claude-haiku-4-5` fallback. `/log`, `/add`, and verifier rewrites use `reasoning_effort=high` with temperature omitted; `/notify` stays plain Flash. On the DeepSeek primary, `high` engages thinking via translated `extra_body`; on the Anthropic fallback, the same effort is sent natively.
 
 Logged LLM calls record the effective model, and fallback calls include `requested_model` and `fallback_used` in params/metadata.
 
@@ -58,7 +58,7 @@ Using recent logged token sizes from this app, the always-on daemon lands around
 | Nudges at the 2/day cap, including DeepSeek verification | ~$0.75/week |
 | **Daemon total at default caps** | **~$1.05/week** |
 
-This assumes verification normally succeeds on DeepSeek Pro with DeepSeek thinking enabled and rewrite calls remain rare. Verification falls back to Opus 4.7 with high `reasoning_effort` and omitted temperature.
+This assumes verification normally succeeds on DeepSeek Pro with thinking engaged (via `reasoning_effort=high`) and rewrite calls remain rare. Verification falls back to Opus 4.7 with the same `reasoning_effort=high` (sent natively) and omitted temperature.
 
 Chat is separate because it is user-driven. Routing chat to DeepSeek Flash is usually under one cent per turn, but quality may drop for harder analysis.
 
@@ -87,10 +87,6 @@ ZDROWSKIT_NOTIFY_MODEL=deepseek/deepseek-v4-flash
 ZDROWSKIT_LOG_FLOW_MODEL=deepseek/deepseek-v4-flash
 # /log uses anthropic/claude-haiku-4-5 as its flash profile fallback
 ZDROWSKIT_ADD_CLONE_MODEL=deepseek/deepseek-v4-flash
-
-# DeepSeek V4 defaults to thinking enabled/high; app calls keep it on for reliability.
-# Set to "disabled" per-surface (env override) when latency/cost matters more than depth.
-ZDROWSKIT_DEEPSEEK_THINKING=enabled
 
 ZDROWSKIT_MAX_TOKENS_DEFAULT=4096
 ZDROWSKIT_MAX_TOKENS_INSIGHTS=8192
@@ -121,15 +117,13 @@ Post-generation verification runs by default for async LLM outputs: reports, coa
 
 Chat remains unverified because it is interactive and latency-sensitive.
 
-The default verifier uses `deepseek/deepseek-v4-pro` with DeepSeek thinking enabled and falls back to Opus 4.7 with high `reasoning_effort` and no temperature. Bounded rewrites stay on Flash by default, also with high reasoning and no temperature.
+The default verifier uses `deepseek/deepseek-v4-pro` with `reasoning_effort=high` (engages DeepSeek thinking) and falls back to Opus 4.7 with the same effort sent natively, no temperature. Bounded rewrites stay on Flash by default, also with `reasoning_effort=high` and no temperature — DeepSeek translates `high` into thinking mode via `extra_body` while Anthropic uses it natively, so the same per-feature setting works across both providers.
 
 ```env
 # Optional overrides:
 ZDROWSKIT_ENABLE_LLM_VERIFICATION=0
 ZDROWSKIT_VERIFICATION_MODEL=deepseek/deepseek-v4-pro
 ZDROWSKIT_VERIFICATION_REWRITE_MODEL=deepseek/deepseek-v4-flash
-# Defaults to ZDROWSKIT_DEEPSEEK_THINKING when unset.
-ZDROWSKIT_VERIFY_DEEPSEEK_THINKING=enabled
 ZDROWSKIT_MAX_TOKENS_VERIFICATION=4096
 ZDROWSKIT_MAX_TOKENS_VERIFICATION_REWRITE=4096
 ZDROWSKIT_MAX_VERIFICATION_REVISIONS=1

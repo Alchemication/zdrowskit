@@ -49,7 +49,7 @@ from config import (
     VERIFY_NUDGE,
 )
 from context_edit import ContextEdit, EditPreviewError, build_edit_preview
-from llm import LLMResult, call_llm, extract_memory, _model_accepts_reasoning_effort
+from llm import LLMResult, _reasoning_engaged, call_llm, extract_memory
 from llm_context import append_history, build_messages, load_context, load_prompt_text
 from llm_health import (
     build_llm_data,
@@ -1102,11 +1102,11 @@ def cmd_insights(
                     }
                 )
         synthesis_attempts = [("final_synthesis", reasoning_effort)]
-        # The "no-reasoning" retry only helps when the model actually accepts
-        # reasoning_effort (Anthropic extended thinking). For DeepSeek and
-        # others the param is stripped upstream, so a second pass with
-        # effort=None is identical and just doubles cost — skip it.
-        if reasoning_effort is not None and _model_accepts_reasoning_effort(model):
+        # The "no-reasoning" retry only helps when reasoning was actually
+        # engaged for this model+effort combination. Skipping the no-op retry
+        # avoids doubling cost on routes where reasoning was already off
+        # (e.g. DeepSeek with low/medium, or non-reasoning providers).
+        if _reasoning_engaged(model, reasoning_effort):
             synthesis_attempts.append(("final_synthesis_no_reasoning", None))
         for label, effort in synthesis_attempts:
             try:
