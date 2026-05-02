@@ -1309,6 +1309,60 @@ class TestCmdNudge:
         assert save_nudge.call_args.args[0].startswith("**📊 Data Sync**")
         assert send_telegram.call_args.args[0].startswith("**📊 Data Sync**")
 
+    def test_nudge_passes_route_reasoning_effort(
+        self,
+        in_memory_db,
+        capsys,
+        monkeypatch,
+    ) -> None:
+        args = SimpleNamespace(
+            db="ignored.db",
+            model=None,
+            months=1,
+            trigger="new_data",
+            email=False,
+            telegram=False,
+        )
+        result = LLMResult(
+            text="**Keep it easy today.** The load is already high.",
+            model="opus-model",
+            input_tokens=1,
+            output_tokens=12,
+            total_tokens=13,
+            latency_s=0.1,
+            llm_call_id=22,
+        )
+        seen_kwargs: list[dict[str, object]] = []
+
+        def fake_call_llm(_messages: list[dict], **kwargs: object) -> LLMResult:
+            seen_kwargs.append(kwargs)
+            return result
+
+        monkeypatch.setattr("cmd_llm.ENABLE_LLM_VERIFICATION", False)
+        with ExitStack() as stack:
+            for ctx in self._patch_nudge_context(in_memory_db):
+                stack.enter_context(ctx)
+            stack.enter_context(
+                patch(
+                    "cmd_llm._route_kwargs",
+                    return_value={
+                        "model": "opus-model",
+                        "reasoning_effort": "high",
+                        "temperature": None,
+                    },
+                )
+            )
+            stack.enter_context(patch("cmd_llm.call_llm", side_effect=fake_call_llm))
+            stack.enter_context(patch("cmd_llm._save_nudge"))
+            stack.enter_context(patch("cmd_llm.send_telegram"))
+
+            cmd_nudge(args)
+
+        assert capsys.readouterr().out
+        assert seen_kwargs[0]["reasoning_effort"] == "high"
+        assert seen_kwargs[0]["temperature"] is None
+        assert seen_kwargs[0]["metadata"]["reasoning_effort"] == "high"
+
     def test_empty_nudge_without_successful_retry_skips_without_sending(
         self,
         in_memory_db,

@@ -146,7 +146,7 @@ class TestNotificationPrefs:
             now=datetime.fromisoformat("2026-04-05T10:00:00+00:00"),
         )
 
-        assert "Max nudges per day: 3" in text
+        assert "Max nudges per day: 2" in text
 
     def test_invalid_nudge_cap_is_rejected(self) -> None:
         from notification_prefs import validate_notification_changes

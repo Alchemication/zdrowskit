@@ -41,7 +41,7 @@ from config import (
     VERIFICATION_REWRITE_MODEL,
 )
 
-PREFS_VERSION = 1
+PREFS_VERSION = 2
 
 PRO_FEATURES: tuple[str, ...] = (
     "insights",
@@ -57,6 +57,7 @@ FLASH_FEATURES: tuple[str, ...] = (
     "verification_rewrite",
 )
 FEATURES: tuple[str, ...] = PRO_FEATURES + FLASH_FEATURES
+ASYNC_QUALITY_FEATURES: tuple[str, ...] = ("insights", "coach", "nudge")
 
 FEATURE_LABELS: dict[str, str] = {
     "insights": "Reports",
@@ -136,13 +137,14 @@ def default_model_prefs() -> dict[str, Any]:
             },
         },
         "features": {
-            "insights": {"profile": "pro", "primary": DEFAULT_INSIGHTS_MODEL},
-            "coach": {"profile": "pro", "primary": DEFAULT_COACH_MODEL},
-            "nudge": {"profile": "pro", "primary": DEFAULT_NUDGE_MODEL},
+            "insights": _feature_defaults("insights", DEFAULT_INSIGHTS_MODEL),
+            "coach": _feature_defaults("coach", DEFAULT_COACH_MODEL),
+            "nudge": _feature_defaults("nudge", DEFAULT_NUDGE_MODEL),
             "chat": {
-                "profile": "pro",
-                "primary": ANTHROPIC_OPUS_4_7_MODEL,
-                "fallback": DEFAULT_CHAT_MODEL,
+                "profile": "flash",
+                "primary": DEFAULT_CHAT_MODEL,
+                "reasoning_effort": None,
+                "temperature": 0.7,
             },
             "notify": {"profile": "flash", "primary": DEFAULT_NOTIFY_MODEL},
             "log_flow": {
@@ -158,6 +160,15 @@ def default_model_prefs() -> dict[str, Any]:
             },
         },
     }
+
+
+def _feature_defaults(feature: str, primary: str) -> dict[str, Any]:
+    """Return default route entry for one feature."""
+    entry: dict[str, Any] = {"profile": _default_profile(feature), "primary": primary}
+    entry.update(_feature_model_defaults(feature, primary))
+    if feature in ASYNC_QUALITY_FEATURES and primary == ANTHROPIC_OPUS_4_7_MODEL:
+        entry["fallback"] = PRIMARY_PRO_MODEL
+    return entry
 
 
 def selectable_models() -> list[str]:
@@ -228,6 +239,8 @@ def load_model_prefs(path: Path | None = None) -> dict[str, Any]:
         return prefs
     if not isinstance(raw, dict):
         return prefs
+    raw_version = raw.get("version")
+    prefs_version = raw_version if isinstance(raw_version, int) else 1
 
     raw_profiles = raw.get("profiles")
     if isinstance(raw_profiles, dict):
@@ -245,6 +258,8 @@ def load_model_prefs(path: Path | None = None) -> dict[str, Any]:
     if isinstance(raw_features, dict):
         for feature, override in raw_features.items():
             if feature in prefs["features"] and isinstance(override, dict):
+                if _is_legacy_v1_default_override(prefs_version, feature, override):
+                    continue
                 clean = {
                     key: value
                     for key, value in override.items()
@@ -259,6 +274,33 @@ def load_model_prefs(path: Path | None = None) -> dict[str, Any]:
                 }
                 prefs["features"][feature].update(clean)
     return prefs
+
+
+def _is_legacy_v1_default_override(
+    prefs_version: int,
+    feature: str,
+    override: dict[str, Any],
+) -> bool:
+    """Return True for v1 entries that only persisted old built-in defaults."""
+    if prefs_version >= PREFS_VERSION:
+        return False
+    if feature in ASYNC_QUALITY_FEATURES:
+        return (
+            override.get("profile") == "pro"
+            and override.get("primary") == PRIMARY_PRO_MODEL
+            and "fallback" not in override
+            and "reasoning_effort" not in override
+            and "temperature" not in override
+        )
+    if feature == "chat":
+        return (
+            override.get("profile") == "pro"
+            and override.get("primary") == ANTHROPIC_OPUS_4_7_MODEL
+            and override.get("fallback") == PRIMARY_PRO_MODEL
+            and override.get("reasoning_effort") is None
+            and override.get("temperature") is None
+        )
+    return False
 
 
 def save_model_prefs(
@@ -295,10 +337,10 @@ def resolve_model_route(
     fallback = str(raw_fallback) if raw_fallback else None
 
     # Effective reasoning/temperature: per-feature override wins; otherwise
-    # the primary model's documented requirements apply (Opus 4.7 must omit
-    # temperature and run with reasoning off); otherwise leave to call_llm
-    # to apply its global defaults.
-    primary_defaults = _primary_model_defaults(primary)
+    # feature/model defaults apply. Opus 4.7 must omit temperature; async
+    # judgment surfaces use high reasoning, while chat keeps reasoning off
+    # for latency.
+    primary_defaults = _feature_model_defaults(feature, primary)
     params: dict[str, Any] = {}
     for key in ("reasoning_effort", "temperature"):
         if key in feature_cfg:
@@ -319,10 +361,13 @@ def resolve_model_route(
     )
 
 
-def _primary_model_defaults(primary: str) -> dict[str, Any]:
-    """Return reasoning/temperature defaults forced by the primary model."""
+def _feature_model_defaults(feature: str, primary: str) -> dict[str, Any]:
+    """Return reasoning/temperature defaults for a feature/model pair."""
     if primary == ANTHROPIC_OPUS_4_7_MODEL:
-        return {"reasoning_effort": None, "temperature": None}
+        return {
+            "reasoning_effort": ("high" if feature in ASYNC_QUALITY_FEATURES else None),
+            "temperature": None,
+        }
     return {}
 
 
@@ -354,17 +399,17 @@ def profile_fallback_for(
     return str(raw) if raw else None
 
 
-def _normalize_primary_params(entry: dict[str, Any], primary: str) -> None:
+def _normalize_primary_params(
+    entry: dict[str, Any], primary: str, feature: str
+) -> None:
     """Reset reasoning/temperature when primary model family changes.
 
-    Switching to Opus 4.7 forces both off (the model omits temperature and
-    has reasoning controls disabled by spec). Switching to anything else
-    drops Opus-specific overrides so the route picks up the global call
-    defaults again.
+    Switching to Opus 4.7 omits temperature and chooses the route's default
+    reasoning posture. Switching to anything else drops Opus-specific overrides
+    so the route picks up the global call defaults again.
     """
     if primary == ANTHROPIC_OPUS_4_7_MODEL:
-        entry["reasoning_effort"] = None
-        entry["temperature"] = None
+        entry.update(_feature_model_defaults(feature, primary))
     else:
         entry.pop("reasoning_effort", None)
         entry.pop("temperature", None)
@@ -395,7 +440,7 @@ def set_feature_route(
         primary_changed = entry.get("primary") != primary
         entry["primary"] = primary  # type: ignore[assignment]
     if primary_changed:
-        _normalize_primary_params(entry, str(entry["primary"]))
+        _normalize_primary_params(entry, str(entry["primary"]), feature)
     if fallback is not ...:
         # ``None`` persists as JSON null and means "use profile fallback".
         # The resolver treats null and missing identically, but storing
@@ -440,7 +485,7 @@ def update_multiple_features(
             raise ValueError(f"Unknown model feature: {feature}")
         entry = dict(prefs["features"].get(feature, {}))
         entry["primary"] = primary
-        _normalize_primary_params(entry, primary)
+        _normalize_primary_params(entry, primary, feature)
         if fallback is not ...:
             # ``None`` persists as null and means "use profile fallback".
             entry["fallback"] = fallback  # type: ignore[assignment]
@@ -507,11 +552,16 @@ def doctor_findings(
             if not os.environ.get(env_name):
                 findings.append(f"{env_name} is not set.")
 
-    chat = resolve_model_route("chat", prefs=prefs)
-    if chat.primary == ANTHROPIC_OPUS_4_7_MODEL:
-        if chat.temperature is not None:
-            findings.append("Chat Opus 4.7 should omit temperature.")
-        if chat.reasoning_effort is not None:
+    for route in routes:
+        if route.primary == ANTHROPIC_OPUS_4_7_MODEL and route.temperature is not None:
+            findings.append(
+                f"{FEATURE_LABELS[route.feature]} Opus 4.7 should omit temperature."
+            )
+        if (
+            route.feature == "chat"
+            and route.primary == ANTHROPIC_OPUS_4_7_MODEL
+            and route.reasoning_effort is not None
+        ):
             findings.append("Chat Opus 4.7 should run with reasoning off.")
     return findings
 

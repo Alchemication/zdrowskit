@@ -1329,10 +1329,16 @@ def cmd_nudge(
     model = route["model"]
     fallback_models = route.get("fallback_models")
     temperature = route.get("temperature", 0.7)
+    reasoning_effort = route.get("reasoning_effort")
     tools = run_sql_tool()
     max_iterations = MAX_TOOL_ITERATIONS_NUDGE
 
-    logger.info("Calling %s for nudge (trigger: %s) ...", model, _trigger)
+    logger.info(
+        "Calling %s for nudge (trigger: %s, reasoning=%s) ...",
+        model,
+        _trigger,
+        reasoning_effort or "off",
+    )
     for iteration in range(max_iterations):
         try:
             result = call_llm(
@@ -1341,10 +1347,15 @@ def cmd_nudge(
                 max_tokens=MAX_TOKENS_NUDGE,
                 temperature=temperature,
                 tools=tools,
+                reasoning_effort=reasoning_effort,
                 fallback_models=fallback_models,
                 conn=conn,
                 request_type="nudge",
-                metadata={"trigger_type": _trigger, "iteration": iteration},
+                metadata={
+                    "trigger_type": _trigger,
+                    "iteration": iteration,
+                    "reasoning_effort": reasoning_effort,
+                },
             )
         except Exception as e:
             err_name = type(e).__name__
@@ -1416,10 +1427,15 @@ def cmd_nudge(
                 max_tokens=MAX_TOKENS_NUDGE,
                 temperature=temperature,
                 tools=None,
+                reasoning_effort=reasoning_effort,
                 fallback_models=fallback_models,
                 conn=conn,
                 request_type="nudge",
-                metadata={"trigger_type": _trigger, "iteration": "final_synthesis"},
+                metadata={
+                    "trigger_type": _trigger,
+                    "iteration": "final_synthesis",
+                    "reasoning_effort": reasoning_effort,
+                },
             )
         except Exception as e:
             logger.error("Nudge final synthesis call failed: %s", e)
@@ -1448,12 +1464,14 @@ def cmd_nudge(
                     max_tokens=MAX_TOKENS_NUDGE,
                     temperature=temperature,
                     tools=None,
+                    reasoning_effort=reasoning_effort,
                     fallback_models=[],
                     conn=conn,
                     request_type="nudge",
                     metadata={
                         "trigger_type": _trigger,
                         "iteration": "empty_retry",
+                        "reasoning_effort": reasoning_effort,
                         "retry_after_llm_call_id": source_llm_call_id,
                     },
                 )

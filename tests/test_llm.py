@@ -75,13 +75,12 @@ class TestExtractMemory:
 
 
 class TestFeatureDefaultModels:
-    def test_high_judgment_surfaces_default_to_deepseek_pro(self) -> None:
+    def test_high_judgment_surfaces_default_to_opus(self) -> None:
         assert DEFAULT_MODEL == PRIMARY_PRO_MODEL == DEEPSEEK_PRO_MODEL
         assert FALLBACK_MODEL == FALLBACK_PRO_MODEL == ANTHROPIC_OPUS_MODEL
-        assert DEFAULT_INSIGHTS_MODEL == PRIMARY_PRO_MODEL
-        assert DEFAULT_COACH_MODEL == PRIMARY_PRO_MODEL
-        assert DEFAULT_NUDGE_MODEL == PRIMARY_PRO_MODEL
-        assert DEFAULT_CHAT_MODEL == PRIMARY_PRO_MODEL
+        assert DEFAULT_INSIGHTS_MODEL == DEFAULT_COACH_MODEL == DEFAULT_NUDGE_MODEL
+        assert DEFAULT_INSIGHTS_MODEL == ANTHROPIC_OPUS_4_7_MODEL
+        assert DEFAULT_CHAT_MODEL == PRIMARY_FLASH_MODEL
 
     def test_lightweight_utility_surfaces_default_models(self) -> None:
         assert PRIMARY_FLASH_MODEL == DEEPSEEK_FLASH_MODEL
@@ -1079,9 +1078,7 @@ class TestCallLlm:
             value: str
 
         original_messages = [{"role": "user", "content": "test"}]
-        mock_litellm.completion.return_value = self._mock_response(
-            '{"value":"ok"}'
-        )
+        mock_litellm.completion.return_value = self._mock_response('{"value":"ok"}')
         mock_litellm.completion_cost.return_value = 0.02
 
         call_llm(

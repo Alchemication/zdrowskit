@@ -27,13 +27,22 @@ from model_prefs import (
 
 
 class TestModelPrefs:
-    def test_chat_default_uses_opus_without_reasoning_or_temperature(self, tmp_path):
+    def test_async_defaults_use_opus_with_high_reasoning_no_temperature(self, tmp_path):
+        for feature in ("insights", "coach", "nudge"):
+            route = resolve_model_route(feature, path=tmp_path / "models.json")
+
+            assert route.primary == ANTHROPIC_OPUS_4_7_MODEL
+            assert route.fallback == PRIMARY_PRO_MODEL
+            assert route.call_kwargs()["reasoning_effort"] == "high"
+            assert route.call_kwargs()["temperature"] is None
+
+    def test_chat_default_uses_deepseek_flash(self, tmp_path):
         route = resolve_model_route("chat", path=tmp_path / "models.json")
 
-        assert route.primary == ANTHROPIC_OPUS_4_7_MODEL
-        assert route.fallback == PRIMARY_PRO_MODEL
+        assert route.primary == PRIMARY_FLASH_MODEL
+        assert route.fallback == ANTHROPIC_HAIKU_MODEL
         assert route.call_kwargs()["reasoning_effort"] is None
-        assert route.call_kwargs()["temperature"] is None
+        assert route.call_kwargs()["temperature"] == 0.7
 
     def test_log_flow_defaults_to_haiku_with_deepseek_flash_fallback(self, tmp_path):
         route = resolve_model_route("log_flow", path=tmp_path / "models.json")
@@ -57,8 +66,8 @@ class TestModelPrefs:
         reset_feature_route("nudge", path=path)
 
         route = resolve_model_route("nudge", path=path)
-        assert route.primary == PRIMARY_PRO_MODEL
-        assert route.fallback == FALLBACK_PRO_MODEL
+        assert route.primary == ANTHROPIC_OPUS_4_7_MODEL
+        assert route.fallback == PRIMARY_PRO_MODEL
 
     def test_profile_route_updates_inherited_fallback(self, tmp_path):
         path = tmp_path / "models.json"
@@ -84,8 +93,8 @@ class TestModelPrefs:
 
         route = resolve_model_route("chat", path=path)
         # ``None`` overrides chat's built-in feature-level fallback so the
-        # profile fallback (Pro: claude-opus-4-6) applies.
-        assert route.fallback == FALLBACK_PRO_MODEL
+        # profile fallback applies.
+        assert route.fallback == ANTHROPIC_HAIKU_MODEL
         # Persisted as JSON null so the resolver can distinguish "user
         # picked auto" from "default chat fallback".
         assert json.loads(path.read_text())["features"]["chat"]["fallback"] is None
@@ -95,13 +104,62 @@ class TestModelPrefs:
         path.write_text(json.dumps({"features": {"insights": {}}}))
 
         route = resolve_model_route("insights", path=path)
-        assert route.fallback == FALLBACK_PRO_MODEL
+        assert route.fallback == PRIMARY_PRO_MODEL
 
-    def test_reset_feature_restores_chat_to_opus(self, tmp_path):
+    def test_legacy_v1_default_async_routes_migrate_to_new_defaults(self, tmp_path):
+        path = tmp_path / "models.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "features": {
+                        "insights": {
+                            "profile": "pro",
+                            "primary": PRIMARY_PRO_MODEL,
+                        },
+                        "nudge": {
+                            "profile": "pro",
+                            "primary": PRIMARY_PRO_MODEL,
+                        },
+                    },
+                }
+            )
+        )
+
+        insights = resolve_model_route("insights", path=path)
+        nudge = resolve_model_route("nudge", path=path)
+
+        assert insights.primary == ANTHROPIC_OPUS_4_7_MODEL
+        assert nudge.primary == ANTHROPIC_OPUS_4_7_MODEL
+        assert nudge.reasoning_effort == "high"
+
+    def test_legacy_v1_explicit_async_override_is_preserved(self, tmp_path):
+        path = tmp_path / "models.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "features": {
+                        "nudge": {
+                            "profile": "pro",
+                            "primary": PRIMARY_PRO_MODEL,
+                            "temperature": 0.3,
+                        },
+                    },
+                }
+            )
+        )
+
+        route = resolve_model_route("nudge", path=path)
+
+        assert route.primary == PRIMARY_PRO_MODEL
+        assert route.temperature == 0.3
+
+    def test_reset_feature_restores_chat_to_flash(self, tmp_path):
         path = tmp_path / "models.json"
         set_feature_route(
             "chat",
-            primary=PRIMARY_PRO_MODEL,
+            primary=ANTHROPIC_OPUS_4_7_MODEL,
             fallback=FALLBACK_PRO_MODEL,
             path=path,
         )
@@ -109,8 +167,8 @@ class TestModelPrefs:
         reset_feature_route("chat", path=path)
 
         route = resolve_model_route("chat", path=path)
-        assert route.primary == ANTHROPIC_OPUS_4_7_MODEL
-        assert route.temperature is None
+        assert route.primary == PRIMARY_FLASH_MODEL
+        assert route.temperature == 0.7
         assert route.reasoning_effort is None
 
     def test_reset_all_restores_every_feature(self, tmp_path):
@@ -127,10 +185,10 @@ class TestModelPrefs:
 
         nudge = resolve_model_route("nudge", path=path)
         notify = resolve_model_route("notify", path=path)
-        assert nudge.primary == PRIMARY_PRO_MODEL
+        assert nudge.primary == ANTHROPIC_OPUS_4_7_MODEL
         assert notify.fallback != ANTHROPIC_OPUS_4_7_MODEL
 
-    def test_set_feature_strips_reasoning_when_primary_changes_away_from_opus(
+    def test_set_chat_feature_returns_to_chat_controls_when_leaving_opus(
         self, tmp_path
     ):
         path = tmp_path / "models.json"
@@ -147,14 +205,14 @@ class TestModelPrefs:
 
         route = resolve_model_route("chat", path=path)
         assert route.primary == PRIMARY_PRO_MODEL
-        assert "reasoning_effort" not in route.params
-        assert "temperature" not in route.params
+        assert route.reasoning_effort is None
+        assert route.temperature == 0.7
 
     def test_explicit_reasoning_override_persists(self, tmp_path):
         path = tmp_path / "models.json"
         set_feature_route(
             "coach",
-            primary=PRIMARY_PRO_MODEL,
+            primary=ANTHROPIC_OPUS_4_7_MODEL,
             reasoning_effort="medium",
             path=path,
         )
@@ -164,7 +222,7 @@ class TestModelPrefs:
 
     def test_profile_fallback_for_returns_profile_fallback(self, tmp_path):
         path = tmp_path / "models.json"
-        assert profile_fallback_for("chat", path=path) == FALLBACK_PRO_MODEL
+        assert profile_fallback_for("chat", path=path) == ANTHROPIC_HAIKU_MODEL
         assert profile_fallback_for("notify", path=path) is not None
 
     def test_selectable_models_include_configured_choices(self):
@@ -210,3 +268,20 @@ class TestDoctor:
         findings = doctor_findings(path=path)
 
         assert any("reasoning" in finding for finding in findings)
+
+    def test_flags_any_opus_temperature_set(self, tmp_path, monkeypatch):
+        path = tmp_path / "models.json"
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "test")
+        set_feature_route(
+            "nudge",
+            primary=ANTHROPIC_OPUS_4_7_MODEL,
+            temperature=0.7,
+            path=path,
+        )
+
+        findings = doctor_findings(path=path)
+
+        assert any(
+            "Nudges" in finding and "temperature" in finding for finding in findings
+        )

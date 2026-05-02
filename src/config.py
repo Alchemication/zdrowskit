@@ -219,25 +219,25 @@ FALLBACK_MODEL: str = os.environ.get("ZDROWSKIT_FALLBACK_MODEL", FALLBACK_PRO_MO
 
 DEFAULT_INSIGHTS_MODEL: str = os.environ.get(
     "ZDROWSKIT_INSIGHTS_MODEL",
-    PRIMARY_PRO_MODEL,
+    ANTHROPIC_OPUS_4_7_MODEL,
 )
 """Default model for weekly insights reports."""
 
 DEFAULT_COACH_MODEL: str = os.environ.get(
     "ZDROWSKIT_COACH_MODEL",
-    PRIMARY_PRO_MODEL,
+    ANTHROPIC_OPUS_4_7_MODEL,
 )
 """Default model for coaching review/proposal generation."""
 
 DEFAULT_NUDGE_MODEL: str = os.environ.get(
     "ZDROWSKIT_NUDGE_MODEL",
-    PRIMARY_PRO_MODEL,
+    ANTHROPIC_OPUS_4_7_MODEL,
 )
 """Default model for proactive nudges."""
 
 DEFAULT_CHAT_MODEL: str = os.environ.get(
     "ZDROWSKIT_CHAT_MODEL",
-    PRIMARY_PRO_MODEL,
+    PRIMARY_FLASH_MODEL,
 )
 """Default model for interactive Telegram chat."""
 
@@ -327,10 +327,10 @@ event before importing, so all sibling files have time to land via iCloud."""
 CONTEXT_DEBOUNCE_S: int = 60
 """Context-file (.md) debounce window: collapse rapid edits into one fire."""
 
-MAX_NUDGES_PER_DAY: int = 3
+MAX_NUDGES_PER_DAY: int = 2
 """Hard cap on nudges per calendar day."""
 
-MIN_NUDGE_INTERVAL_S: int = 90 * 60
+MIN_NUDGE_INTERVAL_S: int = 3 * 60 * 60
 """Minimum gap between consecutive nudges."""
 
 SCHEDULED_CHECK_INTERVAL_S: int = 30 * 60

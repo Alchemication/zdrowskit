@@ -6,7 +6,7 @@ Each notification type is a distinct LLM call with its own prompt, context, tool
 |---------|---------|---------|-----------|--------|-------|----------------|
 | **Insights** | Full weekly report | Scheduled, default Monday 10am, or manual `/review` | 1x/week | ~450 words | `run_sql` | `<chart>` by default 1, skip if misleading; `<memory>` always 1, appended to `history.md` |
 | **Coach** | Weekly strategy review, only when proposals exist | After insights, silent on no-change weeks | 1x/week | ~300 words | `run_sql`, `update_context` for `strategy` only | `SKIP` if no changes warranted; bundled message with inline Accept/Reject buttons per edit |
-| **Nudge** | Short reactive next-action nudge | Data sync, file edit | Up to 3/day by default | 80 words | `run_sql` | `SKIP` if nothing changes; optional `<chart>` |
+| **Nudge** | Short reactive next-action nudge | Data sync, file edit | Up to 2/day by default | 80 words | `run_sql` | `SKIP` if nothing changes; optional `<chart>` |
 | **Chat** | Interactive conversation: answer the current message, ask anything, get charts | Your Telegram message | On demand | 150 words | `run_sql` up to 5/turn, `update_context` any file | Optional `<chart>`; at most one `update_context` |
 
 ## Notification Preferences Via Telegram
@@ -63,7 +63,7 @@ Each channel sees what the others recently said so the LLM avoids redundancy:
 - **Earliest nudge time:** nudges are deferred until the configured earliest send time. Triggers queue and drain as one consolidated nudge once the window opens.
 - **Temporary mute / disable:** when a notification type is muted or disabled, the daemon skips the notification LLM call entirely.
 - **Report suppression:** nudges are suppressed +/- 1 hour around scheduled reports because the report already covers the big picture.
-- **Rate limits:** max 3 nudges/day by default, min 90 minutes apart.
+- **Rate limits:** max 2 nudges/day by default, min 3 hours apart.
 - **LLM SKIP:** the nudge LLM can respond `SKIP` if there is nothing genuinely new to say.
 - **Coach:** runs at most once per calendar day.
 - **No replay after mute:** skipped nudges/reports are not replayed after a temporary mute expires.

@@ -65,7 +65,7 @@ _DEFAULT_EFFECTIVE: dict[str, dict[str, Any]] = {
     "nudges": {
         "enabled": True,
         "earliest_time": "10:00",
-        "max_per_day": 3,
+        "max_per_day": 2,
     },
     "weekly_insights": {
         "enabled": True,

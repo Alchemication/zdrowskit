@@ -2,7 +2,7 @@
 
 zdrowskit relies on capable models. The coach writes personalised reports, decides when to stay quiet, generates SQL queries against your data, and produces chart code.
 
-Default: DeepSeek V4 Pro for async judgement surfaces, with Anthropic Opus 4.6 as the cross-provider fallback. Telegram chat defaults to Anthropic Opus 4.7 with reasoning off for lower latency.
+Default: Anthropic Opus 4.7 for async judgement surfaces, with high reasoning and temperature omitted. Telegram chat defaults to DeepSeek V4 Flash for lower latency and cost.
 
 Minimum: Claude Sonnet 4.6 or equivalent. Anything below that and the reports get generic, the queries get unreliable, and the charts break.
 
@@ -28,7 +28,7 @@ The Telegram panel groups features as Chat / Reports / Coach / Nudges / Utilitie
 
 A `Reset all` button on the main panel and `uv run python main.py models reset --all` restore everything to built-in defaults. Picking the `Auto` fallback, or `--fallback auto` from the CLI, defers to the profile's fallback so future profile changes propagate.
 
-Insights, coach, and nudges default to `deepseek/deepseek-v4-pro` with `anthropic/claude-opus-4-6` fallback. Chat defaults to `anthropic/claude-opus-4-7` with reasoning off and temperature omitted, falling back to DeepSeek Pro.
+Insights, coach, and nudges default to `anthropic/claude-opus-4-7` with `reasoning_effort=high`, temperature omitted, and `deepseek/deepseek-v4-pro` fallback. Chat defaults to `deepseek/deepseek-v4-flash` with `anthropic/claude-haiku-4-5` fallback.
 
 Lightweight utility surfaces, including `/notify` interpretation, `/log` flow building, and `/add` workout clone selection, default to `deepseek/deepseek-v4-flash` with `anthropic/claude-haiku-4-5` fallback.
 
@@ -36,31 +36,31 @@ Logged LLM calls record the effective model, and fallback calls include `request
 
 ## Cost Projection
 
-Providers bill in USD per million tokens. Prices below were checked on 2026-04-30 against [DeepSeek pricing](https://api-docs.deepseek.com/quick_start/pricing/) and [Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pricing).
+Providers bill in USD per million tokens. Prices below were checked on 2026-05-02 against [DeepSeek pricing](https://api-docs.deepseek.com/quick_start/pricing/) and [Anthropic's Opus 4.7 page](https://www.anthropic.com/claude/opus). Anthropic lists Opus 4.7 at $5/MTok input and $25/MTok output.
 
 Current default routes:
 
 | Feature | Primary | Normal cadence |
 |---|---|---:|
-| Weekly + midweek reports | `deepseek/deepseek-v4-pro` | 2/week |
-| Coach review | `deepseek/deepseek-v4-pro` | 1/week |
-| Nudges | `deepseek/deepseek-v4-pro` | up to 3/day |
+| Weekly + midweek reports | `anthropic/claude-opus-4-7` | 2/week |
+| Coach review | `anthropic/claude-opus-4-7` | 1/week |
+| Nudges | `anthropic/claude-opus-4-7` | up to 2/day |
 | Verification | `deepseek/deepseek-v4-pro` | reports, coach, nudges |
 | Verification rewrites | `deepseek/deepseek-v4-flash` | only when verifier asks |
-| Chat | `anthropic/claude-opus-4-7` | on demand |
+| Chat | `deepseek/deepseek-v4-flash` | on demand |
 
 Using recent logged token sizes from this app, the always-on daemon lands around:
 
 | Workload | Projected cost |
 |---|---:|
-| Reports, including verification | ~$0.04/week |
-| Coach review | ~$0.01/week |
-| Nudges at the 3/day cap, including verification | ~$0.23/week |
-| **Daemon total at default caps** | **~$0.30/week** |
+| Reports, including DeepSeek verification | ~$0.20/week |
+| Coach review | ~$0.10/week |
+| Nudges at the 2/day cap, including DeepSeek verification | ~$0.75/week |
+| **Daemon total at default caps** | **~$1.05/week** |
 
-This assumes DeepSeek Pro succeeds and Anthropic fallback is rare. If every Pro-class call used Anthropic Opus instead, the same daemon workload would be several dollars per week. If DeepSeek Pro returns to list pricing after the current promo, the default daemon projection rises to roughly `$1.10/week`.
+This assumes verification stays on DeepSeek Pro and rewrite calls remain rare. Moving every verifier call to Opus too would roughly double nudge cost at the daily cap, so the default keeps verification on DeepSeek Pro unless quality regressions prove it needs upgrading.
 
-Chat is separate because it is user-driven. A typical Opus 4.7 chat turn with tools can cost around `$0.08`; routing chat to DeepSeek Flash is usually under one cent per turn, but quality may drop for harder analysis.
+Chat is separate because it is user-driven. Routing chat to DeepSeek Flash is usually under one cent per turn, but quality may drop for harder analysis.
 
 Inspect actual spend from your local DB:
 
@@ -79,10 +79,10 @@ ZDROWSKIT_PRIMARY_FLASH_MODEL=deepseek/deepseek-v4-flash
 ZDROWSKIT_FALLBACK_FLASH_MODEL=anthropic/claude-haiku-4-5
 ZDROWSKIT_ANTHROPIC_OPUS_4_7_MODEL=anthropic/claude-opus-4-7
 
-ZDROWSKIT_INSIGHTS_MODEL=deepseek/deepseek-v4-pro
-ZDROWSKIT_COACH_MODEL=deepseek/deepseek-v4-pro
-ZDROWSKIT_NUDGE_MODEL=deepseek/deepseek-v4-pro
-ZDROWSKIT_CHAT_MODEL=deepseek/deepseek-v4-pro
+ZDROWSKIT_INSIGHTS_MODEL=anthropic/claude-opus-4-7
+ZDROWSKIT_COACH_MODEL=anthropic/claude-opus-4-7
+ZDROWSKIT_NUDGE_MODEL=anthropic/claude-opus-4-7
+ZDROWSKIT_CHAT_MODEL=deepseek/deepseek-v4-flash
 ZDROWSKIT_NOTIFY_MODEL=deepseek/deepseek-v4-flash
 ZDROWSKIT_LOG_FLOW_MODEL=anthropic/claude-haiku-4-5
 # /log uses deepseek/deepseek-v4-flash as its feature-level fallback
