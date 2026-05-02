@@ -733,6 +733,25 @@ class TestChatRunner:
             )
         )
         monkeypatch.setattr(run_nudge_verify, "call_llm", mock_call)
+        routes = {
+            "verification": SimpleNamespace(
+                primary="deepseek/deepseek-v4-pro",
+                fallback="anthropic/claude-opus-4-7",
+                reasoning_effort="high",
+                temperature=None,
+            ),
+            "verification_rewrite": SimpleNamespace(
+                primary="deepseek/deepseek-v4-flash",
+                fallback="anthropic/claude-haiku-4-5",
+                reasoning_effort="high",
+                temperature=None,
+            ),
+        }
+        monkeypatch.setattr(
+            run_nudge_verify,
+            "resolve_model_route",
+            lambda feature: routes[feature],
+        )
         cache = EvalCache(tmp_path / "eval-cache.sqlite")
 
         first = run_case(case, cache=cache)
@@ -747,6 +766,13 @@ class TestChatRunner:
         assert second.execution.cache_hits == 1
         assert second.execution.cache_misses == 0
         assert second.execution.input_tokens == 100
+        assert first.model == "deepseek/deepseek-v4-pro"
+        assert mock_call.call_args.kwargs["model"] == "deepseek/deepseek-v4-pro"
+        assert mock_call.call_args.kwargs["fallback_models"] == [
+            "anthropic/claude-opus-4-7"
+        ]
+        assert mock_call.call_args.kwargs["reasoning_effort"] == "high"
+        assert mock_call.call_args.kwargs["temperature"] is None
         assert mock_call.call_count == 1
 
     def test_chat_case_fails_when_judge_omits_an_assertion(

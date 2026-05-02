@@ -2,10 +2,10 @@
 
 Exercises the production verifier path (``verify_and_rewrite`` with the
 rewriter disabled) against a fixture captured from a real verifier call.
-Models, provider extras (deepseek thinking flag), and the structured
-response schema are resolved by the production verifier path at runtime,
-so swapping model/thinking env vars is the supported way to A/B verifier
-behaviour.
+Models, fallback, reasoning, temperature, and the structured response schema
+are resolved through the same model route used by production. Change the
+verifier route's ``reasoning_effort`` via ``main.py models`` to A/B DeepSeek
+thinking behavior.
 """
 
 from __future__ import annotations
@@ -21,18 +21,15 @@ _SRC = Path(__file__).resolve().parent.parent / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from config import (  # noqa: E402
-    VERIFICATION_MODEL,
-    VERIFICATION_REWRITE_MODEL,
-)
 from llm import LLMResult, call_llm  # noqa: E402
 from llm_verify import VerificationResult, verify_and_rewrite  # noqa: E402
+from model_prefs import resolve_model_route  # noqa: E402
 from store import connect_db  # noqa: E402
 
 
 def _resolved_model_label() -> str:
     """Render the verifier model for result reporting."""
-    return VERIFICATION_MODEL
+    return resolve_model_route("verification").primary
 
 
 def run_nudge_verify_case(
@@ -59,6 +56,8 @@ def run_nudge_verify_case(
 
     started = time.perf_counter()
     wrapper = _CachingCallLLM(cache=cache, refresh_cache=refresh_cache)
+    verifier_route = resolve_model_route("verification")
+    rewrite_route = resolve_model_route("verification_rewrite")
     with tempfile.TemporaryDirectory() as tmp:
         conn = connect_db(Path(tmp) / "eval.db", migrate=True)
         try:
@@ -69,8 +68,15 @@ def run_nudge_verify_case(
                 source_messages=source_messages,
                 conn=conn,
                 metadata=metadata,
-                model=VERIFICATION_MODEL,
-                rewrite_model=VERIFICATION_REWRITE_MODEL,
+                model=verifier_route.primary,
+                rewrite_model=rewrite_route.primary,
+                fallback_models=(
+                    [verifier_route.fallback] if verifier_route.fallback else None
+                ),
+                temperature=verifier_route.temperature,
+                reasoning_effort=verifier_route.reasoning_effort,
+                rewrite_temperature=rewrite_route.temperature,
+                rewrite_reasoning_effort=rewrite_route.reasoning_effort,
                 max_revisions=0,
                 strict=False,
                 _call_llm=wrapper,
