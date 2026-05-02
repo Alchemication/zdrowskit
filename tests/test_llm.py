@@ -1072,6 +1072,39 @@ class TestCallLlm:
         assert "requested_extra_body" not in params
 
     @patch("llm.litellm")
+    def test_logs_deepseek_injected_schema_messages(
+        self, mock_litellm: MagicMock, in_memory_db: sqlite3.Connection
+    ) -> None:
+        class TestSchema(BaseModel):
+            value: str
+
+        original_messages = [{"role": "user", "content": "test"}]
+        mock_litellm.completion.return_value = self._mock_response(
+            '{"value":"ok"}'
+        )
+        mock_litellm.completion_cost.return_value = 0.02
+
+        call_llm(
+            original_messages,
+            model=DEEPSEEK_PRO_MODEL,
+            response_format=TestSchema,
+            conn=in_memory_db,
+            request_type="insights",
+        )
+
+        row = in_memory_db.execute("SELECT * FROM llm_call").fetchone()
+        logged_messages = json.loads(row["messages_json"])
+        params = json.loads(row["params_json"])
+
+        assert original_messages == [{"role": "user", "content": "test"}]
+        assert logged_messages[0]["role"] == "system"
+        assert "TestSchema" in logged_messages[0]["content"]
+        assert "value" in logged_messages[0]["content"]
+        assert logged_messages[1] == {"role": "user", "content": "test"}
+        assert params["response_format"] == {"type": "json_object"}
+        assert params["pydantic_schema_injected"]["name"] == "TestSchema"
+
+    @patch("llm.litellm")
     def test_logs_requested_model_when_fallback_used(
         self, mock_litellm: MagicMock, in_memory_db: sqlite3.Connection
     ) -> None:

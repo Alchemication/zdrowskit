@@ -724,6 +724,9 @@ def call_llm(
     )
 
     if conn and request_type:
+        logged_messages = _completion_kwargs_for_model(kwargs, model).get(
+            "messages", messages
+        )
         logged_extra_body = effective_extra_body
         if extra_body is None and not _model_accepts_extra_body(model):
             logged_extra_body = None
@@ -746,7 +749,7 @@ def call_llm(
                 conn,
                 request_type=request_type,
                 model=model,
-                messages=messages,
+                messages=logged_messages,
                 response_text=result.text,
                 params=params,
                 input_tokens=result.input_tokens,
