@@ -26,7 +26,8 @@ from config import (
 )
 
 if TYPE_CHECKING:
-    from cmd_llm import CoachProposal, CommandResult
+    from cmd_coach import CoachProposal
+    from cmd_llm_common import CommandResult
     from daemon import ZdrowskitDaemon
 
 logger = logging.getLogger(__name__)
@@ -446,7 +447,7 @@ class DaemonRunnerHandler:
         if not skip_import:
             self._d._run_import()
 
-        from cmd_llm import cmd_insights
+        from cmd_insights import cmd_insights
 
         args = types.SimpleNamespace(
             db=str(self._d.db),
@@ -506,7 +507,7 @@ class DaemonRunnerHandler:
 
         self._d._run_import()
 
-        from cmd_llm import cmd_insights
+        from cmd_insights import cmd_insights
 
         args = types.SimpleNamespace(
             db=str(self._d.db),
@@ -579,7 +580,7 @@ class DaemonRunnerHandler:
 
         self._d._run_import()
 
-        from cmd_llm import cmd_insights
+        from cmd_insights import cmd_insights
 
         args = types.SimpleNamespace(
             db=str(self._d.db),
@@ -701,7 +702,7 @@ class DaemonRunnerHandler:
             )
             return
 
-        from cmd_llm import cmd_nudge
+        from cmd_nudge import cmd_nudge
 
         args = types.SimpleNamespace(
             db=str(self._d.db),
@@ -833,7 +834,7 @@ class DaemonRunnerHandler:
         if not skip_import:
             self._d._run_import()
 
-        from cmd_llm import cmd_coach
+        from cmd_coach import cmd_coach
 
         args = types.SimpleNamespace(
             db=str(self._d.db),

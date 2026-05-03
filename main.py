@@ -101,9 +101,11 @@ sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 from cmd_db import cmd_db
 from cmd_events import CATEGORIES as EVENT_CATEGORIES, cmd_events
-from cmd_llm import cmd_coach, cmd_insights, cmd_nudge
+from cmd_coach import cmd_coach
+from cmd_insights import cmd_insights
 from cmd_llm_log import cmd_llm_log
 from cmd_models import cmd_models
+from cmd_nudge import cmd_nudge
 from cmd_notify import RESET_TARGETS as NOTIFY_RESET_TARGETS
 from cmd_notify import cmd_notify
 from commands import (

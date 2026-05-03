@@ -78,7 +78,7 @@ class NotifyFlowHandler:
 
     def handle_command(self, request_text: str, message_id: int) -> None:
         """Handle the Telegram /notify command."""
-        from cmd_llm import interpret_notify_request
+        from cmd_notify_interpreter import interpret_notify_request
         from notification_prefs import (
             format_notification_summary,
             format_proposed_changes,
@@ -181,7 +181,7 @@ class NotifyFlowHandler:
         message: dict,
     ) -> bool:
         """Handle a free-text clarification reply for /notify."""
-        from cmd_llm import interpret_notify_request
+        from cmd_notify_interpreter import interpret_notify_request
         from notification_prefs import (
             format_notification_summary,
             format_proposed_changes,

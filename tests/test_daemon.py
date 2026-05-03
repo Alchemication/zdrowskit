@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import daemon as daemon_module
 import daemon_runners as daemon_runners_module
-from cmd_llm import CommandResult
+from cmd_llm_common import CommandResult
 from context_edit import (
     ContextEdit,
     PendingContextEdit,
@@ -44,7 +44,7 @@ class TestWeeklyReportScheduling:
                 daemon, "_record_report", side_effect=lambda _: events.append("record")
             ),
             patch(
-                "cmd_llm.cmd_insights",
+                "cmd_insights.cmd_insights",
                 side_effect=_mock_insights,
             ),
             patch.object(daemon, "_attach_feedback_button"),
@@ -132,7 +132,7 @@ class TestNudgeScheduling:
         with (
             patch.object(daemon_module, "datetime", fake_datetime),
             patch.object(daemon_runners_module, "datetime", fake_datetime),
-            patch("cmd_llm.cmd_nudge") as cmd_nudge,
+            patch("cmd_nudge.cmd_nudge") as cmd_nudge,
         ):
             daemon._run_nudge("new_data")
 
@@ -154,7 +154,7 @@ class TestNudgeScheduling:
             encoding="utf-8",
         )
 
-        with patch("cmd_llm.cmd_nudge") as cmd_nudge:
+        with patch("cmd_nudge.cmd_nudge") as cmd_nudge:
             daemon._run_nudge("new_data")
 
         assert daemon._state.get("quiet_queue") is None
@@ -181,7 +181,7 @@ class TestNudgeScheduling:
             encoding="utf-8",
         )
 
-        with patch("cmd_llm.cmd_insights") as cmd_insights:
+        with patch("cmd_insights.cmd_insights") as cmd_insights:
             daemon._run_weekly_report()
 
         cmd_insights.assert_not_called()
@@ -591,7 +591,7 @@ class TestNotifyFlow:
         )
 
         with patch(
-            "cmd_llm.interpret_notify_request",
+            "cmd_notify_interpreter.interpret_notify_request",
             return_value={
                 "status": "proposal",
                 "intent": "set",
@@ -634,7 +634,7 @@ class TestNotifyFlow:
 class TestLogFlow:
     @staticmethod
     def _two_step_flow():
-        from cmd_llm import LogFlow, LogFlowStep
+        from cmd_log_flow import LogFlow, LogFlowStep
 
         return LogFlow(
             steps=[
@@ -670,7 +670,7 @@ class TestLogFlow:
         log_path.write_text("# Weekly Log\n\n## 2026-04-19\n\nOld entry.\n")
 
         with patch(
-            "cmd_llm.build_log_flow", return_value=self._two_step_flow()
+            "cmd_log_flow.build_log_flow", return_value=self._two_step_flow()
         ) as build_flow:
             daemon._handle_command("/log", 100)
 
@@ -759,12 +759,12 @@ class TestLogFlow:
         log_path.write_text("# Weekly Log\n")
 
         one_step = self._two_step_flow().steps[0]
-        from cmd_llm import LogFlow
+        from cmd_log_flow import LogFlow
 
         simple_flow = LogFlow(steps=[one_step], llm_call_id=None, model="t")
         with (
-            patch("cmd_llm.build_log_flow", return_value=simple_flow),
-            patch("cmd_llm.build_log_step_followup", return_value=None),
+            patch("cmd_log_flow.build_log_flow", return_value=simple_flow),
+            patch("cmd_log_flow.build_log_step_followup", return_value=None),
         ):
             daemon._handle_command("/log", 200)
             token = next(iter(daemon._log_flow._pending))
@@ -817,10 +817,10 @@ class TestLogFlow:
         daemon._poller.send_reply.return_value = 710
 
         one_step = self._two_step_flow().steps[0]
-        from cmd_llm import LogFlow
+        from cmd_log_flow import LogFlow
 
         simple_flow = LogFlow(steps=[one_step], llm_call_id=None, model="t")
-        with patch("cmd_llm.build_log_flow", return_value=simple_flow):
+        with patch("cmd_log_flow.build_log_flow", return_value=simple_flow):
             daemon._handle_command("/log", 201)
         token = next(iter(daemon._log_flow._pending))
 
@@ -852,7 +852,7 @@ class TestLogFlow:
         log_path = tmp_path / "log.md"
         log_path.write_text("# Weekly Log\n")
 
-        with patch("cmd_llm.build_log_flow", return_value=self._two_step_flow()):
+        with patch("cmd_log_flow.build_log_flow", return_value=self._two_step_flow()):
             daemon._handle_command("/log", 202)
         token = next(iter(daemon._log_flow._pending))
         daemon._log_flow._pending[token].session_date = date(2026, 4, 19)
@@ -905,10 +905,10 @@ class TestLogFlow:
         daemon._poller.send_reply.return_value = 730
 
         one_step = self._two_step_flow().steps[0]
-        from cmd_llm import LogFlow
+        from cmd_log_flow import LogFlow
 
         simple_flow = LogFlow(steps=[one_step], llm_call_id=None, model="t")
-        with patch("cmd_llm.build_log_flow", return_value=simple_flow):
+        with patch("cmd_log_flow.build_log_flow", return_value=simple_flow):
             daemon._handle_command("/log", 203)
         token = next(iter(daemon._log_flow._pending))
 
@@ -937,7 +937,7 @@ class TestLogFlow:
     def test_log_flow_done_rejects_empty_optional_submission(
         self, tmp_path: Path
     ) -> None:
-        from cmd_llm import LogFlow, LogFlowStep
+        from cmd_log_flow import LogFlow, LogFlowStep
 
         daemon = _make_daemon(tmp_path)
         daemon._chat._poller = MagicMock()
@@ -959,7 +959,7 @@ class TestLogFlow:
         log_path = tmp_path / "log.md"
         log_path.write_text("# Weekly Log\n")
 
-        with patch("cmd_llm.build_log_flow", return_value=optional_flow):
+        with patch("cmd_log_flow.build_log_flow", return_value=optional_flow):
             daemon._handle_command("/log", 210)
         token = next(iter(daemon._log_flow._pending))
 
@@ -983,7 +983,7 @@ class TestLogFlow:
 
         from context_edit import MAX_LOG_BULLET_CHARS, _validate_log_append_content
 
-        from cmd_llm import LogFlow, LogFlowStep
+        from cmd_log_flow import LogFlow, LogFlowStep
 
         daemon = _make_daemon(tmp_path)
         daemon._chat._poller = MagicMock()
@@ -1006,8 +1006,8 @@ class TestLogFlow:
         log_path.write_text("# Weekly Log\n")
 
         with (
-            patch("cmd_llm.build_log_flow", return_value=flow),
-            patch("cmd_llm.build_log_step_followup", return_value=None),
+            patch("cmd_log_flow.build_log_flow", return_value=flow),
+            patch("cmd_log_flow.build_log_step_followup", return_value=None),
         ):
             daemon._handle_command("/log", 211)
             token = next(iter(daemon._log_flow._pending))
@@ -1041,7 +1041,7 @@ class TestLogFlow:
 
     @staticmethod
     def _one_step_flow():
-        from cmd_llm import LogFlow, LogFlowStep
+        from cmd_log_flow import LogFlow, LogFlowStep
 
         return LogFlow(
             steps=[
@@ -1058,7 +1058,7 @@ class TestLogFlow:
         )
 
     def test_log_flow_reactive_followup_appends_step_2(self, tmp_path: Path) -> None:
-        from cmd_llm import LogFlowStep
+        from cmd_log_flow import LogFlowStep
 
         daemon = _make_daemon(tmp_path)
         daemon._chat._poller = MagicMock()
@@ -1075,9 +1075,9 @@ class TestLogFlow:
             optional=True,
         )
         with (
-            patch("cmd_llm.build_log_flow", return_value=self._one_step_flow()),
+            patch("cmd_log_flow.build_log_flow", return_value=self._one_step_flow()),
             patch(
-                "cmd_llm.build_log_step_followup", return_value=followup_step
+                "cmd_log_flow.build_log_step_followup", return_value=followup_step
             ) as followup,
         ):
             daemon._handle_command("/log", 220)
@@ -1147,8 +1147,10 @@ class TestLogFlow:
         log_path.write_text("# Weekly Log\n")
 
         with (
-            patch("cmd_llm.build_log_flow", return_value=self._one_step_flow()),
-            patch("cmd_llm.build_log_step_followup", return_value=None) as followup,
+            patch("cmd_log_flow.build_log_flow", return_value=self._one_step_flow()),
+            patch(
+                "cmd_log_flow.build_log_step_followup", return_value=None
+            ) as followup,
         ):
             daemon._handle_command("/log", 221)
             token = next(iter(daemon._log_flow._pending))
@@ -1184,9 +1186,9 @@ class TestLogFlow:
         log_path.write_text("# Weekly Log\n")
 
         with (
-            patch("cmd_llm.build_log_flow", return_value=self._one_step_flow()),
+            patch("cmd_log_flow.build_log_flow", return_value=self._one_step_flow()),
             patch(
-                "cmd_llm.build_log_step_followup",
+                "cmd_log_flow.build_log_step_followup",
                 side_effect=RuntimeError("llm down"),
             ),
         ):
@@ -1222,7 +1224,7 @@ class TestTelegramCommands:
         with (
             patch.object(daemon, "_run_import"),
             patch(
-                "cmd_llm.cmd_insights",
+                "cmd_insights.cmd_insights",
                 return_value=CommandResult(text="report"),
             ) as cmd_insights,
             patch.object(daemon, "_attach_feedback_button"),
@@ -1245,7 +1247,7 @@ class TestTelegramCommands:
         with (
             patch.object(daemon, "_run_import"),
             patch(
-                "cmd_llm.cmd_insights",
+                "cmd_insights.cmd_insights",
                 return_value=CommandResult(text="report"),
             ) as cmd_insights,
             patch.object(daemon, "_attach_feedback_button"),

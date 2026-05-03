@@ -1,7 +1,7 @@
 """/log Telegram command flow.
 
 Handles the fast tap-through daily log check-in. An LLM designs a 1–3 step
-interview (see :func:`cmd_llm.build_log_flow`), the user taps through
+interview (see :func:`cmd_log_flow.build_log_flow`), the user taps through
 inline keyboards, and a deterministic writer appends one bullet to log.md.
 
 The handler owns its own pending-state map, lock, and ``+ note`` free-text
@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING
 from context_edit import MAX_LOG_BULLET_CHARS
 
 if TYPE_CHECKING:
-    from cmd_llm import LogFlow
+    from cmd_log_flow import LogFlow
     from daemon import ZdrowskitDaemon
 
 logger = logging.getLogger(__name__)
@@ -247,7 +247,7 @@ class LogFlowHandler:
 
     def handle_command(self, message_id: int) -> None:
         """Handle the Telegram /log command: build an LLM flow and render step 1."""
-        from cmd_llm import build_log_flow
+        from cmd_log_flow import build_log_flow
 
         placeholder_id = self._poller.send_reply(
             "Building today's check-in\u2026",
@@ -591,7 +591,7 @@ class LogFlowHandler:
                 logger.debug("Tailoring-step edit failed; continuing", exc_info=True)
 
         try:
-            from cmd_llm import build_log_step_followup
+            from cmd_log_flow import build_log_step_followup
 
             next_step = build_log_step_followup(
                 prior_step=prior_step,

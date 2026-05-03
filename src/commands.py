@@ -1,9 +1,11 @@
 """Non-LLM subcommand handlers for the zdrowskit CLI.
 
 LLM-powered commands live in dedicated modules:
-    cmd_llm.py     — cmd_insights, cmd_nudge, cmd_coach
-    cmd_llm_log.py — cmd_llm_log
-    cmd_db.py      — cmd_db
+    cmd_insights.py — cmd_insights
+    cmd_nudge.py    — cmd_nudge
+    cmd_coach.py    — cmd_coach
+    cmd_llm_log.py  — cmd_llm_log
+    cmd_db.py       — cmd_db
 
 This module contains:
     cmd_import   — parse export dir and upsert into DB.
