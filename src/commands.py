@@ -539,18 +539,22 @@ def cmd_daemon_stop(args: argparse.Namespace) -> None:  # noqa: ARG001
 
 # Bot commands registered with Telegram for / autocomplete and menu button.
 TELEGRAM_BOT_COMMANDS: list[dict[str, str]] = [
-    {"command": "review", "description": "Weekly report"},
-    {"command": "coach", "description": "Coaching review (strategy proposals)"},
-    {"command": "add", "description": "Log a workout or sleep"},
-    {"command": "log", "description": "Fast daily log entry via tap-keyboard"},
-    {"command": "status", "description": "Bot and data status"},
-    {"command": "events", "description": "Recent system events (nudges, imports, …)"},
-    {"command": "notify", "description": "Notification settings"},
+    {"command": "log", "description": "Log today's context"},
+    {"command": "add", "description": "Add workout or sleep"},
+    {"command": "review", "description": "Run weekly report"},
+    {"command": "coach", "description": "Suggest plan changes"},
+    {"command": "notify", "description": "Tune notifications"},
+    {"command": "status", "description": "Show bot/data status"},
+    {"command": "advanced", "description": "Show advanced commands"},
+]
+
+# Hidden-but-supported commands shown by /advanced.
+ADVANCED_TELEGRAM_BOT_COMMANDS: list[dict[str, str]] = [
     {"command": "models", "description": "Model routing settings"},
     {"command": "context", "description": "View context files"},
+    {"command": "events", "description": "Recent system events (nudges, imports, …)"},
     {"command": "clear", "description": "Reset chat memory"},
     {"command": "tutorial", "description": "Guided tour of zdrowskit"},
-    {"command": "help", "description": "Command list"},
 ]
 
 

@@ -32,19 +32,18 @@ The daemon runs a Telegram long-polling listener alongside the file watcher. Sen
 Telegram commands include:
 
 ```text
+/log
+/add
 /review [current|last]
 /coach [current|last]
-/add
-/log
 /notify
-/models
-/clear
 /status
-/events [N] [category]
-/context [name]
-/tutorial
-/help
+/advanced
 ```
+
+`/advanced` shows less-used commands that remain typeable but are hidden from
+the Telegram menu: `/models`, `/context [name]`, `/events [N] [category]`,
+`/clear`, and `/tutorial`.
 
 `/tutorial` opens a 9-step guided tour of the system with Next/Back/Exit buttons.
 

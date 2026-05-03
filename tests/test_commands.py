@@ -19,7 +19,7 @@ from cmd_log_flow import _query_today_snapshot, build_log_flow
 from cmd_notify_interpreter import interpret_notify_request
 from cmd_nudge import cmd_nudge
 import commands as commands_module
-from commands import TELEGRAM_BOT_COMMANDS, cmd_setup
+from commands import ADVANCED_TELEGRAM_BOT_COMMANDS, TELEGRAM_BOT_COMMANDS, cmd_setup
 from config import MAX_TOKENS_INSIGHTS, MAX_TOKENS_NUDGE
 from llm import LLMResult
 from llm_verify import VerificationResult
@@ -72,25 +72,32 @@ class TestSetupCommand:
 class TestTelegramBotCommands:
     def test_registered_bot_commands_match_telegram_surface(self) -> None:
         assert TELEGRAM_BOT_COMMANDS == [
-            {"command": "review", "description": "Weekly report"},
-            {
-                "command": "coach",
-                "description": "Coaching review (strategy proposals)",
-            },
-            {"command": "add", "description": "Log a workout or sleep"},
-            {"command": "log", "description": "Fast daily log entry via tap-keyboard"},
-            {"command": "status", "description": "Bot and data status"},
+            {"command": "log", "description": "Log today's context"},
+            {"command": "add", "description": "Add workout or sleep"},
+            {"command": "review", "description": "Run weekly report"},
+            {"command": "coach", "description": "Suggest plan changes"},
+            {"command": "notify", "description": "Tune notifications"},
+            {"command": "status", "description": "Show bot/data status"},
+            {"command": "advanced", "description": "Show advanced commands"},
+        ]
+        assert ADVANCED_TELEGRAM_BOT_COMMANDS == [
+            {"command": "models", "description": "Model routing settings"},
+            {"command": "context", "description": "View context files"},
             {
                 "command": "events",
                 "description": "Recent system events (nudges, imports, …)",
             },
-            {"command": "notify", "description": "Notification settings"},
-            {"command": "models", "description": "Model routing settings"},
-            {"command": "context", "description": "View context files"},
             {"command": "clear", "description": "Reset chat memory"},
             {"command": "tutorial", "description": "Guided tour of zdrowskit"},
-            {"command": "help", "description": "Command list"},
         ]
+
+    def test_registered_bot_command_descriptions_are_short_one_liners(
+        self,
+    ) -> None:
+        for command in TELEGRAM_BOT_COMMANDS:
+            description = command["description"]
+            assert "\n" not in description
+            assert len(description) <= 40
 
 
 class TestLogFlowSnapshot:

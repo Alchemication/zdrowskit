@@ -112,7 +112,7 @@ TUTORIAL_STEPS: list[tuple[str, str, str]] = [
         "You're set",
         (
             "That's the tour. From here:\n"
-            "- /help — every command at a glance\n"
+            "- /advanced — less-used commands\n"
             "- /context — view or edit your context files\n"
             "- /notify — tune when and how nudges fire\n"
             "- /tutorial — reopen this tour anytime\n\n"

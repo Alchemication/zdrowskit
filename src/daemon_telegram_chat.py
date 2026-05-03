@@ -25,6 +25,23 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _format_telegram_command(command: dict[str, str]) -> str:
+    """Render a command entry with usage hints for commands with arguments."""
+    name = command["command"]
+    description = command["description"]
+    if name == "review":
+        return f"/review [current|last] — {description} (default: last)"
+    if name == "coach":
+        return f"/coach [current|last] — {description} (default: last)"
+    if name == "context":
+        return f"/context [name] — {description}"
+    if name == "add":
+        return f"/add — {description} (workouts, sleep)"
+    if name == "events":
+        return f"/events [N] [category] — {description} (default: last 3 days)"
+    return f"/{name} — {description}"
+
+
 class TelegramChatHandler:
     """Message router, command dispatcher, and LLM chat loop for Telegram.
 
@@ -380,8 +397,8 @@ class TelegramChatHandler:
             self._daemon._add_flow.handle_command(message_id)
         elif cmd == "/tutorial":
             self._handle_tutorial_start(message_id)
-        elif cmd == "/help":
-            from commands import TELEGRAM_BOT_COMMANDS
+        elif cmd == "/advanced":
+            from commands import ADVANCED_TELEGRAM_BOT_COMMANDS, TELEGRAM_BOT_COMMANDS
             from config import CONTEXT_DIR, PROMPTS_DIR
 
             ctx_names = sorted(
@@ -391,31 +408,20 @@ class TelegramChatHandler:
                 if f.stat().st_size > 0
             )
             ctx_opts = ", ".join(ctx_names) if ctx_names else "none found"
-            lines = []
-            for command in TELEGRAM_BOT_COMMANDS:
-                if command["command"] == "review":
-                    lines.append(
-                        f"/review [current|last] — {command['description']} (default: last)"
-                    )
-                elif command["command"] == "coach":
-                    lines.append(
-                        f"/coach [current|last] — {command['description']} (default: last)"
-                    )
-                elif command["command"] == "context":
-                    lines.append(f"/context [name] — {command['description']}")
-                elif command["command"] == "add":
-                    lines.append(f"/add — {command['description']} (workouts, sleep)")
-                elif command["command"] == "events":
-                    lines.append(
-                        f"/events [N] [category] — {command['description']} (default: last 3 days)"
-                    )
-                else:
-                    lines.append(f"/{command['command']} — {command['description']}")
+            lines = ["Menu commands:"]
+            lines.extend(
+                _format_telegram_command(command) for command in TELEGRAM_BOT_COMMANDS
+            )
+            lines.append("\nAdvanced commands:")
+            lines.extend(
+                _format_telegram_command(command)
+                for command in ADVANCED_TELEGRAM_BOT_COMMANDS
+            )
             lines.append(f"\nAvailable context files: {ctx_opts}")
             self._poller.send_reply("\n".join(lines), reply_to_message_id=message_id)
         else:
             self._poller.send_reply(
-                "Unknown command. Try /help",
+                "Unknown command. Try /advanced",
                 reply_to_message_id=message_id,
             )
 
@@ -815,7 +821,7 @@ class TelegramChatHandler:
             if msg_id:
                 self._poller.edit_message(
                     msg_id,
-                    "Tutorial closed. Type /tutorial to reopen, /help for commands.",
+                    "Tutorial closed. Type /tutorial to reopen, /advanced for commands.",
                 )
             return
 
@@ -825,7 +831,7 @@ class TelegramChatHandler:
                 self._poller.edit_message(
                     msg_id,
                     "\u2705 Tutorial complete. Now ask the bot something — "
-                    "or type /help to see every command.",
+                    "or type /advanced to see less-used commands.",
                 )
             return
 

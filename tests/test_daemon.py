@@ -1337,17 +1337,20 @@ class TestTelegramCommands:
         assert "- Last coach run: never" in sent
         assert "- Data: database is empty" in sent
 
-    def test_help_mentions_review_and_context_usage(self, tmp_path: Path) -> None:
+    def test_advanced_mentions_menu_and_hidden_commands(self, tmp_path: Path) -> None:
         daemon = _make_daemon(tmp_path)
         daemon._chat._poller = MagicMock()
         (tmp_path / "me.md").write_text("About me\n", encoding="utf-8")
 
-        daemon._handle_command("/help", 55)
+        daemon._handle_command("/advanced", 55)
 
         daemon._poller.send_reply.assert_called_once()
         sent = daemon._poller.send_reply.call_args.args[0]
-        assert "/review [current|last] — Weekly report (default: last)" in sent
+        assert "Menu commands:" in sent
+        assert "Advanced commands:" in sent
+        assert "/review [current|last] — Run weekly report (default: last)" in sent
         assert "/context [name] — View context files" in sent
+        assert "/events [N] [category] — Recent system events" in sent
         assert "Available context files:" in sent
         assert "me" in sent
 
