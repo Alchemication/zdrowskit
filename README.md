@@ -9,6 +9,7 @@ Your watch collects thousands of data points a week. Apple shows you rings. zdro
 - **Reactive nudges** - new data synced or context changed? The coach notices and says something useful, or stays quiet if there is nothing to say
 - **Remembers you week to week** - a freeform journal captures why things happened, and the coach appends its own memory after each report
 - **Ask anything about your data** - "What's my fastest 1km pace?", "How's my HRV trending since January?", "Do I sleep worse after evening runs?" If the data exists, it will find the answer and chart it
+- **Ask Codex about the repo** - Telegram can route read-only `/codex` questions to the local Codex CLI while preserving the Codex session
 
 It is a Telegram conversation, not a dashboard: reply to a report, update your goals mid-chat, get a chart on demand.
 

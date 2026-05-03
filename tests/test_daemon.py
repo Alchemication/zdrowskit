@@ -1351,8 +1351,132 @@ class TestTelegramCommands:
         assert "/review [current|last] — Run weekly report (default: last)" in sent
         assert "/context [name] — View context files" in sent
         assert "/events [N] [category] — Recent system events" in sent
+        assert "/codex <prompt> — Ask Codex about this repo" in sent
         assert "Available context files:" in sent
         assert "me" in sent
+
+
+class TestCodexTelegramCommand:
+    def test_codex_command_stores_session_and_edits_placeholder(
+        self, tmp_path: Path
+    ) -> None:
+        from daemon_agent_flow import CodexRunResult
+
+        daemon = _make_daemon(tmp_path)
+        daemon._chat._poller = MagicMock()
+        daemon._poller.send_reply.return_value = 900
+
+        with (
+            patch.object(
+                daemon._chat,
+                "_start_placeholder_animation",
+                return_value=(None, None),
+            ),
+            patch.object(daemon._chat, "_stop_placeholder_animation"),
+            patch(
+                "daemon_agent_flow.run_codex_readonly",
+                return_value=CodexRunResult(
+                    text="Read-only answer",
+                    session_id="codex-session",
+                ),
+            ) as run_codex,
+        ):
+            daemon._handle_command("/codex where is the Telegram router?", 55)
+
+        run_codex.assert_called_once()
+        assert run_codex.call_args.kwargs["session_id"] is None
+        daemon._poller.edit_message.assert_called_once_with(900, "Read-only answer")
+        assert daemon._state["codex_session_id"] == "codex-session"
+        assert daemon._state["codex_last_message_id"] == 900
+        state = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
+        assert state["codex_session_id"] == "codex-session"
+
+    def test_codex_command_resumes_saved_session(self, tmp_path: Path) -> None:
+        from daemon_agent_flow import CodexRunResult
+
+        daemon = _make_daemon(tmp_path)
+        daemon._chat._poller = MagicMock()
+        daemon._poller.send_reply.return_value = 901
+        daemon._state["codex_session_id"] = "saved-session"
+
+        with (
+            patch.object(
+                daemon._chat,
+                "_start_placeholder_animation",
+                return_value=(None, None),
+            ),
+            patch.object(daemon._chat, "_stop_placeholder_animation"),
+            patch(
+                "daemon_agent_flow.run_codex_readonly",
+                return_value=CodexRunResult(
+                    text="Follow-up answer",
+                    session_id="saved-session",
+                ),
+            ) as run_codex,
+        ):
+            daemon._handle_command("/codex next question", 56)
+
+        assert run_codex.call_args.kwargs["session_id"] == "saved-session"
+        daemon._poller.edit_message.assert_called_once_with(901, "Follow-up answer")
+
+    def test_codex_new_starts_fresh_session(self, tmp_path: Path) -> None:
+        from daemon_agent_flow import CodexRunResult
+
+        daemon = _make_daemon(tmp_path)
+        daemon._chat._poller = MagicMock()
+        daemon._poller.send_reply.return_value = 902
+        daemon._state["codex_session_id"] = "old-session"
+
+        with (
+            patch.object(
+                daemon._chat,
+                "_start_placeholder_animation",
+                return_value=(None, None),
+            ),
+            patch.object(daemon._chat, "_stop_placeholder_animation"),
+            patch(
+                "daemon_agent_flow.run_codex_readonly",
+                return_value=CodexRunResult(text="Fresh", session_id="new-session"),
+            ) as run_codex,
+        ):
+            daemon._handle_command("/codex new start over", 57)
+
+        assert run_codex.call_args.kwargs["session_id"] is None
+        assert daemon._state["codex_session_id"] == "new-session"
+
+    def test_codex_stop_clears_session(self, tmp_path: Path) -> None:
+        daemon = _make_daemon(tmp_path)
+        daemon._chat._poller = MagicMock()
+        daemon._state["codex_session_id"] = "saved-session"
+        daemon._state["codex_last_message_id"] = 900
+
+        daemon._handle_command("/codex stop", 58)
+
+        assert "codex_session_id" not in daemon._state
+        assert "codex_last_message_id" not in daemon._state
+        daemon._poller.send_reply.assert_called_once_with(
+            "Codex session cleared.", reply_to_message_id=58
+        )
+
+    def test_reply_to_last_codex_message_continues_codex(self, tmp_path: Path) -> None:
+        daemon = _make_daemon(tmp_path)
+        daemon._chat._poller = MagicMock()
+        daemon._state["codex_last_message_id"] = 900
+
+        with patch.object(daemon._chat, "_handle_codex_turn") as handle_codex:
+            daemon._handle_telegram_message(
+                {
+                    "message_id": 59,
+                    "text": "and where are the tests?",
+                    "reply_to_message": {"message_id": 900, "text": "Codex answer"},
+                }
+            )
+
+        handle_codex.assert_called_once_with(
+            "and where are the tests?",
+            59,
+            new_session=False,
+        )
 
 
 class TestModelsFlow:

@@ -74,6 +74,7 @@ class TestTelegramBotCommands:
         assert TELEGRAM_BOT_COMMANDS == [
             {"command": "log", "description": "Log today's context"},
             {"command": "add", "description": "Add workout or sleep"},
+            {"command": "codex", "description": "Ask Codex about this repo"},
             {"command": "clear", "description": "Reset chat memory"},
             {"command": "status", "description": "Show bot/data status"},
             {"command": "advanced", "description": "Show advanced commands"},

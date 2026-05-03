@@ -432,6 +432,10 @@ class ZdrowskitDaemon:
         }
         _save_state(self._state)
 
+    def _save_state(self) -> None:
+        """Persist daemon state."""
+        _save_state(self._state)
+
     def _drop_feedback_reason_prompts(self, feedback_id: int) -> None:
         """Remove any pending reason prompts tied to a deleted feedback row."""
         stale = [

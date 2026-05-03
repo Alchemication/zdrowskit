@@ -34,6 +34,7 @@ Telegram commands include:
 ```text
 /log
 /add
+/codex
 /clear
 /status
 /advanced
@@ -46,6 +47,11 @@ the Telegram menu: `/notify`, `/review [current|last]`, `/coach [current|last]`,
 `/tutorial` opens a 9-step guided tour of the system with Next/Back/Exit buttons.
 
 `/status` shows bot state, data coverage, recent activity, and notification state.
+
+`/codex` asks the local Codex CLI about this repo in read-only mode. Follow-up
+`/codex` messages resume the saved Codex session; `/codex new <prompt>` starts a
+fresh one, and `/codex stop` clears it. Replies to the last Codex Telegram
+message also continue the Codex session.
 
 ## `/notify`
 

@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 import threading
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from config import MAX_TOKENS_CHAT
@@ -149,6 +150,10 @@ class TelegramChatHandler:
         # Handle bot commands before the LLM.
         if text.startswith("/"):
             self._handle_command(text, message_id)
+            return
+
+        if self._is_codex_reply(reply_to):
+            self._handle_codex_turn(text, message_id, new_session=False)
             return
 
         # If the user replied to a specific bot message, inject its text
@@ -389,6 +394,8 @@ class TelegramChatHandler:
             )
         elif cmd == "/events":
             self._handle_events_command(text, message_id)
+        elif cmd == "/codex":
+            self._handle_codex_command(text, message_id)
         elif cmd == "/context":
             parts = text.split()
             file_arg = parts[1] if len(parts) > 1 else None
@@ -417,6 +424,10 @@ class TelegramChatHandler:
                 _format_telegram_command(command)
                 for command in ADVANCED_TELEGRAM_BOT_COMMANDS
             )
+            lines.append("\nCodex:")
+            lines.append("/codex <prompt> — Ask Codex about this repo (read-only)")
+            lines.append("/codex new <prompt> — Start a fresh Codex session")
+            lines.append("/codex stop — Forget the current Codex session")
             lines.append(f"\nAvailable context files: {ctx_opts}")
             self._poller.send_reply("\n".join(lines), reply_to_message_id=message_id)
         else:
@@ -424,6 +435,114 @@ class TelegramChatHandler:
                 "Unknown command. Try /advanced",
                 reply_to_message_id=message_id,
             )
+
+    # ------------------------------------------------------------------
+    # Codex bridge
+    # ------------------------------------------------------------------
+
+    def _handle_codex_command(self, text: str, message_id: int) -> None:
+        """Handle ``/codex`` read-only repo questions."""
+        from daemon_agent_flow import codex_usage
+
+        parts = text.split(maxsplit=1)
+        request_text = parts[1].strip() if len(parts) > 1 else ""
+        if not request_text:
+            self._poller.send_reply(codex_usage(), reply_to_message_id=message_id)
+            return
+
+        first_word, _, rest = request_text.partition(" ")
+        action = first_word.lower()
+        if action == "stop" and not rest:
+            self._daemon._state.pop("codex_session_id", None)
+            self._daemon._state.pop("codex_last_message_id", None)
+            self._daemon._save_state()
+            self._poller.send_reply(
+                "Codex session cleared.", reply_to_message_id=message_id
+            )
+            return
+
+        if action == "new":
+            prompt = rest.strip()
+            if not prompt:
+                self._poller.send_reply(codex_usage(), reply_to_message_id=message_id)
+                return
+            self._handle_codex_turn(prompt, message_id, new_session=True)
+            return
+
+        self._handle_codex_turn(request_text, message_id, new_session=False)
+
+    def _handle_codex_turn(
+        self,
+        prompt: str,
+        message_id: int,
+        *,
+        new_session: bool,
+    ) -> None:
+        """Run one read-only Codex turn and send the result to Telegram."""
+        from daemon_agent_flow import CodexRunError, run_codex_readonly
+
+        status_prefix = "Codex reading "
+        status_id = self._poller.send_reply(
+            f"{status_prefix}.", reply_to_message_id=message_id
+        )
+        stop_anim, anim_thread = self._start_placeholder_animation(
+            status_id, prefix=status_prefix
+        )
+        session_id = (
+            None if new_session else self._daemon._state.get("codex_session_id")
+        )
+
+        try:
+            result = run_codex_readonly(
+                prompt,
+                cwd=Path(__file__).resolve().parent.parent,
+                session_id=session_id if isinstance(session_id, str) else None,
+            )
+        except ValueError:
+            self._stop_placeholder_animation(stop_anim, anim_thread)
+            if status_id:
+                self._poller.edit_message(status_id, "Use /codex <prompt>.")
+            else:
+                self._poller.send_reply(
+                    "Use /codex <prompt>.", reply_to_message_id=message_id
+                )
+            return
+        except CodexRunError as exc:
+            self._stop_placeholder_animation(stop_anim, anim_thread)
+            logger.warning("Codex Telegram command failed: %s", exc)
+            text = str(exc)
+            if status_id:
+                self._poller.edit_message(status_id, text)
+            else:
+                self._poller.send_reply(text, reply_to_message_id=message_id)
+            return
+
+        self._stop_placeholder_animation(stop_anim, anim_thread)
+
+        if result.session_id:
+            self._daemon._state["codex_session_id"] = result.session_id
+        if status_id:
+            self._poller.edit_message(status_id, result.text)
+            self._daemon._state["codex_last_message_id"] = status_id
+        else:
+            sent_id = self._poller.send_reply(
+                result.text, reply_to_message_id=message_id
+            )
+            if sent_id:
+                self._daemon._state["codex_last_message_id"] = sent_id
+        self._daemon._save_state()
+
+    def _is_codex_reply(self, reply_to: dict | None) -> bool:
+        """Return whether a Telegram reply should continue the Codex session."""
+        if not reply_to:
+            return False
+        last_id = self._daemon._state.get("codex_last_message_id")
+        if last_id is None:
+            return False
+        try:
+            return int(reply_to.get("message_id")) == int(last_id)
+        except (TypeError, ValueError):
+            return False
 
     # ------------------------------------------------------------------
     # Context overview
