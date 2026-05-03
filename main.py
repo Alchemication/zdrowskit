@@ -66,9 +66,6 @@ Examples:
     uv run python main.py insights --explain
         Show context files, assembled prompt, and token usage diagnostics on stderr.
 
-    uv run python main.py insights --email
-        Send the report via email (requires RESEND_API_KEY and EMAIL_TO in .env).
-
     uv run python main.py insights --telegram
         Send the report via Telegram (requires TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID).
 
@@ -80,9 +77,6 @@ Examples:
 
     uv run python main.py nudge --trigger new_data
         Send a short nudge via Telegram (default) for new health data.
-
-    uv run python main.py nudge --trigger log_update --email
-        Send a nudge via email responding to a log.md update.
 
     uv run python main.py nudge --trigger strategy_updated
         Send a nudge via Telegram acknowledging a strategy.md edit.
@@ -275,11 +269,6 @@ def main() -> None:
         ),
     )
     p_insights.add_argument(
-        "--email",
-        action="store_true",
-        help="Send report via email (requires RESEND_API_KEY and EMAIL_TO in .env)",
-    )
-    p_insights.add_argument(
         "--telegram",
         action="store_true",
         help=(
@@ -335,11 +324,6 @@ def main() -> None:
         help=f"litellm model string (default: {resolve_model_route('nudge').primary})",
     )
     p_nudge.add_argument(
-        "--email",
-        action="store_true",
-        help="Send via email instead of Telegram",
-    )
-    p_nudge.add_argument(
         "--telegram",
         action="store_true",
         help="Send via Telegram (default when no flag given)",
@@ -377,11 +361,6 @@ def main() -> None:
             "Extended thinking budget for the model (default: medium). "
             "Use 'none' to disable, 'high' for the deepest analysis."
         ),
-    )
-    p_coach.add_argument(
-        "--email",
-        action="store_true",
-        help="Send coaching review via email",
     )
     p_coach.add_argument(
         "--telegram",

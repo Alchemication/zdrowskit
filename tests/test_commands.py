@@ -528,7 +528,6 @@ class TestCmdInsights:
             no_update_baselines=True,
             no_update_history=True,
             explain=False,
-            email=False,
             telegram=False,
         )
 
@@ -645,7 +644,6 @@ class TestCmdInsights:
             no_update_baselines=True,
             no_update_history=True,
             explain=False,
-            email=False,
             telegram=False,
             reasoning_effort="medium",
         )
@@ -765,7 +763,6 @@ class TestCmdInsights:
             no_update_baselines=True,
             no_update_history=True,
             explain=False,
-            email=False,
             telegram=False,
             reasoning_effort="none",
         )
@@ -1241,7 +1238,6 @@ class TestCmdNudge:
             model="test-model",
             months=1,
             trigger="new_data",
-            email=False,
             telegram=True,
         )
         result = LLMResult(
@@ -1301,7 +1297,6 @@ class TestCmdNudge:
             model=None,
             months=1,
             trigger="new_data",
-            email=False,
             telegram=False,
         )
         empty_result = LLMResult(
@@ -1375,7 +1370,6 @@ class TestCmdNudge:
             model=None,
             months=1,
             trigger="new_data",
-            email=False,
             telegram=False,
         )
         result = LLMResult(
@@ -1428,7 +1422,6 @@ class TestCmdNudge:
             model=None,
             months=1,
             trigger="new_data",
-            email=False,
             telegram=False,
         )
         empty_result = LLMResult(
@@ -1471,7 +1464,6 @@ class TestCmdNudge:
             model="test-model",
             months=1,
             trigger="new_data",
-            email=False,
             telegram=True,
         )
         chart_only_result = LLMResult(
@@ -1518,7 +1510,6 @@ class TestCmdNudge:
             model="test-model",
             months=1,
             trigger="new_data",
-            email=False,
             telegram=False,
         )
         seen_messages: list[list[dict[str, str]]] = []

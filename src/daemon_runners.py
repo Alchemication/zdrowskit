@@ -452,7 +452,6 @@ class DaemonRunnerHandler:
         args = types.SimpleNamespace(
             db=str(self._d.db),
             model=self._d.model,
-            email=False,
             telegram=True,
             week=week,
             months=3,
@@ -512,7 +511,6 @@ class DaemonRunnerHandler:
         args = types.SimpleNamespace(
             db=str(self._d.db),
             model=self._d.model,
-            email=False,
             telegram=True,
             week="last",
             months=3,
@@ -585,7 +583,6 @@ class DaemonRunnerHandler:
         args = types.SimpleNamespace(
             db=str(self._d.db),
             model=self._d.model,
-            email=False,
             telegram=True,
             week="current",
             months=3,
@@ -707,7 +704,6 @@ class DaemonRunnerHandler:
         args = types.SimpleNamespace(
             db=str(self._d.db),
             model=self._d.model,
-            email=False,
             telegram=True,
             trigger=trigger,
             months=1,

@@ -31,7 +31,7 @@ from llm_context import append_history, build_messages, load_context, load_promp
 from llm_health import build_llm_data, build_review_facts, render_health_data
 from llm_verify import extract_tool_evidence, slim_source_messages
 from milestones import compute_milestones
-from notify import send_email, send_telegram_report
+from notify import send_telegram_report
 from store import open_db
 
 logger = logging.getLogger(__name__)
@@ -487,8 +487,6 @@ def cmd_insights(
     notify_subject = f"Week {week_label} {report_type}" if week_label else "Report"
 
     telegram_message_id: int | None = None
-    if args.email:
-        send_email(visible_report, notify_subject)
     if args.telegram:
         telegram_message_id = send_telegram_report(
             visible_report,

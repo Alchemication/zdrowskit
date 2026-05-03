@@ -23,7 +23,7 @@ from llm import call_llm
 from llm_context import build_messages, load_context, load_prompt_text
 from llm_health import build_llm_data, format_recent_nudges, render_health_data
 from llm_verify import extract_tool_evidence, slim_source_messages
-from notify import send_email, send_telegram, send_telegram_photo
+from notify import send_telegram, send_telegram_photo
 from store import open_db
 
 logger = logging.getLogger(__name__)
@@ -77,8 +77,8 @@ def cmd_nudge(
     """Handle the 'nudge' subcommand: send a short context-aware notification.
 
     Args:
-        args: Parsed CLI arguments with db, model, email, telegram, trigger,
-              months, and optional recent_nudges attributes.
+        args: Parsed CLI arguments with db, model, telegram, trigger, months,
+              and optional recent_nudges attributes.
         trigger_type: What triggered the nudge — overrides args.trigger when
             called programmatically (e.g. from the daemon).
         reply_markup: Optional Telegram reply markup (e.g. feedback keyboard)
@@ -349,15 +349,12 @@ def cmd_nudge(
     _save_nudge(nudge_text, _trigger)
     print(nudge_text)
 
-    use_email = getattr(args, "email", False)
     use_telegram = getattr(args, "telegram", False)
-    if not use_email and not use_telegram:
+    if not use_telegram:
         use_telegram = True  # Default channel
 
     telegram_message_id: int | None = None
     subject = f"zdrowskit — {_trigger.replace('_', ' ')}"
-    if use_email:
-        send_email(nudge_text, subject)
     if use_telegram:
         # Send chart photos before the text nudge.
         for index, chart in enumerate(nudge_charts, start=1):

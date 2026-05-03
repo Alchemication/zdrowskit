@@ -1,9 +1,7 @@
-"""Notification delivery — email and Telegram.
+"""Notification delivery via Telegram.
 
 Public API:
-    md_to_html              — convert markdown to a styled HTML document.
     md_to_telegram_html     — convert markdown to Telegram-compatible HTML.
-    send_email              — send HTML report via Resend API.
     send_telegram           — send formatted report via Telegram Bot API.
     send_telegram_photo     — send a photo via Telegram Bot API.
     send_telegram_report    — send a sectioned report with interleaved charts.
@@ -11,8 +9,8 @@ Public API:
     chunk_text              — split text into chunks respecting line boundaries.
 
 Example:
-    from notify import send_email, send_telegram
-    send_email(report_text, "Week 2026-W11 Review")
+    from notify import send_telegram
+    send_telegram(report_text, "Week 2026-W11 Review")
 """
 
 from __future__ import annotations
@@ -25,39 +23,6 @@ import time
 from html import escape as html_escape
 
 logger = logging.getLogger(__name__)
-
-
-def md_to_html(md_text: str) -> str:
-    """Convert markdown to a styled HTML document for email.
-
-    Args:
-        md_text: Markdown report text.
-
-    Returns:
-        A complete HTML document string with inline styling.
-    """
-    import markdown
-
-    body = markdown.markdown(md_text, extensions=["tables", "fenced_code"])
-    return f"""<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"></head>
-<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-             max-width: 640px; margin: 0 auto; padding: 20px;
-             color: #1a1a1a; line-height: 1.6;">
-<style>
-  table {{ border-collapse: collapse; width: 100%; margin: 1em 0; }}
-  th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
-  th {{ background: #f5f5f5; font-weight: 600; }}
-  tr:nth-child(even) {{ background: #fafafa; }}
-  h1 {{ font-size: 1.4em; border-bottom: 2px solid #333; padding-bottom: 0.3em; }}
-  h2 {{ font-size: 1.15em; color: #333; margin-top: 1.5em; }}
-  hr {{ border: none; border-top: 1px solid #ddd; margin: 1.5em 0; }}
-  code {{ background: #f0f0f0; padding: 2px 6px; border-radius: 3px; font-size: 0.9em; }}
-</style>
-{body}
-</body>
-</html>"""
 
 
 def md_to_telegram_html(md_text: str) -> str:
@@ -181,44 +146,6 @@ def _inline_format(text: str) -> str:
             chunk = re.sub(r"(?<!\w)_(.+?)_(?!\w)", r"<i>\1</i>", chunk)
             parts.append(chunk)
     return "".join(parts)
-
-
-def send_email(report: str, week_label: str) -> None:
-    """Send the report as a styled HTML email via Resend.
-
-    Requires RESEND_API_KEY and EMAIL_TO in environment / .env.
-
-    Args:
-        report: The markdown report text.
-        week_label: Human-readable week label for the subject line.
-    """
-    import resend
-
-    api_key = os.environ.get("RESEND_API_KEY")
-    email_to = os.environ.get("EMAIL_TO")
-    email_from = os.environ.get("EMAIL_FROM", "zdrowskit <onboarding@resend.dev>")
-
-    if not api_key:
-        logger.error("RESEND_API_KEY not set. Add it to your .env file.")
-        return
-    if not email_to:
-        logger.error("EMAIL_TO not set. Add it to your .env file.")
-        return
-
-    resend.api_key = api_key
-    html = md_to_html(report)
-    try:
-        resend.Emails.send(
-            {
-                "from": email_from,
-                "to": [email_to],
-                "subject": f"zdrowskit — {week_label}",
-                "html": html,
-            }
-        )
-        logger.info("Email sent to %s", email_to)
-    except Exception as e:
-        logger.error("Failed to send email: %s", e)
 
 
 def chunk_text(text: str, max_len: int = 4000) -> list[str]:
