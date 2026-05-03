@@ -242,7 +242,7 @@ class ZdrowskitDaemon:
         """Initialise the daemon.
 
         Args:
-            model: Optional legacy global litellm model override.
+            model: Optional litellm model override for LLM commands.
             db: Path to the SQLite database.
             context_dir: Path to the ContextFiles directory.
             health_dir: Path to the Auto Export data directory.

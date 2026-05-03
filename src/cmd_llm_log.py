@@ -1,7 +1,6 @@
 """LLM call history query subcommand.
 
 Extracted from commands.py to keep individual modules under ~1000 lines.
-Public API re-exported from commands.py for backward compatibility.
 """
 
 from __future__ import annotations

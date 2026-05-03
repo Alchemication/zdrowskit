@@ -42,7 +42,7 @@ def default_db_path() -> Path:
     """
     import os
 
-    env = os.environ.get("ZDROWSKIT_DB") or os.environ.get("zdrowskit_DB")
+    env = os.environ.get("ZDROWSKIT_DB")
     if env:
         return Path(env).expanduser().resolve()
     return _DEFAULT_DB
