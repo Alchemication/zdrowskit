@@ -34,16 +34,14 @@ Telegram commands include:
 ```text
 /log
 /add
-/review [current|last]
-/coach [current|last]
-/notify
+/clear
 /status
 /advanced
 ```
 
 `/advanced` shows less-used commands that remain typeable but are hidden from
-the Telegram menu: `/models`, `/context [name]`, `/events [N] [category]`,
-`/clear`, and `/tutorial`.
+the Telegram menu: `/notify`, `/review [current|last]`, `/coach [current|last]`,
+`/models`, `/context [name]`, `/events [N] [category]`, and `/tutorial`.
 
 `/tutorial` opens a 9-step guided tour of the system with Next/Back/Exit buttons.
 

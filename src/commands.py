@@ -541,19 +541,19 @@ def cmd_daemon_stop(args: argparse.Namespace) -> None:  # noqa: ARG001
 TELEGRAM_BOT_COMMANDS: list[dict[str, str]] = [
     {"command": "log", "description": "Log today's context"},
     {"command": "add", "description": "Add workout or sleep"},
-    {"command": "review", "description": "Run weekly report"},
-    {"command": "coach", "description": "Suggest plan changes"},
-    {"command": "notify", "description": "Tune notifications"},
+    {"command": "clear", "description": "Reset chat memory"},
     {"command": "status", "description": "Show bot/data status"},
     {"command": "advanced", "description": "Show advanced commands"},
 ]
 
 # Hidden-but-supported commands shown by /advanced.
 ADVANCED_TELEGRAM_BOT_COMMANDS: list[dict[str, str]] = [
+    {"command": "notify", "description": "Tune notifications"},
+    {"command": "review", "description": "Run weekly report"},
+    {"command": "coach", "description": "Suggest plan changes"},
     {"command": "models", "description": "Model routing settings"},
     {"command": "context", "description": "View context files"},
     {"command": "events", "description": "Recent system events (nudges, imports, …)"},
-    {"command": "clear", "description": "Reset chat memory"},
     {"command": "tutorial", "description": "Guided tour of zdrowskit"},
 ]
 
