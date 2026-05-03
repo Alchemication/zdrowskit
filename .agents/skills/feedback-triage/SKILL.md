@@ -30,12 +30,35 @@ The user's complaint may not be the actual verifier/model bug — it may be data
 
 Before blaming the LLM, check whether the user's "you said X, now you say Y" complaint is actually about a value that drifted between the historical nudge (in `recent_nudges_text`) and the current `health_data_text`. If so, the fix is either prompt-side (acknowledge resync drift) or product-side (don't emit nudges off freshly imported, still-noisy data).
 
+## Cross-check rendered prompt data against canonical DB data
+
+The value in the LLM prompt may be wrong even when the canonical table has the user's expected fact. Compare:
+
+- the rendered `## Health Data` / `Today` block in the source call
+- current DB rows via `store.open_db(store.default_db_path())` or `store.connect_db(..., migrate=True)`
+- canonical all-source views such as `sleep_all` / `workout_all`, especially when the user manually logged data
+
+Manual sleep is stored in `manual_sleep` and exposed through `sleep_all` using the **night-start date**. If both imported and manual sleep rows exist for the same date, product context should prefer manual sleep. If the prompt still shows the imported value, localize the bug to data assembly (for example `store.load_snapshots()` / `llm_health.build_llm_data()`), not to the writer/verifier model.
+
 ## Decide what to do next
 
 - **Verifier introduced the bug** → almost always a model-quality issue. A/B by flipping the verifier route's `reasoning_effort` via `main.py models` or Telegram `/models` (on DeepSeek, `high` engages thinking; `medium` leaves it off). Capture as a `nudge_verify` real_regression if reproducible.
 - **Source draft already had it** → prompt or context issue. Capture as a `chat` or other surface real_regression if there's a chat trace; otherwise iterate on the prompt.
 - **Rewriter mangled a correct correction** → rewriter prompt issue.
 - **User-perception bug from data resync** → not an LLM eval target. Open a product/prompt issue instead.
+- **Prompt context was wrong** → fix the data assembly path and add a deterministic regression at the loader/rendering boundary; this is usually not an LLM eval target.
+
+## Clean up bad delivered nudges
+
+If a delivered nudge is factually wrong and would contaminate future prompts, remove it from daemon state after the root cause is fixed:
+
+1. Inspect `~/Documents/zdrowskit/.daemon_state.json`.
+2. Remove only the bad entry from `recent_nudges`.
+3. Recompute `last_nudge_ts` from the first remaining recent nudge, or set it to `null` if none remain.
+4. Recompute `nudge_count_today` from remaining `recent_nudges` whose `ts` starts with `nudge_date`.
+5. Verify the bad phrase/timestamp no longer appears in the state JSON.
+
+Archived markdown files under `~/Documents/zdrowskit/Nudges/` are historical records. Future LLM context comes from daemon state, so do not delete archives unless the user explicitly asks.
 
 ## Reproducibility threshold
 

@@ -742,7 +742,10 @@ class AddFlowHandler:
                 (target_date,),
             ).fetchone()
             if row and row["n"] > 0:
-                return f"⚠️ Sleep data already exists for {target_date} — saving will replace it.\n"
+                return (
+                    f"⚠️ Sleep data already exists for {target_date} — "
+                    "saving will make this manual entry take precedence.\n"
+                )
             return ""
         finally:
             conn.close()

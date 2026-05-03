@@ -23,8 +23,9 @@
 - Join tip: join `workout_split.start_utc` to imported sessions in `workout` (or to `workout_all` on `start_utc`, noting that manual workouts will not have split rows)
 - Use `workout_split` for within-run pacing: late-run fade, fastest contiguous 5 km / 10 km segments, and elevation-adjusted pacing checks.
 
-**sleep_all** — one row per night, keyed by `date`, with `source` (`'import'` or `'manual'`)
+**sleep_all** — sleep rows keyed by `date`, with `source` (`'import'` or `'manual'`)
 
 - Columns: `sleep_total_h`, `sleep_in_bed_h`, `sleep_efficiency_pct`, `sleep_deep_h`, `sleep_core_h`, `sleep_rem_h`, `sleep_awake_h`
 - Stored under **night-start date**
+- If both `import` and `manual` rows exist for the same date, prefer the `manual` row.
 - Stage columns are NULL for manual entries

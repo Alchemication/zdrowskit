@@ -51,7 +51,7 @@ from llm_health import (
     render_health_data,
 )
 from models import DailySnapshot
-from store import store_snapshots
+from store import insert_manual_sleep, store_snapshots
 
 
 class TestExtractMemory:
@@ -1714,6 +1714,53 @@ class TestBuildLlmData:
         # Metrics unchanged
         assert days["2026-03-09"]["steps"] == 9500
         assert days["2026-03-10"]["steps"] == 12000
+
+    @patch("llm_health.datetime")
+    @patch("llm_health.date")
+    def test_manual_sleep_overrides_imported_sleep_in_prompt_context(
+        self,
+        mock_date: MagicMock,
+        mock_datetime: MagicMock,
+        in_memory_db: sqlite3.Connection,
+    ) -> None:
+        """Manual sleep should win before LLM sleep is shifted to wake day."""
+        mock_date.today.return_value = date(2026, 5, 3)
+        mock_date.fromisoformat = date.fromisoformat
+        mock_datetime.now.return_value = datetime(2026, 5, 3, 15, 30)
+        store_snapshots(
+            in_memory_db,
+            [
+                DailySnapshot(
+                    date="2026-05-02",
+                    steps=7066,
+                    resting_hr=49,
+                    hrv_ms=74.3,
+                    sleep_total_h=5.46,
+                    sleep_in_bed_h=6.09,
+                    sleep_efficiency_pct=89.6,
+                    sleep_deep_h=0.48,
+                    sleep_core_h=3.4,
+                    sleep_rem_h=1.58,
+                    sleep_awake_h=0.63,
+                ),
+                DailySnapshot(
+                    date="2026-05-03",
+                    steps=3989,
+                    resting_hr=50,
+                    hrv_ms=47.3,
+                ),
+            ],
+        )
+        insert_manual_sleep(in_memory_db, "2026-05-02", 7.0, sleep_in_bed_h=7.56)
+
+        result = build_llm_data(in_memory_db, months=3)
+        rendered = render_health_data(result, prompt_kind="nudge")
+
+        days = {d["date"]: d for d in result["current_week"]["days"]}
+        assert days["2026-05-03"]["sleep_total_h"] == 7.0
+        assert days["2026-05-03"]["sleep_efficiency_pct"] is None
+        assert "Sleep: 7.0 h" in rendered
+        assert "Sleep: 5.5 h" not in rendered
 
     @patch("llm_health.datetime")
     @patch("llm_health.date")

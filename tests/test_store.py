@@ -20,6 +20,7 @@ from store import (
     log_feedback,
     log_llm_call,
     open_db,
+    insert_manual_sleep,
     store_snapshots,
     update_feedback_reason,
 )
@@ -128,6 +129,35 @@ class TestStoreAndLoad:
         assert w.splits[0].km_index == 1
         assert w.splits[0].pace_min_km == 6.0
         assert w.splits[1].elevation_gain_m == 10.0
+
+    def test_manual_sleep_overrides_imported_sleep(
+        self, in_memory_db: sqlite3.Connection
+    ) -> None:
+        """Manual sleep should replace imported sleep for the same night."""
+        original = DailySnapshot(
+            date="2026-05-02",
+            sleep_total_h=5.46,
+            sleep_in_bed_h=6.09,
+            sleep_efficiency_pct=89.6,
+            sleep_deep_h=0.48,
+            sleep_core_h=3.4,
+            sleep_rem_h=1.58,
+            sleep_awake_h=0.63,
+        )
+        store_snapshots(in_memory_db, [original])
+        insert_manual_sleep(in_memory_db, "2026-05-02", 7.0, sleep_in_bed_h=7.56)
+
+        loaded = load_snapshots(in_memory_db)
+
+        assert len(loaded) == 1
+        day = loaded[0]
+        assert day.sleep_total_h == 7.0
+        assert day.sleep_in_bed_h == 7.56
+        assert day.sleep_efficiency_pct is None
+        assert day.sleep_deep_h is None
+        assert day.sleep_core_h is None
+        assert day.sleep_rem_h is None
+        assert day.sleep_awake_h is None
 
     def test_upsert_overwrites(self, in_memory_db: sqlite3.Connection) -> None:
         day1 = DailySnapshot(date="2026-03-10", steps=5000, resting_hr=50)

@@ -262,9 +262,19 @@ def load_snapshots(
     if not daily_rows:
         return []
 
-    # Load all workouts for the matched date range in one query.
     dates = [r["date"] for r in daily_rows]
     placeholders = ",".join("?" * len(dates))
+    manual_sleep_rows = conn.execute(
+        f"""
+        SELECT date, sleep_total_h, sleep_in_bed_h
+        FROM manual_sleep
+        WHERE date IN ({placeholders})
+        """,
+        dates,
+    ).fetchall()
+    manual_sleep_by_date = {row["date"]: row for row in manual_sleep_rows}
+
+    # Load all workouts for the matched date range in one query.
     workout_rows = conn.execute(
         f"""
         SELECT * FROM workout
@@ -322,42 +332,62 @@ def load_snapshots(
             )
         )
 
-    return [
-        DailySnapshot(
-            date=row["date"],
-            steps=row["steps"],
-            distance_km=row["distance_km"],
-            active_energy_kj=row["active_energy_kj"],
-            exercise_min=row["exercise_min"],
-            stand_hours=row["stand_hours"],
-            flights_climbed=row["flights_climbed"],
-            resting_hr=row["resting_hr"],
-            hrv_ms=row["hrv_ms"],
-            walking_hr_avg=row["walking_hr_avg"],
-            hr_day_min=row["hr_day_min"],
-            hr_day_max=row["hr_day_max"],
-            vo2max=row["vo2max"],
-            walking_speed_kmh=row["walking_speed_kmh"],
-            walking_step_length_cm=row["walking_step_length_cm"],
-            walking_asymmetry_pct=row["walking_asymmetry_pct"],
-            walking_double_support_pct=row["walking_double_support_pct"],
-            stair_speed_up_ms=row["stair_speed_up_ms"],
-            stair_speed_down_ms=row["stair_speed_down_ms"],
-            running_stride_length_m=row["running_stride_length_m"],
-            running_power_w=row["running_power_w"],
-            running_speed_kmh=row["running_speed_kmh"],
-            sleep_total_h=row["sleep_total_h"],
-            sleep_in_bed_h=row["sleep_in_bed_h"],
-            sleep_efficiency_pct=row["sleep_efficiency_pct"],
-            sleep_deep_h=row["sleep_deep_h"],
-            sleep_core_h=row["sleep_core_h"],
-            sleep_rem_h=row["sleep_rem_h"],
-            sleep_awake_h=row["sleep_awake_h"],
-            recovery_index=row["recovery_index"],
-            workouts=workouts_by_date[row["date"]],
+    snapshots: list[DailySnapshot] = []
+    for row in daily_rows:
+        manual_sleep = manual_sleep_by_date.get(row["date"])
+        if manual_sleep:
+            sleep_total_h = manual_sleep["sleep_total_h"]
+            sleep_in_bed_h = manual_sleep["sleep_in_bed_h"]
+            sleep_efficiency_pct = None
+            sleep_deep_h = None
+            sleep_core_h = None
+            sleep_rem_h = None
+            sleep_awake_h = None
+        else:
+            sleep_total_h = row["sleep_total_h"]
+            sleep_in_bed_h = row["sleep_in_bed_h"]
+            sleep_efficiency_pct = row["sleep_efficiency_pct"]
+            sleep_deep_h = row["sleep_deep_h"]
+            sleep_core_h = row["sleep_core_h"]
+            sleep_rem_h = row["sleep_rem_h"]
+            sleep_awake_h = row["sleep_awake_h"]
+
+        snapshots.append(
+            DailySnapshot(
+                date=row["date"],
+                steps=row["steps"],
+                distance_km=row["distance_km"],
+                active_energy_kj=row["active_energy_kj"],
+                exercise_min=row["exercise_min"],
+                stand_hours=row["stand_hours"],
+                flights_climbed=row["flights_climbed"],
+                resting_hr=row["resting_hr"],
+                hrv_ms=row["hrv_ms"],
+                walking_hr_avg=row["walking_hr_avg"],
+                hr_day_min=row["hr_day_min"],
+                hr_day_max=row["hr_day_max"],
+                vo2max=row["vo2max"],
+                walking_speed_kmh=row["walking_speed_kmh"],
+                walking_step_length_cm=row["walking_step_length_cm"],
+                walking_asymmetry_pct=row["walking_asymmetry_pct"],
+                walking_double_support_pct=row["walking_double_support_pct"],
+                stair_speed_up_ms=row["stair_speed_up_ms"],
+                stair_speed_down_ms=row["stair_speed_down_ms"],
+                running_stride_length_m=row["running_stride_length_m"],
+                running_power_w=row["running_power_w"],
+                running_speed_kmh=row["running_speed_kmh"],
+                sleep_total_h=sleep_total_h,
+                sleep_in_bed_h=sleep_in_bed_h,
+                sleep_efficiency_pct=sleep_efficiency_pct,
+                sleep_deep_h=sleep_deep_h,
+                sleep_core_h=sleep_core_h,
+                sleep_rem_h=sleep_rem_h,
+                sleep_awake_h=sleep_awake_h,
+                recovery_index=row["recovery_index"],
+                workouts=workouts_by_date[row["date"]],
+            )
         )
-        for row in daily_rows
-    ]
+    return snapshots
 
 
 def load_date_range(conn: sqlite3.Connection) -> tuple[str, str] | None:
@@ -669,7 +699,7 @@ def insert_manual_sleep(
 
     Args:
         conn: Open database connection.
-        date: ISO date (the morning date, i.e. when the user woke up).
+        date: ISO night-start date, e.g. Monday night is stored as Monday.
         sleep_total_h: Total sleep hours (excluding awake time).
         sleep_in_bed_h: Total time in bed (including awake). Estimated from
             sleep_total_h if not provided.
