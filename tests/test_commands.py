@@ -13,7 +13,7 @@ from unittest.mock import patch
 from cmd_db import cmd_db
 from cmd_coach import cmd_coach
 from cmd_insights import cmd_insights
-from cmd_llm_common import _apply_verification
+from cmd_llm_common import apply_verification
 from cmd_llm_log import cmd_llm_log
 from cmd_log_flow import _query_today_snapshot, build_log_flow
 from cmd_notify_interpreter import interpret_notify_request
@@ -147,7 +147,7 @@ class TestLogFlowSnapshot:
             patch("cmd_log_flow.open_db", return_value=in_memory_db),
             patch("cmd_log_flow.build_messages", return_value=[]),
             patch(
-                "cmd_log_flow._route_kwargs",
+                "cmd_log_flow.route_kwargs",
                 return_value={
                     "model": "primary-model",
                     "fallback_models": ["fallback-model"],
@@ -177,7 +177,7 @@ class TestVerificationGate:
 
         monkeypatch.setattr("cmd_llm_common.verify_and_rewrite", fail_verify)
 
-        approved = _apply_verification(
+        approved = apply_verification(
             kind="insights",
             draft="draft",
             evidence={},
@@ -205,7 +205,7 @@ class TestVerificationGate:
 
         monkeypatch.setattr("cmd_llm_common.verify_and_rewrite", fake_verify)
 
-        approved = _apply_verification(
+        approved = apply_verification(
             kind="insights",
             draft="draft",
             evidence={},
@@ -228,7 +228,7 @@ class TestVerificationGate:
             lambda **kwargs: VerificationResult(verdict="fail", issues=[]),
         )
 
-        approved = _apply_verification(
+        approved = apply_verification(
             kind="nudge",
             draft="weak nudge",
             evidence={},
@@ -255,7 +255,7 @@ class TestVerificationGate:
 
         monkeypatch.setattr("cmd_llm_common.verify_and_rewrite", fake_verify)
 
-        _apply_verification(
+        apply_verification(
             kind="coach",
             draft="bundle",
             evidence={},
@@ -296,7 +296,7 @@ class TestVerificationGate:
             ),
         )
 
-        approved = _apply_verification(
+        approved = apply_verification(
             kind="nudge",
             draft="good nudge",
             evidence={},
@@ -343,7 +343,7 @@ class TestCmdCoach:
             patch("cmd_coach.load_context", return_value={"prompt": "x", "soul": "y"}),
             patch("cmd_coach.open_db", return_value=in_memory_db),
             patch("cmd_coach.compute_baselines", return_value="baseline md"),
-            patch("cmd_coach._save_baselines"),
+            patch("cmd_coach.save_baselines"),
             patch(
                 "cmd_coach.build_llm_data",
                 return_value={
@@ -421,7 +421,7 @@ class TestCmdCoach:
             patch("cmd_coach.load_context", return_value={"prompt": "x", "soul": "y"}),
             patch("cmd_coach.open_db", return_value=in_memory_db),
             patch("cmd_coach.compute_baselines", return_value="baseline md"),
-            patch("cmd_coach._save_baselines"),
+            patch("cmd_coach.save_baselines"),
             patch(
                 "cmd_coach.build_llm_data",
                 return_value={
@@ -486,7 +486,7 @@ class TestCmdCoach:
             patch("cmd_coach.load_context", return_value={"prompt": "x", "soul": "y"}),
             patch("cmd_coach.open_db", return_value=in_memory_db),
             patch("cmd_coach.compute_baselines", return_value="baseline md"),
-            patch("cmd_coach._save_baselines"),
+            patch("cmd_coach.save_baselines"),
             patch(
                 "cmd_coach.build_llm_data",
                 return_value={
@@ -934,7 +934,7 @@ class TestCmdCoachEmptyResponseFallback:
             patch("cmd_coach.load_context", return_value={"prompt": "x", "soul": "y"}),
             patch("cmd_coach.open_db", return_value=in_memory_db),
             patch("cmd_coach.compute_baselines", return_value="baseline md"),
-            patch("cmd_coach._save_baselines"),
+            patch("cmd_coach.save_baselines"),
             patch(
                 "cmd_coach.build_llm_data",
                 return_value={
@@ -1328,7 +1328,7 @@ class TestCmdNudge:
                 stack.enter_context(ctx)
             stack.enter_context(
                 patch(
-                    "cmd_nudge._route_kwargs",
+                    "cmd_nudge.route_kwargs",
                     return_value={
                         "model": "primary-model",
                         "fallback_models": ["fallback-model"],
@@ -1393,7 +1393,7 @@ class TestCmdNudge:
                 stack.enter_context(ctx)
             stack.enter_context(
                 patch(
-                    "cmd_nudge._route_kwargs",
+                    "cmd_nudge.route_kwargs",
                     return_value={
                         "model": "opus-model",
                         "reasoning_effort": "high",
@@ -1439,7 +1439,7 @@ class TestCmdNudge:
                 stack.enter_context(ctx)
             stack.enter_context(
                 patch(
-                    "cmd_nudge._route_kwargs",
+                    "cmd_nudge.route_kwargs",
                     return_value={"model": "primary-model", "fallback_models": []},
                 )
             )

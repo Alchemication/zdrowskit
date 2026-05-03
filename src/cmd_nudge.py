@@ -17,7 +17,7 @@ from charts import (
     render_chart,
     strip_charts,
 )
-from cmd_llm_common import CommandResult, _apply_verification, _route_kwargs
+from cmd_llm_common import CommandResult, apply_verification, route_kwargs
 from config import CONTEXT_DIR, MAX_TOKENS_NUDGE, MAX_TOOL_ITERATIONS_NUDGE, NUDGES_DIR
 from llm import call_llm
 from llm_context import build_messages, load_context, load_prompt_text
@@ -122,7 +122,7 @@ def cmd_nudge(
 
     from tools import execute_run_sql, run_sql_tool
 
-    route = _route_kwargs("nudge", getattr(args, "model", None))
+    route = route_kwargs("nudge", getattr(args, "model", None))
     model = route["model"]
     fallback_models = route.get("fallback_models")
     temperature = route.get("temperature", 0.7)
@@ -291,7 +291,7 @@ def cmd_nudge(
         logger.info("Nudge skipped by LLM — nothing new to say (trigger: %s)", _trigger)
         return CommandResult(llm_call_id=result.llm_call_id)
 
-    verified_text = _apply_verification(
+    verified_text = apply_verification(
         kind="nudge",
         draft=raw_text,
         evidence={

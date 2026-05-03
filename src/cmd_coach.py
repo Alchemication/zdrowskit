@@ -12,10 +12,10 @@ from pathlib import Path
 from baselines import compute_baselines
 from cmd_llm_common import (
     CommandResult,
-    _apply_verification,
-    _normalize_reasoning_effort,
-    _route_kwargs,
-    _save_baselines,
+    apply_verification,
+    normalize_reasoning_effort,
+    route_kwargs,
+    save_baselines,
 )
 from config import CONTEXT_DIR, MAX_TOKENS_COACH, MAX_TOOL_ITERATIONS_COACH
 from context_edit import ContextEdit, EditPreviewError, build_edit_preview
@@ -115,7 +115,7 @@ def cmd_coach(
 
     baselines = compute_baselines(conn)
     milestones = compute_milestones(conn)
-    _save_baselines(CONTEXT_DIR, baselines)
+    save_baselines(CONTEXT_DIR, baselines)
 
     week_complete = health_data.get("week_complete", False)
     week_label = health_data.get("week_label")
@@ -158,14 +158,14 @@ def cmd_coach(
         logger.error("Failed to render coach_prompt.md template: %s", e)
         sys.exit(1)
 
-    route = _route_kwargs("coach", getattr(args, "model", None))
+    route = route_kwargs("coach", getattr(args, "model", None))
     model = route["model"]
     fallback_models = route.get("fallback_models")
     tools = run_sql_tool() + context_update_tool(allowed_files=["strategy"])
     raw_edits: list[ContextEdit] = []
     narrative_parts: list[str] = []
     max_iterations = MAX_TOOL_ITERATIONS_COACH
-    reasoning_effort = _normalize_reasoning_effort(
+    reasoning_effort = normalize_reasoning_effort(
         getattr(args, "reasoning_effort", "medium")
     )
     if "reasoning_effort" in route:
@@ -322,7 +322,7 @@ def cmd_coach(
         )
 
     bundled_text = _format_coach_bundle(narrative, proposals)
-    verified_text = _apply_verification(
+    verified_text = apply_verification(
         kind="coach",
         draft=bundled_text,
         evidence={

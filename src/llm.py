@@ -789,3 +789,19 @@ def extract_memory(response: str) -> str | None:
     """
     match = re.search(r"<memory>(.*?)</memory>", response, re.DOTALL)
     return match.group(1).strip() if match else None
+
+
+def strip_json_fences(text: str) -> str:
+    """Drop a ```json``` fence wrapping the payload, if present.
+
+    Args:
+        text: Raw LLM output that may be wrapped in a Markdown code fence.
+
+    Returns:
+        The payload with the surrounding fence removed and whitespace trimmed.
+    """
+    candidate = text.strip()
+    if candidate.startswith("```"):
+        candidate = re.sub(r"^```(?:json)?\s*", "", candidate)
+        candidate = re.sub(r"\s*```$", "", candidate).strip()
+    return candidate

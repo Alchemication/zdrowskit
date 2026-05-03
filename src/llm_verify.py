@@ -25,7 +25,7 @@ from config import (
     VERIFICATION_REWRITE_MODEL,
 )
 from events import record_event
-from llm import LLMResult, call_llm
+from llm import LLMResult, call_llm, strip_json_fences
 from llm_context import load_prompt_text
 
 CallLLM = Callable[..., LLMResult]
@@ -184,15 +184,6 @@ def slim_source_messages(
     return slim
 
 
-def _strip_json_fences(text: str) -> str:
-    """Drop a single ```json``` fence wrapping the payload, if present."""
-    candidate = text.strip()
-    if candidate.startswith("```"):
-        candidate = re.sub(r"^```(?:json)?\s*", "", candidate)
-        candidate = re.sub(r"\s*```$", "", candidate).strip()
-    return candidate
-
-
 def parse_verification_result(text: str) -> VerificationResult:
     """Parse verifier JSON into a ``VerificationResult``.
 
@@ -205,7 +196,7 @@ def parse_verification_result(text: str) -> VerificationResult:
     Raises:
         ValueError: If the payload is malformed or violates the contract.
     """
-    candidate = _strip_json_fences(text)
+    candidate = strip_json_fences(text)
     try:
         payload = _VerifierPayload.model_validate_json(candidate)
     except ValidationError as exc:

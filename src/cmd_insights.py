@@ -14,11 +14,11 @@ from baselines import compute_baselines
 from charts import ChartResult, extract_charts, render_chart, strip_charts
 from cmd_llm_common import (
     CommandResult,
-    _apply_verification,
-    _hit_token_ceiling,
-    _normalize_reasoning_effort,
-    _route_kwargs,
-    _save_baselines,
+    apply_verification,
+    hit_token_ceiling,
+    normalize_reasoning_effort,
+    route_kwargs,
+    save_baselines,
 )
 from config import (
     CONTEXT_DIR,
@@ -212,7 +212,7 @@ def cmd_insights(
     milestones = None
     if not args.no_update_baselines and args.week != "current":
         baselines = compute_baselines(conn)
-        _save_baselines(CONTEXT_DIR, baselines)
+        save_baselines(CONTEXT_DIR, baselines)
     milestones = compute_milestones(conn)
 
     week_complete = health_data.get("week_complete", False)
@@ -244,10 +244,10 @@ def cmd_insights(
 
     tools = run_sql_tool()
     max_iterations = MAX_TOOL_ITERATIONS_INSIGHTS
-    reasoning_effort = _normalize_reasoning_effort(
+    reasoning_effort = normalize_reasoning_effort(
         getattr(args, "reasoning_effort", "medium")
     )
-    route = _route_kwargs("insights", getattr(args, "model", None))
+    route = route_kwargs("insights", getattr(args, "model", None))
     model = route["model"]
     fallback_models = route.get("fallback_models")
     if "reasoning_effort" in route:
@@ -370,7 +370,7 @@ def cmd_insights(
         )
         sys.exit(1)
 
-    if _hit_token_ceiling(result):
+    if hit_token_ceiling(result):
         logger.warning(
             "Insights response hit max_tokens=%d; retrying concise synthesis",
             MAX_TOKENS_INSIGHTS,
@@ -408,14 +408,14 @@ def cmd_insights(
                 "Insights concise synthesis returned empty text; refusing to save a blank report"
             )
             sys.exit(1)
-        if _hit_token_ceiling(result):
+        if hit_token_ceiling(result):
             logger.error(
                 "Insights concise synthesis still hit max_tokens=%d; refusing to save a truncated report",
                 MAX_TOKENS_INSIGHTS,
             )
             sys.exit(1)
 
-    verified_text = _apply_verification(
+    verified_text = apply_verification(
         kind="insights",
         draft=result.text,
         evidence={

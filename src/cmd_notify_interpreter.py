@@ -10,9 +10,9 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, ValidationError
 
-from cmd_llm_common import _route_kwargs, _strip_json_fences
+from cmd_llm_common import route_kwargs
 from config import CONTEXT_DIR, MAX_TOKENS_NOTIFY, NOTIFICATION_PREFS_PATH
-from llm import call_llm
+from llm import call_llm, strip_json_fences
 from llm_context import build_messages, load_context
 from notification_prefs import (
     DEFAULT_NOTIFICATION_PREFS,
@@ -112,7 +112,7 @@ def interpret_notify_request(
     )
 
     conn = open_db(Path(db))
-    route = _route_kwargs("notify", model)
+    route = route_kwargs("notify", model)
     temperature = route.pop("temperature", 0)
     try:
         result = call_llm(
@@ -133,7 +133,7 @@ def interpret_notify_request(
         conn.close()
 
     try:
-        parsed = NotifyResponse.model_validate_json(_strip_json_fences(result.text))
+        parsed = NotifyResponse.model_validate_json(strip_json_fences(result.text))
     except ValidationError as exc:
         raise ValueError(f"Notify interpreter returned invalid payload: {exc}") from exc
 

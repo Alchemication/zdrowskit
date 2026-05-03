@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import re
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
@@ -38,21 +37,21 @@ class CommandResult:
     telegram_message_id: int | None = None
 
 
-def _normalize_reasoning_effort(value: str | None) -> str | None:
+def normalize_reasoning_effort(value: str | None) -> str | None:
     """Normalize a CLI reasoning-effort value to what call_llm expects."""
     if value is None or value == "none":
         return None
     return value
 
 
-def _route_kwargs(feature: str, explicit_model: str | None = None) -> dict:
+def route_kwargs(feature: str, explicit_model: str | None = None) -> dict:
     """Return model-routing kwargs for a feature unless explicitly overridden."""
     if explicit_model:
         return {"model": explicit_model}
     return resolve_model_route(feature).call_kwargs()
 
 
-def _single_model_attempts(route: dict) -> list[dict]:
+def single_model_attempts(route: dict) -> list[dict]:
     """Expand a route into one-model attempts for validation-aware retries."""
     raw_models = [route.get("model"), *(route.get("fallback_models") or [])]
     seen: set[str] = set()
@@ -76,23 +75,14 @@ def _single_model_attempts(route: dict) -> list[dict]:
     return attempts
 
 
-def _strip_json_fences(text: str) -> str:
-    """Drop a ```json``` fence wrapping the payload, if present."""
-    candidate = text.strip()
-    if candidate.startswith("```"):
-        candidate = re.sub(r"^```(?:json)?\s*", "", candidate)
-        candidate = re.sub(r"\s*```$", "", candidate)
-    return candidate
-
-
-def _save_baselines(context_dir: Path, baselines: str) -> None:
+def save_baselines(context_dir: Path, baselines: str) -> None:
     """Write auto-computed baselines to a dedicated baselines.md file."""
     path = context_dir / "baselines.md"
     path.write_text(baselines.rstrip() + "\n", encoding="utf-8")
     logger.info("Saved baselines to %s", path)
 
 
-def _hit_token_ceiling(result: LLMResult) -> bool:
+def hit_token_ceiling(result: LLMResult) -> bool:
     """Return True when an LLM result likely ended because max_tokens was hit."""
     return result.max_tokens is not None and result.output_tokens >= result.max_tokens
 
@@ -108,7 +98,7 @@ def _verification_enabled(kind: VerificationKind) -> bool:
     }[kind]
 
 
-def _apply_verification(
+def apply_verification(
     *,
     kind: VerificationKind,
     draft: str,

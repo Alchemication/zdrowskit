@@ -9,9 +9,9 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from cmd_llm_common import _route_kwargs, _single_model_attempts, _strip_json_fences
+from cmd_llm_common import route_kwargs, single_model_attempts
 from config import CONTEXT_DIR, MAX_TOKENS_LOG_FLOW
-from llm import call_llm
+from llm import call_llm, strip_json_fences
 from llm_context import build_messages, load_context
 from store import open_db
 
@@ -256,9 +256,9 @@ def build_log_flow(
             today=today,
         )
 
-        route = _route_kwargs("log_flow", model)
+        route = route_kwargs("log_flow", model)
         temperature = route.pop("temperature", 0)
-        attempts = _single_model_attempts(route)
+        attempts = single_model_attempts(route)
         last_error: Exception | None = None
         for attempt in attempts:
             try:
@@ -273,7 +273,7 @@ def build_log_flow(
                     metadata={"date": today.isoformat()},
                 )
                 payload = _LogFlowPayload.model_validate_json(
-                    _strip_json_fences(result.text)
+                    strip_json_fences(result.text)
                 )
                 return LogFlow(
                     steps=list(payload.steps),
@@ -342,9 +342,9 @@ def build_log_step_followup(
             today=today,
         )
 
-        route = _route_kwargs("log_flow", model)
+        route = route_kwargs("log_flow", model)
         temperature = route.pop("temperature", 0)
-        attempts = _single_model_attempts(route)
+        attempts = single_model_attempts(route)
         last_error: Exception | None = None
         for attempt in attempts:
             try:
@@ -363,7 +363,7 @@ def build_log_step_followup(
                     },
                 )
                 payload = _LogFollowupPayload.model_validate_json(
-                    _strip_json_fences(result.text)
+                    strip_json_fences(result.text)
                 )
                 return payload.step
             except Exception as exc:
