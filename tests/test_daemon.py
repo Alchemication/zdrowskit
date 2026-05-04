@@ -1424,9 +1424,9 @@ class TestCodexTelegramCommand:
             ),
             patch.object(daemon._chat, "_stop_placeholder_animation"),
             patch(
-                "daemon_agent_flow.run_codex_readonly",
+                "daemon_agent_flow.run_codex_workspace",
                 return_value=CodexRunResult(
-                    text="Read-only answer",
+                    text="Workspace answer",
                     session_id="codex-session",
                 ),
             ) as run_codex,
@@ -1435,7 +1435,7 @@ class TestCodexTelegramCommand:
 
         run_codex.assert_called_once()
         assert run_codex.call_args.kwargs["session_id"] is None
-        daemon._poller.edit_message.assert_called_once_with(900, "Read-only answer")
+        daemon._poller.edit_message.assert_called_once_with(900, "Workspace answer")
         assert daemon._state["codex_session_id"] == "codex-session"
         assert daemon._state["codex_last_message_id"] == 900
         state = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
@@ -1457,7 +1457,7 @@ class TestCodexTelegramCommand:
             ),
             patch.object(daemon._chat, "_stop_placeholder_animation"),
             patch(
-                "daemon_agent_flow.run_codex_readonly",
+                "daemon_agent_flow.run_codex_workspace",
                 return_value=CodexRunResult(
                     text="Follow-up answer",
                     session_id="saved-session",
@@ -1485,7 +1485,7 @@ class TestCodexTelegramCommand:
             ),
             patch.object(daemon._chat, "_stop_placeholder_animation"),
             patch(
-                "daemon_agent_flow.run_codex_readonly",
+                "daemon_agent_flow.run_codex_workspace",
                 return_value=CodexRunResult(text="Fresh", session_id="new-session"),
             ) as run_codex,
         ):

@@ -1,8 +1,8 @@
-"""Telegram-facing read-only Codex runner.
+"""Telegram-facing Codex runner.
 
 This module keeps subprocess execution and Codex JSONL parsing out of the
-Telegram command router.  It intentionally supports only Codex in read-only
-mode for the first pass.
+Telegram command router.  It runs Codex with workspace-write sandboxing so it
+can edit files in the repository, while still denying approval escalation.
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ class CodexRunError(RuntimeError):
     """Raised when the Codex CLI cannot produce a usable reply."""
 
 
-def run_codex_readonly(
+def run_codex_workspace(
     prompt: str,
     *,
     cwd: Path,
@@ -53,7 +53,7 @@ def run_codex_readonly(
     timeout_s: int = CODEX_TIMEOUT_S,
     executable: str | None = None,
 ) -> CodexRunResult:
-    """Run one Codex turn in read-only mode.
+    """Run one Codex turn with workspace-write sandboxing.
 
     Args:
         prompt: User prompt text.
@@ -84,7 +84,7 @@ def run_codex_readonly(
         "--ask-for-approval",
         "never",
         "--sandbox",
-        "read-only",
+        "workspace-write",
         "--cd",
         str(cwd),
         "exec",
@@ -157,7 +157,7 @@ def _default_codex_executable() -> str:
 
 
 def codex_usage() -> str:
-    """Return Telegram help text for the read-only Codex command."""
+    """Return Telegram help text for the Codex command."""
     return (
         "Codex commands:\n"
         "/codex <prompt> — Ask Codex about this repo.\n"
@@ -168,7 +168,7 @@ def codex_usage() -> str:
         "/codex stop — Clear Codex context and turn mode off.\n\n"
         "After /codex on, plain non-command messages go to Codex automatically "
         "until /codex off, /codex stop, or 30 min of inactivity.\n"
-        "Read-only mode only."
+        "Workspace-write mode: Codex can edit files in this repo."
     )
 
 

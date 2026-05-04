@@ -565,8 +565,8 @@ class TelegramChatHandler:
         *,
         new_session: bool,
     ) -> None:
-        """Run one read-only Codex turn and send the result to Telegram."""
-        from daemon_agent_flow import CodexRunError, run_codex_readonly
+        """Run one Codex turn and send the result to Telegram."""
+        from daemon_agent_flow import CodexRunError, run_codex_workspace
 
         status_prefix = "Codex reading "
         status_id = self._poller.send_reply(
@@ -580,7 +580,7 @@ class TelegramChatHandler:
         )
 
         try:
-            result = run_codex_readonly(
+            result = run_codex_workspace(
                 prompt,
                 cwd=Path(__file__).resolve().parent.parent,
                 session_id=session_id if isinstance(session_id, str) else None,

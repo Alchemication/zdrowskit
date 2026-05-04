@@ -49,11 +49,15 @@ the Telegram menu: `/notify`, `/review [current|last]`, `/coach [current|last]`,
 `/status` shows bot state, data coverage, recent activity, and notification state.
 
 `/codex` with no arguments shows the available Codex commands. `/codex <prompt>`
-asks the local Codex CLI about this repo in read-only mode. Follow-up `/codex`
+asks the local Codex CLI about this repo in workspace-write mode. Follow-up `/codex`
 messages resume the saved Codex session; `/codex new <prompt>` starts a fresh
 one; `/codex reset [prompt]` clears the saved Codex context; and `/codex stop`
 clears it and turns Codex mode off. Replies to the last Codex Telegram message
 also continue the Codex session.
+
+Workspace-write mode lets Codex edit files in the repo checkout. It does not
+grant write access to external state directories such as `~/Documents/zdrowskit`
+or the default SQLite DB directory unless those paths are added separately.
 
 Use `/codex on [prompt]` to route plain non-command Telegram messages to Codex
 without retyping `/codex`. Codex mode refreshes after each Codex turn and turns

@@ -8,11 +8,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from daemon_agent_flow import CodexRunError, run_codex_readonly
+from daemon_agent_flow import CodexRunError, run_codex_workspace
 
 
-class TestRunCodexReadonly:
-    def test_starts_readonly_session_and_reads_last_message(
+class TestRunCodexWorkspace:
+    def test_starts_workspace_write_session_and_reads_last_message(
         self, tmp_path: Path, monkeypatch
     ) -> None:
         calls: list[list[str]] = []
@@ -34,7 +34,7 @@ class TestRunCodexReadonly:
         monkeypatch.setattr("daemon_agent_flow.shutil.which", lambda name: None)
         monkeypatch.setattr(subprocess, "run", fake_run)
 
-        result = run_codex_readonly("Where is the bot?", cwd=tmp_path)
+        result = run_codex_workspace("Where is the bot?", cwd=tmp_path)
 
         assert result.text == "Codex answer"
         assert result.session_id == "11111111-1111-1111-1111-111111111111"
@@ -42,7 +42,7 @@ class TestRunCodexReadonly:
         assert cmd[0] == "codex"
         assert "exec" in cmd
         assert "--sandbox" in cmd
-        assert cmd[cmd.index("--sandbox") + 1] == "read-only"
+        assert cmd[cmd.index("--sandbox") + 1] == "workspace-write"
         assert "--ask-for-approval" in cmd
         assert cmd[cmd.index("--ask-for-approval") + 1] == "never"
 
@@ -60,7 +60,7 @@ class TestRunCodexReadonly:
         monkeypatch.setenv("ZDROWSKIT_CODEX_EXECUTABLE", "/opt/homebrew/bin/codex")
         monkeypatch.setattr(subprocess, "run", fake_run)
 
-        result = run_codex_readonly("Where is the bot?", cwd=tmp_path)
+        result = run_codex_workspace("Where is the bot?", cwd=tmp_path)
 
         assert result.text == "Codex answer"
         assert calls[0][0] == "/opt/homebrew/bin/codex"
@@ -78,7 +78,7 @@ class TestRunCodexReadonly:
         monkeypatch.setattr("daemon_agent_flow.shutil.which", lambda name: None)
         monkeypatch.setattr(subprocess, "run", fake_run)
 
-        result = run_codex_readonly(
+        result = run_codex_workspace(
             "Next question",
             cwd=tmp_path,
             session_id="existing-session",
@@ -99,4 +99,4 @@ class TestRunCodexReadonly:
         monkeypatch.setattr(subprocess, "run", fake_run)
 
         with pytest.raises(CodexRunError, match="auth failed"):
-            run_codex_readonly("hello", cwd=tmp_path)
+            run_codex_workspace("hello", cwd=tmp_path)
