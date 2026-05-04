@@ -53,6 +53,10 @@ the Telegram menu: `/notify`, `/review [current|last]`, `/coach [current|last]`,
 fresh one, and `/codex stop` clears it. Replies to the last Codex Telegram
 message also continue the Codex session.
 
+When running under launchd, `/codex` uses the `ZDROWSKIT_CODEX_EXECUTABLE`
+value written by `uv run python main.py daemon-install` if available. Re-run
+`daemon-install` after installing or moving the Codex CLI.
+
 ## `/notify`
 
 `/notify` shows and changes notification preferences through a structured proposal flow. See [Notifications](notifications.md#notification-preferences-via-telegram) for examples, supported settings, and the storage path.

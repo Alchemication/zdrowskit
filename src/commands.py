@@ -347,14 +347,22 @@ def cmd_doctor(args: argparse.Namespace) -> None:  # noqa: ARG001
     print("\nAll local checks passed.")
 
 
-def _render_launchd_plist(*, uv_path: Path, project_dir: Path, home: Path) -> str:
+def _render_launchd_plist(
+    *,
+    uv_path: Path,
+    project_dir: Path,
+    home: Path,
+    codex_path: Path | None = None,
+) -> str:
     """Return a launchd plist for this checkout and user."""
     daemon_path = project_dir / "src" / "daemon.py"
     log_file = home / "Library" / "Logs" / "zdrowskit.daemon.log"
-    path_value = (
-        f"{uv_path.parent}:{home}/.local/bin:/opt/homebrew/bin:"
-        "/usr/local/bin:/usr/bin:/bin"
-    )
+    path_value = _launchd_path_value(uv_path=uv_path, home=home)
+    codex_env = ""
+    if codex_path is not None:
+        codex_env = f"""
+        <key>ZDROWSKIT_CODEX_EXECUTABLE</key>
+        <string>{xml_escape(str(codex_path))}</string>"""
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -390,11 +398,32 @@ def _render_launchd_plist(*, uv_path: Path, project_dir: Path, home: Path) -> st
         <key>PATH</key>
         <string>{xml_escape(path_value)}</string>
         <key>HOME</key>
-        <string>{xml_escape(str(home))}</string>
+        <string>{xml_escape(str(home))}</string>{codex_env}
     </dict>
 </dict>
 </plist>
 """
+
+
+def _launchd_path_value(*, uv_path: Path, home: Path) -> str:
+    """Return a launchd PATH with duplicate entries removed."""
+    candidates = [
+        uv_path.parent,
+        home / ".local" / "bin",
+        Path("/opt/homebrew/bin"),
+        Path("/usr/local/bin"),
+        Path("/usr/bin"),
+        Path("/bin"),
+    ]
+    seen: set[str] = set()
+    parts: list[str] = []
+    for path in candidates:
+        value = str(path)
+        if value in seen:
+            continue
+        seen.add(value)
+        parts.append(value)
+    return ":".join(parts)
 
 
 def cmd_daemon_install(args: argparse.Namespace) -> None:
@@ -404,11 +433,13 @@ def cmd_daemon_install(args: argparse.Namespace) -> None:
         args: Parsed CLI arguments with no_start attribute.
     """
     import subprocess
+    import time
 
     uv = shutil.which("uv")
     if uv is None:
         print("uv not found on PATH. Install uv first, then retry daemon-install.")
         sys.exit(1)
+    codex = shutil.which("codex")
 
     launch_agents = Path.home() / "Library" / "LaunchAgents"
     launch_agents.mkdir(parents=True, exist_ok=True)
@@ -418,10 +449,15 @@ def cmd_daemon_install(args: argparse.Namespace) -> None:
             uv_path=Path(uv),
             project_dir=REPO_ROOT,
             home=Path.home(),
+            codex_path=Path(codex) if codex else None,
         ),
         encoding="utf-8",
     )
     print(f"Wrote {plist}")
+    if codex:
+        print(f"Codex CLI: {codex}")
+    else:
+        print("Codex CLI not found on PATH; /codex will need it before use.")
 
     if getattr(args, "no_start", False):
         print("Not starting daemon because --no-start was provided.")
@@ -436,6 +472,13 @@ def cmd_daemon_install(args: argparse.Namespace) -> None:
         capture_output=True,
         text=True,
     )
+    if result.returncode != 0:
+        time.sleep(0.5)
+        result = subprocess.run(
+            ["launchctl", "bootstrap", domain, str(plist)],
+            capture_output=True,
+            text=True,
+        )
     if result.returncode != 0:
         print(f"Failed to start daemon: {result.stderr.strip()}")
         print(

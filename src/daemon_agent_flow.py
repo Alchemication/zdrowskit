@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
+import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass
@@ -49,7 +51,7 @@ def run_codex_readonly(
     cwd: Path,
     session_id: str | None = None,
     timeout_s: int = CODEX_TIMEOUT_S,
-    executable: str = "codex",
+    executable: str | None = None,
 ) -> CodexRunResult:
     """Run one Codex turn in read-only mode.
 
@@ -58,7 +60,8 @@ def run_codex_readonly(
         cwd: Project directory Codex should inspect.
         session_id: Existing Codex session to resume, if any.
         timeout_s: Maximum wall time for the CLI process.
-        executable: Codex executable name/path.
+        executable: Codex executable name/path. Defaults to
+            ZDROWSKIT_CODEX_EXECUTABLE, then PATH lookup, then "codex".
 
     Returns:
         Parsed Codex result with final text and best-known session id.
@@ -70,6 +73,8 @@ def run_codex_readonly(
     prompt = prompt.strip()
     if not prompt:
         raise ValueError("Prompt is empty.")
+
+    executable = executable or _default_codex_executable()
 
     with tempfile.NamedTemporaryFile(prefix="zdrowskit-codex-", delete=False) as out:
         output_path = Path(out.name)
@@ -113,7 +118,7 @@ def run_codex_readonly(
     except FileNotFoundError as exc:
         _unlink_quietly(output_path)
         raise CodexRunError(
-            "Codex CLI not found. Install it and restart daemon."
+            "Codex CLI not found. Install it, run `uv run python main.py daemon-install`, then retry."
         ) from exc
     except subprocess.TimeoutExpired as exc:
         _unlink_quietly(output_path)
@@ -139,6 +144,14 @@ def run_codex_readonly(
         raise CodexRunError("Codex returned an empty response.")
 
     return CodexRunResult(text=text.strip(), session_id=parsed_session_id)
+
+
+def _default_codex_executable() -> str:
+    """Return the best Codex executable for daemon subprocesses."""
+    configured = os.environ.get("ZDROWSKIT_CODEX_EXECUTABLE")
+    if configured and configured.strip():
+        return configured.strip()
+    return shutil.which("codex") or "codex"
 
 
 def codex_usage() -> str:

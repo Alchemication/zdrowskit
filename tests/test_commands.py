@@ -8,7 +8,7 @@ from contextlib import AbstractContextManager, ExitStack
 from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 from cmd_db import cmd_db
 from cmd_coach import cmd_coach
@@ -19,7 +19,12 @@ from cmd_log_flow import _query_today_snapshot, build_log_flow
 from cmd_notify_interpreter import interpret_notify_request
 from cmd_nudge import cmd_nudge
 import commands as commands_module
-from commands import ADVANCED_TELEGRAM_BOT_COMMANDS, TELEGRAM_BOT_COMMANDS, cmd_setup
+from commands import (
+    ADVANCED_TELEGRAM_BOT_COMMANDS,
+    TELEGRAM_BOT_COMMANDS,
+    cmd_daemon_install,
+    cmd_setup,
+)
 from config import MAX_TOKENS_INSIGHTS, MAX_TOKENS_NUDGE
 from llm import LLMResult
 from llm_verify import VerificationResult
@@ -67,6 +72,80 @@ class TestSetupCommand:
         assert "/Users/adamsky" not in plist
         assert str(tmp_path / "project" / "src" / "daemon.py") in plist
         assert str(tmp_path / "bin" / "uv") in plist
+
+    def test_launchd_plist_can_pin_codex_executable(self, tmp_path: Path) -> None:
+        plist = commands_module._render_launchd_plist(
+            uv_path=tmp_path / "bin" / "uv",
+            project_dir=tmp_path / "project",
+            home=tmp_path / "home",
+            codex_path=tmp_path / "bin" / "codex",
+        )
+
+        assert "<key>ZDROWSKIT_CODEX_EXECUTABLE</key>" in plist
+        assert str(tmp_path / "bin" / "codex") in plist
+        assert "/opt/homebrew/bin" in plist
+
+    def test_launchd_path_dedupes_uv_parent(self, tmp_path: Path) -> None:
+        home = tmp_path / "home"
+
+        path_value = commands_module._launchd_path_value(
+            uv_path=home / ".local" / "bin" / "uv",
+            home=home,
+        )
+
+        assert path_value.split(":").count(str(home / ".local" / "bin")) == 1
+
+    def test_daemon_install_retries_bootstrap_after_bootout_race(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        home = tmp_path / "home"
+        uv_path = tmp_path / "bin" / "uv"
+        codex_path = tmp_path / "bin" / "codex"
+
+        run_results = [
+            SimpleNamespace(returncode=0, stdout="", stderr=""),
+            SimpleNamespace(returncode=5, stdout="", stderr="Bootstrap failed: 5"),
+            SimpleNamespace(returncode=0, stdout="", stderr=""),
+        ]
+
+        with (
+            patch.object(Path, "home", return_value=home),
+            patch.object(
+                commands_module.shutil,
+                "which",
+                side_effect=lambda name: {
+                    "uv": str(uv_path),
+                    "codex": str(codex_path),
+                }.get(name),
+            ),
+            patch("subprocess.check_output", return_value=b"501\n"),
+            patch("subprocess.run", side_effect=run_results) as run,
+            patch("time.sleep") as sleep,
+        ):
+            cmd_daemon_install(SimpleNamespace(no_start=False))
+
+        plist = home / "Library" / "LaunchAgents" / "com.zdrowskit.daemon.plist"
+        assert plist.exists()
+        assert "ZDROWSKIT_CODEX_EXECUTABLE" in plist.read_text(encoding="utf-8")
+        assert run.call_args_list == [
+            call(
+                ["launchctl", "bootout", "gui/501/com.zdrowskit.daemon"],
+                capture_output=True,
+                text=True,
+            ),
+            call(
+                ["launchctl", "bootstrap", "gui/501", str(plist)],
+                capture_output=True,
+                text=True,
+            ),
+            call(
+                ["launchctl", "bootstrap", "gui/501", str(plist)],
+                capture_output=True,
+                text=True,
+            ),
+        ]
+        sleep.assert_called_once_with(0.5)
+        assert "Daemon installed and started" in capsys.readouterr().out
 
 
 class TestTelegramBotCommands:

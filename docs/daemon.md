@@ -12,7 +12,7 @@ uv run python main.py daemon-install
 
 What it watches and when it acts is covered in [Notifications](notifications.md): triggers, suppression rules, and cross-channel awareness.
 
-The checked-in plist under `launchd/` is a placeholder template. `daemon-install` generates the real plist with your checkout path, `uv` path, `HOME`, and log location. It currently installs one daemon instance for the current macOS user.
+The checked-in plist under `launchd/` is a placeholder template. `daemon-install` generates the real plist with your checkout path, `uv` path, `HOME`, `PATH`, log location, and resolved Codex CLI path if `codex` is available. It currently installs one daemon instance for the current macOS user.
 
 ## Files
 
@@ -62,6 +62,7 @@ Restart rules:
 |---|---|
 | Code change in `src/`, such as `daemon.py` or `commands.py` | `uv run python main.py daemon-restart` |
 | Change to `.env`, such as a new API key | `uv run python main.py daemon-restart` |
+| PATH or CLI location changes, such as installing Codex under Homebrew | `uv run python main.py daemon-install` |
 | Stop for testing in foreground | `uv run python main.py daemon-stop` |
 | Change to the `.plist` itself | See below |
 | Context file changes (`*.md`) | No restart needed; read at trigger time |
