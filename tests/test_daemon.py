@@ -1387,12 +1387,26 @@ class TestTelegramCommands:
         assert "/review [current|last] — Run weekly report (default: last)" in sent
         assert "/context [name] — View context files" in sent
         assert "/events [N] [category] — Recent system events" in sent
-        assert "/codex <prompt> — Ask Codex about this repo" in sent
+        assert "/codex — Show Codex commands" in sent
+        assert "/codex on [prompt]" not in sent
         assert "Available context files:" in sent
         assert "me" in sent
 
 
 class TestCodexTelegramCommand:
+    def test_codex_without_args_shows_mode_help(self, tmp_path: Path) -> None:
+        daemon = _make_daemon(tmp_path)
+        daemon._chat._poller = MagicMock()
+
+        daemon._handle_command("/codex", 53)
+
+        daemon._poller.send_reply.assert_called_once()
+        sent = daemon._poller.send_reply.call_args.args[0]
+        assert "Codex commands:" in sent
+        assert "/codex on [prompt] — Turn on Codex mode." in sent
+        assert "plain non-command messages go to Codex automatically" in sent
+        assert "30 min of inactivity" in sent
+
     def test_codex_command_stores_session_and_edits_placeholder(
         self, tmp_path: Path
     ) -> None:

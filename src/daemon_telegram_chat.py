@@ -433,12 +433,7 @@ class TelegramChatHandler:
                 for command in ADVANCED_TELEGRAM_BOT_COMMANDS
             )
             lines.append("\nCodex:")
-            lines.append("/codex <prompt> — Ask Codex about this repo (read-only)")
-            lines.append("/codex on [prompt] — Route plain messages to Codex")
-            lines.append("/codex off — Stop routing plain messages to Codex")
-            lines.append("/codex reset [prompt] — Clear Codex context")
-            lines.append("/codex new <prompt> — Start a fresh Codex session")
-            lines.append("/codex stop — Forget the current Codex session")
+            lines.append("/codex — Show Codex commands")
             lines.append(f"\nAvailable context files: {ctx_opts}")
             self._poller.send_reply("\n".join(lines), reply_to_message_id=message_id)
         else:

@@ -159,12 +159,15 @@ def _default_codex_executable() -> str:
 def codex_usage() -> str:
     """Return Telegram help text for the read-only Codex command."""
     return (
-        "Use /codex <prompt> to ask Codex about this repo.\n"
-        "Use /codex on [prompt] to route plain messages to Codex for 30 min.\n"
-        "Use /codex off to return plain messages to health chat.\n"
-        "Use /codex reset [prompt] to clear Codex context.\n"
-        "Use /codex new <prompt> to start a fresh Codex session.\n"
-        "Use /codex stop to clear Codex context and turn mode off.\n"
+        "Codex commands:\n"
+        "/codex <prompt> — Ask Codex about this repo.\n"
+        "/codex on [prompt] — Turn on Codex mode.\n"
+        "/codex off — Turn off Codex mode.\n"
+        "/codex reset [prompt] — Clear Codex context.\n"
+        "/codex new <prompt> — Start a fresh Codex session.\n"
+        "/codex stop — Clear Codex context and turn mode off.\n\n"
+        "After /codex on, plain non-command messages go to Codex automatically "
+        "until /codex off, /codex stop, or 30 min of inactivity.\n"
         "Read-only mode only."
     )
 
