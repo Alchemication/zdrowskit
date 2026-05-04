@@ -79,10 +79,19 @@ def run_codex_readonly(
     with tempfile.NamedTemporaryFile(prefix="zdrowskit-codex-", delete=False) as out:
         output_path = Path(out.name)
 
+    base_cmd = [
+        executable,
+        "--ask-for-approval",
+        "never",
+        "--sandbox",
+        "read-only",
+        "--cd",
+        str(cwd),
+        "exec",
+    ]
     if session_id:
         cmd = [
-            executable,
-            "exec",
+            *base_cmd,
             "resume",
             "--json",
             "--output-last-message",
@@ -92,14 +101,7 @@ def run_codex_readonly(
         ]
     else:
         cmd = [
-            executable,
-            "exec",
-            "--cd",
-            str(cwd),
-            "--sandbox",
-            "read-only",
-            "--ask-for-approval",
-            "never",
+            *base_cmd,
             "--json",
             "--output-last-message",
             str(output_path),

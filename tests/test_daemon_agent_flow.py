@@ -39,7 +39,8 @@ class TestRunCodexReadonly:
         assert result.text == "Codex answer"
         assert result.session_id == "11111111-1111-1111-1111-111111111111"
         cmd = calls[0]
-        assert cmd[:2] == ["codex", "exec"]
+        assert cmd[0] == "codex"
+        assert "exec" in cmd
         assert "--sandbox" in cmd
         assert cmd[cmd.index("--sandbox") + 1] == "read-only"
         assert "--ask-for-approval" in cmd
@@ -85,7 +86,8 @@ class TestRunCodexReadonly:
 
         assert result.text == "Follow-up answer"
         assert result.session_id == "existing-session"
-        assert calls[0][:4] == ["codex", "exec", "resume", "--json"]
+        exec_index = calls[0].index("exec")
+        assert calls[0][exec_index : exec_index + 3] == ["exec", "resume", "--json"]
         assert "existing-session" in calls[0]
 
     def test_raises_useful_error_on_failure(self, tmp_path: Path, monkeypatch) -> None:
