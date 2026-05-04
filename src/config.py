@@ -135,7 +135,7 @@ MAX_TOKENS_LOG_FLOW: int = _env_int("ZDROWSKIT_MAX_TOKENS_LOG_FLOW", 4096)
 MAX_TOKENS_ADD_CLONE: int = _env_int("ZDROWSKIT_MAX_TOKENS_ADD_CLONE", 512)
 """Output token budget for /add historical workout clone selection."""
 
-MAX_TOKENS_VERIFICATION: int = _env_int("ZDROWSKIT_MAX_TOKENS_VERIFICATION", 4096)
+MAX_TOKENS_VERIFICATION: int = _env_int("ZDROWSKIT_MAX_TOKENS_VERIFICATION", 8192)
 """Output token budget for evidence-bound verifier passes."""
 
 MAX_TOKENS_VERIFICATION_REWRITE: int = _env_int(

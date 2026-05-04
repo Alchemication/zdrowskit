@@ -384,6 +384,84 @@ class TestVerifyAndRewrite:
         assert verifier_metadata["verdict"] == "fail"
         assert verifier_metadata["critical_count"] == 1
 
+    def test_empty_verifier_response_retries_fallback(
+        self,
+        in_memory_db: sqlite3.Connection,
+        monkeypatch,
+    ) -> None:
+        source_id = log_llm_call(
+            in_memory_db,
+            request_type="insights",
+            model="source-model",
+            messages=[],
+            response_text="Draft report.",
+            metadata={},
+        )
+        seen_models: list[str] = []
+        seen_fallbacks: list[list[str] | None] = []
+
+        def fake_call_llm(messages, **kwargs):
+            seen_models.append(kwargs["model"])
+            seen_fallbacks.append(kwargs.get("fallback_models"))
+            row_id = log_llm_call(
+                kwargs["conn"],
+                request_type=kwargs["request_type"],
+                model=kwargs["model"],
+                messages=messages,
+                response_text="",
+                metadata=kwargs["metadata"],
+            )
+            if kwargs["model"] == "verify-model":
+                return LLMResult(
+                    text="",
+                    model=kwargs["model"],
+                    input_tokens=10,
+                    output_tokens=kwargs["max_tokens"],
+                    total_tokens=10 + kwargs["max_tokens"],
+                    latency_s=0.1,
+                    max_tokens=kwargs["max_tokens"],
+                    llm_call_id=row_id,
+                )
+            return LLMResult(
+                text='{"verdict":"pass","issues":[],"confidence":"high"}',
+                model=kwargs["model"],
+                input_tokens=10,
+                output_tokens=20,
+                total_tokens=30,
+                latency_s=0.1,
+                max_tokens=kwargs["max_tokens"],
+                llm_call_id=row_id,
+            )
+
+        monkeypatch.setattr("llm_verify.call_llm", fake_call_llm)
+
+        result = verify_and_rewrite(
+            kind="insights",
+            draft="Draft report.",
+            evidence={},
+            source_messages=[],
+            conn=in_memory_db,
+            metadata={"source_llm_call_id": source_id},
+            model="verify-model",
+            rewrite_model="rewrite-model",
+            fallback_models=["fallback-model"],
+            max_revisions=1,
+        )
+
+        assert result.verdict == "pass"
+        assert seen_models == ["verify-model", "fallback-model"]
+        assert seen_fallbacks == [["fallback-model"], None]
+
+        source = in_memory_db.execute(
+            "SELECT metadata_json FROM llm_call WHERE id = ?",
+            (source_id,),
+        ).fetchone()
+        source_metadata = json.loads(source["metadata_json"])
+        assert source_metadata["insights_verification"]["verdict"] == "pass"
+        assert source_metadata["insights_verification"]["verifier_call_id"] == (
+            result.verifier_call_id
+        )
+
 
 class TestExtractToolEvidence:
     def test_pairs_assistant_tool_calls_with_results(self) -> None:

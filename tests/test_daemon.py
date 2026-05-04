@@ -60,6 +60,42 @@ class TestWeeklyReportScheduling:
 
         assert events == ["insights", "record", "coach:last:True"]
 
+    def test_weekly_report_failure_suppresses_same_day_retry(
+        self, tmp_path: Path
+    ) -> None:
+        daemon = _make_daemon(tmp_path)
+
+        with (
+            patch.object(daemon, "_run_import"),
+            patch("cmd_insights.cmd_insights", side_effect=SystemExit(1)),
+            patch.object(daemon, "_notify_user_failure") as notify_failure,
+        ):
+            daemon._run_weekly_report()
+
+        today = daemon_runners_module.date.today().isoformat()
+        assert daemon._state["last_review_skip_date"] == today
+        state = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
+        assert state["last_review_skip_date"] == today
+        notify_failure.assert_called_once()
+
+    def test_midweek_report_failure_suppresses_same_day_retry(
+        self, tmp_path: Path
+    ) -> None:
+        daemon = _make_daemon(tmp_path)
+
+        with (
+            patch.object(daemon, "_run_import"),
+            patch("cmd_insights.cmd_insights", side_effect=SystemExit(1)),
+            patch.object(daemon, "_notify_user_failure") as notify_failure,
+        ):
+            daemon._runners._run_midweek_report()
+
+        today = daemon_runners_module.date.today().isoformat()
+        assert daemon._state["last_progress_skip_date"] == today
+        state = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
+        assert state["last_progress_skip_date"] == today
+        notify_failure.assert_called_once()
+
 
 class TestNudgeScheduling:
     def test_health_file_change_records_detected_event_before_debounce(

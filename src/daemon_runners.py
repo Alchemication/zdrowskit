@@ -539,6 +539,8 @@ class DaemonRunnerHandler:
             except SystemExit:
                 captured = cap.last_message
                 logger.error("Weekly review report failed")
+                self._d._state["last_review_skip_date"] = date.today().isoformat()
+                _save_state(self._d._state)
                 self._d._notify_user_failure("Weekly review", captured)
                 self._d._record_event(
                     "insights",
@@ -610,6 +612,8 @@ class DaemonRunnerHandler:
             except SystemExit:
                 captured = cap.last_message
                 logger.error("Mid-week progress report failed")
+                self._d._state["last_progress_skip_date"] = date.today().isoformat()
+                _save_state(self._d._state)
                 self._d._notify_user_failure("Mid-week progress", captured)
                 self._d._record_event(
                     "insights",

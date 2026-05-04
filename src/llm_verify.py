@@ -615,23 +615,52 @@ def verify_and_rewrite(
         )
         verifier_call_id = verifier_result.llm_call_id
         if not verifier_result.text.strip():
-            logger.warning(
-                "%s verifier returned empty response (output_tokens=%d, max_tokens=%d)",
-                kind,
-                verifier_result.output_tokens,
-                verifier_result.max_tokens or MAX_TOKENS_VERIFICATION,
-            )
-            result = _empty_verifier_result(
-                verifier_result=verifier_result,
-                max_tokens=MAX_TOKENS_VERIFICATION,
-            )
-            return _finalize_failed_verification(
-                conn,
-                kind=kind,
-                source_llm_call_id=source_llm_call_id,
-                result=result,
-                strict=strict,
-            )
+            remaining_fallbacks = [
+                fallback
+                for fallback in (fallback_models or [])
+                if fallback != verifier_result.model
+            ]
+            if remaining_fallbacks:
+                retry_model = remaining_fallbacks[0]
+                logger.warning(
+                    "%s verifier returned empty response from %s; "
+                    "retrying with fallback %s",
+                    kind,
+                    verifier_result.model,
+                    retry_model,
+                )
+                verifier_result = invoke(
+                    verifier_messages,
+                    model=retry_model,
+                    max_tokens=MAX_TOKENS_VERIFICATION,
+                    temperature=temperature,
+                    reasoning_effort=reasoning_effort,
+                    response_format=_VerifierPayload,
+                    fallback_models=remaining_fallbacks[1:] or None,
+                    conn=conn,
+                    request_type=f"{kind}_verify",
+                    metadata={**metadata, "stage": "verify"},
+                )
+                verifier_call_id = verifier_result.llm_call_id
+            if not verifier_result.text.strip():
+                logger.warning(
+                    "%s verifier returned empty response "
+                    "(output_tokens=%d, max_tokens=%d)",
+                    kind,
+                    verifier_result.output_tokens,
+                    verifier_result.max_tokens or MAX_TOKENS_VERIFICATION,
+                )
+                result = _empty_verifier_result(
+                    verifier_result=verifier_result,
+                    max_tokens=MAX_TOKENS_VERIFICATION,
+                )
+                return _finalize_failed_verification(
+                    conn,
+                    kind=kind,
+                    source_llm_call_id=source_llm_call_id,
+                    result=result,
+                    strict=strict,
+                )
         parsed = parse_verification_result(verifier_result.text)
         parsed.verifier_call_id = verifier_call_id
     except Exception as exc:
