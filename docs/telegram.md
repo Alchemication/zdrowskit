@@ -50,8 +50,14 @@ the Telegram menu: `/notify`, `/review [current|last]`, `/coach [current|last]`,
 
 `/codex` asks the local Codex CLI about this repo in read-only mode. Follow-up
 `/codex` messages resume the saved Codex session; `/codex new <prompt>` starts a
-fresh one, and `/codex stop` clears it. Replies to the last Codex Telegram
-message also continue the Codex session.
+fresh one; `/codex reset [prompt]` clears the saved Codex context; and
+`/codex stop` clears it and turns Codex mode off. Replies to the last Codex
+Telegram message also continue the Codex session.
+
+Use `/codex on [prompt]` to route plain non-command Telegram messages to Codex
+without retyping `/codex`. Codex mode refreshes after each Codex turn and turns
+itself off after 30 minutes of inactivity. Use `/codex off` to return plain
+messages to the normal health chat immediately.
 
 When running under launchd, `/codex` uses the `ZDROWSKIT_CODEX_EXECUTABLE`
 value written by `uv run python main.py daemon-install` if available. Re-run

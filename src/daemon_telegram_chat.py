@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 import threading
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -24,6 +25,9 @@ if TYPE_CHECKING:
     from daemon import ZdrowskitDaemon
 
 logger = logging.getLogger(__name__)
+
+CODEX_MODE_TIMEOUT_MIN = 30
+"""Minutes after which plain-message Codex mode turns off."""
 
 
 def _format_telegram_command(command: dict[str, str]) -> str:
@@ -153,6 +157,10 @@ class TelegramChatHandler:
             return
 
         if self._is_codex_reply(reply_to):
+            self._handle_codex_turn(text, message_id, new_session=False)
+            return
+
+        if self._codex_mode_active():
             self._handle_codex_turn(text, message_id, new_session=False)
             return
 
@@ -426,6 +434,9 @@ class TelegramChatHandler:
             )
             lines.append("\nCodex:")
             lines.append("/codex <prompt> — Ask Codex about this repo (read-only)")
+            lines.append("/codex on [prompt] — Route plain messages to Codex")
+            lines.append("/codex off — Stop routing plain messages to Codex")
+            lines.append("/codex reset [prompt] — Clear Codex context")
             lines.append("/codex new <prompt> — Start a fresh Codex session")
             lines.append("/codex stop — Forget the current Codex session")
             lines.append(f"\nAvailable context files: {ctx_opts}")
@@ -452,12 +463,47 @@ class TelegramChatHandler:
 
         first_word, _, rest = request_text.partition(" ")
         action = first_word.lower()
+        if action == "on":
+            self._enable_codex_mode()
+            prompt = rest.strip()
+            if prompt:
+                self._handle_codex_turn(prompt, message_id, new_session=False)
+            else:
+                self._poller.send_reply(
+                    f"Codex mode on for {CODEX_MODE_TIMEOUT_MIN} min. "
+                    "Plain messages now go to Codex. Use /codex off to exit.",
+                    reply_to_message_id=message_id,
+                )
+            return
+
+        if action == "off" and not rest:
+            self._disable_codex_mode()
+            self._poller.send_reply(
+                "Codex mode off. Plain messages go back to health chat.",
+                reply_to_message_id=message_id,
+            )
+            return
+
+        if action == "reset":
+            prompt = rest.strip()
+            self._clear_codex_session()
+            if self._codex_mode_active():
+                self._refresh_codex_mode()
+            self._daemon._save_state()
+            if prompt:
+                self._handle_codex_turn(prompt, message_id, new_session=True)
+            else:
+                self._poller.send_reply(
+                    "Codex context cleared.", reply_to_message_id=message_id
+                )
+            return
+
         if action == "stop" and not rest:
-            self._daemon._state.pop("codex_session_id", None)
-            self._daemon._state.pop("codex_last_message_id", None)
+            self._clear_codex_session()
+            self._disable_codex_mode(save=False)
             self._daemon._save_state()
             self._poller.send_reply(
-                "Codex session cleared.", reply_to_message_id=message_id
+                "Codex session cleared and mode off.", reply_to_message_id=message_id
             )
             return
 
@@ -470,6 +516,52 @@ class TelegramChatHandler:
             return
 
         self._handle_codex_turn(request_text, message_id, new_session=False)
+
+    def _enable_codex_mode(self) -> None:
+        """Route plain non-command messages to Codex until timeout."""
+        self._daemon._state["codex_mode"] = True
+        self._refresh_codex_mode(save=False)
+        self._daemon._save_state()
+
+    def _disable_codex_mode(self, *, save: bool = True) -> None:
+        """Stop routing plain messages to Codex."""
+        self._daemon._state.pop("codex_mode", None)
+        self._daemon._state.pop("codex_mode_expires_at", None)
+        if save:
+            self._daemon._save_state()
+
+    def _refresh_codex_mode(self, *, save: bool = True) -> None:
+        """Extend Codex mode after user activity."""
+        expires_at = datetime.now(timezone.utc) + timedelta(
+            minutes=CODEX_MODE_TIMEOUT_MIN
+        )
+        self._daemon._state["codex_mode_expires_at"] = expires_at.isoformat()
+        if save:
+            self._daemon._save_state()
+
+    def _codex_mode_active(self) -> bool:
+        """Return whether plain-message Codex mode is enabled and unexpired."""
+        if not self._daemon._state.get("codex_mode"):
+            return False
+        expires_raw = self._daemon._state.get("codex_mode_expires_at")
+        if isinstance(expires_raw, str):
+            try:
+                expires_at = datetime.fromisoformat(expires_raw)
+            except ValueError:
+                expires_at = None
+            if expires_at is not None:
+                if expires_at.tzinfo is None:
+                    expires_at = expires_at.replace(tzinfo=timezone.utc)
+                now = datetime.now(expires_at.tzinfo)
+                if expires_at <= now:
+                    self._disable_codex_mode()
+                    return False
+        return True
+
+    def _clear_codex_session(self) -> None:
+        """Forget saved Codex conversation pointers."""
+        self._daemon._state.pop("codex_session_id", None)
+        self._daemon._state.pop("codex_last_message_id", None)
 
     def _handle_codex_turn(
         self,
@@ -521,6 +613,8 @@ class TelegramChatHandler:
 
         if result.session_id:
             self._daemon._state["codex_session_id"] = result.session_id
+        if self._daemon._state.get("codex_mode"):
+            self._refresh_codex_mode(save=False)
         if status_id:
             self._poller.edit_message(status_id, result.text)
             self._daemon._state["codex_last_message_id"] = status_id

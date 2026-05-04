@@ -1485,13 +1485,109 @@ class TestCodexTelegramCommand:
         daemon._chat._poller = MagicMock()
         daemon._state["codex_session_id"] = "saved-session"
         daemon._state["codex_last_message_id"] = 900
+        daemon._state["codex_mode"] = True
+        daemon._state["codex_mode_expires_at"] = "2099-01-01T00:00:00+00:00"
 
         daemon._handle_command("/codex stop", 58)
 
         assert "codex_session_id" not in daemon._state
         assert "codex_last_message_id" not in daemon._state
+        assert "codex_mode" not in daemon._state
+        assert "codex_mode_expires_at" not in daemon._state
         daemon._poller.send_reply.assert_called_once_with(
-            "Codex session cleared.", reply_to_message_id=58
+            "Codex session cleared and mode off.", reply_to_message_id=58
+        )
+
+    def test_codex_on_routes_plain_messages_until_off(self, tmp_path: Path) -> None:
+        daemon = _make_daemon(tmp_path)
+        daemon._chat._poller = MagicMock()
+
+        daemon._handle_command("/codex on", 58)
+
+        assert daemon._state["codex_mode"] is True
+        assert "codex_mode_expires_at" in daemon._state
+        daemon._poller.send_reply.assert_called_once()
+        assert "Codex mode on" in daemon._poller.send_reply.call_args.args[0]
+
+        with patch.object(daemon._chat, "_handle_codex_turn") as handle_codex:
+            daemon._handle_telegram_message(
+                {"message_id": 59, "text": "continue this investigation"}
+            )
+
+        handle_codex.assert_called_once_with(
+            "continue this investigation",
+            59,
+            new_session=False,
+        )
+
+        daemon._poller.reset_mock()
+        daemon._handle_command("/codex off", 60)
+
+        assert "codex_mode" not in daemon._state
+        assert "codex_mode_expires_at" not in daemon._state
+        daemon._poller.send_reply.assert_called_once_with(
+            "Codex mode off. Plain messages go back to health chat.",
+            reply_to_message_id=60,
+        )
+
+    def test_codex_mode_expires_to_health_chat(self, tmp_path: Path) -> None:
+        daemon = _make_daemon(tmp_path)
+        daemon._chat._poller = MagicMock()
+        daemon._chat._conversation = MagicMock()
+        daemon._state["codex_mode"] = True
+        daemon._state["codex_mode_expires_at"] = "2000-01-01T00:00:00+00:00"
+
+        with (
+            patch.object(daemon._chat, "_handle_codex_turn") as handle_codex,
+            patch.object(daemon._chat, "_chat_reply") as chat_reply,
+            patch.object(
+                daemon._chat,
+                "_start_placeholder_animation",
+                return_value=(None, None),
+            ),
+            patch.object(daemon._chat, "_stop_placeholder_animation"),
+        ):
+            chat_reply.return_value = (CommandResult(text="health reply"), [], [])
+            daemon._handle_telegram_message(
+                {"message_id": 61, "text": "normal health question"}
+            )
+
+        handle_codex.assert_not_called()
+        chat_reply.assert_called_once()
+        assert "codex_mode" not in daemon._state
+        assert "codex_mode_expires_at" not in daemon._state
+
+    def test_codex_reset_clears_session_but_keeps_mode(self, tmp_path: Path) -> None:
+        daemon = _make_daemon(tmp_path)
+        daemon._chat._poller = MagicMock()
+        daemon._state["codex_session_id"] = "saved-session"
+        daemon._state["codex_last_message_id"] = 900
+        daemon._state["codex_mode"] = True
+        daemon._state["codex_mode_expires_at"] = "2099-01-01T00:00:00+00:00"
+
+        daemon._handle_command("/codex reset", 62)
+
+        assert "codex_session_id" not in daemon._state
+        assert "codex_last_message_id" not in daemon._state
+        assert daemon._state["codex_mode"] is True
+        assert "codex_mode_expires_at" in daemon._state
+        daemon._poller.send_reply.assert_called_once_with(
+            "Codex context cleared.", reply_to_message_id=62
+        )
+
+    def test_codex_reset_with_prompt_starts_fresh_session(self, tmp_path: Path) -> None:
+        daemon = _make_daemon(tmp_path)
+        daemon._chat._poller = MagicMock()
+        daemon._state["codex_session_id"] = "saved-session"
+
+        with patch.object(daemon._chat, "_handle_codex_turn") as handle_codex:
+            daemon._handle_command("/codex reset inspect fresh", 63)
+
+        assert "codex_session_id" not in daemon._state
+        handle_codex.assert_called_once_with(
+            "inspect fresh",
+            63,
+            new_session=True,
         )
 
     def test_reply_to_last_codex_message_continues_codex(self, tmp_path: Path) -> None:

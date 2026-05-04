@@ -160,8 +160,11 @@ def codex_usage() -> str:
     """Return Telegram help text for the read-only Codex command."""
     return (
         "Use /codex <prompt> to ask Codex about this repo.\n"
+        "Use /codex on [prompt] to route plain messages to Codex for 30 min.\n"
+        "Use /codex off to return plain messages to health chat.\n"
+        "Use /codex reset [prompt] to clear Codex context.\n"
         "Use /codex new <prompt> to start a fresh Codex session.\n"
-        "Use /codex stop to forget the current Codex session.\n"
+        "Use /codex stop to clear Codex context and turn mode off.\n"
         "Read-only mode only."
     )
 
