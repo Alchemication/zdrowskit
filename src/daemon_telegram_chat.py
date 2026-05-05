@@ -701,11 +701,11 @@ class TelegramChatHandler:
         status_id = self._poller.send_reply(
             f"{status_prefix}.", reply_to_message_id=message_id
         )
-        stream_codex = kind == "codex" and status_id is not None
-        codex_progress_callback: object | None = None
-        if stream_codex:
-            stop_anim, anim_thread, codex_progress_callback = (
-                self._start_codex_stream_status(status_id)
+        stream_agent = status_id is not None and kind in _AGENT_LABELS
+        progress_callback: object | None = None
+        if stream_agent and status_id is not None:
+            stop_anim, anim_thread, progress_callback = self._start_agent_stream_status(
+                status_id, label
             )
         else:
             stop_anim, anim_thread = self._start_placeholder_animation(
@@ -719,8 +719,8 @@ class TelegramChatHandler:
                 "cwd": Path(__file__).resolve().parent.parent,
                 "session_id": session_id if isinstance(session_id, str) else None,
             }
-            if codex_progress_callback is not None:
-                run_kwargs["progress_callback"] = codex_progress_callback
+            if progress_callback is not None:
+                run_kwargs["progress_callback"] = progress_callback
             result = run(
                 prompt,
                 **run_kwargs,
@@ -748,7 +748,7 @@ class TelegramChatHandler:
         elapsed_s = int(time.monotonic() - started_at)
         result_text = (
             self._append_agent_elapsed(result.text, label, elapsed_s)
-            if kind == "codex"
+            if stream_agent
             else result.text
         )
 
@@ -781,15 +781,15 @@ class TelegramChatHandler:
                     self._daemon._state["agent_last_message_kind"] = kind
         self._daemon._save_state()
 
-    def _start_codex_stream_status(
-        self, status_id: int
+    def _start_agent_stream_status(
+        self, status_id: int, label: str
     ) -> tuple[threading.Event, threading.Thread, object]:
-        """Animate a friendly Codex streaming status message."""
+        """Animate a friendly streaming status message for an agent."""
         stop = threading.Event()
         state = {"stage": "Starting up"}
 
         def progress_callback(progress: str) -> None:
-            state["stage"] = self._friendly_codex_stage(progress)
+            state["stage"] = self._friendly_agent_stage(progress)
 
         def animate() -> None:
             started = time.monotonic()
@@ -798,7 +798,7 @@ class TelegramChatHandler:
             while not stop.is_set():
                 elapsed = int(time.monotonic() - started)
                 text = (
-                    f"**Codex is working{frames[frame_index % len(frames)]}**\n\n"
+                    f"**{label} is working{frames[frame_index % len(frames)]}**\n\n"
                     f"**Status**  {state['stage']}\n"
                     f"**Elapsed**  {self._format_elapsed(elapsed)}\n\n"
                     "_Final answer will replace this message._"
@@ -812,16 +812,20 @@ class TelegramChatHandler:
         return stop, thread, progress_callback
 
     @staticmethod
-    def _friendly_codex_stage(progress: str) -> str:
-        """Convert noisy Codex JSONL progress into a stable user-facing stage."""
+    def _friendly_agent_stage(progress: str) -> str:
+        """Convert noisy agent stream progress into a stable user-facing stage."""
         normalized = progress.lower()
         if "session" in normalized:
             return "Session ready"
         if any(token in normalized for token in ("patch", "edit", "file", "write")):
             return "Inspecting or editing files"
-        if any(token in normalized for token in ("command", "cmd", "exec", "bash")):
+        if any(
+            token in normalized for token in ("command", "cmd", "exec", "bash", "tool")
+        ):
             return "Running a repo command"
-        if any(token in normalized for token in ("message", "final", "answer")):
+        if any(
+            token in normalized for token in ("message", "final", "answer", "assistant")
+        ):
             return "Drafting the reply"
         return "Working through the request"
 

@@ -60,10 +60,9 @@ that agent; `/<agent> new <prompt>` starts a fresh one, `/<agent> reset [prompt]
 clears saved context, and `/<agent> stop` clears it and turns mode off. Replies
 to the last agent reply continue that specific agent's session.
 
-Codex turns show an animated progress panel with a friendly status, elapsed
-time, and a note that the final answer will replace the panel. The final Codex
-answer includes how long the turn took. Claude turns currently show the animated
-placeholder until the final answer arrives.
+Codex and Claude turns show an animated progress panel with a friendly status,
+elapsed time, and a note that the final answer will replace the panel. The final
+agent answer includes how long the turn took.
 
 Workspace permissions let either agent edit files in the repo checkout. They
 do not grant write access to external state directories such as

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -92,6 +93,51 @@ class TestRunClaudeWorkspace:
         assert result.session_id == "existing-session"
         assert "--resume" in calls[0]
         assert calls[0][calls[0].index("--resume") + 1] == "existing-session"
+
+    def test_streaming_uses_stream_json_and_emits_progress(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        progress: list[str] = []
+        calls: list[list[str]] = []
+
+        class FakePopen:
+            def __init__(self, cmd: list[str], **kwargs: object) -> None:
+                calls.append(cmd)
+                self.stdout = io.StringIO(
+                    '{"type":"system","subtype":"init",'
+                    '"session_id":"22222222-2222-2222-2222-222222222222"}\n'
+                    '{"type":"assistant","message":{"content":[{"type":"text","text":"Partial"}]}}\n'
+                    '{"type":"result","subtype":"success","result":"Claude answer",'
+                    '"session_id":"22222222-2222-2222-2222-222222222222"}\n'
+                )
+                self.stderr = io.StringIO("")
+
+            def wait(self, timeout: int) -> int:
+                return 0
+
+            def kill(self) -> None:
+                return
+
+        monkeypatch.delenv("ZDROWSKIT_CLAUDE_EXECUTABLE", raising=False)
+        monkeypatch.setattr("daemon_claude_flow.shutil.which", lambda name: None)
+        monkeypatch.setattr(subprocess, "Popen", FakePopen)
+
+        result = run_claude_workspace(
+            "Where is the bot?",
+            cwd=tmp_path,
+            progress_callback=progress.append,
+        )
+
+        assert result.text == "Claude answer"
+        assert result.session_id == "22222222-2222-2222-2222-222222222222"
+        cmd = calls[0]
+        assert cmd[0] == "claude"
+        assert cmd[cmd.index("--output-format") + 1] == "stream-json"
+        assert "--verbose" in cmd
+        assert "--include-partial-messages" in cmd
+        assert "system init" in progress
+        assert any(item.startswith("assistant") for item in progress)
+        assert "final answer" in progress
 
     def test_raises_useful_error_on_failure(self, tmp_path: Path, monkeypatch) -> None:
         def fake_run(cmd: list[str], **kwargs: object) -> SimpleNamespace:
