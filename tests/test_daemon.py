@@ -1605,7 +1605,12 @@ class TestCodexTelegramCommand:
                 daemon._chat,
                 "_start_placeholder_animation",
                 return_value=(None, None),
-            ),
+            ) as start_animation,
+            patch.object(
+                daemon._chat,
+                "_start_codex_stream_status",
+                return_value=(None, None, lambda progress: None),
+            ) as start_stream_status,
             patch.object(daemon._chat, "_stop_placeholder_animation"),
             patch(
                 "daemon_agent_flow.run_codex_workspace",
@@ -1619,7 +1624,12 @@ class TestCodexTelegramCommand:
 
         run_codex.assert_called_once()
         assert run_codex.call_args.kwargs["session_id"] is None
-        daemon._poller.edit_message.assert_called_once_with(900, "Workspace answer")
+        assert callable(run_codex.call_args.kwargs["progress_callback"])
+        start_animation.assert_not_called()
+        start_stream_status.assert_called_once_with(900)
+        daemon._poller.edit_message.assert_called_once()
+        text = daemon._poller.edit_message.call_args.args[1]
+        assert text.startswith("Workspace answer\n\n_Codex finished in ")
         assert daemon._state["codex_session_id"] == "codex-session"
         assert daemon._state["agent_last_message_id"] == 900
         assert daemon._state["agent_last_message_kind"] == "codex"
@@ -1643,6 +1653,11 @@ class TestCodexTelegramCommand:
                 "_start_placeholder_animation",
                 return_value=(None, None),
             ),
+            patch.object(
+                daemon._chat,
+                "_start_codex_stream_status",
+                return_value=(None, None, lambda progress: None),
+            ),
             patch.object(daemon._chat, "_stop_placeholder_animation"),
             patch(
                 "daemon_agent_flow.run_codex_workspace",
@@ -1657,7 +1672,7 @@ class TestCodexTelegramCommand:
         daemon._poller.edit_message_with_keyboard.assert_called_once()
         text = daemon._poller.edit_message_with_keyboard.call_args.args[1]
         buttons = daemon._poller.edit_message_with_keyboard.call_args.args[2]
-        assert text == "Workspace answer"
+        assert text.startswith("Workspace answer\n\n_Codex finished in ")
         assert buttons == [
             [{"text": "Back to chat", "callback_data": "agent:exit:codex"}]
         ]
@@ -1681,6 +1696,11 @@ class TestCodexTelegramCommand:
                 "_start_placeholder_animation",
                 return_value=(None, None),
             ),
+            patch.object(
+                daemon._chat,
+                "_start_codex_stream_status",
+                return_value=(None, None, lambda progress: None),
+            ),
             patch.object(daemon._chat, "_stop_placeholder_animation"),
             patch(
                 "daemon_agent_flow.run_codex_workspace",
@@ -1692,7 +1712,9 @@ class TestCodexTelegramCommand:
         ):
             daemon._handle_command("/codex where is the Telegram router?", 55)
 
-        daemon._poller.edit_message.assert_called_once_with(900, "Workspace answer")
+        daemon._poller.edit_message.assert_called_once()
+        text = daemon._poller.edit_message.call_args.args[1]
+        assert text.startswith("Workspace answer\n\n_Codex finished in ")
         daemon._poller.edit_message_with_keyboard.assert_not_called()
         assert "agent_mode" not in daemon._state
         assert "agent_mode_expires_at" not in daemon._state
@@ -1720,6 +1742,32 @@ class TestCodexTelegramCommand:
             [{"text": "Back to chat", "callback_data": "agent:exit:codex"}]
         ]
 
+    def test_codex_progress_events_map_to_friendly_stages(self, tmp_path: Path) -> None:
+        daemon = _make_daemon(tmp_path)
+
+        assert (
+            daemon._chat._friendly_codex_stage("agent message: done")
+            == "Drafting the reply"
+        )
+        assert (
+            daemon._chat._friendly_codex_stage("exec command: uv run pytest")
+            == "Running a repo command"
+        )
+        assert (
+            daemon._chat._friendly_codex_stage("patch file src/a.py")
+            == "Inspecting or editing files"
+        )
+        assert (
+            daemon._chat._friendly_codex_stage("turn started")
+            == "Working through the request"
+        )
+        assert daemon._chat._format_elapsed(7) == "7s"
+        assert daemon._chat._format_elapsed(67) == "1m 07s"
+        assert (
+            daemon._chat._append_agent_elapsed("Done\n", "Codex", 67)
+            == "Done\n\n_Codex finished in 1m 07s._"
+        )
+
     def test_codex_command_resumes_saved_session(self, tmp_path: Path) -> None:
         from daemon_agent_flow import CodexRunResult
 
@@ -1734,6 +1782,11 @@ class TestCodexTelegramCommand:
                 "_start_placeholder_animation",
                 return_value=(None, None),
             ),
+            patch.object(
+                daemon._chat,
+                "_start_codex_stream_status",
+                return_value=(None, None, lambda progress: None),
+            ),
             patch.object(daemon._chat, "_stop_placeholder_animation"),
             patch(
                 "daemon_agent_flow.run_codex_workspace",
@@ -1746,7 +1799,9 @@ class TestCodexTelegramCommand:
             daemon._handle_command("/codex next question", 56)
 
         assert run_codex.call_args.kwargs["session_id"] == "saved-session"
-        daemon._poller.edit_message.assert_called_once_with(901, "Follow-up answer")
+        daemon._poller.edit_message.assert_called_once()
+        text = daemon._poller.edit_message.call_args.args[1]
+        assert text.startswith("Follow-up answer\n\n_Codex finished in ")
 
     def test_codex_new_starts_fresh_session(self, tmp_path: Path) -> None:
         from daemon_agent_flow import CodexRunResult
@@ -1761,6 +1816,11 @@ class TestCodexTelegramCommand:
                 daemon._chat,
                 "_start_placeholder_animation",
                 return_value=(None, None),
+            ),
+            patch.object(
+                daemon._chat,
+                "_start_codex_stream_status",
+                return_value=(None, None, lambda progress: None),
             ),
             patch.object(daemon._chat, "_stop_placeholder_animation"),
             patch(

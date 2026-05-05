@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 import threading
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -700,16 +701,29 @@ class TelegramChatHandler:
         status_id = self._poller.send_reply(
             f"{status_prefix}.", reply_to_message_id=message_id
         )
-        stop_anim, anim_thread = self._start_placeholder_animation(
-            status_id, prefix=status_prefix
-        )
+        stream_codex = kind == "codex" and status_id is not None
+        codex_progress_callback: object | None = None
+        if stream_codex:
+            stop_anim, anim_thread, codex_progress_callback = (
+                self._start_codex_stream_status(status_id)
+            )
+        else:
+            stop_anim, anim_thread = self._start_placeholder_animation(
+                status_id, prefix=status_prefix
+            )
         session_id = None if new_session else self._daemon._state.get(session_key)
+        started_at = time.monotonic()
 
         try:
+            run_kwargs: dict[str, object] = {
+                "cwd": Path(__file__).resolve().parent.parent,
+                "session_id": session_id if isinstance(session_id, str) else None,
+            }
+            if codex_progress_callback is not None:
+                run_kwargs["progress_callback"] = codex_progress_callback
             result = run(
                 prompt,
-                cwd=Path(__file__).resolve().parent.parent,
-                session_id=session_id if isinstance(session_id, str) else None,
+                **run_kwargs,
             )
         except ValueError:
             self._stop_placeholder_animation(stop_anim, anim_thread)
@@ -731,6 +745,12 @@ class TelegramChatHandler:
             return
 
         self._stop_placeholder_animation(stop_anim, anim_thread)
+        elapsed_s = int(time.monotonic() - started_at)
+        result_text = (
+            self._append_agent_elapsed(result.text, label, elapsed_s)
+            if kind == "codex"
+            else result.text
+        )
 
         if result.session_id:
             self._daemon._state[session_key] = result.session_id
@@ -739,7 +759,7 @@ class TelegramChatHandler:
             self._refresh_agent_mode(save=False)
         if agent_mode_active:
             sent_id = self._send_agent_result_with_exit(
-                result.text,
+                result_text,
                 kind=kind,
                 status_id=status_id,
                 reply_to_message_id=message_id,
@@ -749,17 +769,75 @@ class TelegramChatHandler:
                 self._daemon._state["agent_last_message_kind"] = kind
         else:
             if status_id:
-                self._poller.edit_message(status_id, result.text)
+                self._poller.edit_message(status_id, result_text)
                 self._daemon._state["agent_last_message_id"] = status_id
                 self._daemon._state["agent_last_message_kind"] = kind
             else:
                 sent_id = self._poller.send_reply(
-                    result.text, reply_to_message_id=message_id
+                    result_text, reply_to_message_id=message_id
                 )
                 if sent_id:
                     self._daemon._state["agent_last_message_id"] = sent_id
                     self._daemon._state["agent_last_message_kind"] = kind
         self._daemon._save_state()
+
+    def _start_codex_stream_status(
+        self, status_id: int
+    ) -> tuple[threading.Event, threading.Thread, object]:
+        """Animate a friendly Codex streaming status message."""
+        stop = threading.Event()
+        state = {"stage": "Starting up"}
+
+        def progress_callback(progress: str) -> None:
+            state["stage"] = self._friendly_codex_stage(progress)
+
+        def animate() -> None:
+            started = time.monotonic()
+            frames = (".", "..", "...")
+            frame_index = 0
+            while not stop.is_set():
+                elapsed = int(time.monotonic() - started)
+                text = (
+                    f"**Codex is working{frames[frame_index % len(frames)]}**\n\n"
+                    f"**Status**  {state['stage']}\n"
+                    f"**Elapsed**  {self._format_elapsed(elapsed)}\n\n"
+                    "_Final answer will replace this message._"
+                )
+                self._poller.edit_message(status_id, text)
+                frame_index += 1
+                stop.wait(1.5)
+
+        thread = threading.Thread(target=animate, daemon=True)
+        thread.start()
+        return stop, thread, progress_callback
+
+    @staticmethod
+    def _friendly_codex_stage(progress: str) -> str:
+        """Convert noisy Codex JSONL progress into a stable user-facing stage."""
+        normalized = progress.lower()
+        if "session" in normalized:
+            return "Session ready"
+        if any(token in normalized for token in ("patch", "edit", "file", "write")):
+            return "Inspecting or editing files"
+        if any(token in normalized for token in ("command", "cmd", "exec", "bash")):
+            return "Running a repo command"
+        if any(token in normalized for token in ("message", "final", "answer")):
+            return "Drafting the reply"
+        return "Working through the request"
+
+    @staticmethod
+    def _append_agent_elapsed(text: str, label: str, elapsed_s: int) -> str:
+        """Append a small elapsed-time footer to a completed agent response."""
+        return f"{text.rstrip()}\n\n_{label} finished in {TelegramChatHandler._format_elapsed(elapsed_s)}._"
+
+    @staticmethod
+    def _format_elapsed(elapsed_s: int) -> str:
+        """Format elapsed seconds compactly for Telegram."""
+        elapsed_s = max(0, elapsed_s)
+        minutes, seconds = divmod(elapsed_s, 60)
+        if minutes:
+            return f"{minutes}m {seconds:02d}s"
+        return f"{seconds}s"
 
     def _send_agent_result_with_exit(
         self,
