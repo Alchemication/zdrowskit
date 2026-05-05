@@ -85,6 +85,19 @@ class TestSetupCommand:
         assert str(tmp_path / "bin" / "codex") in plist
         assert "/opt/homebrew/bin" in plist
 
+    def test_launchd_plist_can_pin_both_agent_executables(self, tmp_path: Path) -> None:
+        plist = commands_module._render_launchd_plist(
+            uv_path=tmp_path / "bin" / "uv",
+            project_dir=tmp_path / "project",
+            home=tmp_path / "home",
+            codex_path=tmp_path / "bin" / "codex",
+            claude_path=tmp_path / "bin" / "claude",
+        )
+
+        assert "<key>ZDROWSKIT_CODEX_EXECUTABLE</key>" in plist
+        assert "<key>ZDROWSKIT_CLAUDE_EXECUTABLE</key>" in plist
+        assert str(tmp_path / "bin" / "claude") in plist
+
     def test_launchd_path_dedupes_uv_parent(self, tmp_path: Path) -> None:
         home = tmp_path / "home"
 
@@ -154,6 +167,7 @@ class TestTelegramBotCommands:
             {"command": "log", "description": "Log today's context"},
             {"command": "add", "description": "Add workout or sleep"},
             {"command": "codex", "description": "Ask Codex about this repo"},
+            {"command": "claude", "description": "Ask Claude about this repo"},
             {"command": "clear", "description": "Reset chat memory"},
             {"command": "status", "description": "Show bot/data status"},
             {"command": "advanced", "description": "Show advanced commands"},

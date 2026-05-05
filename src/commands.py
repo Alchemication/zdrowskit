@@ -353,16 +353,21 @@ def _render_launchd_plist(
     project_dir: Path,
     home: Path,
     codex_path: Path | None = None,
+    claude_path: Path | None = None,
 ) -> str:
     """Return a launchd plist for this checkout and user."""
     daemon_path = project_dir / "src" / "daemon.py"
     log_file = home / "Library" / "Logs" / "zdrowskit.daemon.log"
     path_value = _launchd_path_value(uv_path=uv_path, home=home)
-    codex_env = ""
+    agent_env = ""
     if codex_path is not None:
-        codex_env = f"""
+        agent_env += f"""
         <key>ZDROWSKIT_CODEX_EXECUTABLE</key>
         <string>{xml_escape(str(codex_path))}</string>"""
+    if claude_path is not None:
+        agent_env += f"""
+        <key>ZDROWSKIT_CLAUDE_EXECUTABLE</key>
+        <string>{xml_escape(str(claude_path))}</string>"""
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -398,7 +403,7 @@ def _render_launchd_plist(
         <key>PATH</key>
         <string>{xml_escape(path_value)}</string>
         <key>HOME</key>
-        <string>{xml_escape(str(home))}</string>{codex_env}
+        <string>{xml_escape(str(home))}</string>{agent_env}
     </dict>
 </dict>
 </plist>
@@ -440,6 +445,7 @@ def cmd_daemon_install(args: argparse.Namespace) -> None:
         print("uv not found on PATH. Install uv first, then retry daemon-install.")
         sys.exit(1)
     codex = shutil.which("codex")
+    claude = shutil.which("claude")
 
     launch_agents = Path.home() / "Library" / "LaunchAgents"
     launch_agents.mkdir(parents=True, exist_ok=True)
@@ -450,6 +456,7 @@ def cmd_daemon_install(args: argparse.Namespace) -> None:
             project_dir=REPO_ROOT,
             home=Path.home(),
             codex_path=Path(codex) if codex else None,
+            claude_path=Path(claude) if claude else None,
         ),
         encoding="utf-8",
     )
@@ -458,6 +465,10 @@ def cmd_daemon_install(args: argparse.Namespace) -> None:
         print(f"Codex CLI: {codex}")
     else:
         print("Codex CLI not found on PATH; /codex will need it before use.")
+    if claude:
+        print(f"Claude CLI: {claude}")
+    else:
+        print("Claude CLI not found on PATH; /claude will need it before use.")
 
     if getattr(args, "no_start", False):
         print("Not starting daemon because --no-start was provided.")
@@ -585,6 +596,7 @@ TELEGRAM_BOT_COMMANDS: list[dict[str, str]] = [
     {"command": "log", "description": "Log today's context"},
     {"command": "add", "description": "Add workout or sleep"},
     {"command": "codex", "description": "Ask Codex about this repo"},
+    {"command": "claude", "description": "Ask Claude about this repo"},
     {"command": "clear", "description": "Reset chat memory"},
     {"command": "status", "description": "Show bot/data status"},
     {"command": "advanced", "description": "Show advanced commands"},

@@ -26,8 +26,16 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-CODEX_MODE_TIMEOUT_MIN = 30
-"""Minutes after which plain-message Codex mode turns off."""
+AGENT_MODE_TIMEOUT_MIN = 30
+"""Minutes after which plain-message agent mode (codex/claude) turns off."""
+
+
+def _agent_session_key(kind: str) -> str:
+    """State key holding the saved session id for an agent kind."""
+    return f"{kind}_session_id"
+
+
+_AGENT_LABELS = {"codex": "Codex", "claude": "Claude"}
 
 
 def _format_telegram_command(command: dict[str, str]) -> str:
@@ -156,12 +164,18 @@ class TelegramChatHandler:
             self._handle_command(text, message_id)
             return
 
-        if self._is_codex_reply(reply_to):
-            self._handle_codex_turn(text, message_id, new_session=False)
+        reply_kind = self._is_agent_reply(reply_to)
+        if reply_kind:
+            self._handle_agent_turn(
+                text, message_id, kind=reply_kind, new_session=False
+            )
             return
 
-        if self._codex_mode_active():
-            self._handle_codex_turn(text, message_id, new_session=False)
+        active_kind = self._agent_mode_active()
+        if active_kind:
+            self._handle_agent_turn(
+                text, message_id, kind=active_kind, new_session=False
+            )
             return
 
         # If the user replied to a specific bot message, inject its text
@@ -403,7 +417,9 @@ class TelegramChatHandler:
         elif cmd == "/events":
             self._handle_events_command(text, message_id)
         elif cmd == "/codex":
-            self._handle_codex_command(text, message_id)
+            self._handle_agent_command(text, message_id, kind="codex")
+        elif cmd == "/claude":
+            self._handle_agent_command(text, message_id, kind="claude")
         elif cmd == "/context":
             parts = text.split()
             file_arg = parts[1] if len(parts) > 1 else None
@@ -432,8 +448,9 @@ class TelegramChatHandler:
                 _format_telegram_command(command)
                 for command in ADVANCED_TELEGRAM_BOT_COMMANDS
             )
-            lines.append("\nCodex:")
+            lines.append("\nAgents:")
             lines.append("/codex — Show Codex commands")
+            lines.append("/claude — Show Claude commands")
             lines.append(f"\nAvailable context files: {ctx_opts}")
             self._poller.send_reply("\n".join(lines), reply_to_message_id=message_id)
         else:
@@ -443,102 +460,136 @@ class TelegramChatHandler:
             )
 
     # ------------------------------------------------------------------
-    # Codex bridge
+    # Agent bridge (Codex + Claude)
     # ------------------------------------------------------------------
 
-    def _handle_codex_command(self, text: str, message_id: int) -> None:
-        """Handle ``/codex`` read-only repo questions."""
-        from daemon_agent_flow import codex_usage
+    def _handle_agent_command(self, text: str, message_id: int, *, kind: str) -> None:
+        """Handle ``/codex`` or ``/claude`` workspace-write repo questions."""
+        label = _AGENT_LABELS[kind]
 
         parts = text.split(maxsplit=1)
         request_text = parts[1].strip() if len(parts) > 1 else ""
         if not request_text:
-            self._poller.send_reply(codex_usage(), reply_to_message_id=message_id)
+            self._poller.send_reply(
+                self._agent_usage(kind), reply_to_message_id=message_id
+            )
             return
 
         first_word, _, rest = request_text.partition(" ")
         action = first_word.lower()
         if action == "on":
-            self._enable_codex_mode()
+            self._enable_agent_mode(kind)
             prompt = rest.strip()
             if prompt:
-                self._handle_codex_turn(prompt, message_id, new_session=False)
+                self._handle_agent_turn(
+                    prompt, message_id, kind=kind, new_session=False
+                )
             else:
                 self._poller.send_reply(
-                    f"Codex mode on for {CODEX_MODE_TIMEOUT_MIN} min. "
-                    "Plain messages now go to Codex. Use /codex off to exit.",
+                    f"{label} mode on for {AGENT_MODE_TIMEOUT_MIN} min. "
+                    f"Plain messages now go to {label}. Use /{kind} off to exit.",
                     reply_to_message_id=message_id,
                 )
             return
 
         if action == "off" and not rest:
-            self._disable_codex_mode()
-            self._poller.send_reply(
-                "Codex mode off. Plain messages go back to health chat.",
-                reply_to_message_id=message_id,
-            )
+            if self._agent_mode_active() == kind:
+                self._disable_agent_mode()
+                self._poller.send_reply(
+                    f"{label} mode off. Plain messages go back to health chat.",
+                    reply_to_message_id=message_id,
+                )
+            else:
+                active = self._agent_mode_active()
+                if active:
+                    self._poller.send_reply(
+                        f"{label} mode wasn't on ({_AGENT_LABELS[active]} mode is). "
+                        f"Use /{active} off.",
+                        reply_to_message_id=message_id,
+                    )
+                else:
+                    self._poller.send_reply(
+                        f"{label} mode wasn't on.",
+                        reply_to_message_id=message_id,
+                    )
             return
 
         if action == "reset":
             prompt = rest.strip()
-            self._clear_codex_session()
-            if self._codex_mode_active():
-                self._refresh_codex_mode()
+            self._clear_agent_session(kind)
+            if self._agent_mode_active() == kind:
+                self._refresh_agent_mode()
             self._daemon._save_state()
             if prompt:
-                self._handle_codex_turn(prompt, message_id, new_session=True)
+                self._handle_agent_turn(prompt, message_id, kind=kind, new_session=True)
             else:
                 self._poller.send_reply(
-                    "Codex context cleared.", reply_to_message_id=message_id
+                    f"{label} context cleared.", reply_to_message_id=message_id
                 )
             return
 
         if action == "stop" and not rest:
-            self._clear_codex_session()
-            self._disable_codex_mode(save=False)
+            self._clear_agent_session(kind)
+            if self._agent_mode_active() == kind:
+                self._disable_agent_mode(save=False)
             self._daemon._save_state()
             self._poller.send_reply(
-                "Codex session cleared and mode off.", reply_to_message_id=message_id
+                f"{label} session cleared and mode off.",
+                reply_to_message_id=message_id,
             )
             return
 
         if action == "new":
             prompt = rest.strip()
             if not prompt:
-                self._poller.send_reply(codex_usage(), reply_to_message_id=message_id)
+                self._poller.send_reply(
+                    self._agent_usage(kind), reply_to_message_id=message_id
+                )
                 return
-            self._handle_codex_turn(prompt, message_id, new_session=True)
+            self._handle_agent_turn(prompt, message_id, kind=kind, new_session=True)
             return
 
-        self._handle_codex_turn(request_text, message_id, new_session=False)
+        self._handle_agent_turn(request_text, message_id, kind=kind, new_session=False)
 
-    def _enable_codex_mode(self) -> None:
-        """Route plain non-command messages to Codex until timeout."""
-        self._daemon._state["codex_mode"] = True
-        self._refresh_codex_mode(save=False)
+    @staticmethod
+    def _agent_usage(kind: str) -> str:
+        """Return the help text for an agent kind."""
+        if kind == "codex":
+            from daemon_agent_flow import codex_usage
+
+            return codex_usage()
+        from daemon_claude_flow import claude_usage
+
+        return claude_usage()
+
+    def _enable_agent_mode(self, kind: str) -> None:
+        """Route plain non-command messages to ``kind`` until timeout."""
+        self._daemon._state["agent_mode"] = kind
+        self._refresh_agent_mode(save=False)
         self._daemon._save_state()
 
-    def _disable_codex_mode(self, *, save: bool = True) -> None:
-        """Stop routing plain messages to Codex."""
-        self._daemon._state.pop("codex_mode", None)
-        self._daemon._state.pop("codex_mode_expires_at", None)
+    def _disable_agent_mode(self, *, save: bool = True) -> None:
+        """Stop routing plain messages to any agent."""
+        self._daemon._state.pop("agent_mode", None)
+        self._daemon._state.pop("agent_mode_expires_at", None)
         if save:
             self._daemon._save_state()
 
-    def _refresh_codex_mode(self, *, save: bool = True) -> None:
-        """Extend Codex mode after user activity."""
+    def _refresh_agent_mode(self, *, save: bool = True) -> None:
+        """Extend agent mode after user activity."""
         expires_at = datetime.now(timezone.utc) + timedelta(
-            minutes=CODEX_MODE_TIMEOUT_MIN
+            minutes=AGENT_MODE_TIMEOUT_MIN
         )
-        self._daemon._state["codex_mode_expires_at"] = expires_at.isoformat()
+        self._daemon._state["agent_mode_expires_at"] = expires_at.isoformat()
         if save:
             self._daemon._save_state()
 
-    def _codex_mode_active(self) -> bool:
-        """Return whether plain-message Codex mode is enabled and unexpired."""
-        if not self._daemon._state.get("codex_mode"):
-            return False
-        expires_raw = self._daemon._state.get("codex_mode_expires_at")
+    def _agent_mode_active(self) -> str | None:
+        """Return the active agent kind (``codex`` / ``claude``) or ``None``."""
+        kind = self._daemon._state.get("agent_mode")
+        if kind not in _AGENT_LABELS:
+            return None
+        expires_raw = self._daemon._state.get("agent_mode_expires_at")
         if isinstance(expires_raw, str):
             try:
                 expires_at = datetime.fromisoformat(expires_raw)
@@ -549,38 +600,56 @@ class TelegramChatHandler:
                     expires_at = expires_at.replace(tzinfo=timezone.utc)
                 now = datetime.now(expires_at.tzinfo)
                 if expires_at <= now:
-                    self._disable_codex_mode()
-                    return False
-        return True
+                    self._disable_agent_mode()
+                    return None
+        return kind
 
-    def _clear_codex_session(self) -> None:
-        """Forget saved Codex conversation pointers."""
-        self._daemon._state.pop("codex_session_id", None)
-        self._daemon._state.pop("codex_last_message_id", None)
+    def _clear_agent_session(self, kind: str) -> None:
+        """Forget saved session pointers for one agent kind.
 
-    def _handle_codex_turn(
+        Also clears the shared "last agent message id" iff it was last set
+        by this kind, so replies don't accidentally continue a stale session.
+        """
+        self._daemon._state.pop(_agent_session_key(kind), None)
+        if self._daemon._state.get("agent_last_message_kind") == kind:
+            self._daemon._state.pop("agent_last_message_id", None)
+            self._daemon._state.pop("agent_last_message_kind", None)
+
+    def _handle_agent_turn(
         self,
         prompt: str,
         message_id: int,
         *,
+        kind: str,
         new_session: bool,
     ) -> None:
-        """Run one Codex turn and send the result to Telegram."""
-        from daemon_agent_flow import CodexRunError, run_codex_workspace
+        """Run one agent turn (codex/claude) and send the result to Telegram."""
+        if kind == "codex":
+            from daemon_agent_flow import CodexRunError as _RunError
+            from daemon_agent_flow import run_codex_workspace as _run
 
-        status_prefix = "Codex reading "
+            run = _run
+            run_error: type[Exception] = _RunError
+        else:
+            from daemon_claude_flow import ClaudeRunError as _RunError
+            from daemon_claude_flow import run_claude_workspace as _run
+
+            run = _run
+            run_error = _RunError
+        label = _AGENT_LABELS[kind]
+        session_key = _agent_session_key(kind)
+
+        status_prefix = f"{label} reading "
         status_id = self._poller.send_reply(
             f"{status_prefix}.", reply_to_message_id=message_id
         )
         stop_anim, anim_thread = self._start_placeholder_animation(
             status_id, prefix=status_prefix
         )
-        session_id = (
-            None if new_session else self._daemon._state.get("codex_session_id")
-        )
+        session_id = None if new_session else self._daemon._state.get(session_key)
 
         try:
-            result = run_codex_workspace(
+            result = run(
                 prompt,
                 cwd=Path(__file__).resolve().parent.parent,
                 session_id=session_id if isinstance(session_id, str) else None,
@@ -588,15 +657,15 @@ class TelegramChatHandler:
         except ValueError:
             self._stop_placeholder_animation(stop_anim, anim_thread)
             if status_id:
-                self._poller.edit_message(status_id, "Use /codex <prompt>.")
+                self._poller.edit_message(status_id, f"Use /{kind} <prompt>.")
             else:
                 self._poller.send_reply(
-                    "Use /codex <prompt>.", reply_to_message_id=message_id
+                    f"Use /{kind} <prompt>.", reply_to_message_id=message_id
                 )
             return
-        except CodexRunError as exc:
+        except run_error as exc:
             self._stop_placeholder_animation(stop_anim, anim_thread)
-            logger.warning("Codex Telegram command failed: %s", exc)
+            logger.warning("%s Telegram command failed: %s", label, exc)
             text = str(exc)
             if status_id:
                 self._poller.edit_message(status_id, text)
@@ -607,31 +676,36 @@ class TelegramChatHandler:
         self._stop_placeholder_animation(stop_anim, anim_thread)
 
         if result.session_id:
-            self._daemon._state["codex_session_id"] = result.session_id
-        if self._daemon._state.get("codex_mode"):
-            self._refresh_codex_mode(save=False)
+            self._daemon._state[session_key] = result.session_id
+        if self._daemon._state.get("agent_mode") == kind:
+            self._refresh_agent_mode(save=False)
         if status_id:
             self._poller.edit_message(status_id, result.text)
-            self._daemon._state["codex_last_message_id"] = status_id
+            self._daemon._state["agent_last_message_id"] = status_id
+            self._daemon._state["agent_last_message_kind"] = kind
         else:
             sent_id = self._poller.send_reply(
                 result.text, reply_to_message_id=message_id
             )
             if sent_id:
-                self._daemon._state["codex_last_message_id"] = sent_id
+                self._daemon._state["agent_last_message_id"] = sent_id
+                self._daemon._state["agent_last_message_kind"] = kind
         self._daemon._save_state()
 
-    def _is_codex_reply(self, reply_to: dict | None) -> bool:
-        """Return whether a Telegram reply should continue the Codex session."""
+    def _is_agent_reply(self, reply_to: dict | None) -> str | None:
+        """Return the agent kind whose last message ``reply_to`` matches, or ``None``."""
         if not reply_to:
-            return False
-        last_id = self._daemon._state.get("codex_last_message_id")
-        if last_id is None:
-            return False
+            return None
+        last_id = self._daemon._state.get("agent_last_message_id")
+        last_kind = self._daemon._state.get("agent_last_message_kind")
+        if last_id is None or last_kind not in _AGENT_LABELS:
+            return None
         try:
-            return int(reply_to.get("message_id")) == int(last_id)
+            if int(reply_to.get("message_id")) == int(last_id):
+                return last_kind
         except (TypeError, ValueError):
-            return False
+            return None
+        return None
 
     # ------------------------------------------------------------------
     # Context overview

@@ -1388,6 +1388,7 @@ class TestTelegramCommands:
         assert "/context [name] — View context files" in sent
         assert "/events [N] [category] — Recent system events" in sent
         assert "/codex — Show Codex commands" in sent
+        assert "/claude — Show Claude commands" in sent
         assert "/codex on [prompt]" not in sent
         assert "Available context files:" in sent
         assert "me" in sent
@@ -1437,7 +1438,8 @@ class TestCodexTelegramCommand:
         assert run_codex.call_args.kwargs["session_id"] is None
         daemon._poller.edit_message.assert_called_once_with(900, "Workspace answer")
         assert daemon._state["codex_session_id"] == "codex-session"
-        assert daemon._state["codex_last_message_id"] == 900
+        assert daemon._state["agent_last_message_id"] == 900
+        assert daemon._state["agent_last_message_kind"] == "codex"
         state = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
         assert state["codex_session_id"] == "codex-session"
 
@@ -1498,16 +1500,18 @@ class TestCodexTelegramCommand:
         daemon = _make_daemon(tmp_path)
         daemon._chat._poller = MagicMock()
         daemon._state["codex_session_id"] = "saved-session"
-        daemon._state["codex_last_message_id"] = 900
-        daemon._state["codex_mode"] = True
-        daemon._state["codex_mode_expires_at"] = "2099-01-01T00:00:00+00:00"
+        daemon._state["agent_last_message_id"] = 900
+        daemon._state["agent_last_message_kind"] = "codex"
+        daemon._state["agent_mode"] = "codex"
+        daemon._state["agent_mode_expires_at"] = "2099-01-01T00:00:00+00:00"
 
         daemon._handle_command("/codex stop", 58)
 
         assert "codex_session_id" not in daemon._state
-        assert "codex_last_message_id" not in daemon._state
-        assert "codex_mode" not in daemon._state
-        assert "codex_mode_expires_at" not in daemon._state
+        assert "agent_last_message_id" not in daemon._state
+        assert "agent_last_message_kind" not in daemon._state
+        assert "agent_mode" not in daemon._state
+        assert "agent_mode_expires_at" not in daemon._state
         daemon._poller.send_reply.assert_called_once_with(
             "Codex session cleared and mode off.", reply_to_message_id=58
         )
@@ -1518,27 +1522,28 @@ class TestCodexTelegramCommand:
 
         daemon._handle_command("/codex on", 58)
 
-        assert daemon._state["codex_mode"] is True
-        assert "codex_mode_expires_at" in daemon._state
+        assert daemon._state["agent_mode"] == "codex"
+        assert "agent_mode_expires_at" in daemon._state
         daemon._poller.send_reply.assert_called_once()
         assert "Codex mode on" in daemon._poller.send_reply.call_args.args[0]
 
-        with patch.object(daemon._chat, "_handle_codex_turn") as handle_codex:
+        with patch.object(daemon._chat, "_handle_agent_turn") as handle_agent:
             daemon._handle_telegram_message(
                 {"message_id": 59, "text": "continue this investigation"}
             )
 
-        handle_codex.assert_called_once_with(
+        handle_agent.assert_called_once_with(
             "continue this investigation",
             59,
+            kind="codex",
             new_session=False,
         )
 
         daemon._poller.reset_mock()
         daemon._handle_command("/codex off", 60)
 
-        assert "codex_mode" not in daemon._state
-        assert "codex_mode_expires_at" not in daemon._state
+        assert "agent_mode" not in daemon._state
+        assert "agent_mode_expires_at" not in daemon._state
         daemon._poller.send_reply.assert_called_once_with(
             "Codex mode off. Plain messages go back to health chat.",
             reply_to_message_id=60,
@@ -1548,11 +1553,11 @@ class TestCodexTelegramCommand:
         daemon = _make_daemon(tmp_path)
         daemon._chat._poller = MagicMock()
         daemon._chat._conversation = MagicMock()
-        daemon._state["codex_mode"] = True
-        daemon._state["codex_mode_expires_at"] = "2000-01-01T00:00:00+00:00"
+        daemon._state["agent_mode"] = "codex"
+        daemon._state["agent_mode_expires_at"] = "2000-01-01T00:00:00+00:00"
 
         with (
-            patch.object(daemon._chat, "_handle_codex_turn") as handle_codex,
+            patch.object(daemon._chat, "_handle_agent_turn") as handle_agent,
             patch.object(daemon._chat, "_chat_reply") as chat_reply,
             patch.object(
                 daemon._chat,
@@ -1566,25 +1571,27 @@ class TestCodexTelegramCommand:
                 {"message_id": 61, "text": "normal health question"}
             )
 
-        handle_codex.assert_not_called()
+        handle_agent.assert_not_called()
         chat_reply.assert_called_once()
-        assert "codex_mode" not in daemon._state
-        assert "codex_mode_expires_at" not in daemon._state
+        assert "agent_mode" not in daemon._state
+        assert "agent_mode_expires_at" not in daemon._state
 
     def test_codex_reset_clears_session_but_keeps_mode(self, tmp_path: Path) -> None:
         daemon = _make_daemon(tmp_path)
         daemon._chat._poller = MagicMock()
         daemon._state["codex_session_id"] = "saved-session"
-        daemon._state["codex_last_message_id"] = 900
-        daemon._state["codex_mode"] = True
-        daemon._state["codex_mode_expires_at"] = "2099-01-01T00:00:00+00:00"
+        daemon._state["agent_last_message_id"] = 900
+        daemon._state["agent_last_message_kind"] = "codex"
+        daemon._state["agent_mode"] = "codex"
+        daemon._state["agent_mode_expires_at"] = "2099-01-01T00:00:00+00:00"
 
         daemon._handle_command("/codex reset", 62)
 
         assert "codex_session_id" not in daemon._state
-        assert "codex_last_message_id" not in daemon._state
-        assert daemon._state["codex_mode"] is True
-        assert "codex_mode_expires_at" in daemon._state
+        assert "agent_last_message_id" not in daemon._state
+        assert "agent_last_message_kind" not in daemon._state
+        assert daemon._state["agent_mode"] == "codex"
+        assert "agent_mode_expires_at" in daemon._state
         daemon._poller.send_reply.assert_called_once_with(
             "Codex context cleared.", reply_to_message_id=62
         )
@@ -1594,22 +1601,24 @@ class TestCodexTelegramCommand:
         daemon._chat._poller = MagicMock()
         daemon._state["codex_session_id"] = "saved-session"
 
-        with patch.object(daemon._chat, "_handle_codex_turn") as handle_codex:
+        with patch.object(daemon._chat, "_handle_agent_turn") as handle_agent:
             daemon._handle_command("/codex reset inspect fresh", 63)
 
         assert "codex_session_id" not in daemon._state
-        handle_codex.assert_called_once_with(
+        handle_agent.assert_called_once_with(
             "inspect fresh",
             63,
+            kind="codex",
             new_session=True,
         )
 
     def test_reply_to_last_codex_message_continues_codex(self, tmp_path: Path) -> None:
         daemon = _make_daemon(tmp_path)
         daemon._chat._poller = MagicMock()
-        daemon._state["codex_last_message_id"] = 900
+        daemon._state["agent_last_message_id"] = 900
+        daemon._state["agent_last_message_kind"] = "codex"
 
-        with patch.object(daemon._chat, "_handle_codex_turn") as handle_codex:
+        with patch.object(daemon._chat, "_handle_agent_turn") as handle_agent:
             daemon._handle_telegram_message(
                 {
                     "message_id": 59,
@@ -1618,11 +1627,122 @@ class TestCodexTelegramCommand:
                 }
             )
 
-        handle_codex.assert_called_once_with(
+        handle_agent.assert_called_once_with(
             "and where are the tests?",
             59,
+            kind="codex",
             new_session=False,
         )
+
+    def test_reply_to_last_claude_message_continues_claude(
+        self, tmp_path: Path
+    ) -> None:
+        daemon = _make_daemon(tmp_path)
+        daemon._chat._poller = MagicMock()
+        daemon._state["agent_last_message_id"] = 901
+        daemon._state["agent_last_message_kind"] = "claude"
+
+        with patch.object(daemon._chat, "_handle_agent_turn") as handle_agent:
+            daemon._handle_telegram_message(
+                {
+                    "message_id": 60,
+                    "text": "and where is the runner?",
+                    "reply_to_message": {"message_id": 901, "text": "Claude answer"},
+                }
+            )
+
+        handle_agent.assert_called_once_with(
+            "and where is the runner?",
+            60,
+            kind="claude",
+            new_session=False,
+        )
+
+    def test_codex_off_when_claude_active_does_not_disable(
+        self, tmp_path: Path
+    ) -> None:
+        daemon = _make_daemon(tmp_path)
+        daemon._chat._poller = MagicMock()
+        daemon._state["agent_mode"] = "claude"
+        daemon._state["agent_mode_expires_at"] = "2099-01-01T00:00:00+00:00"
+
+        daemon._handle_command("/codex off", 70)
+
+        assert daemon._state["agent_mode"] == "claude"
+        sent = daemon._poller.send_reply.call_args.args[0]
+        assert "Claude mode is" in sent
+
+    def test_claude_on_replaces_codex_mode(self, tmp_path: Path) -> None:
+        daemon = _make_daemon(tmp_path)
+        daemon._chat._poller = MagicMock()
+        daemon._state["agent_mode"] = "codex"
+        daemon._state["agent_mode_expires_at"] = "2099-01-01T00:00:00+00:00"
+
+        daemon._handle_command("/claude on", 71)
+
+        assert daemon._state["agent_mode"] == "claude"
+        assert "agent_mode_expires_at" in daemon._state
+        sent = daemon._poller.send_reply.call_args.args[0]
+        assert "Claude mode on" in sent
+
+    def test_claude_command_stores_session_and_edits_placeholder(
+        self, tmp_path: Path
+    ) -> None:
+        from daemon_claude_flow import ClaudeRunResult
+
+        daemon = _make_daemon(tmp_path)
+        daemon._chat._poller = MagicMock()
+        daemon._poller.send_reply.return_value = 950
+
+        with (
+            patch.object(
+                daemon._chat,
+                "_start_placeholder_animation",
+                return_value=(None, None),
+            ),
+            patch.object(daemon._chat, "_stop_placeholder_animation"),
+            patch(
+                "daemon_claude_flow.run_claude_workspace",
+                return_value=ClaudeRunResult(
+                    text="Claude answer",
+                    session_id="claude-session",
+                ),
+            ) as run_claude,
+        ):
+            daemon._handle_command("/claude where is the Telegram router?", 72)
+
+        run_claude.assert_called_once()
+        assert run_claude.call_args.kwargs["session_id"] is None
+        daemon._poller.edit_message.assert_called_once_with(950, "Claude answer")
+        assert daemon._state["claude_session_id"] == "claude-session"
+        assert daemon._state["agent_last_message_id"] == 950
+        assert daemon._state["agent_last_message_kind"] == "claude"
+
+    def test_claude_session_independent_from_codex(self, tmp_path: Path) -> None:
+        from daemon_claude_flow import ClaudeRunResult
+
+        daemon = _make_daemon(tmp_path)
+        daemon._chat._poller = MagicMock()
+        daemon._poller.send_reply.return_value = 951
+        daemon._state["codex_session_id"] = "codex-session"
+        daemon._state["claude_session_id"] = "claude-session"
+
+        with (
+            patch.object(
+                daemon._chat,
+                "_start_placeholder_animation",
+                return_value=(None, None),
+            ),
+            patch.object(daemon._chat, "_stop_placeholder_animation"),
+            patch(
+                "daemon_claude_flow.run_claude_workspace",
+                return_value=ClaudeRunResult(text="ok", session_id="claude-session"),
+            ) as run_claude,
+        ):
+            daemon._handle_command("/claude follow up", 73)
+
+        assert run_claude.call_args.kwargs["session_id"] == "claude-session"
+        assert daemon._state["codex_session_id"] == "codex-session"
 
 
 class TestModelsFlow:

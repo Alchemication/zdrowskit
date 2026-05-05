@@ -35,6 +35,7 @@ Telegram commands include:
 /log
 /add
 /codex
+/claude
 /clear
 /status
 /advanced
@@ -48,25 +49,32 @@ the Telegram menu: `/notify`, `/review [current|last]`, `/coach [current|last]`,
 
 `/status` shows bot state, data coverage, recent activity, and notification state.
 
-`/codex` with no arguments shows the available Codex commands. `/codex <prompt>`
-asks the local Codex CLI about this repo in workspace-write mode. Follow-up `/codex`
-messages resume the saved Codex session; `/codex new <prompt>` starts a fresh
-one; `/codex reset [prompt]` clears the saved Codex context; and `/codex stop`
-clears it and turns Codex mode off. Replies to the last Codex Telegram message
-also continue the Codex session.
+`/codex` and `/claude` are mirror commands for the two supported coding
+agents — both run the local CLI against the repo with workspace-edit
+permissions. `/codex <prompt>` uses the OpenAI Codex CLI in workspace-write
+sandbox mode; `/claude <prompt>` uses the Anthropic Claude Code CLI in
+`acceptEdits` permission mode. With no arguments either command prints its
+own help. Follow-up calls resume the saved session for that agent;
+`/<agent> new <prompt>` starts a fresh one, `/<agent> reset [prompt]`
+clears the saved context, and `/<agent> stop` clears it and turns mode off.
+Replies to the last agent reply continue that specific agent's session.
 
-Workspace-write mode lets Codex edit files in the repo checkout. It does not
-grant write access to external state directories such as `~/Documents/zdrowskit`
-or the default SQLite DB directory unless those paths are added separately.
+Workspace permissions let either agent edit files in the repo checkout. They
+do not grant write access to external state directories such as
+`~/Documents/zdrowskit` or the default SQLite DB directory unless those paths
+are added separately.
 
-Use `/codex on [prompt]` to route plain non-command Telegram messages to Codex
-without retyping `/codex`. Codex mode refreshes after each Codex turn and turns
-itself off after 30 minutes of inactivity. Use `/codex off` to return plain
-messages to the normal health chat immediately.
+Use `/<agent> on [prompt]` to route plain non-command Telegram messages to
+that agent without retyping the slash command. Only one agent mode is active
+at a time — `/claude on` while Codex mode is active switches to Claude.
+Agent mode refreshes after each turn and turns itself off after 30 minutes
+of inactivity. Use `/<agent> off` to return plain messages to the normal
+health chat immediately.
 
-When running under launchd, `/codex` uses the `ZDROWSKIT_CODEX_EXECUTABLE`
-value written by `uv run python main.py daemon-install` if available. Re-run
-`daemon-install` after installing or moving the Codex CLI.
+When running under launchd, the agent commands use
+`ZDROWSKIT_CODEX_EXECUTABLE` and `ZDROWSKIT_CLAUDE_EXECUTABLE` values written
+by `uv run python main.py daemon-install` if available. Re-run
+`daemon-install` after installing or moving either CLI.
 
 ## `/notify`
 
