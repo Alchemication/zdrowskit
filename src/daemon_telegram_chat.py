@@ -449,8 +449,8 @@ class TelegramChatHandler:
                 for command in ADVANCED_TELEGRAM_BOT_COMMANDS
             )
             lines.append("\nAgents:")
-            lines.append("/codex — Show Codex commands")
-            lines.append("/claude — Show Claude commands")
+            lines.append("/codex — Open Codex panel")
+            lines.append("/claude — Open Claude panel")
             lines.append(f"\nAvailable context files: {ctx_opts}")
             self._poller.send_reply("\n".join(lines), reply_to_message_id=message_id)
         else:
@@ -470,9 +470,7 @@ class TelegramChatHandler:
         parts = text.split(maxsplit=1)
         request_text = parts[1].strip() if len(parts) > 1 else ""
         if not request_text:
-            self._poller.send_reply(
-                self._agent_usage(kind), reply_to_message_id=message_id
-            )
+            self._send_agent_panel(kind, reply_to_message_id=message_id)
             return
 
         first_word, _, rest = request_text.partition(" ")
@@ -562,6 +560,50 @@ class TelegramChatHandler:
 
         return claude_usage()
 
+    def _send_agent_panel(
+        self, kind: str, *, reply_to_message_id: int | None = None
+    ) -> int | None:
+        """Send the compact inline-button panel for one agent."""
+        text, buttons = self._agent_panel(kind)
+        return self._poller.send_message_with_keyboard(
+            text, buttons, reply_to_message_id=reply_to_message_id
+        )
+
+    def _edit_agent_panel(self, message_id: int, kind: str) -> None:
+        """Refresh an existing agent panel message."""
+        text, buttons = self._agent_panel(kind)
+        self._poller.edit_message_with_keyboard(message_id, text, buttons)
+
+    def _agent_panel(self, kind: str) -> tuple[str, list[list[dict[str, str]]]]:
+        """Return panel text and buttons for one agent."""
+        label = _AGENT_LABELS[kind]
+        active = self._agent_mode_active()
+        if active == kind:
+            minutes = self._agent_mode_minutes_left()
+            suffix = f" · {minutes} min left" if minutes is not None else ""
+            text = f"{label}: on{suffix}"
+            primary = {"text": "Turn off", "callback_data": f"agent:off:{kind}"}
+        else:
+            other = f" · {_AGENT_LABELS[active]} active" if active else ""
+            text = f"{label}: off{other}"
+            button_text = f"Switch to {label}" if active else "Turn on"
+            primary = {"text": button_text, "callback_data": f"agent:on:{kind}"}
+
+        return (
+            text,
+            [
+                [
+                    primary,
+                    {"text": "New session", "callback_data": f"agent:new:{kind}"},
+                ]
+            ],
+        )
+
+    @staticmethod
+    def _agent_exit_keyboard(kind: str) -> list[list[dict[str, str]]]:
+        """Return the inline keyboard for leaving active agent mode."""
+        return [[{"text": "Back to chat", "callback_data": f"agent:exit:{kind}"}]]
+
     def _enable_agent_mode(self, kind: str) -> None:
         """Route plain non-command messages to ``kind`` until timeout."""
         self._daemon._state["agent_mode"] = kind
@@ -603,6 +645,21 @@ class TelegramChatHandler:
                     self._disable_agent_mode()
                     return None
         return kind
+
+    def _agent_mode_minutes_left(self) -> int | None:
+        """Return whole minutes left for the active agent mode."""
+        expires_raw = self._daemon._state.get("agent_mode_expires_at")
+        if not isinstance(expires_raw, str):
+            return None
+        try:
+            expires_at = datetime.fromisoformat(expires_raw)
+        except ValueError:
+            return None
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        now = datetime.now(expires_at.tzinfo)
+        seconds_left = max(0, (expires_at - now).total_seconds())
+        return max(1, int((seconds_left + 59) // 60))
 
     def _clear_agent_session(self, kind: str) -> None:
         """Forget saved session pointers for one agent kind.
@@ -677,20 +734,60 @@ class TelegramChatHandler:
 
         if result.session_id:
             self._daemon._state[session_key] = result.session_id
-        if self._daemon._state.get("agent_mode") == kind:
+        agent_mode_active = self._agent_mode_active() == kind
+        if agent_mode_active:
             self._refresh_agent_mode(save=False)
-        if status_id:
-            self._poller.edit_message(status_id, result.text)
-            self._daemon._state["agent_last_message_id"] = status_id
-            self._daemon._state["agent_last_message_kind"] = kind
-        else:
-            sent_id = self._poller.send_reply(
-                result.text, reply_to_message_id=message_id
+        if agent_mode_active:
+            sent_id = self._send_agent_result_with_exit(
+                result.text,
+                kind=kind,
+                status_id=status_id,
+                reply_to_message_id=message_id,
             )
             if sent_id:
                 self._daemon._state["agent_last_message_id"] = sent_id
                 self._daemon._state["agent_last_message_kind"] = kind
+        else:
+            if status_id:
+                self._poller.edit_message(status_id, result.text)
+                self._daemon._state["agent_last_message_id"] = status_id
+                self._daemon._state["agent_last_message_kind"] = kind
+            else:
+                sent_id = self._poller.send_reply(
+                    result.text, reply_to_message_id=message_id
+                )
+                if sent_id:
+                    self._daemon._state["agent_last_message_id"] = sent_id
+                    self._daemon._state["agent_last_message_kind"] = kind
         self._daemon._save_state()
+
+    def _send_agent_result_with_exit(
+        self,
+        text: str,
+        *,
+        kind: str,
+        status_id: int | None,
+        reply_to_message_id: int,
+    ) -> int | None:
+        """Send an active-mode agent result with a Back to chat button."""
+        buttons = self._agent_exit_keyboard(kind)
+        if status_id is None:
+            return self._poller.send_message_with_keyboard(
+                text, buttons, reply_to_message_id=reply_to_message_id
+            )
+
+        from notify import chunk_text
+
+        chunks = chunk_text(text)
+        if len(chunks) == 1:
+            self._poller.edit_message_with_keyboard(status_id, text, buttons)
+            return status_id
+
+        self._poller.edit_message(status_id, chunks[0])
+        sent_id = self._poller.send_message_with_keyboard(
+            "\n\n".join(chunks[1:]), buttons
+        )
+        return sent_id or status_id
 
     def _is_agent_reply(self, reply_to: dict | None) -> str | None:
         """Return the agent kind whose last message ``reply_to`` matches, or ``None``."""
@@ -919,6 +1016,9 @@ class TelegramChatHandler:
         elif data.startswith("log_"):
             self._daemon._log_flow.handle_callback(cb_id, data, msg_id)
 
+        elif data.startswith("agent:"):
+            self._handle_agent_callback(cb_id, data, msg_id)
+
         elif data.startswith("ctx_diff:"):
             edit_id = data.split(":", 1)[1]
             pending = self._pending_edits.peek(edit_id)
@@ -1063,6 +1163,56 @@ class TelegramChatHandler:
 
         elif data.startswith("add_"):
             self._daemon._add_flow.handle_callback(cb_id, data, msg_id)
+
+    def _handle_agent_callback(self, cb_id: str, data: str, msg_id: int | None) -> None:
+        """Handle Codex/Claude inline panel and exit buttons."""
+        parts = data.split(":")
+        if len(parts) != 3:
+            self._poller.answer_callback_query(cb_id, "Invalid agent action.")
+            return
+
+        _, action, kind = parts
+        if kind not in _AGENT_LABELS:
+            self._poller.answer_callback_query(cb_id, "Unknown agent.")
+            return
+
+        label = _AGENT_LABELS[kind]
+        if action == "on":
+            self._enable_agent_mode(kind)
+            self._poller.answer_callback_query(cb_id, f"{label} mode on.")
+            if msg_id:
+                self._edit_agent_panel(msg_id, kind)
+            return
+
+        if action == "off":
+            if self._agent_mode_active() == kind:
+                self._disable_agent_mode()
+                self._poller.answer_callback_query(cb_id, f"{label} mode off.")
+            else:
+                self._poller.answer_callback_query(cb_id, f"{label} mode was not on.")
+            if msg_id:
+                self._edit_agent_panel(msg_id, kind)
+            return
+
+        if action == "new":
+            self._clear_agent_session(kind)
+            self._enable_agent_mode(kind)
+            self._poller.answer_callback_query(cb_id, f"New {label} session.")
+            if msg_id:
+                self._edit_agent_panel(msg_id, kind)
+            return
+
+        if action == "exit":
+            if self._agent_mode_active() == kind:
+                self._disable_agent_mode()
+                self._poller.answer_callback_query(cb_id, "Back to chat.")
+            else:
+                self._poller.answer_callback_query(cb_id, "Already back in chat.")
+            if msg_id:
+                self._poller.edit_message_reply_markup(msg_id, None)
+            return
+
+        self._poller.answer_callback_query(cb_id, "Unknown agent action.")
 
     # ------------------------------------------------------------------
     # Tutorial wizard

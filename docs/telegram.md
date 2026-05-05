@@ -53,11 +53,12 @@ the Telegram menu: `/notify`, `/review [current|last]`, `/coach [current|last]`,
 agents — both run the local CLI against the repo with workspace-edit
 permissions. `/codex <prompt>` uses the OpenAI Codex CLI in workspace-write
 sandbox mode; `/claude <prompt>` uses the Anthropic Claude Code CLI in
-`acceptEdits` permission mode. With no arguments either command prints its
-own help. Follow-up calls resume the saved session for that agent;
-`/<agent> new <prompt>` starts a fresh one, `/<agent> reset [prompt]`
-clears the saved context, and `/<agent> stop` clears it and turns mode off.
-Replies to the last agent reply continue that specific agent's session.
+`acceptEdits` permission mode. With no arguments either command opens a
+compact button panel for that agent: turn mode on/off, switch from the other
+agent, or start a new session. Follow-up calls resume the saved session for
+that agent; `/<agent> new <prompt>` starts a fresh one, `/<agent> reset [prompt]`
+clears saved context, and `/<agent> stop` clears it and turns mode off. Replies
+to the last agent reply continue that specific agent's session.
 
 Workspace permissions let either agent edit files in the repo checkout. They
 do not grant write access to external state directories such as
@@ -66,10 +67,11 @@ are added separately.
 
 Use `/<agent> on [prompt]` to route plain non-command Telegram messages to
 that agent without retyping the slash command. Only one agent mode is active
-at a time — `/claude on` while Codex mode is active switches to Claude.
-Agent mode refreshes after each turn and turns itself off after 30 minutes
-of inactivity. Use `/<agent> off` to return plain messages to the normal
-health chat immediately.
+at a time — `/claude on` while Codex mode is active switches to Claude — but
+Codex and Claude keep separate saved sessions. Agent mode refreshes after each
+turn and turns itself off after 30 minutes of inactivity. Use `/<agent> off`,
+the panel's `Turn off`, or the `Back to chat` button below active-mode agent
+replies to return plain messages to the normal health chat immediately.
 
 When running under launchd, the agent commands use
 `ZDROWSKIT_CODEX_EXECUTABLE` and `ZDROWSKIT_CLAUDE_EXECUTABLE` values written
