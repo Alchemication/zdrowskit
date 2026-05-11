@@ -27,7 +27,7 @@ from evals.framework import (
     run_case,
 )
 from evals import run as eval_run
-from evals import run_nudge_verify
+from evals import run_verify
 from evals.run import select_cases
 
 
@@ -732,7 +732,7 @@ class TestChatRunner:
                 max_tokens=512,
             )
         )
-        monkeypatch.setattr(run_nudge_verify, "call_llm", mock_call)
+        monkeypatch.setattr(run_verify, "call_llm", mock_call)
         routes = {
             "verification": SimpleNamespace(
                 primary="deepseek/deepseek-v4-pro",
@@ -748,7 +748,7 @@ class TestChatRunner:
             ),
         }
         monkeypatch.setattr(
-            run_nudge_verify,
+            run_verify,
             "resolve_model_route",
             lambda feature: routes[feature],
         )

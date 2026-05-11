@@ -297,10 +297,10 @@ def run_case(
                 cache=cache,
                 refresh_cache=refresh_cache,
             )
-        elif case.feature == "nudge_verify":
-            from evals.run_nudge_verify import run_nudge_verify_case
+        elif case.feature in {"nudge_verify", "insights_verify"}:
+            from evals.run_verify import run_verify_case
 
-            execution, result.model = run_nudge_verify_case(
+            execution, result.model = run_verify_case(
                 case,
                 cache=cache,
                 refresh_cache=refresh_cache,
@@ -735,10 +735,10 @@ def _case_from_dict(raw: dict[str, Any], path: Path) -> EvalCase:
             raise ValueError(
                 f"{path} chat fixture must include today, context, and turns"
             )
-    elif feature == "nudge_verify":
+    elif feature in {"nudge_verify", "insights_verify"}:
         if not all(key in fixture for key in ("draft", "evidence", "source_messages")):
             raise ValueError(
-                f"{path} nudge_verify fixture must include draft, evidence, "
+                f"{path} {feature} fixture must include draft, evidence, "
                 "and source_messages"
             )
     else:

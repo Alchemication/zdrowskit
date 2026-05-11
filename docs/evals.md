@@ -56,7 +56,7 @@ Some models reject a `temperature` parameter (for example `claude-opus-4-7`). Fo
 ## Supported features
 
 - `chat` — exercises the full chat tool loop end-to-end, taking the model from `--model`.
-- `nudge_verify` — exercises the production verifier path (`verify_and_rewrite` with the rewriter disabled). Models and the Pydantic response schema are resolved by the production path at runtime. Override the verifier model via `ZDROWSKIT_VERIFICATION_MODEL` or change its `reasoning_effort` through `main.py models` to A/B verifier behavior (on DeepSeek, `high`/`max` engage thinking via call_llm's translation).
+- `nudge_verify` and `insights_verify` — exercise the production verifier path (`verify_and_rewrite` with the rewriter disabled) for nudges and weekly insights respectively. Both run through the same `evals/run_verify.py` runner; the surface (`nudge` / `insights`) is taken from `fixture.kind`. Models and the Pydantic response schema are resolved by the production path at runtime. Override the verifier model via `ZDROWSKIT_VERIFICATION_MODEL` or change its `reasoning_effort` through `main.py models` to A/B verifier behavior (on DeepSeek, `high`/`max` engage thinking via call_llm's translation).
 
 ## Leaderboard
 

@@ -1,11 +1,13 @@
-"""Runner for ``nudge_verify`` eval cases.
+"""Runner for verifier eval cases (``nudge_verify``, ``insights_verify``).
 
 Exercises the production verifier path (``verify_and_rewrite`` with the
 rewriter disabled) against a fixture captured from a real verifier call.
 Models, fallback, reasoning, temperature, and the structured response schema
 are resolved through the same model route used by production. Change the
 verifier route's ``reasoning_effort`` via ``main.py models`` to A/B DeepSeek
-thinking behavior.
+thinking behavior. The runner is feature-agnostic: the surface (insights /
+coach / nudge) comes from ``fixture.kind`` and the eval feature name is used
+only to namespace the eval cache.
 """
 
 from __future__ import annotations
@@ -32,13 +34,19 @@ def _resolved_model_label() -> str:
     return resolve_model_route("verification").primary
 
 
-def run_nudge_verify_case(
+def run_verify_case(
     case: Any,
     *,
     cache: Any = None,
     refresh_cache: bool = False,
 ) -> tuple[Any, str]:
-    """Run one ``nudge_verify`` case and return its execution + model label."""
+    """Run one verifier eval case and return its execution + model label.
+
+    The verifier surface (``insights`` / ``coach`` / ``nudge``) is taken from
+    ``fixture.kind``; ``case.feature`` (e.g. ``insights_verify``) is used only
+    to namespace the eval cache so cases targeting different surfaces never
+    collide on a cached response.
+    """
     from evals.framework import EvalExecution  # local import to avoid cycle
 
     fixture = case.fixture
@@ -55,7 +63,11 @@ def run_nudge_verify_case(
     metadata.setdefault("source_feedback_id", case.source_feedback_id)
 
     started = time.perf_counter()
-    wrapper = _CachingCallLLM(cache=cache, refresh_cache=refresh_cache)
+    wrapper = _CachingCallLLM(
+        feature=str(case.feature),
+        cache=cache,
+        refresh_cache=refresh_cache,
+    )
     verifier_route = resolve_model_route("verification")
     rewrite_route = resolve_model_route("verification_rewrite")
     with tempfile.TemporaryDirectory() as tmp:
@@ -116,7 +128,8 @@ class _CachingCallLLM:
     patching the production ``call_llm`` import.
     """
 
-    def __init__(self, *, cache: Any, refresh_cache: bool) -> None:
+    def __init__(self, *, feature: str, cache: Any, refresh_cache: bool) -> None:
+        self._feature = feature
         self._cache = cache
         self._refresh_cache = refresh_cache
         self.hits = 0
@@ -136,7 +149,7 @@ class _CachingCallLLM:
             self._record(result)
             return result
 
-        request = self._cache_request(messages, kwargs)
+        request = self._cache_request(self._feature, messages, kwargs)
         if not self._refresh_cache:
             cached = self._cache.get(request)
             if cached is not None:
@@ -160,6 +173,7 @@ class _CachingCallLLM:
 
     @staticmethod
     def _cache_request(
+        feature: str,
         messages: list[dict[str, Any]],
         kwargs: dict[str, Any],
     ) -> dict[str, Any]:
@@ -170,7 +184,7 @@ class _CachingCallLLM:
 
         return {
             "cache_schema_version": EVAL_CACHE_SCHEMA_VERSION,
-            "runner": "nudge_verify",
+            "runner": feature,
             "model": kwargs.get("model"),
             "messages": messages,
             "max_tokens": kwargs.get("max_tokens"),
