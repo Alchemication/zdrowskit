@@ -13,7 +13,7 @@ from events import query_events
 from llm import LLMResult
 from llm_verify import (
     VerificationIssue,
-    _VerifierPayload,
+    VerifierPayload,
     deterministic_verification_issues,
     extract_tool_evidence,
     parse_verification_result,
@@ -224,7 +224,7 @@ class TestVerifyAndRewrite:
             MAX_TOKENS_VERIFICATION,
             MAX_TOKENS_VERIFICATION_REWRITE,
         ]
-        assert seen_response_formats == [_VerifierPayload, None]
+        assert seen_response_formats == [VerifierPayload, None]
         assert seen_extra_bodies == [None, None]
         assert seen_temperatures == [None, None]
         assert seen_reasoning == ["high", "high"]

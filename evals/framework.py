@@ -94,11 +94,12 @@ class CapturedToolCall:
 
 @dataclass(frozen=True)
 class AssertionResult:
-    """Result of one deterministic assertion."""
+    """Result of one deterministic or judge assertion."""
 
     name: str
     passed: bool
     detail: str = ""
+    kind: str = "deterministic"
 
 
 @dataclass
@@ -306,11 +307,14 @@ def run_case(
                 cache=cache,
                 refresh_cache=refresh_cache,
             )
-        elif case.feature in {"nudge_verify", "insights_verify"}:
-            from evals.run_verify import run_verify_case
+        elif case.feature == "verification_judge":
+            from evals.run_verify import run_verification_judge_case
 
-            execution, result.model, result.route = run_verify_case(
+            execution, result.model, result.route = run_verification_judge_case(
                 case,
+                model=model,
+                reasoning_effort=reasoning_effort,
+                temperature=temperature,
                 cache=cache,
                 refresh_cache=refresh_cache,
             )
@@ -384,6 +388,7 @@ def run_judge_assertions(
                 name="judge_response_valid",
                 passed=False,
                 detail=_judge_validation_detail(exc, raw_text),
+                kind="judge",
             )
         ]
     results_by_name: dict[str, JudgeAssertionResult] = {}
@@ -402,6 +407,7 @@ def run_judge_assertions(
                     name=name,
                     passed=False,
                     detail="Judge returned multiple results for this assertion.",
+                    kind="judge",
                 )
             )
             continue
@@ -412,12 +418,18 @@ def run_judge_assertions(
                     name=name,
                     passed=False,
                     detail="Judge response omitted this assertion.",
+                    kind="judge",
                 )
             )
             continue
         detail = "" if judged.passed else _judge_failure_detail(judged)
         assertion_results.append(
-            AssertionResult(name=name, passed=judged.passed, detail=detail)
+            AssertionResult(
+                name=name,
+                passed=judged.passed,
+                detail=detail,
+                kind="judge",
+            )
         )
 
     extra_names = sorted(set(results_by_name) - set(expected_names))
@@ -427,6 +439,7 @@ def run_judge_assertions(
                 name="judge_no_extra_results",
                 passed=False,
                 detail=f"Unexpected judge result(s): {extra_names}",
+                kind="judge",
             )
         )
     return assertion_results
@@ -764,7 +777,7 @@ def _case_from_dict(raw: dict[str, Any], path: Path) -> EvalCase:
             raise ValueError(
                 f"{path} chat fixture must include today, context, and turns"
             )
-    elif feature in {"nudge_verify", "insights_verify"}:
+    elif feature == "verification_judge":
         if not all(key in fixture for key in ("draft", "evidence", "source_messages")):
             raise ValueError(
                 f"{path} {feature} fixture must include draft, evidence, "

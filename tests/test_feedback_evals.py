@@ -712,7 +712,7 @@ class TestChatRunner:
         )
         assert mock_call.call_count == 2
 
-    def test_nudge_verify_case_reuses_cached_verifier_response(
+    def test_verification_judge_case_reuses_cached_response(
         self,
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
@@ -720,7 +720,7 @@ class TestChatRunner:
         case = next(
             case
             for case in load_cases()
-            if case.id == "nudge_verify_hrv_direction_reversal"
+            if case.id == "verification_judge_nudge_hrv_direction_reversal"
         )
         mock_call = MagicMock(
             return_value=llm.LLMResult(
@@ -734,30 +734,23 @@ class TestChatRunner:
                 max_tokens=512,
             )
         )
-        monkeypatch.setattr(run_verify, "call_llm", mock_call)
-        routes = {
-            "verification": SimpleNamespace(
-                primary="deepseek/deepseek-v4-pro",
-                fallback="anthropic/claude-opus-4-7",
-                reasoning_effort="high",
-                temperature=None,
-            ),
-            "verification_rewrite": SimpleNamespace(
-                primary="deepseek/deepseek-v4-flash",
-                fallback="anthropic/claude-haiku-4-5",
-                reasoning_effort="high",
-                temperature=None,
-            ),
-        }
-        monkeypatch.setattr(
-            run_verify,
-            "resolve_model_route",
-            lambda feature: routes[feature],
-        )
+        monkeypatch.setattr(llm, "call_llm", mock_call)
         cache = EvalCache(tmp_path / "eval-cache.sqlite")
 
-        first = run_case(case, cache=cache)
-        second = run_case(case, cache=cache)
+        first = run_case(
+            case,
+            model="deepseek/deepseek-v4-pro",
+            reasoning_effort="high",
+            temperature=None,
+            cache=cache,
+        )
+        second = run_case(
+            case,
+            model="deepseek/deepseek-v4-pro",
+            reasoning_effort="high",
+            temperature=None,
+            cache=cache,
+        )
 
         assert first.passed
         assert second.passed
@@ -770,13 +763,15 @@ class TestChatRunner:
         assert second.execution.input_tokens == 100
         assert first.model == "deepseek/deepseek-v4-pro"
         assert first.route["primary"] == "deepseek/deepseek-v4-pro"
-        assert first.route["fallback_models"] == ["anthropic/claude-opus-4-7"]
+        assert first.route["feature"] == "verification_judge"
+        assert first.route["kind"] == "nudge"
+        assert first.route["fallback_models"] == []
         assert first.route["reasoning_effort"] == "high"
-        assert first.route["rewrite_primary"] == "deepseek/deepseek-v4-flash"
         assert mock_call.call_args.kwargs["model"] == "deepseek/deepseek-v4-pro"
-        assert mock_call.call_args.kwargs["fallback_models"] == [
-            "anthropic/claude-opus-4-7"
-        ]
+        assert (
+            mock_call.call_args.kwargs["response_format"] is run_verify.VerifierPayload
+        )
+        assert mock_call.call_args.kwargs["fallback_models"] == []
         assert mock_call.call_args.kwargs["reasoning_effort"] == "high"
         assert mock_call.call_args.kwargs["temperature"] is None
         assert mock_call.call_count == 1

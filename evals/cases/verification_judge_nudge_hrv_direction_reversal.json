@@ -1,6 +1,6 @@
 {
-  "id": "nudge_verify_hrv_direction_reversal",
-  "feature": "nudge_verify",
+  "id": "verification_judge_nudge_hrv_direction_reversal",
+  "feature": "verification_judge",
   "case_kind": "real_regression",
   "source_feedback_id": 30,
   "source_llm_call_id": 601,

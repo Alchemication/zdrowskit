@@ -66,6 +66,7 @@ Use `evals.matrix` for model or route comparisons:
 ```bash
 uv run python -m evals.matrix --production --record
 uv run python -m evals.matrix --feature chat --models deepseek/deepseek-v4-flash,deepseek/deepseek-v4-pro --reasoning-efforts high --no-temperature --record
+uv run python -m evals.matrix --feature verification_judge --models deepseek/deepseek-v4-pro,anthropic/claude-sonnet-4-6 --reasoning-efforts high --no-temperature --record
 ```
 
 If `evals/.cache.sqlite` was wiped, the first run is fresh. Otherwise use `--refresh-cache` for real model comparisons.
@@ -73,8 +74,8 @@ If `evals/.cache.sqlite` was wiped, the first run is fresh. Otherwise use `--ref
 ## Model and route comparisons
 
 - `chat` evals take the requested CLI model directly.
-- `nudge_verify` and `insights_verify` resolve the production `verification` and `verification_rewrite` routes through `model_prefs`; changing `--models` is not the way to A/B verifier behavior.
-- To compare verifier models, change routes with `uv run python main.py models`, then run `uv run python -m evals.matrix --feature nudge_verify --record` or `--feature insights_verify --record`.
-- Mixed `--production` runs are smoke/regression checks. Make model decisions from feature-scoped runs.
+- `verification_judge` evals take the requested CLI model directly and exercise only the verifier prompt/schema. The surface (`nudge`, `insights`, `coach`) comes from `fixture.kind`.
+- Do not use the full `verify_and_rewrite` pipeline for model selection. If rewrite behavior needs coverage, add a separate rewrite-step feature from real rewrite failures.
+- Mixed `--production` runs are smoke/regression checks. Make model decisions from feature-scoped matrix runs.
 
 Leaderboard records store run-level `requested_model` plus per-case actual `route` metadata. Actual model identity belongs to the case route, not a top-level compatibility field.

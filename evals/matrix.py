@@ -23,6 +23,8 @@ from evals.framework import (
 )
 from evals.run import _normalize_reasoning_effort, _run_selected_cases, select_cases
 
+DIRECT_MODEL_FEATURES = {"chat", "verification_judge"}
+
 
 @dataclass(frozen=True)
 class MatrixRun:
@@ -55,10 +57,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--models",
-        help=(
-            "Comma-separated litellm model strings. Required for chat matrices; "
-            "ignored by verifier features because those resolve model_prefs."
-        ),
+        help="Comma-separated litellm model strings for direct LLM feature matrices.",
     )
     parser.add_argument(
         "--reasoning-efforts",
@@ -173,9 +172,9 @@ def build_matrix_runs(
     if not feature:
         raise ValueError("Pass --feature for a matrix, or --production for smoke.")
     selected = select_cases(cases, case_ids=case_ids, feature=feature)
-    if feature == "chat":
+    if feature in DIRECT_MODEL_FEATURES:
         if not models:
-            raise ValueError("--feature chat requires --models")
+            raise ValueError(f"--feature {feature} requires --models")
         return [
             MatrixRun(
                 label=(
@@ -191,21 +190,7 @@ def build_matrix_runs(
             for effort in reasoning_efforts
         ]
 
-    if len(models) > 1:
-        raise ValueError(
-            f"--feature {feature} resolves production model_prefs; multiple "
-            "models would not change the run. Use main.py models to A/B routes."
-        )
-    model = models[0] if models else DEFAULT_MODEL
-    return [
-        MatrixRun(
-            label=f"{feature} · production route",
-            cases=selected,
-            model=model,
-            reasoning_effort=None,
-            temperature=temperature,
-        )
-    ]
+    raise ValueError(f"Unsupported matrix feature: {feature}")
 
 
 def _record_matrix_run(

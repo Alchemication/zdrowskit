@@ -609,6 +609,8 @@ def render_leaderboard_html(runs: list[dict[str, Any]]) -> str:
                       <th>Passed</th>
                       <th>Failed</th>
                       <th>Routes</th>
+                      <th>Params</th>
+                      <th>Checks</th>
                       <th>Avg Latency</th>
                       <th>p95 Latency</th>
                       <th>Total Cost</th>
@@ -719,6 +721,8 @@ def render_leaderboard_html(runs: list[dict[str, Any]]) -> str:
             row.requested_model,
             row.model_display,
             row.reasoning_effort || "none",
+            row.route_param_text,
+            row.assertion_text,
             row.git_sha_short,
             row.failed_cases.join(" "),
           ].join(" ").toLowerCase();
@@ -753,7 +757,7 @@ def render_leaderboard_html(runs: list[dict[str, Any]]) -> str:
         els.body.innerHTML = "";
         if (!rows.length) {{
           const tr = document.createElement("tr");
-          tr.innerHTML = `<td colspan="11" class="muted">No runs match the current filters.</td>`;
+          tr.innerHTML = `<td colspan="13" class="muted">No runs match the current filters.</td>`;
           els.body.appendChild(tr);
           return;
         }}
@@ -776,6 +780,8 @@ def render_leaderboard_html(runs: list[dict[str, Any]]) -> str:
             <td>${{row.summary.passed}}</td>
             <td>${{row.summary.failed}}</td>
             <td class="failed-cases">${{row.routes || "—"}}</td>
+            <td class="failed-cases">${{routeParamHtml(row)}}</td>
+            <td class="failed-cases">${{assertionSummaryHtml(row)}}</td>
             <td>${{fmtSeconds(row.summary.avg_latency_s)}}</td>
             <td>${{fmtSeconds(row.summary.p95_latency_s)}}</td>
             <td>${{fmtCost(row.summary.total_cost)}}</td>
@@ -785,6 +791,43 @@ def render_leaderboard_html(runs: list[dict[str, Any]]) -> str:
           `;
           els.body.appendChild(tr);
         }}
+      }}
+
+      function routeParamHtml(row) {{
+        if (!row.route_params.length) return "—";
+        return row.route_params.map((route) => {{
+          const label = [route.feature, route.kind].filter(Boolean).join("/");
+          const fallback = route.fallback_models.length ? `fallback=${{route.fallback_models.join(",")}}` : "fallback=none";
+          return `
+            <div class="model-cell">
+              <strong>${{escapeHtml(label || "route")}}</strong>
+              <span class="muted">${{escapeHtml(route.model)}} · reasoning=${{escapeHtml(route.reasoning_effort)}} · temp=${{escapeHtml(route.temperature)}} · ${{escapeHtml(fallback)}} · ${{escapeHtml(route.source)}}</span>
+            </div>
+          `;
+        }}).join("");
+      }}
+
+      function escapeHtml(value) {{
+        return String(value)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#039;");
+      }}
+
+      function assertionSummaryHtml(row) {{
+        const checks = row.assertion_summary;
+        return `
+          <div class="model-cell">
+            <strong>det ${{checks.deterministic.passed}}/${{checks.deterministic.total}}</strong>
+            <span class="muted">${{checks.deterministic.failed}} failed</span>
+          </div>
+          <div class="model-cell">
+            <strong>judge ${{checks.judge.passed}}/${{checks.judge.total}}</strong>
+            <span class="muted">${{checks.judge.failed}} failed</span>
+          </div>
+        `;
       }}
 
       function renderScopeMeta(section) {{
@@ -1029,6 +1072,10 @@ def _build_case_result(result: EvalResult) -> dict[str, Any]:
         "route": result.route,
         "passed": result.passed,
         "failure_names": [failure.name for failure in result.failures],
+        "assertions": [
+            {"name": assertion.name, "passed": assertion.passed, "kind": assertion.kind}
+            for assertion in result.assertions
+        ],
         "error": result.error,
         "latency_s": execution.latency_s if execution is not None else None,
         "cost": execution.cost if execution is not None else None,
@@ -1227,6 +1274,8 @@ def _build_html_payload(runs: list[dict[str, Any]]) -> dict[str, Any]:
 
 def _run_for_html(run: dict[str, Any]) -> dict[str, Any]:
     """Normalize one recorded run for the HTML client."""
+    route_params = _route_params_for_html(run)
+    assertion_summary = _assertion_summary_for_run(run)
     return {
         "run_id": run["run_id"],
         "created_at": run["created_at"],
@@ -1236,6 +1285,10 @@ def _run_for_html(run: dict[str, Any]) -> dict[str, Any]:
         "reasoning_effort": run.get("reasoning_effort"),
         "feature_summary": run["feature_summary"],
         "routes": _format_run_routes(run),
+        "route_params": route_params,
+        "route_param_text": _route_param_text(route_params),
+        "assertion_summary": assertion_summary,
+        "assertion_text": _assertion_text(assertion_summary),
         "summary": run["summary"],
         "git_sha_short": str(run.get("git_sha", "unknown"))[:7],
         "dirty": bool(run.get("dirty", False)),
@@ -1244,6 +1297,86 @@ def _run_for_html(run: dict[str, Any]) -> dict[str, Any]:
             str(case["case_id"]) for case in run["per_case"] if not bool(case["passed"])
         ],
     }
+
+
+def _assertion_summary_for_run(run: dict[str, Any]) -> dict[str, dict[str, int]]:
+    """Return deterministic and judge assertion pass/fail counts."""
+    summary = {
+        "deterministic": {"total": 0, "passed": 0, "failed": 0},
+        "judge": {"total": 0, "passed": 0, "failed": 0},
+    }
+    for case in run["per_case"]:
+        for assertion in case["assertions"]:
+            kind = "judge" if assertion["kind"] == "judge" else "deterministic"
+            summary[kind]["total"] += 1
+            if assertion["passed"]:
+                summary[kind]["passed"] += 1
+            else:
+                summary[kind]["failed"] += 1
+    return summary
+
+
+def _assertion_text(summary: dict[str, dict[str, int]]) -> str:
+    """Return searchable assertion summary text."""
+    deterministic = summary["deterministic"]
+    judge = summary["judge"]
+    return (
+        "deterministic "
+        f"passed={deterministic['passed']} failed={deterministic['failed']} "
+        f"total={deterministic['total']} judge passed={judge['passed']} "
+        f"failed={judge['failed']} total={judge['total']}"
+    )
+
+
+def _route_params_for_html(run: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return unique route parameter rows for a recorded run."""
+    seen: set[str] = set()
+    rows: list[dict[str, Any]] = []
+    for case in run["per_case"]:
+        route = case["route"]
+        row = {
+            "feature": str(route["feature"]),
+            "kind": str(route.get("kind", "")),
+            "model": str(route["primary"]),
+            "reasoning_effort": _display_reasoning_effort(
+                route.get("reasoning_effort")
+            ),
+            "temperature": _display_temperature(route.get("temperature")),
+            "fallback_models": [str(model) for model in route["fallback_models"]],
+            "source": str(route["source"]),
+        }
+        key = json.dumps(row, sort_keys=True)
+        if key in seen:
+            continue
+        seen.add(key)
+        rows.append(row)
+    return rows
+
+
+def _route_param_text(route_params: list[dict[str, Any]]) -> str:
+    """Return a searchable text summary of route parameters."""
+    parts: list[str] = []
+    for route in route_params:
+        fallback = ",".join(route["fallback_models"]) or "none"
+        parts.append(
+            " ".join(
+                [
+                    str(route["feature"]),
+                    str(route["kind"]),
+                    str(route["model"]),
+                    f"reasoning={route['reasoning_effort']}",
+                    f"temp={route['temperature']}",
+                    f"fallback={fallback}",
+                    str(route["source"]),
+                ]
+            )
+        )
+    return " | ".join(parts)
+
+
+def _display_temperature(value: Any) -> str:
+    """Render an eval route temperature value."""
+    return "omit" if value is None else str(value)
 
 
 def _git_output(command: list[str], cwd: Path) -> str | None:

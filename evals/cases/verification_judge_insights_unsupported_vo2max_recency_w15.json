@@ -1,6 +1,6 @@
 {
-  "id": "insights_verify_unsupported_vo2max_recency_w15",
-  "feature": "insights_verify",
+  "id": "verification_judge_insights_unsupported_vo2max_recency_w15",
+  "feature": "verification_judge",
   "case_kind": "real_regression",
   "source_feedback_id": 38,
   "source_llm_call_id": 780,

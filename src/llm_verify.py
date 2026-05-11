@@ -85,7 +85,7 @@ class VerificationIssue(BaseModel):
         return stripped or None
 
 
-class _VerifierPayload(BaseModel):
+class VerifierPayload(BaseModel):
     """Strict verifier payload as produced by the LLM (no pipeline state)."""
 
     verdict: Verdict = Field(
@@ -103,7 +103,7 @@ class _VerifierPayload(BaseModel):
     )
 
     @model_validator(mode="after")
-    def _coerce_pass_with_issues(self) -> _VerifierPayload:
+    def _coerce_pass_with_issues(self) -> VerifierPayload:
         # Verifier sometimes reports 'pass' while still listing issues.
         # Treat that as 'revise' so the rewriter is invoked.
         if self.verdict == "pass" and self.issues:
@@ -294,7 +294,7 @@ def parse_verification_result(text: str) -> VerificationResult:
     """
     candidate = strip_json_fences(text)
     try:
-        payload = _VerifierPayload.model_validate_json(candidate)
+        payload = VerifierPayload.model_validate_json(candidate)
     except ValidationError as exc:
         raise ValueError(f"verifier payload failed validation: {exc}") from exc
     return VerificationResult(
@@ -512,7 +512,7 @@ def deterministic_verification_issues(
     return issues
 
 
-def _messages_for_verifier(
+def messages_for_verifier(
     *,
     kind: VerificationKind,
     draft: str,
@@ -709,7 +709,7 @@ def verify_and_rewrite(
         )
         return result
 
-    verifier_messages = _messages_for_verifier(
+    verifier_messages = messages_for_verifier(
         kind=kind,
         draft=draft,
         evidence=evidence,
@@ -724,7 +724,7 @@ def verify_and_rewrite(
             max_tokens=MAX_TOKENS_VERIFICATION,
             temperature=temperature,
             reasoning_effort=reasoning_effort,
-            response_format=_VerifierPayload,
+            response_format=VerifierPayload,
             fallback_models=fallback_models,
             conn=conn,
             request_type=f"{kind}_verify",
@@ -753,7 +753,7 @@ def verify_and_rewrite(
                     max_tokens=MAX_TOKENS_VERIFICATION,
                     temperature=temperature,
                     reasoning_effort=reasoning_effort,
-                    response_format=_VerifierPayload,
+                    response_format=VerifierPayload,
                     fallback_models=remaining_fallbacks[1:] or None,
                     conn=conn,
                     request_type=f"{kind}_verify",

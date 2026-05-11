@@ -58,13 +58,13 @@ Some models reject a `temperature` parameter (for example `claude-opus-4-7`). Fo
 ## Supported features
 
 - `chat` — exercises the full chat tool loop end-to-end, taking the model from `--model`.
-- `nudge_verify` and `insights_verify` — exercise the production verifier path (`verify_and_rewrite` with the rewriter disabled) for nudges and weekly insights respectively. Both run through the same `evals/run_verify.py` runner; the surface (`nudge` / `insights`) is taken from `fixture.kind`. Models and the Pydantic response schema are resolved by the production path at runtime. Override the verifier model via `ZDROWSKIT_VERIFICATION_MODEL` or change its `reasoning_effort` through `main.py models` to A/B verifier behavior (on DeepSeek, `high`/`max` engage thinking via call_llm's translation).
+- `verification_judge` — exercises only the verifier prompt and structured response schema. The surface (`nudge`, `insights`, or `coach`) comes from `fixture.kind`. It does not call `verify_and_rewrite`, resolve `model_prefs`, write DB rows, or invoke rewrites.
 
 ## Model Matrices
 
 Use `evals.run` for one smoke run and `evals.matrix` for comparisons.
 
-Chat is the only current feature where `--model` directly changes the evaluated production path:
+Direct LLM features take `--models` from the matrix runner:
 
 ```bash
 uv run python -m evals.matrix \
@@ -75,14 +75,18 @@ uv run python -m evals.matrix \
   --record
 ```
 
-Verifier features resolve `model_prefs` at runtime. To compare verifier models, change the `verification` route with `uv run python main.py models`, then run:
+Verifier judgement uses the same model-matrix shape:
 
 ```bash
-uv run python -m evals.matrix --feature nudge_verify --record
-uv run python -m evals.matrix --feature insights_verify --record
+uv run python -m evals.matrix \
+  --feature verification_judge \
+  --models deepseek/deepseek-v4-pro,anthropic/claude-sonnet-4-6 \
+  --reasoning-efforts high \
+  --no-temperature \
+  --record
 ```
 
-Recorded runs now store both the requested CLI model and the actual per-case route. Mixed all-case runs are useful as production smoke checks, but model decisions should be made from feature-scoped sections because verifier cases do not use the chat `--model`.
+Recorded runs store both the requested CLI model and the actual per-case route. Mixed all-case runs are useful as smoke checks, but model decisions should be made from feature-scoped sections.
 
 ## Leaderboard
 

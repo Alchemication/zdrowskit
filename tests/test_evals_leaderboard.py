@@ -147,15 +147,16 @@ class TestRecording:
         verifier = _eval_result(
             "case-verify",
             passed=False,
-            feature="nudge_verify",
+            feature="verification_judge",
             model="deepseek/verifier",
             route={
-                "feature": "nudge_verify",
+                "feature": "verification_judge",
+                "kind": "nudge",
                 "primary": "deepseek/verifier",
-                "fallback_models": ["anthropic/fallback"],
+                "fallback_models": [],
                 "reasoning_effort": "high",
                 "temperature": None,
-                "source": "model_prefs:verification",
+                "source": "eval_cli",
             },
         )
 
@@ -171,7 +172,7 @@ class TestRecording:
         assert record["requested_model"] == "deepseek/chat"
         assert record["route_set_id"]
         assert record["feature_summary"]["chat"]["passed"] == 1
-        assert record["feature_summary"]["nudge_verify"]["failed"] == 1
+        assert record["feature_summary"]["verification_judge"]["failed"] == 1
         assert record["per_case"][1]["route"]["primary"] == "deepseek/verifier"
 
     def test_record_run_skips_duplicate_by_default(self, tmp_path: Path) -> None:
@@ -375,6 +376,13 @@ class TestRendering:
         assert "reasoning-filter" in html
         assert "latest-only" in html
         assert "failed-only" in html
+        assert "Params" in html
+        assert "Checks" in html
+        assert "route_params" in html
+        assert "reasoning=medium" in html
+        assert "temp=omit" in html
+        assert "assertion_summary" in html
+        assert "deterministic passed" in html
         assert "leaderboard-data" in html
         assert "model-a" in html
         assert "case-a" in html
@@ -571,14 +579,22 @@ class TestMatrix:
             for run in runs
         )
 
-    def test_build_matrix_rejects_multiple_models_for_verifier_feature(self) -> None:
-        with pytest.raises(ValueError, match="production model_prefs"):
-            eval_matrix.build_matrix_runs(
-                load_cases(),
-                feature="nudge_verify",
-                production=False,
-                case_ids=None,
-                models=["model-a", "model-b"],
-                reasoning_efforts=["none"],
-                temperature=None,
-            )
+    def test_build_matrix_expands_verification_judge_models(self) -> None:
+        runs = eval_matrix.build_matrix_runs(
+            load_cases(),
+            feature="verification_judge",
+            production=False,
+            case_ids=["verification_judge_nudge_hrv_direction_reversal"],
+            models=["model-a", "model-b"],
+            reasoning_efforts=["none", "high"],
+            temperature=None,
+        )
+
+        assert len(runs) == 4
+        assert {run.model for run in runs} == {"model-a", "model-b"}
+        assert {run.reasoning_effort for run in runs} == {None, "high"}
+        assert all(
+            [case.id for case in run.cases]
+            == ["verification_judge_nudge_hrv_direction_reversal"]
+            for run in runs
+        )

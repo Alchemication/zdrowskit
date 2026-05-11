@@ -1,21 +1,15 @@
-"""Runner for verifier eval cases (``nudge_verify``, ``insights_verify``).
+"""Runner for direct verifier-judgement eval cases.
 
-Exercises the production verifier path (``verify_and_rewrite`` with the
-rewriter disabled) against a fixture captured from a real verifier call.
-Models, fallback, reasoning, temperature, and the structured response schema
-are resolved through the same model route used by production. Change the
-verifier route's ``reasoning_effort`` via ``main.py models`` to A/B DeepSeek
-thinking behavior. The runner is feature-agnostic: the surface (insights /
-coach / nudge) comes from ``fixture.kind`` and the eval feature name is used
-only to namespace the eval cache.
+Exercises the verifier prompt/schema only. It intentionally does not call the
+full ``verify_and_rewrite`` pipeline, resolve ``model_prefs``, write DB rows, or
+invoke the bounded rewriter. Model comparisons therefore behave like chat evals:
+the requested eval model is the model under test.
 """
 
 from __future__ import annotations
 
 import json
 import sys
-import tempfile
-import time
 from pathlib import Path
 from typing import Any
 
@@ -23,26 +17,28 @@ _SRC = Path(__file__).resolve().parent.parent / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from llm import LLMResult, call_llm  # noqa: E402
-from llm_verify import VerificationResult, verify_and_rewrite  # noqa: E402
-from model_prefs import resolve_model_route  # noqa: E402
-from store import connect_db  # noqa: E402
+from config import MAX_TOKENS_VERIFICATION  # noqa: E402
+from llm_verify import (  # noqa: E402
+    VerifierPayload,
+    messages_for_verifier,
+    parse_verification_result,
+)
 
 
-def run_verify_case(
+def run_verification_judge_case(
     case: Any,
     *,
+    model: str,
+    reasoning_effort: str | None,
+    temperature: float | None,
     cache: Any = None,
     refresh_cache: bool = False,
 ) -> tuple[Any, str, dict[str, Any]]:
-    """Run one verifier eval case and return its execution + model label.
-
-    The verifier surface (``insights`` / ``coach`` / ``nudge``) is taken from
-    ``fixture.kind``; ``case.feature`` (e.g. ``insights_verify``) is used only
-    to namespace the eval cache so cases targeting different surfaces never
-    collide on a cached response.
-    """
-    from evals.framework import EvalExecution  # local import to avoid cycle
+    """Run one verifier judgement case and return execution, model, and route."""
+    from evals.framework import (  # local import to avoid cycle
+        EvalExecution,
+        _call_llm_for_eval,
+    )
 
     fixture = case.fixture
     kind = str(fixture.get("kind", "nudge"))
@@ -50,157 +46,65 @@ def run_verify_case(
     evidence = dict(fixture["evidence"])
     source_messages = list(fixture["source_messages"])
     metadata = dict(fixture.get("metadata", {}))
-    # Drop source_llm_call_id: the temp DB has no source row, so any FK-bound
-    # event/metadata write that references it will fail. The verifier itself
-    # does not need it to produce a verdict.
-    metadata.pop("source_llm_call_id", None)
     metadata.setdefault("eval_case_id", case.id)
     metadata.setdefault("source_feedback_id", case.source_feedback_id)
 
-    started = time.perf_counter()
-    wrapper = _CachingCallLLM(
-        feature=str(case.feature),
+    messages = messages_for_verifier(
+        kind=kind,
+        draft=draft,
+        evidence=evidence,
+        source_messages=source_messages,
+        metadata=metadata,
+    )
+    llm_result, cache_hit = _call_llm_for_eval(
+        messages=messages,
+        model=model,
+        max_tokens=MAX_TOKENS_VERIFICATION,
+        reasoning_effort=reasoning_effort,
+        temperature=temperature,
+        tools=None,
+        response_format=VerifierPayload,
+        fallback_models=[],
+        metadata={
+            "eval_case_id": case.id,
+            "source_feedback_id": case.source_feedback_id,
+            "stage": "verification_judge",
+            "kind": kind,
+        },
         cache=cache,
         refresh_cache=refresh_cache,
     )
-    verifier_route = resolve_model_route("verification")
-    rewrite_route = resolve_model_route("verification_rewrite")
-    fallback_models = [verifier_route.fallback] if verifier_route.fallback else []
-    with tempfile.TemporaryDirectory() as tmp:
-        conn = connect_db(Path(tmp) / "eval.db", migrate=True)
-        try:
-            result: VerificationResult = verify_and_rewrite(
-                kind=kind,
-                draft=draft,
-                evidence=evidence,
-                source_messages=source_messages,
-                conn=conn,
-                metadata=metadata,
-                model=verifier_route.primary,
-                rewrite_model=rewrite_route.primary,
-                fallback_models=fallback_models or None,
-                temperature=verifier_route.temperature,
-                reasoning_effort=verifier_route.reasoning_effort,
-                rewrite_temperature=rewrite_route.temperature,
-                rewrite_reasoning_effort=rewrite_route.reasoning_effort,
-                max_revisions=0,
-                strict=False,
-                _call_llm=wrapper,
-            )
-            payload = {
-                "verdict": result.verdict,
-                "confidence": result.confidence,
-                "issues": [issue.model_dump() for issue in result.issues],
-                "verifier_call_id": result.verifier_call_id,
-            }
-            text = json.dumps(payload, ensure_ascii=False, indent=2)
-        finally:
-            conn.close()
-
+    parsed = parse_verification_result(llm_result.text)
+    text = json.dumps(
+        {
+            "verdict": parsed.verdict,
+            "confidence": parsed.confidence,
+            "issues": [issue.model_dump() for issue in parsed.issues],
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
     return (
         EvalExecution(
             text=text,
             tool_calls=[],
-            messages=[],
-            input_tokens=wrapper.input_tokens,
-            output_tokens=wrapper.output_tokens,
-            total_tokens=wrapper.total_tokens,
-            latency_s=time.perf_counter() - started,
-            cost=wrapper.cost,
-            cache_hits=wrapper.hits,
-            cache_misses=wrapper.misses,
+            messages=messages,
+            input_tokens=int(getattr(llm_result, "input_tokens", 0) or 0),
+            output_tokens=int(getattr(llm_result, "output_tokens", 0) or 0),
+            total_tokens=int(getattr(llm_result, "total_tokens", 0) or 0),
+            latency_s=float(getattr(llm_result, "latency_s", 0.0) or 0.0),
+            cost=getattr(llm_result, "cost", None),
+            cache_hits=1 if cache_hit else 0,
+            cache_misses=0 if cache_hit else 1,
         ),
-        verifier_route.primary,
+        model,
         {
             "feature": str(case.feature),
             "kind": kind,
-            "primary": verifier_route.primary,
-            "fallback_models": fallback_models,
-            "reasoning_effort": verifier_route.reasoning_effort,
-            "temperature": verifier_route.temperature,
-            "rewrite_primary": rewrite_route.primary,
-            "rewrite_fallback_models": (
-                [rewrite_route.fallback] if rewrite_route.fallback else []
-            ),
-            "rewrite_reasoning_effort": rewrite_route.reasoning_effort,
-            "rewrite_temperature": rewrite_route.temperature,
-            "source": "model_prefs:verification",
+            "primary": model,
+            "fallback_models": [],
+            "reasoning_effort": reasoning_effort,
+            "temperature": temperature,
+            "source": "eval_cli",
         },
     )
-
-
-class _CachingCallLLM:
-    """``call_llm`` wrapper that consults an eval cache and accumulates stats.
-
-    Used as a dependency-injected seam (``verify_and_rewrite(_call_llm=...)``)
-    so eval runs can reuse verifier responses across runs without monkey-
-    patching the production ``call_llm`` import.
-    """
-
-    def __init__(self, *, feature: str, cache: Any, refresh_cache: bool) -> None:
-        self._feature = feature
-        self._cache = cache
-        self._refresh_cache = refresh_cache
-        self.hits = 0
-        self.misses = 0
-        self.input_tokens = 0
-        self.output_tokens = 0
-        self.total_tokens = 0
-        self.cost: float | None = None
-
-    def __call__(
-        self,
-        messages: list[dict[str, Any]],
-        **kwargs: Any,
-    ) -> LLMResult:
-        if self._cache is None:
-            result = call_llm(messages, **kwargs)
-            self._record(result)
-            return result
-
-        request = self._cache_request(self._feature, messages, kwargs)
-        if not self._refresh_cache:
-            cached = self._cache.get(request)
-            if cached is not None:
-                self.hits += 1
-                self._record(cached)
-                return cached
-
-        self.misses += 1
-        result = call_llm(messages, **kwargs)
-        self._cache.put(request, result)
-        self._record(result)
-        return result
-
-    def _record(self, result: LLMResult) -> None:
-        self.input_tokens += int(getattr(result, "input_tokens", 0) or 0)
-        self.output_tokens += int(getattr(result, "output_tokens", 0) or 0)
-        self.total_tokens += int(getattr(result, "total_tokens", 0) or 0)
-        result_cost = getattr(result, "cost", None)
-        if result_cost is not None:
-            self.cost = (self.cost or 0.0) + float(result_cost)
-
-    @staticmethod
-    def _cache_request(
-        feature: str,
-        messages: list[dict[str, Any]],
-        kwargs: dict[str, Any],
-    ) -> dict[str, Any]:
-        from evals.framework import (
-            EVAL_CACHE_SCHEMA_VERSION,
-            _response_format_cache_key,
-        )
-
-        return {
-            "cache_schema_version": EVAL_CACHE_SCHEMA_VERSION,
-            "runner": feature,
-            "model": kwargs.get("model"),
-            "messages": messages,
-            "max_tokens": kwargs.get("max_tokens"),
-            "temperature": kwargs.get("temperature"),
-            "response_format": _response_format_cache_key(
-                kwargs.get("response_format")
-            ),
-            "reasoning_effort": kwargs.get("reasoning_effort"),
-            "fallback_models": kwargs.get("fallback_models"),
-        }
