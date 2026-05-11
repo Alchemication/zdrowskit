@@ -528,6 +528,7 @@ def verify_and_rewrite(
     source_messages: list[dict[str, Any]],
     conn: sqlite3.Connection,
     metadata: dict[str, Any],
+    trace_id: int | None = None,
     model: str = VERIFICATION_MODEL,
     rewrite_model: str = VERIFICATION_REWRITE_MODEL,
     fallback_models: list[str] | None = None,
@@ -548,6 +549,7 @@ def verify_and_rewrite(
         source_messages: Slim source payload (system + user + final draft).
         conn: Open DB connection for LLM logging.
         metadata: Product metadata to store with verifier/rewrite calls.
+        trace_id: Optional llm_trace row grouping related LLM calls.
         model: Verifier model.
         rewrite_model: Bounded rewriter model.
         fallback_models: Optional explicit verifier fallback chain.
@@ -612,6 +614,7 @@ def verify_and_rewrite(
             conn=conn,
             request_type=f"{kind}_verify",
             metadata={**metadata, "stage": "verify"},
+            trace_id=trace_id,
         )
         verifier_call_id = verifier_result.llm_call_id
         if not verifier_result.text.strip():
@@ -640,6 +643,7 @@ def verify_and_rewrite(
                     conn=conn,
                     request_type=f"{kind}_verify",
                     metadata={**metadata, "stage": "verify"},
+                    trace_id=trace_id,
                 )
                 verifier_call_id = verifier_result.llm_call_id
             if not verifier_result.text.strip():
@@ -764,6 +768,7 @@ def verify_and_rewrite(
                 **_issue_counts(parsed.issues),
                 "issues": _issues_for_metadata(parsed.issues),
             },
+            trace_id=trace_id,
         )
     except Exception as exc:
         logger.warning("%s rewrite failed closed: %s", kind, exc)

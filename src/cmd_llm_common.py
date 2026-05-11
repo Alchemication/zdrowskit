@@ -106,6 +106,7 @@ def apply_verification(
     source_messages: list[dict[str, Any]],
     conn: sqlite3.Connection,
     metadata: dict[str, Any],
+    trace_id: int | None = None,
     strict: bool = False,
 ) -> str | None:
     """Run verifier/rewrite and return the approved text, or None on fail.
@@ -126,6 +127,7 @@ def apply_verification(
         source_messages=source_messages,
         conn=conn,
         metadata=metadata,
+        trace_id=trace_id,
         model=verifier_route.primary,
         rewrite_model=rewrite_route.primary,
         fallback_models=[verifier_route.fallback] if verifier_route.fallback else None,

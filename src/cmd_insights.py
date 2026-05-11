@@ -32,7 +32,7 @@ from llm_health import build_llm_data, build_review_facts, render_health_data
 from llm_verify import extract_tool_evidence, slim_source_messages
 from milestones import compute_milestones
 from notify import send_telegram_report
-from store import open_db
+from store import create_llm_trace, open_db
 
 logger = logging.getLogger(__name__)
 
@@ -240,6 +240,12 @@ def cmd_insights(
         logger.error("Failed to render insights_prompt.md template: %s", e)
         sys.exit(1)
 
+    trace_id = create_llm_trace(
+        conn,
+        "insights",
+        metadata={"week": args.week, "months": args.months},
+    )
+
     from tools import execute_run_sql, run_sql_tool
 
     tools = run_sql_tool()
@@ -267,6 +273,7 @@ def cmd_insights(
                 fallback_models=fallback_models,
                 conn=conn,
                 request_type="insights",
+                trace_id=trace_id,
                 metadata={
                     "week": args.week,
                     "months": args.months,
@@ -347,6 +354,7 @@ def cmd_insights(
                     fallback_models=fallback_models,
                     conn=conn,
                     request_type="insights",
+                    trace_id=trace_id,
                     metadata={
                         "week": args.week,
                         "months": args.months,
@@ -393,6 +401,7 @@ def cmd_insights(
                 fallback_models=fallback_models,
                 conn=conn,
                 request_type="insights",
+                trace_id=trace_id,
                 metadata={
                     "week": args.week,
                     "months": args.months,
@@ -435,6 +444,7 @@ def cmd_insights(
             "months": args.months,
             "week_label": week_label,
         },
+        trace_id=trace_id,
     )
     if verified_text is None:
         logger.error("Insights verification failed; refusing to save/send report")

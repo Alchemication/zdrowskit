@@ -202,6 +202,91 @@ def _load_related_verification_calls(conn, target_row) -> list[dict[str, object]
     return related
 
 
+def _load_llm_trace(conn, trace_id: int) -> dict[str, object] | None:
+    """Load one LLM trace row."""
+    row = conn.execute("SELECT * FROM llm_trace WHERE id = ?", (trace_id,)).fetchone()
+    if row is None:
+        return None
+    return {
+        "id": row["id"],
+        "started_at": row["started_at"],
+        "surface": row["surface"],
+        "metadata": _parse_metadata(row["metadata_json"]),
+    }
+
+
+def _load_trace_calls(
+    conn,
+    trace_id: int,
+    selected_call_id: int | None = None,
+) -> list[dict[str, object]]:
+    """Load all LLM calls in a trace, ordered by execution."""
+    rows = conn.execute(
+        """
+        SELECT id, timestamp, request_type, model, input_tokens, output_tokens,
+               total_tokens, latency_s, cost, metadata_json
+        FROM llm_call
+        WHERE trace_id = ?
+        ORDER BY timestamp ASC, id ASC
+        """,
+        (trace_id,),
+    ).fetchall()
+
+    calls: list[dict[str, object]] = []
+    for row in rows:
+        metadata = _parse_metadata(row["metadata_json"])
+        calls.append(
+            {
+                "id": row["id"],
+                "timestamp": row["timestamp"],
+                "request_type": row["request_type"],
+                "model": row["model"],
+                "input_tokens": row["input_tokens"],
+                "output_tokens": row["output_tokens"],
+                "total_tokens": row["total_tokens"],
+                "latency_s": row["latency_s"],
+                "cost": row["cost"],
+                "metadata": metadata,
+                "selected": row["id"] == selected_call_id,
+            }
+        )
+    return calls
+
+
+def _print_trace_calls_table(console, title: str, trace_calls: list[dict]) -> None:
+    """Print a compact table for calls belonging to the same trace."""
+    from rich.table import Table
+
+    table = Table(title=title, show_lines=False)
+    table.add_column("ID", justify="right", style="dim")
+    table.add_column("When")
+    table.add_column("Type", style="cyan")
+    table.add_column("Stage")
+    table.add_column("Iteration")
+    table.add_column("Model", style="dim")
+    table.add_column("Latency", justify="right")
+    table.add_column("Cost", justify="right", style="green")
+    for call in trace_calls:
+        metadata = call["metadata"]
+        assert isinstance(metadata, dict)
+        marker = ">" if call.get("selected") else ""
+        stage = metadata.get("stage")
+        iteration = metadata.get("iteration")
+        cost = call["cost"]
+        table.add_row(
+            f"{marker}{call['id']}",
+            str(call["timestamp"])[:19],
+            str(call["request_type"]),
+            str(stage) if stage is not None else "—",
+            str(iteration) if iteration is not None else "—",
+            str(call["model"]).split("/")[-1],
+            f"{float(call['latency_s']):.1f}s",
+            f"${float(cost):.4f}" if cost is not None else "—",
+            style="bold green" if call.get("selected") else "",
+        )
+    console.print(table)
+
+
 # ---------------------------------------------------------------------------
 # Subcommand handler
 # ---------------------------------------------------------------------------
@@ -214,13 +299,45 @@ def cmd_llm_log(args: argparse.Namespace) -> None:
       default   — list recent calls with summary info (last N, default 10).
       --stats   — aggregate usage summary by request type and model.
       --id N    — show full detail for a specific call.
+      --trace N — show all calls in one correlated trace.
       --feedback — list recent thumbs-down feedback joined to LLM calls.
 
     Args:
-        args: Parsed CLI arguments with db, last, stats, id, feedback,
+        args: Parsed CLI arguments with db, last, stats, id, trace, feedback,
             and json attributes.
     """
     conn = open_db(Path(args.db))
+
+    # --- Trace mode ---
+    if getattr(args, "trace", None):
+        trace = _load_llm_trace(conn, args.trace)
+        if trace is None:
+            print(f"No LLM trace found with id={args.trace}")
+            sys.exit(1)
+        trace_calls = _load_trace_calls(conn, args.trace)
+        if args.json:
+            print(json.dumps({"trace": trace, "calls": trace_calls}, indent=2))
+            return
+
+        from rich.console import Console
+        from rich.table import Table
+
+        console = Console()
+        trace_table = Table(title=f"LLM Trace #{trace['id']}", show_lines=False)
+        trace_table.add_column("Field", style="cyan")
+        trace_table.add_column("Value")
+        trace_table.add_row("Started", str(trace["started_at"]))
+        trace_table.add_row("Surface", str(trace["surface"]))
+        metadata = trace["metadata"]
+        if metadata:
+            trace_table.add_row("Metadata", json.dumps(metadata, sort_keys=True))
+        console.print(trace_table)
+        _print_trace_calls_table(
+            console,
+            f"Trace Calls ({len(trace_calls)})",
+            trace_calls,
+        )
+        return
 
     # --- Detail mode ---
     if args.id:
@@ -233,6 +350,13 @@ def cmd_llm_log(args: argparse.Namespace) -> None:
         transcript = _normalize_llm_log_transcript(messages, row["response_text"])
         nearby_calls = _load_nearby_llm_calls(conn, row)
         related_verification_calls = _load_related_verification_calls(conn, row)
+        trace_id = row["trace_id"]
+        trace = _load_llm_trace(conn, trace_id) if trace_id is not None else None
+        trace_calls = (
+            _load_trace_calls(conn, trace_id, selected_call_id=row["id"])
+            if trace_id is not None
+            else []
+        )
 
         if args.json:
             detail = {k: row[k] for k in row.keys()}
@@ -240,6 +364,8 @@ def cmd_llm_log(args: argparse.Namespace) -> None:
             detail["transcript"] = transcript
             detail["nearby_calls"] = nearby_calls
             detail["related_verification_calls"] = related_verification_calls
+            detail["trace"] = trace
+            detail["trace_calls"] = trace_calls
             print(json.dumps(detail, indent=2))
             return
 
@@ -255,6 +381,8 @@ def cmd_llm_log(args: argparse.Namespace) -> None:
         meta_table.add_row("Timestamp", row["timestamp"])
         meta_table.add_row("Request type", row["request_type"])
         meta_table.add_row("Model", row["model"])
+        if row["trace_id"] is not None:
+            meta_table.add_row("Trace", str(row["trace_id"]))
         meta_table.add_row("Input tokens", f"{row['input_tokens']:,}")
         meta_table.add_row("Output tokens", f"{row['output_tokens']:,}")
         meta_table.add_row("Total tokens", f"{row['total_tokens']:,}")
@@ -270,7 +398,14 @@ def cmd_llm_log(args: argparse.Namespace) -> None:
             meta_table.add_row("Metadata", row["metadata_json"])
         console.print(meta_table)
 
-        if nearby_calls:
+        if trace is not None and trace_calls:
+            _print_trace_calls_table(
+                console,
+                f"Trace #{trace['id']} ({trace['surface']})",
+                trace_calls,
+            )
+
+        if nearby_calls and not trace_calls:
             nearby_table = Table(
                 title="Nearby Calls (~2 min, same type)", show_lines=False
             )
@@ -296,7 +431,7 @@ def cmd_llm_log(args: argparse.Namespace) -> None:
                 )
             console.print(nearby_table)
 
-        if len(related_verification_calls) > 1:
+        if len(related_verification_calls) > 1 and not trace_calls:
             related_table = Table(title="Related Verification Trace", show_lines=False)
             related_table.add_column("ID", justify="right", style="dim")
             related_table.add_column("Stage", style="cyan")
@@ -519,6 +654,7 @@ def cmd_llm_log(args: argparse.Namespace) -> None:
             c.total_tokens,
             c.latency_s,
             c.cost,
+            c.trace_id,
             c.metadata_json,
             COUNT(f.id) AS feedback_count
         FROM llm_call AS c
@@ -527,7 +663,7 @@ def cmd_llm_log(args: argparse.Namespace) -> None:
         GROUP BY
             c.id, c.timestamp, c.request_type, c.model,
             c.input_tokens, c.output_tokens, c.total_tokens,
-            c.latency_s, c.cost, c.metadata_json
+            c.latency_s, c.cost, c.trace_id, c.metadata_json
         ORDER BY c.id DESC
         LIMIT ?
         """,
@@ -556,6 +692,7 @@ def cmd_llm_log(args: argparse.Namespace) -> None:
     table.add_column("Out tok", justify="right")
     table.add_column("Latency", justify="right")
     table.add_column("Cost", justify="right", style="green")
+    table.add_column("Trace", justify="right")
     table.add_column("Feedback", justify="right")
     table.add_column("Metadata", style="dim")
 
@@ -570,6 +707,7 @@ def cmd_llm_log(args: argparse.Namespace) -> None:
             f"{r['output_tokens']:,}",
             f"{r['latency_s']:.1f}s",
             f"${r['cost']:.4f}" if r["cost"] is not None else "—",
+            str(r["trace_id"] or ""),
             str(r["feedback_count"] or 0),
             meta,
         )

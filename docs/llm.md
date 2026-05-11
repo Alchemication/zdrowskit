@@ -132,6 +132,6 @@ ZDROWSKIT_VERIFY_COACH=1
 ZDROWSKIT_VERIFY_NUDGE=1
 ```
 
-Verification traces are logged as `insights_verify`, `insights_rewrite`, `coach_verify`, `coach_rewrite`, `nudge_verify`, and `nudge_rewrite`.
+Each product operation creates an `llm_trace` row. Related provider calls share the same trace: tool-loop iterations, final synthesis retries, verification, and rewrites. `uv run python main.py llm-log --id N` shows the selected call plus its trace; `uv run python main.py llm-log --trace N` shows the trace call list directly.
 
-The original source call metadata also records the verifier verdict, issue counts, issue details, and verifier/rewrite call IDs. Use `uv run python main.py llm-log --id N` on either the source call or a verifier call to see the related verification trace.
+Verification calls are logged as `insights_verify`, `insights_rewrite`, `coach_verify`, `coach_rewrite`, `nudge_verify`, and `nudge_rewrite`. The original source call metadata also records the verifier verdict, issue counts, issue details, and verifier/rewrite call IDs.

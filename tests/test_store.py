@@ -11,6 +11,7 @@ import pytest
 from db.migrations import apply_migrations, get_live_schema, list_migrations
 from models import DailySnapshot, WorkoutSnapshot, WorkoutSplit
 from store import (
+    create_llm_trace,
     connect_db,
     delete_feedback,
     default_db_path,
@@ -319,6 +320,32 @@ class TestLoadDateRange:
 
 
 class TestLogLlmCall:
+    def test_trace_links_related_calls(self, in_memory_db: sqlite3.Connection) -> None:
+        trace_id = create_llm_trace(
+            in_memory_db,
+            "chat",
+            metadata={"message_id": 123},
+        )
+        call_id = log_llm_call(
+            in_memory_db,
+            request_type="chat",
+            model="test-model",
+            messages=[{"role": "user", "content": "test"}],
+            response_text="response",
+            trace_id=trace_id,
+        )
+
+        trace = in_memory_db.execute(
+            "SELECT * FROM llm_trace WHERE id = ?", (trace_id,)
+        ).fetchone()
+        call = in_memory_db.execute(
+            "SELECT trace_id FROM llm_call WHERE id = ?", (call_id,)
+        ).fetchone()
+
+        assert trace["surface"] == "chat"
+        assert json.loads(trace["metadata_json"]) == {"message_id": 123}
+        assert call["trace_id"] == trace_id
+
     def test_inserts_record(self, in_memory_db: sqlite3.Connection) -> None:
         row_id = log_llm_call(
             in_memory_db,
@@ -416,7 +443,7 @@ class TestMigrations:
 
         applied = apply_migrations(conn)
 
-        assert len(applied) == 8
+        assert len(applied) == 9
         statuses = list_migrations(conn)
         assert all(status.status == "applied" for status in statuses)
         schema = get_live_schema(conn)
@@ -428,6 +455,7 @@ class TestMigrations:
         assert "CREATE TABLE manual_sleep" in schema
         assert "CREATE TABLE events" in schema
         assert "CREATE TABLE workout_split" in schema
+        assert "CREATE TABLE llm_trace" in schema
 
     def test_adopts_legacy_schema_and_applies_missing(self) -> None:
         conn = sqlite3.connect(":memory:")
@@ -508,6 +536,7 @@ class TestMigrations:
             r[1] for r in conn.execute("PRAGMA table_info(llm_call)").fetchall()
         }
         assert "cost" in llm_cols
+        assert "trace_id" in llm_cols
         daily_cols = {r[1] for r in conn.execute("PRAGMA table_info(daily)").fetchall()}
         assert "sleep_total_h" in daily_cols
         rows = conn.execute(

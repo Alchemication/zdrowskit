@@ -33,7 +33,7 @@ from config import (
     PRIMARY_FLASH_MODEL,
     PRIMARY_PRO_MODEL,
 )
-from store import log_llm_call
+from store import create_llm_trace, log_llm_call
 
 logger = logging.getLogger(__name__)
 
@@ -656,6 +656,7 @@ def call_llm(
     conn: sqlite3.Connection | None = None,
     request_type: str = "",
     metadata: dict | None = None,
+    trace_id: int | None = None,
 ) -> LLMResult:
     """Call the LLM via litellm and return the response with metadata.
 
@@ -679,6 +680,7 @@ def call_llm(
         conn: Open DB connection for logging. None to skip logging.
         request_type: Product-level call type, e.g. "insights" or "nudge".
         metadata: Product context dict stored alongside the call.
+        trace_id: Optional llm_trace row grouping related LLM calls.
 
     Returns:
         An LLMResult containing the response text and usage metadata.
@@ -739,24 +741,25 @@ def call_llm(
     )
 
     if conn and request_type:
-        logged_messages = _completion_kwargs_for_model(kwargs, model).get(
-            "messages", messages
-        )
-        params = _effective_params_for_model(
-            model=model,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            reasoning_effort=reasoning_effort,
-            response_format=response_format,
-            extra_body=extra_body,
-            requested_model=requested_model,
-        )
-        log_metadata = dict(metadata or {})
-        if requested_model != model:
-            log_metadata.setdefault("requested_model", requested_model)
-            log_metadata.setdefault("effective_model", model)
-            log_metadata.setdefault("fallback_used", True)
         try:
+            effective_trace_id = trace_id or create_llm_trace(conn, request_type)
+            logged_messages = _completion_kwargs_for_model(kwargs, model).get(
+                "messages", messages
+            )
+            params = _effective_params_for_model(
+                model=model,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                reasoning_effort=reasoning_effort,
+                response_format=response_format,
+                extra_body=extra_body,
+                requested_model=requested_model,
+            )
+            log_metadata = dict(metadata or {})
+            if requested_model != model:
+                log_metadata.setdefault("requested_model", requested_model)
+                log_metadata.setdefault("effective_model", model)
+                log_metadata.setdefault("fallback_used", True)
             row_id = log_llm_call(
                 conn,
                 request_type=request_type,
@@ -770,6 +773,7 @@ def call_llm(
                 latency_s=result.latency_s,
                 cost=result.cost,
                 metadata=log_metadata,
+                trace_id=effective_trace_id,
             )
             result.llm_call_id = row_id
         except Exception:

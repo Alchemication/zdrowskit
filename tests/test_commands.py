@@ -28,7 +28,7 @@ from commands import (
 from config import MAX_TOKENS_INSIGHTS, MAX_TOKENS_NUDGE
 from llm import LLMResult
 from llm_verify import VerificationResult
-from store import log_feedback, log_llm_call, open_db
+from store import create_llm_trace, log_feedback, log_llm_call, open_db
 
 
 class TestSetupCommand:
@@ -1131,6 +1131,76 @@ class TestCmdLlmLog:
         assert payload["transcript"][-1]["content"] == "response"
         assert payload["nearby_calls"][0]["id"] == call_id
         assert payload["nearby_calls"][0]["selected"] is True
+
+    def test_detail_json_includes_trace_calls(self, in_memory_db, capsys) -> None:
+        trace_id = create_llm_trace(in_memory_db, "chat")
+        first_id = log_llm_call(
+            in_memory_db,
+            request_type="chat",
+            model="test-model",
+            messages=[{"role": "user", "content": "first"}],
+            response_text="",
+            metadata={"iteration": 0},
+            trace_id=trace_id,
+        )
+        final_id = log_llm_call(
+            in_memory_db,
+            request_type="chat",
+            model="test-model",
+            messages=[{"role": "user", "content": "final"}],
+            response_text="done",
+            metadata={"iteration": "final_synthesis"},
+            trace_id=trace_id,
+        )
+        args = SimpleNamespace(
+            db="ignored.db",
+            last=10,
+            stats=False,
+            id=final_id,
+            trace=None,
+            feedback=False,
+            json=True,
+        )
+
+        with patch("cmd_llm_log.open_db", return_value=in_memory_db):
+            cmd_llm_log(args)
+
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["trace"]["id"] == trace_id
+        assert [row["id"] for row in payload["trace_calls"]] == [first_id, final_id]
+        assert payload["trace_calls"][-1]["selected"] is True
+
+    def test_trace_json_view(self, in_memory_db, capsys) -> None:
+        trace_id = create_llm_trace(
+            in_memory_db,
+            "insights",
+            metadata={"week": "last"},
+        )
+        call_id = log_llm_call(
+            in_memory_db,
+            request_type="insights",
+            model="test-model",
+            messages=[{"role": "user", "content": "report"}],
+            response_text="report",
+            trace_id=trace_id,
+        )
+        args = SimpleNamespace(
+            db="ignored.db",
+            last=10,
+            stats=False,
+            id=None,
+            trace=trace_id,
+            feedback=False,
+            json=True,
+        )
+
+        with patch("cmd_llm_log.open_db", return_value=in_memory_db):
+            cmd_llm_log(args)
+
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["trace"]["surface"] == "insights"
+        assert payload["trace"]["metadata"] == {"week": "last"}
+        assert [row["id"] for row in payload["calls"]] == [call_id]
 
     def test_detail_json_normalizes_tool_calls_and_nearby_calls(
         self,

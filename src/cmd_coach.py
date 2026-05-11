@@ -29,7 +29,7 @@ from llm_health import (
 )
 from llm_verify import extract_tool_evidence, slim_source_messages
 from milestones import compute_milestones
-from store import open_db
+from store import create_llm_trace, open_db
 
 logger = logging.getLogger(__name__)
 
@@ -158,6 +158,12 @@ def cmd_coach(
         logger.error("Failed to render coach_prompt.md template: %s", e)
         sys.exit(1)
 
+    trace_id = create_llm_trace(
+        conn,
+        "coach",
+        metadata={"week": week, "months": getattr(args, "months", 3)},
+    )
+
     route = route_kwargs("coach", getattr(args, "model", None))
     model = route["model"]
     fallback_models = route.get("fallback_models")
@@ -189,6 +195,7 @@ def cmd_coach(
                 fallback_models=fallback_models,
                 conn=conn,
                 request_type="coach",
+                trace_id=trace_id,
                 metadata={
                     "week": week,
                     "iteration": iteration,
@@ -271,6 +278,7 @@ def cmd_coach(
                 fallback_models=fallback_models,
                 conn=conn,
                 request_type="coach",
+                trace_id=trace_id,
                 metadata={
                     "week": week,
                     "iteration": "final_synthesis",
@@ -346,6 +354,7 @@ def cmd_coach(
             "week_label": week_label,
             "proposal_count": len(proposals),
         },
+        trace_id=trace_id,
         strict=True,
     )
     if verified_text is None or verified_text.strip().upper() == "SKIP":

@@ -1546,6 +1546,7 @@ class TelegramChatHandler:
             render_health_data,
         )
         from model_prefs import resolve_model_route
+        from store import create_llm_trace
         from tools import all_chat_tools, execute_tool
         from llm_context import load_prompt_text
 
@@ -1585,6 +1586,8 @@ class TelegramChatHandler:
         if conv_msgs:
             messages = messages[:2] + conv_msgs
 
+        trace_id = create_llm_trace(conn, "chat")
+
         tools = all_chat_tools()
         query_rows: list[dict] = []
         tool_results_for_synthesis: list[str] = []
@@ -1610,6 +1613,7 @@ class TelegramChatHandler:
                 reasoning_effort=reasoning_effort,
                 conn=conn,
                 request_type="chat",
+                trace_id=trace_id,
                 max_tokens=MAX_TOKENS_CHAT,
                 metadata={"iteration": _iteration},
             )
@@ -1736,6 +1740,7 @@ class TelegramChatHandler:
                 reasoning_effort=reasoning_effort,
                 conn=conn,
                 request_type="chat",
+                trace_id=trace_id,
                 max_tokens=MAX_TOKENS_CHAT,
                 metadata={"iteration": "final_synthesis"},
             )
@@ -1756,6 +1761,7 @@ class TelegramChatHandler:
                 reasoning_effort=reasoning_effort,
                 conn=conn,
                 request_type="chat",
+                trace_id=trace_id,
                 max_tokens=MAX_TOKENS_CHAT,
                 metadata={"iteration": "final_synthesis_tool_markup_retry"},
             )

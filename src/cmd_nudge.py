@@ -24,7 +24,7 @@ from llm_context import build_messages, load_context, load_prompt_text
 from llm_health import build_llm_data, format_recent_nudges, render_health_data
 from llm_verify import extract_tool_evidence, slim_source_messages
 from notify import send_telegram, send_telegram_photo
-from store import open_db
+from store import create_llm_trace, open_db
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +119,11 @@ def cmd_nudge(
         context["last_coach_summary"] = "(no recent coach review)"
 
     messages = build_messages(context, health_data_text)
+    trace_id = create_llm_trace(
+        conn,
+        "nudge",
+        metadata={"trigger_type": _trigger},
+    )
 
     from tools import execute_run_sql, run_sql_tool
 
@@ -148,6 +153,7 @@ def cmd_nudge(
                 fallback_models=fallback_models,
                 conn=conn,
                 request_type="nudge",
+                trace_id=trace_id,
                 metadata={
                     "trigger_type": _trigger,
                     "iteration": iteration,
@@ -228,6 +234,7 @@ def cmd_nudge(
                 fallback_models=fallback_models,
                 conn=conn,
                 request_type="nudge",
+                trace_id=trace_id,
                 metadata={
                     "trigger_type": _trigger,
                     "iteration": "final_synthesis",
@@ -265,6 +272,7 @@ def cmd_nudge(
                     fallback_models=[],
                     conn=conn,
                     request_type="nudge",
+                    trace_id=trace_id,
                     metadata={
                         "trigger_type": _trigger,
                         "iteration": "empty_retry",
@@ -308,6 +316,7 @@ def cmd_nudge(
             "source_llm_call_id": result.llm_call_id,
             "trigger_type": _trigger,
         },
+        trace_id=trace_id,
     )
     if verified_text is None or verified_text.strip().upper() == "SKIP":
         logger.info("Nudge skipped by verifier (trigger: %s)", _trigger)

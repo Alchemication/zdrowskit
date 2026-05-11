@@ -5,6 +5,7 @@ Public API:
     store_snapshots  -- upsert DailySnapshots (and their workouts) into the DB
     load_snapshots   -- load DailySnapshots with nested workouts from the DB
     load_date_range  -- return the (min, max) date stored, or None if empty
+    create_llm_trace -- insert one trace row for a correlated LLM operation
     log_llm_call     -- insert an LLM call record (input, output, params, metadata)
 
 Example:
@@ -419,6 +420,7 @@ def log_llm_call(
     latency_s: float = 0.0,
     cost: float | None = None,
     metadata: dict | None = None,
+    trace_id: int | None = None,
 ) -> int:
     """Insert an LLM call record into the llm_call table.
 
@@ -435,6 +437,7 @@ def log_llm_call(
         latency_s: Wall-clock time for the LLM call in seconds.
         cost: Actual cost in USD as reported by litellm.
         metadata: Product context (e.g. week, trigger_type).
+        trace_id: Optional llm_trace row grouping related LLM calls.
 
     Returns:
         The row id of the inserted record.
@@ -445,8 +448,8 @@ def log_llm_call(
         INSERT INTO llm_call (
             timestamp, request_type, model, messages_json, response_text,
             params_json, input_tokens, output_tokens, total_tokens,
-            latency_s, cost, metadata_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            latency_s, cost, metadata_json, trace_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             now,
@@ -461,12 +464,41 @@ def log_llm_call(
             latency_s,
             cost,
             json.dumps(metadata) if metadata else None,
+            trace_id,
         ),
     )
     conn.commit()
     logger.debug(
         "Logged LLM call id=%d type=%s model=%s", cursor.lastrowid, request_type, model
     )
+    return cursor.lastrowid
+
+
+def create_llm_trace(
+    conn: sqlite3.Connection,
+    surface: str,
+    metadata: dict | None = None,
+) -> int:
+    """Insert an LLM trace row for one product operation.
+
+    Args:
+        conn: Open database connection returned by open_db().
+        surface: Product surface, e.g. ``chat``, ``insights``, or ``nudge``.
+        metadata: Optional operation-level context shared by related calls.
+
+    Returns:
+        The row id of the inserted trace.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    cursor = conn.execute(
+        """
+        INSERT INTO llm_trace (started_at, surface, metadata_json)
+        VALUES (?, ?, ?)
+        """,
+        (now, surface, json.dumps(metadata) if metadata else None),
+    )
+    conn.commit()
+    logger.debug("Logged LLM trace id=%d surface=%s", cursor.lastrowid, surface)
     return cursor.lastrowid
 
 

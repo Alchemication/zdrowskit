@@ -387,6 +387,12 @@ def main() -> None:
         help="Show full detail for a specific call by row ID",
     )
     p_llm_log.add_argument(
+        "--trace",
+        type=int,
+        metavar="ID",
+        help="Show all LLM calls in a trace by trace ID",
+    )
+    p_llm_log.add_argument(
         "--stats",
         action="store_true",
         help="Show aggregate usage summary by request type and model",
