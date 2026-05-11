@@ -19,10 +19,10 @@ from context_edit import (
 )
 from daemon import ZdrowskitDaemon
 from daemon_telegram_chat import _looks_like_internal_tool_markup
-from events import query_events
+from events import query_events, record_event
 from llm import LLMResult
 from notification_prefs import load_notification_prefs
-from store import log_llm_call, open_db
+from store import create_llm_trace, log_llm_call, open_db
 
 
 def _make_daemon(tmp_path: Path) -> ZdrowskitDaemon:
@@ -63,7 +63,7 @@ class TestWeeklyReportScheduling:
 
         assert events == ["insights", "record", "coach:last:True"]
 
-    def test_weekly_report_failure_suppresses_same_day_retry(
+    def test_weekly_report_failure_records_failure_without_suppressing_retry(
         self, tmp_path: Path
     ) -> None:
         daemon = _make_daemon(tmp_path)
@@ -75,13 +75,18 @@ class TestWeeklyReportScheduling:
         ):
             daemon._run_weekly_report()
 
-        today = daemon_runners_module.date.today().isoformat()
-        assert daemon._state["last_review_skip_date"] == today
+        assert "last_review_skip_date" not in daemon._state
+        assert "last_review_failure_ts" in daemon._state
         state = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
-        assert state["last_review_skip_date"] == today
-        notify_failure.assert_called_once()
+        assert "last_review_skip_date" not in state
+        assert "last_review_failure_ts" in state
+        notify_failure.assert_called_once_with(
+            "Weekly review",
+            None,
+            category="insights",
+        )
 
-    def test_midweek_report_failure_suppresses_same_day_retry(
+    def test_midweek_report_failure_records_failure_without_suppressing_retry(
         self, tmp_path: Path
     ) -> None:
         daemon = _make_daemon(tmp_path)
@@ -93,11 +98,16 @@ class TestWeeklyReportScheduling:
         ):
             daemon._runners._run_midweek_report()
 
-        today = daemon_runners_module.date.today().isoformat()
-        assert daemon._state["last_progress_skip_date"] == today
+        assert "last_progress_skip_date" not in daemon._state
+        assert "last_progress_failure_ts" in daemon._state
         state = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
-        assert state["last_progress_skip_date"] == today
-        notify_failure.assert_called_once()
+        assert "last_progress_skip_date" not in state
+        assert "last_progress_failure_ts" in state
+        notify_failure.assert_called_once_with(
+            "Mid-week progress",
+            None,
+            category="insights",
+        )
 
 
 class TestNudgeScheduling:
@@ -1928,11 +1938,118 @@ class TestTelegramCommands:
         assert "/review [current|last] — Run weekly report (default: last)" in sent
         assert "/context [name] — View context files" in sent
         assert "/events [N] [category] — Recent system events" in sent
+        assert "/llm_log [N|id ID|trace ID] — Recent LLM traces" in sent
         assert "/codex — Open Codex panel" in sent
         assert "/claude — Open Claude panel" in sent
         assert "/codex on [prompt]" not in sent
         assert "Available context files:" in sent
         assert "me" in sent
+
+    def test_llm_log_command_shows_recent_calls(self, tmp_path: Path) -> None:
+        daemon = _make_daemon(tmp_path)
+        daemon._chat._poller = MagicMock()
+        conn = open_db(daemon.db)
+        trace_id = create_llm_trace(conn, "chat")
+        log_llm_call(
+            conn,
+            request_type="chat",
+            model="test/model",
+            messages=[{"role": "user", "content": "hi"}],
+            response_text="hello",
+            latency_s=0.4,
+            metadata={"iteration": "final_synthesis"},
+            trace_id=trace_id,
+        )
+
+        daemon._handle_command("/llm_log", 56)
+
+        daemon._poller.send_message_with_keyboard.assert_called_once()
+        sent = daemon._poller.send_message_with_keyboard.call_args.args[0]
+        buttons = daemon._poller.send_message_with_keyboard.call_args.args[1]
+        assert "Recent LLM calls (5)" in sent
+        assert "trace" in sent
+        assert "chat" in sent
+        assert "iter final_synthesis" in sent
+        assert buttons[0][0]["text"] == f"Trace {trace_id}"
+        assert buttons[0][0]["callback_data"] == f"llmlog:trace:{trace_id}"
+
+    def test_llm_log_command_shows_trace_from_call_id(self, tmp_path: Path) -> None:
+        daemon = _make_daemon(tmp_path)
+        daemon._chat._poller = MagicMock()
+        conn = open_db(daemon.db)
+        trace_id = create_llm_trace(conn, "nudge")
+        first_id = log_llm_call(
+            conn,
+            request_type="nudge",
+            model="test/model",
+            messages=[{"role": "user", "content": "draft"}],
+            response_text="draft",
+            latency_s=0.4,
+            metadata={"iteration": 0},
+            trace_id=trace_id,
+        )
+        log_llm_call(
+            conn,
+            request_type="nudge_verify",
+            model="test/verify",
+            messages=[{"role": "user", "content": "verify"}],
+            response_text="pass",
+            latency_s=0.2,
+            metadata={"stage": "verify"},
+            trace_id=trace_id,
+        )
+
+        daemon._handle_command(f"/llm_log id {first_id}", 57)
+
+        daemon._poller.send_message_with_keyboard.assert_called_once()
+        sent = daemon._poller.send_message_with_keyboard.call_args.args[0]
+        buttons = daemon._poller.send_message_with_keyboard.call_args.args[1]
+        assert f"LLM call {first_id}" in sent
+        assert "Response preview" in sent
+        assert "draft" in sent
+        assert buttons[0][0]["callback_data"] == f"llmlog:trace:{trace_id}"
+
+    def test_llm_log_trace_button_edits_to_trace_view(self, tmp_path: Path) -> None:
+        daemon = _make_daemon(tmp_path)
+        daemon._chat._poller = MagicMock()
+        conn = open_db(daemon.db)
+        trace_id = create_llm_trace(conn, "nudge")
+        call_id = log_llm_call(
+            conn,
+            request_type="nudge",
+            model="test/model",
+            messages=[{"role": "user", "content": "draft"}],
+            response_text="draft",
+            latency_s=0.4,
+            metadata={"iteration": 0},
+            trace_id=trace_id,
+        )
+        log_llm_call(
+            conn,
+            request_type="nudge_verify",
+            model="test/verify",
+            messages=[{"role": "user", "content": "verify"}],
+            response_text="pass",
+            latency_s=0.2,
+            metadata={"stage": "verify"},
+            trace_id=trace_id,
+        )
+
+        daemon._handle_telegram_callback(
+            {
+                "id": "cb1",
+                "data": f"llmlog:trace:{trace_id}",
+                "message": {"message_id": 101},
+            }
+        )
+
+        daemon._poller.answer_callback_query.assert_called_once_with("cb1")
+        daemon._poller.edit_message_with_keyboard.assert_called_once()
+        sent = daemon._poller.edit_message_with_keyboard.call_args.args[1]
+        buttons = daemon._poller.edit_message_with_keyboard.call_args.args[2]
+        assert f"LLM trace {trace_id}" in sent
+        assert "nudge_verify" in sent
+        assert buttons[0][0]["callback_data"] == f"llmlog:call:{call_id}"
 
 
 class TestCodexTelegramCommand:
@@ -2938,6 +3055,66 @@ class TestFailureCapture:
         assert "Weekly review failed" in sent_text
         assert "LLM call failed: details" in sent_text
 
+    def test_notify_user_failure_sends_verifier_summary_and_buttons(
+        self, tmp_path: Path
+    ) -> None:
+        daemon = _make_daemon(tmp_path)
+        daemon._chat._poller = MagicMock()
+        conn = open_db(tmp_path / "test.db")
+        trace_id = create_llm_trace(conn, "insights")
+        source_id = log_llm_call(
+            conn,
+            request_type="insights",
+            model="draft-model",
+            messages=[],
+            response_text="draft",
+            metadata={
+                "insights_verification": {
+                    "verdict": "fail",
+                    "confidence": "high",
+                    "verifier_call_id": 99,
+                    "issues": [
+                        {
+                            "severity": "critical",
+                            "problem": "False Monday streak claim.",
+                            "correction": "Remove the streak.",
+                            "evidence": "W18 Monday was a rest day.",
+                        }
+                    ],
+                }
+            },
+            trace_id=trace_id,
+        )
+        record_event(
+            conn,
+            "insights",
+            "verifier_suppressed",
+            "insights suppressed by verifier",
+            llm_call_id=source_id,
+        )
+
+        daemon._notify_user_failure(
+            "Weekly review",
+            "Insights verification failed; refusing to save/send report",
+            category="insights",
+        )
+
+        sent_text = daemon._poller.send_message_with_keyboard.call_args.args[0]
+        buttons = daemon._poller.send_message_with_keyboard.call_args.args[1]
+        assert "Weekly review failed" in sent_text
+        assert "Verifier blocked it" in sent_text
+        assert "False Monday streak claim." in sent_text
+        assert "The report was not sent." in sent_text
+        assert buttons == [
+            [
+                {"text": "Details", "callback_data": f"faildetail:{source_id}"},
+                {
+                    "text": f"Trace {trace_id}",
+                    "callback_data": f"llmlog:trace:{trace_id}",
+                },
+            ]
+        ]
+
     def test_notify_user_failure_truncates_long_errors(self, tmp_path: Path) -> None:
         daemon = _make_daemon(tmp_path)
         daemon._chat._poller = MagicMock()
@@ -2960,7 +3137,59 @@ class TestFailureCapture:
 
         sent_text = daemon._poller.send_message_with_keyboard.call_args.args[0]
         assert "Coaching review failed" in sent_text
-        assert "check daemon logs" in sent_text
+        assert "Check daemon logs" in sent_text
+
+    def test_failure_detail_callback_shows_verifier_issue(self, tmp_path: Path) -> None:
+        daemon = _make_daemon(tmp_path)
+        daemon._chat._poller = MagicMock()
+        conn = open_db(tmp_path / "test.db")
+        trace_id = create_llm_trace(conn, "insights")
+        source_id = log_llm_call(
+            conn,
+            request_type="insights",
+            model="draft-model",
+            messages=[],
+            response_text="draft",
+            metadata={
+                "insights_verification": {
+                    "verdict": "fail",
+                    "confidence": "high",
+                    "verifier_call_id": 44,
+                    "issues": [
+                        {
+                            "severity": "critical",
+                            "problem": "False Monday streak claim.",
+                            "correction": "Remove the streak.",
+                            "evidence": "W18 Monday was a rest day.",
+                        }
+                    ],
+                }
+            },
+            trace_id=trace_id,
+        )
+
+        daemon._handle_telegram_callback(
+            {
+                "id": "cb_fail",
+                "data": f"faildetail:{source_id}",
+                "message": {"message_id": 808},
+            }
+        )
+
+        daemon._poller.answer_callback_query.assert_called_once_with("cb_fail")
+        daemon._poller.edit_message_with_keyboard.assert_called_once()
+        text = daemon._poller.edit_message_with_keyboard.call_args.args[1]
+        buttons = daemon._poller.edit_message_with_keyboard.call_args.args[2]
+        assert "Verifier blocked call" in text
+        assert "False Monday streak claim." in text
+        assert "Remove the streak." in text
+        callbacks = [button["callback_data"] for row in buttons for button in row]
+        assert callbacks == [
+            f"llmlog:call:{source_id}",
+            "llmlog:call:44",
+            f"llmlog:trace:{trace_id}",
+            "llmlog:recent:5",
+        ]
 
     def test_notify_user_failure_no_op_without_poller(self, tmp_path: Path) -> None:
         """If Telegram isn't configured, _poller is unset — the helper

@@ -188,7 +188,28 @@ def _format_telegram_command(command: dict[str, str]) -> str:
         return f"/add — {description} (workouts, sleep)"
     if name == "events":
         return f"/events [N] [category] — {description} (default: last 3 days)"
+    if name == "llm_log":
+        return f"/llm_log [N|id ID|trace ID] — {description}"
     return f"/{name} — {description}"
+
+
+def _safe_json_dict(raw: object) -> dict:
+    """Parse a JSON object string, returning empty dict on malformed input."""
+    if not isinstance(raw, str) or not raw.strip():
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _clip_text(text: object, limit: int) -> str:
+    """Trim text for compact Telegram diagnostic views."""
+    clipped = " ".join(str(text or "").split())
+    if len(clipped) <= limit:
+        return clipped
+    return clipped[: limit - 3].rstrip() + "..."
 
 
 class TelegramChatHandler:
@@ -574,6 +595,8 @@ class TelegramChatHandler:
             )
         elif cmd == "/events":
             self._handle_events_command(text, message_id)
+        elif cmd in {"/llm_log", "/llm-log"}:
+            self._handle_llm_log_command(text, message_id)
         elif cmd == "/codex":
             self._handle_agent_command(text, message_id, kind="codex")
         elif cmd == "/claude":
@@ -1105,6 +1128,371 @@ class TelegramChatHandler:
             f"_{header_scope}_\n{body}", reply_to_message_id=message_id
         )
 
+    def _handle_llm_log_command(self, text: str, message_id: int) -> None:
+        """Handle ``/llm_log [N|id ID|trace ID]`` with compact trace output.
+
+        Args:
+            text: The full command text.
+            message_id: Telegram message ID for reply threading.
+        """
+        parts = text.split()[1:]
+        mode = "recent"
+        value = 5
+        if parts:
+            first = parts[0].lower()
+            if first.isdigit():
+                value = min(20, max(1, int(first)))
+            elif first in {"id", "trace"} and len(parts) == 2 and parts[1].isdigit():
+                mode = "call" if first == "id" else "trace"
+                value = int(parts[1])
+            else:
+                self._poller.send_reply(
+                    "Usage: /llm_log [N|id ID|trace ID].",
+                    reply_to_message_id=message_id,
+                )
+                return
+
+        view = self._build_llm_log_view(mode, value)
+        if view is None:
+            self._poller.send_reply(
+                f"No LLM calls found for /llm_log {mode} {value}.",
+                reply_to_message_id=message_id,
+            )
+            return
+        self._poller.send_message_with_keyboard(
+            view[0],
+            view[1],
+            reply_to_message_id=message_id,
+        )
+
+    def _handle_llm_log_callback(
+        self,
+        cb_id: str,
+        data: str,
+        msg_id: int | None,
+    ) -> None:
+        """Handle llm-log inline navigation callbacks."""
+        parts = data.split(":")
+        if len(parts) != 3 or parts[1] not in {"recent", "trace", "call"}:
+            self._poller.answer_callback_query(cb_id, "Invalid LLM log action.")
+            return
+        try:
+            value = int(parts[2])
+        except ValueError:
+            self._poller.answer_callback_query(cb_id, "Invalid LLM log id.")
+            return
+
+        view = self._build_llm_log_view(parts[1], value)
+        if view is None:
+            self._poller.answer_callback_query(cb_id, "LLM log row not found.")
+            return
+
+        self._poller.answer_callback_query(cb_id)
+        if msg_id is not None:
+            self._poller.edit_message_with_keyboard(msg_id, view[0], view[1])
+
+    def _build_llm_log_view(
+        self,
+        mode: str,
+        value: int,
+    ) -> tuple[str, list[list[dict[str, str]]]] | None:
+        """Build an interactive Telegram view for LLM logs."""
+        from store import open_db
+
+        conn = open_db(self._daemon.db)
+        try:
+            if mode == "call":
+                row = self._query_llm_call_row(conn, value)
+                if row is None:
+                    return None
+                return self._format_llm_call_view(row)
+            if mode == "trace":
+                rows = self._query_llm_trace_rows(conn, value)
+                if not rows:
+                    return None
+                return self._format_llm_trace_view(value, rows)
+            rows = self._query_recent_llm_rows(conn, value)
+            if not rows:
+                return None
+            return self._format_llm_recent_view(value, rows)
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _query_recent_llm_rows(conn: sqlite3.Connection, limit: int) -> list:
+        """Return recent LLM call rows."""
+        return conn.execute(
+            """
+            SELECT id, timestamp, request_type, model, trace_id,
+                   latency_s, cost, metadata_json
+            FROM llm_call
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+
+    @staticmethod
+    def _query_llm_trace_rows(conn: sqlite3.Connection, trace_id: int) -> list:
+        """Return compact rows for one LLM trace."""
+        return conn.execute(
+            """
+            SELECT id, timestamp, request_type, model, trace_id,
+                   latency_s, cost, metadata_json
+            FROM llm_call
+            WHERE trace_id = ?
+            ORDER BY timestamp ASC, id ASC
+            """,
+            (trace_id,),
+        ).fetchall()
+
+    @staticmethod
+    def _query_llm_call_row(conn: sqlite3.Connection, call_id: int):
+        """Return one LLM call row for Telegram display."""
+        return conn.execute(
+            """
+            SELECT id, timestamp, request_type, model, trace_id, latency_s, cost,
+                   metadata_json, response_text
+            FROM llm_call
+            WHERE id = ?
+            """,
+            (call_id,),
+        ).fetchone()
+
+    def _format_llm_recent_view(
+        self,
+        limit: int,
+        rows: list,
+    ) -> tuple[str, list[list[dict[str, str]]]]:
+        """Format recent LLM calls with trace buttons."""
+        text = self._format_llm_log_rows(f"Recent LLM calls ({limit})", rows)
+        buttons: list[list[dict[str, str]]] = []
+        for row in rows[:8]:
+            trace_id = row["trace_id"]
+            if trace_id is not None:
+                buttons.append(
+                    [
+                        {
+                            "text": f"Trace {trace_id}",
+                            "callback_data": f"llmlog:trace:{trace_id}",
+                        },
+                        {
+                            "text": f"Call {row['id']}",
+                            "callback_data": f"llmlog:call:{row['id']}",
+                        },
+                    ]
+                )
+            else:
+                buttons.append(
+                    [
+                        {
+                            "text": f"Call {row['id']}",
+                            "callback_data": f"llmlog:call:{row['id']}",
+                        }
+                    ]
+                )
+        buttons.append([{"text": "Refresh", "callback_data": f"llmlog:recent:{limit}"}])
+        return text, buttons
+
+    def _format_llm_trace_view(
+        self,
+        trace_id: int,
+        rows: list,
+    ) -> tuple[str, list[list[dict[str, str]]]]:
+        """Format one trace with call drill-down buttons."""
+        text = self._format_llm_log_rows(f"LLM trace {trace_id}", rows)
+        buttons: list[list[dict[str, str]]] = []
+        row_buttons: list[dict[str, str]] = []
+        for row in rows[:12]:
+            row_buttons.append(
+                {
+                    "text": f"Call {row['id']}",
+                    "callback_data": f"llmlog:call:{row['id']}",
+                }
+            )
+            if len(row_buttons) == 2:
+                buttons.append(row_buttons)
+                row_buttons = []
+        if row_buttons:
+            buttons.append(row_buttons)
+        buttons.append(
+            [
+                {"text": "Recent", "callback_data": "llmlog:recent:5"},
+                {"text": "Refresh", "callback_data": f"llmlog:trace:{trace_id}"},
+            ]
+        )
+        return text, buttons
+
+    def _format_llm_call_view(
+        self,
+        row,
+    ) -> tuple[str, list[list[dict[str, str]]]]:
+        """Format one call with response preview and navigation buttons."""
+        metadata = _safe_json_dict(row["metadata_json"])
+        lines = [f"*LLM call {row['id']}*"]
+        lines.append(self._format_llm_row_summary(row))
+        if metadata:
+            visible = {
+                key: metadata[key]
+                for key in ("iteration", "stage", "verdict", "issue_count")
+                if key in metadata
+            }
+            if visible:
+                lines.append(f"`metadata`: `{json.dumps(visible, sort_keys=True)}`")
+        response = str(row["response_text"] or "").strip()
+        if response:
+            preview = response[:900]
+            if len(response) > len(preview):
+                preview += "\n\n[truncated]"
+            lines.append(f"\n*Response preview*\n{preview}")
+        buttons = []
+        if row["trace_id"] is not None:
+            buttons.append(
+                [
+                    {
+                        "text": f"Trace {row['trace_id']}",
+                        "callback_data": f"llmlog:trace:{row['trace_id']}",
+                    }
+                ]
+            )
+        buttons.append([{"text": "Recent", "callback_data": "llmlog:recent:5"}])
+        lines.append("\nFull prompt: `uv run python main.py llm-log --id N`")
+        return "\n".join(lines), buttons
+
+    def _handle_failure_detail_callback(
+        self,
+        cb_id: str,
+        data: str,
+        msg_id: int | None,
+    ) -> None:
+        """Handle verifier failure detail buttons."""
+        parts = data.split(":")
+        if len(parts) != 2:
+            self._poller.answer_callback_query(cb_id, "Invalid failure action.")
+            return
+        try:
+            call_id = int(parts[1])
+        except ValueError:
+            self._poller.answer_callback_query(cb_id, "Invalid failure id.")
+            return
+
+        view = self._build_failure_detail_view(call_id)
+        if view is None:
+            self._poller.answer_callback_query(cb_id, "Failure details not found.")
+            return
+
+        self._poller.answer_callback_query(cb_id)
+        if msg_id is not None:
+            self._poller.edit_message_with_keyboard(msg_id, view[0], view[1])
+
+    def _build_failure_detail_view(
+        self,
+        call_id: int,
+    ) -> tuple[str, list[list[dict[str, str]]]] | None:
+        """Build a compact verifier failure detail view."""
+        row = None
+        from store import open_db
+
+        conn = open_db(self._daemon.db)
+        try:
+            row = self._query_llm_call_row(conn, call_id)
+        finally:
+            conn.close()
+        if row is None:
+            return None
+
+        metadata = _safe_json_dict(row["metadata_json"])
+        verification = next(
+            (
+                value
+                for key, value in metadata.items()
+                if key.endswith("_verification") and isinstance(value, dict)
+            ),
+            {},
+        )
+        if not verification:
+            return None
+
+        issues = verification.get("issues")
+        first_issue = issues[0] if isinstance(issues, list) and issues else {}
+        verifier_call_id = verification.get("verifier_call_id")
+        lines = [f"*Verifier blocked call {call_id}*"]
+        lines.append(
+            "Verdict: "
+            f"`{verification.get('verdict', 'unknown')}`"
+            f" / confidence `{verification.get('confidence', 'unknown')}`"
+        )
+        if verifier_call_id:
+            lines.append(f"Verifier call: `{verifier_call_id}`")
+        if isinstance(first_issue, dict) and first_issue:
+            severity = first_issue.get("severity", "issue")
+            lines.append(f"\n*{str(severity).title()} issue*")
+            lines.append(_clip_text(first_issue.get("problem"), 900))
+            correction = first_issue.get("correction")
+            if correction:
+                lines.append(f"\n*Fix*\n{_clip_text(correction, 500)}")
+            evidence = first_issue.get("evidence")
+            if evidence:
+                lines.append(f"\n*Evidence*\n{_clip_text(evidence, 500)}")
+
+        buttons: list[list[dict[str, str]]] = []
+        row_buttons = [
+            {"text": f"Source {call_id}", "callback_data": f"llmlog:call:{call_id}"}
+        ]
+        if verifier_call_id:
+            row_buttons.append(
+                {
+                    "text": f"Verifier {verifier_call_id}",
+                    "callback_data": f"llmlog:call:{verifier_call_id}",
+                }
+            )
+        buttons.append(row_buttons)
+        if row["trace_id"] is not None:
+            buttons.append(
+                [
+                    {
+                        "text": f"Trace {row['trace_id']}",
+                        "callback_data": f"llmlog:trace:{row['trace_id']}",
+                    },
+                    {"text": "Recent", "callback_data": "llmlog:recent:5"},
+                ]
+            )
+        else:
+            buttons.append([{"text": "Recent", "callback_data": "llmlog:recent:5"}])
+        return "\n".join(lines), buttons
+
+    def _format_llm_log_rows(self, title: str, rows: list) -> str:
+        """Format LLM log rows for Telegram."""
+        lines = [f"*{title}*"]
+        for row in rows:
+            lines.append(self._format_llm_row_summary(row))
+        lines.append(
+            "\nTap a button to drill in. Full prompt: "
+            "`uv run python main.py llm-log --id N`."
+        )
+        return "\n".join(lines)
+
+    @staticmethod
+    def _format_llm_row_summary(row) -> str:
+        """Format one compact LLM row."""
+        metadata = _safe_json_dict(row["metadata_json"])
+        stage = metadata.get("stage")
+        iteration = metadata.get("iteration")
+        stage_text = ""
+        if stage is not None:
+            stage_text = f" · {stage}"
+        elif iteration is not None:
+            stage_text = f" · iter {iteration}"
+        trace_text = f" · trace {row['trace_id']}" if row["trace_id"] else ""
+        model = str(row["model"]).split("/")[-1]
+        cost = row["cost"]
+        cost_text = f" · ${float(cost):.4f}" if cost is not None else ""
+        return (
+            f"`#{row['id']}`{trace_text} · {row['request_type']}{stage_text}\n"
+            f"{str(row['timestamp'])[:16]} · `{model}` · "
+            f"{float(row['latency_s']):.1f}s{cost_text}"
+        )
+
     def _send_context_overview(
         self, message_id: int, file_arg: str | None = None
     ) -> None:
@@ -1396,6 +1784,12 @@ class TelegramChatHandler:
                 )
                 buttons = feedback_keyboard(llm_call_id, message_type)
                 self._poller.edit_message_with_keyboard(msg_id, restored, buttons)
+
+        elif data.startswith("llmlog:"):
+            self._handle_llm_log_callback(cb_id, data, msg_id)
+
+        elif data.startswith("faildetail:"):
+            self._handle_failure_detail_callback(cb_id, data, msg_id)
 
         elif data.startswith("tut:"):
             self._handle_tutorial_callback(cb_id, data, msg_id)

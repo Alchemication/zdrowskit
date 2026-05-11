@@ -57,8 +57,10 @@ class VerificationIssue(BaseModel):
 
     severity: Literal["critical", "major", "minor"] = Field(
         description=(
-            "Issue severity. 'critical' = unsafe / unsupported claim, "
-            "'major' = misleading framing, 'minor' = stylistic nit."
+            "Issue severity. 'critical' = unsafe, broadly hallucinated, "
+            "unrecoverable, or visible factual error that cannot be fixed with "
+            "a bounded rewrite; 'major' = misleading or localized factual issue "
+            "with a clear correction; 'minor' = stylistic nit."
         )
     )
     quote: str = Field(description="Short quote from the draft being criticized.")
@@ -89,7 +91,7 @@ class _VerifierPayload(BaseModel):
     verdict: Verdict = Field(
         description=(
             "Overall verdict. 'pass' = ship as-is, 'revise' = minor fixes, "
-            "'fail' = do not ship."
+            "localized factual fixes, or memory-only fixes; 'fail' = do not ship."
         )
     )
     issues: list[VerificationIssue] = Field(
@@ -125,6 +127,52 @@ class VerificationResult:
     revised_text: str | None = None
     verifier_call_id: int | None = None
     rewrite_call_id: int | None = None
+
+
+_MEMORY_BLOCK_RE = re.compile(r"<memory>.*?</memory>", re.DOTALL | re.IGNORECASE)
+
+
+def _memory_spans(text: str) -> list[tuple[int, int]]:
+    """Return start/end spans for all memory blocks in *text*."""
+    return [match.span() for match in _MEMORY_BLOCK_RE.finditer(text)]
+
+
+def _span_contains(spans: list[tuple[int, int]], index: int) -> bool:
+    """Return True when *index* falls inside one of *spans*."""
+    return any(start <= index < end for start, end in spans)
+
+
+def _issue_is_memory_only(draft: str, issue: VerificationIssue) -> bool:
+    """Return True when a verifier issue points only at the memory block."""
+    spans = _memory_spans(draft)
+    if not spans:
+        return False
+
+    quote = issue.quote.strip()
+    if quote:
+        starts = [
+            match.start()
+            for match in re.finditer(re.escape(quote), draft, flags=re.IGNORECASE)
+        ]
+        return bool(starts) and all(_span_contains(spans, start) for start in starts)
+
+    issue_text = f"{issue.problem} {issue.correction}".lower()
+    return "memory" in issue_text or "<memory>" in issue_text
+
+
+def _downgrade_memory_only_failure(
+    *,
+    kind: VerificationKind,
+    draft: str,
+    result: VerificationResult,
+) -> None:
+    """Allow the rewriter to repair reports whose only failure is memory."""
+    if kind != "insights" or result.verdict != "fail" or not result.issues:
+        return
+    if not all(_issue_is_memory_only(draft, issue) for issue in result.issues):
+        return
+    logger.info("Insights verifier fail was memory-only; rewriting instead")
+    result.verdict = "revise"
 
 
 def extract_tool_evidence(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -693,6 +741,8 @@ def verify_and_rewrite(
         parsed.issues = [*guard_issues, *parsed.issues]
         if parsed.verdict == "pass":
             parsed.verdict = "revise"
+
+    _downgrade_memory_only_failure(kind=kind, draft=draft, result=parsed)
 
     if parsed.verdict == "pass" and parsed.confidence.lower() == "low":
         logger.warning(

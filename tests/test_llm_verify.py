@@ -234,6 +234,75 @@ class TestVerifyAndRewrite:
         assert verify_metadata["issue_count"] == 1
         assert verify_metadata["major_count"] == 1
 
+    def test_memory_only_fail_is_rewritten(
+        self,
+        in_memory_db: sqlite3.Connection,
+        monkeypatch,
+    ) -> None:
+        calls: list[str] = []
+        outputs = [
+            json.dumps(
+                {
+                    "verdict": "fail",
+                    "confidence": "high",
+                    "issues": [
+                        {
+                            "severity": "critical",
+                            "quote": "Bad future-memory claim.",
+                            "problem": "The memory block invents a pattern.",
+                            "correction": "Drop the bad memory item.",
+                            "evidence": "No matching evidence.",
+                        }
+                    ],
+                }
+            ),
+            "Visible report.\n\n<memory>\n- Corrected memory.\n</memory>",
+        ]
+
+        def fake_call_llm(messages, **kwargs):
+            calls.append(kwargs["request_type"])
+            text = outputs.pop(0)
+            row_id = log_llm_call(
+                kwargs["conn"],
+                request_type=kwargs["request_type"],
+                model=kwargs["model"],
+                messages=messages,
+                response_text=text,
+                metadata=kwargs["metadata"],
+            )
+            return LLMResult(
+                text=text,
+                model=kwargs["model"],
+                input_tokens=1,
+                output_tokens=1,
+                total_tokens=2,
+                latency_s=0.1,
+                llm_call_id=row_id,
+            )
+
+        monkeypatch.setattr("llm_verify.call_llm", fake_call_llm)
+
+        result = verify_and_rewrite(
+            kind="insights",
+            draft=(
+                "Visible report is fine.\n\n"
+                "<memory>\n- Bad future-memory claim.\n</memory>"
+            ),
+            evidence={},
+            source_messages=[],
+            conn=in_memory_db,
+            metadata={"source_llm_call_id": 123},
+            model="verify-model",
+            rewrite_model="rewrite-model",
+            max_revisions=1,
+        )
+
+        assert result.verdict == "revise"
+        assert result.revised_text == (
+            "Visible report.\n\n<memory>\n- Corrected memory.\n</memory>"
+        )
+        assert calls == ["insights_verify", "insights_rewrite"]
+
     def test_verifier_reasoning_effort_is_passed_to_llm(
         self,
         in_memory_db: sqlite3.Connection,

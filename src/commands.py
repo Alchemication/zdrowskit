@@ -610,6 +610,7 @@ ADVANCED_TELEGRAM_BOT_COMMANDS: list[dict[str, str]] = [
     {"command": "models", "description": "Model routing settings"},
     {"command": "context", "description": "View context files"},
     {"command": "events", "description": "Recent system events (nudges, imports, …)"},
+    {"command": "llm_log", "description": "Recent LLM traces"},
     {"command": "tutorial", "description": "Guided tour of zdrowskit"},
 ]
 

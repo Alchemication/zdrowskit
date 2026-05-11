@@ -24,7 +24,7 @@ import sys
 import threading
 import time
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Iterator
 
@@ -652,7 +652,74 @@ class ZdrowskitDaemon:
         """Delegate to the runner handler."""
         self._runners._record_report(report_type)
 
-    def _notify_user_failure(self, operation: str, error_text: str | None) -> None:
+    @staticmethod
+    def _truncate_notice(text: str, limit: int) -> str:
+        """Return *text* trimmed for a compact Telegram notice."""
+        stripped = " ".join(text.split())
+        if len(stripped) <= limit:
+            return stripped
+        return stripped[: limit - 3].rstrip() + "..."
+
+    def _latest_verifier_failure_notice(
+        self,
+        category: str,
+    ) -> dict[str, str | int | None] | None:
+        """Return details for the most recent verifier suppression."""
+        from store import open_db
+
+        cutoff = (datetime.now(timezone.utc) - timedelta(minutes=15)).isoformat()
+        conn = open_db(self.db)
+        try:
+            row = conn.execute(
+                """
+                SELECT e.llm_call_id, c.trace_id, c.metadata_json
+                FROM events e
+                LEFT JOIN llm_call c ON c.id = e.llm_call_id
+                WHERE e.category = ?
+                  AND e.kind = 'verifier_suppressed'
+                  AND e.ts >= ?
+                ORDER BY e.ts DESC, e.id DESC
+                LIMIT 1
+                """,
+                (category, cutoff),
+            ).fetchone()
+        finally:
+            conn.close()
+        if row is None or row["llm_call_id"] is None:
+            return None
+
+        try:
+            metadata = json.loads(row["metadata_json"] or "{}")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            metadata = {}
+
+        verification = next(
+            (
+                value
+                for key, value in metadata.items()
+                if key.endswith("_verification") and isinstance(value, dict)
+            ),
+            {},
+        )
+        issues = verification.get("issues") if isinstance(verification, dict) else None
+        first_issue = issues[0] if isinstance(issues, list) and issues else {}
+        problem = first_issue.get("problem") if isinstance(first_issue, dict) else None
+        return {
+            "source_call_id": row["llm_call_id"],
+            "trace_id": row["trace_id"],
+            "verifier_call_id": verification.get("verifier_call_id")
+            if isinstance(verification, dict)
+            else None,
+            "problem": self._truncate_notice(str(problem), 180) if problem else None,
+        }
+
+    def _notify_user_failure(
+        self,
+        operation: str,
+        error_text: str | None,
+        *,
+        category: str | None = None,
+    ) -> None:
         """Send a brief failure notice to Telegram so the user knows.
 
         Background runs (scheduled reports, manual /review, nudges, coach)
@@ -664,22 +731,45 @@ class ZdrowskitDaemon:
             operation: Short human-readable label, e.g. "Weekly review".
             error_text: The captured error message, or None if nothing was
                 captured (rare — falls back to a generic notice).
+            category: Optional event category for verifier-specific details.
         """
         poller = self._chat._poller
         if poller is None:
             # Telegram not configured — nothing to notify.
             return
 
-        if error_text:
-            truncated = (
-                error_text if len(error_text) <= 600 else error_text[:597] + "..."
-            )
-            text = f"**{operation} failed**\n\n{truncated}"
+        detail = None
+        if category and error_text and "verification failed" in error_text.lower():
+            detail = self._latest_verifier_failure_notice(category)
+
+        buttons: list[list[dict[str, str]]] = []
+        if detail:
+            problem = detail.get("problem")
+            text = f"**{operation} failed**\n\nVerifier blocked it."
+            if problem:
+                text += f"\n\n{problem}"
+            text += "\n\nThe report was not sent."
+            row = [
+                {
+                    "text": "Details",
+                    "callback_data": f"faildetail:{detail['source_call_id']}",
+                }
+            ]
+            if detail.get("trace_id") is not None:
+                row.append(
+                    {
+                        "text": f"Trace {detail['trace_id']}",
+                        "callback_data": f"llmlog:trace:{detail['trace_id']}",
+                    }
+                )
+            buttons.append(row)
+        elif error_text:
+            text = f"**{operation} failed**\n\n{self._truncate_notice(error_text, 600)}"
         else:
-            text = f"**{operation} failed** — check daemon logs"
+            text = f"**{operation} failed**\n\nCheck daemon logs."
 
         try:
-            poller.send_message_with_keyboard(text, [])
+            poller.send_message_with_keyboard(text, buttons)
         except Exception:
             logger.warning("Failed to send failure notice to Telegram", exc_info=True)
 

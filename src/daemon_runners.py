@@ -473,7 +473,11 @@ class DaemonRunnerHandler:
                 # Snapshot before our own logger.error overwrites the capture.
                 captured = cap.last_message
                 logger.error("Manual review report failed (%s)", week)
-                self._d._notify_user_failure(f"Manual review ({week})", captured)
+                self._d._notify_user_failure(
+                    f"Manual review ({week})",
+                    captured,
+                    category="insights",
+                )
 
     def _run_weekly_report(self) -> None:
         """Run the full weekly insights report and send via Telegram."""
@@ -539,9 +543,13 @@ class DaemonRunnerHandler:
             except SystemExit:
                 captured = cap.last_message
                 logger.error("Weekly review report failed")
-                self._d._state["last_review_skip_date"] = date.today().isoformat()
+                self._d._state["last_review_failure_ts"] = datetime.now().isoformat()
                 _save_state(self._d._state)
-                self._d._notify_user_failure("Weekly review", captured)
+                self._d._notify_user_failure(
+                    "Weekly review",
+                    captured,
+                    category="insights",
+                )
                 self._d._record_event(
                     "insights",
                     "failed",
@@ -612,9 +620,13 @@ class DaemonRunnerHandler:
             except SystemExit:
                 captured = cap.last_message
                 logger.error("Mid-week progress report failed")
-                self._d._state["last_progress_skip_date"] = date.today().isoformat()
+                self._d._state["last_progress_failure_ts"] = datetime.now().isoformat()
                 _save_state(self._d._state)
-                self._d._notify_user_failure("Mid-week progress", captured)
+                self._d._notify_user_failure(
+                    "Mid-week progress",
+                    captured,
+                    category="insights",
+                )
                 self._d._record_event(
                     "insights",
                     "failed",
@@ -741,7 +753,11 @@ class DaemonRunnerHandler:
             except SystemExit:
                 captured = cap.last_message
                 logger.error("Nudge failed (trigger: %s)", trigger)
-                self._d._notify_user_failure(f"Nudge ({trigger})", captured)
+                self._d._notify_user_failure(
+                    f"Nudge ({trigger})",
+                    captured,
+                    category="nudge",
+                )
                 self._d._record_event(
                     "nudge",
                     "failed",
@@ -873,7 +889,11 @@ class DaemonRunnerHandler:
             except SystemExit:
                 captured = cap.last_message
                 logger.error("Coaching review failed")
-                self._d._notify_user_failure("Coaching review", captured)
+                self._d._notify_user_failure(
+                    "Coaching review",
+                    captured,
+                    category="coach",
+                )
                 self._d._record_event(
                     "coach",
                     "failed",

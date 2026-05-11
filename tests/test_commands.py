@@ -182,6 +182,7 @@ class TestTelegramBotCommands:
                 "command": "events",
                 "description": "Recent system events (nudges, imports, …)",
             },
+            {"command": "llm_log", "description": "Recent LLM traces"},
             {"command": "tutorial", "description": "Guided tour of zdrowskit"},
         ]
 
