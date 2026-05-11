@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
-from charts import extract_charts, render_chart, strip_charts
+from charts import (
+    _row_chart_keys,
+    extract_charts,
+    render_chart,
+    render_rows_chart,
+    strip_charts,
+)
 
 
 class TestExtractCharts:
@@ -113,6 +119,30 @@ class TestRenderChart:
         result = render_chart(code, health_data)
         assert result is not None
         assert result[:4] == b"\x89PNG"
+
+    def test_rows_fallback_chart(self) -> None:
+        rows = [
+            {"week": "2026-W01", "avg_pace": 6.06, "runs": 2},
+            {"week": "2026-W02", "avg_pace": 5.97, "runs": 1},
+            {"week": "2026-W03", "avg_pace": 5.82, "runs": 3},
+        ]
+
+        result = render_rows_chart(rows, title="Weekly Pace")
+
+        assert result is not None
+        assert result[:4] == b"\x89PNG"
+
+    def test_rows_fallback_prefers_avg_pace_min_km(self) -> None:
+        rows = [
+            {
+                "week": "2026-W01",
+                "avg_pace_min_km": 6.06,
+                "total_distance_km": 10.4,
+                "num_runs": 2,
+            },
+        ]
+
+        assert _row_chart_keys(rows) == ("week", "avg_pace_min_km")
 
     def test_annotations(self) -> None:
         code = (

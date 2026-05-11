@@ -12,7 +12,18 @@ Upstream sibling of `llm-evals`: this skill covers analysis of an existing failu
 1. List recent feedback: `uv run python main.py llm-log --feedback` (or `--feedback --json` for full reasons).
 2. Pick the item — note `feedback_id`, `llm_call_id`, `category`, `message_type`.
 3. Inspect the cited call: `uv run python main.py llm-log --id <llm_call_id>`. The output includes the system+user prompt, the final response, and a metadata block.
-4. If the metadata contains a `*_verification` block (e.g. `nudge_verification`), the call went through the verify/rewrite pipeline — walk the chain (next section).
+4. If metadata contains `postprocessed_response_text: true`, treat `response_text` / the Final Response panel as the delivered text and inspect `metadata.raw_response_text` for the raw provider output that was replaced.
+5. If the metadata contains a `*_verification` block (e.g. `nudge_verification`), the call went through the verify/rewrite pipeline — walk the chain (next section).
+
+## Post-processing and tool traces
+
+Some product flows post-process the raw model response before delivery. When triaging, separate three things:
+
+- **Delivered text**: the `response_text` / Final Response panel in `llm-log`.
+- **Raw provider text**: `metadata.raw_response_text` when `postprocessed_response_text: true`.
+- **Intermediate tool loop**: nearby calls with metadata like `{"iteration": 0}`, `1`, ... and a later synthesis call.
+
+If a failure involves tools, inspect nearby calls and compare both the tool requests and tool results. Repeated or near-repeated calls usually mean the model failed to synthesize from available evidence; repeated results with slightly different query syntax are the giveaway.
 
 ## Localize the bug across the verify/rewrite chain
 

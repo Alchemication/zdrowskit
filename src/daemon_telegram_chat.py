@@ -12,6 +12,7 @@ lock, etc.) through a back-reference.
 
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
 import threading
@@ -37,6 +38,140 @@ def _agent_session_key(kind: str) -> str:
 
 
 _AGENT_LABELS = {"codex": "Codex", "claude": "Claude"}
+
+_CHAT_TOOL_MARKUP_RETRY = (
+    "The previous output was internal tool-call markup. Answer the user in "
+    "plain text using the tool results already provided. Do not call tools. "
+    "Do not emit tool markup, XML, DSML, JSON, or function-call syntax."
+)
+_CHAT_TOOL_MARKUP_FALLBACK = (
+    "I couldn't turn the tool results into a clean Telegram reply. Try again "
+    "with a narrower question."
+)
+_CHAT_FINAL_SYNTHESIS = (
+    "Tool use is finished. Answer the user's latest message now in plain "
+    "Telegram text using the tool results below as facts. Do not call tools. "
+    "Do not emit SQL, tool-call markup, DSML, JSON, or function-call syntax. "
+    "If the result is a trend over time or the user asked for a chart/plot, "
+    "include one <chart> block using the rows variable."
+)
+_CHAT_TOOL_RESULTS_MAX_CHARS = 12000
+_CHART_INTENT_MARKERS = (
+    "chart",
+    "plot",
+    "graph",
+    "trend",
+    "over time",
+    "by week",
+    "by month",
+    "by day",
+    "by date",
+    "weekly",
+    "monthly",
+    "daily",
+)
+
+
+def _looks_like_internal_tool_markup(text: str) -> bool:
+    """Return True when a final chat response leaks tool-call syntax."""
+    stripped = text.strip()
+    if not stripped:
+        return False
+
+    markers = (
+        "<｜｜DSML｜｜",
+        "<||DSML||",
+        "｜｜tool_calls",
+        "tool_calls>",
+        "invoke name=",
+        "<tool_call",
+        "</tool_call",
+    )
+    if any(marker in stripped for marker in markers):
+        return True
+
+    if stripped.startswith(("{", "[")) and "tool_calls" in stripped:
+        return True
+
+    return False
+
+
+def _tool_call_signature(tool_call: object) -> tuple[str, str]:
+    """Return a stable signature for detecting repeated tool calls."""
+    function = getattr(tool_call, "function", None)
+    name = str(getattr(function, "name", ""))
+    raw_args = getattr(function, "arguments", "")
+    if isinstance(raw_args, str):
+        try:
+            args = json.loads(raw_args)
+        except (ValueError, json.JSONDecodeError):
+            return name, raw_args.strip()
+    else:
+        args = raw_args
+    try:
+        normalized = json.dumps(args, sort_keys=True, separators=(",", ":"))
+    except TypeError:
+        normalized = str(args)
+    return name, normalized
+
+
+def _tool_result_signature(name: str, content: str) -> tuple[str, str]:
+    """Return a stable signature for detecting repeated tool results."""
+    try:
+        parsed = json.loads(content)
+        normalized = json.dumps(parsed, sort_keys=True, separators=(",", ":"))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        normalized = content.strip()
+    return name, normalized
+
+
+def _format_tool_result_for_synthesis(
+    name: str, args: dict[str, object], content: str
+) -> str:
+    """Render a tool result as plain prompt text for final synthesis."""
+    query = args.get("query")
+    if name == "run_sql" and isinstance(query, str):
+        heading = f"{name} query:\n{query.strip()}"
+    else:
+        heading = f"{name} result"
+    return f"{heading}\n\nResult:\n{content}"
+
+
+def _plain_synthesis_messages(
+    messages: list[dict],
+    tool_results: list[str],
+    instruction: str = _CHAT_FINAL_SYNTHESIS,
+) -> list[dict[str, str]]:
+    """Build a clean no-tools transcript for final user-facing synthesis."""
+    clean: list[dict[str, str]] = []
+    for message in messages:
+        role = message.get("role")
+        if role == "tool":
+            continue
+        if role == "assistant" and message.get("tool_calls"):
+            continue
+        if role not in {"system", "user", "assistant"}:
+            continue
+        content = message.get("content") or ""
+        clean.append({"role": str(role), "content": str(content)})
+
+    results_text = "\n\n---\n\n".join(tool_results) or "(no tool results)"
+    if len(results_text) > _CHAT_TOOL_RESULTS_MAX_CHARS:
+        results_text = results_text[-_CHAT_TOOL_RESULTS_MAX_CHARS:]
+        results_text = "[truncated to latest tool output]\n" + results_text
+    clean.append(
+        {
+            "role": "user",
+            "content": f"{instruction}\n\nTool results:\n{results_text}",
+        }
+    )
+    return clean
+
+
+def _message_wants_chart(text: str) -> bool:
+    """Return True when the user asked for a chartable trend/comparison."""
+    lowered = text.lower()
+    return any(marker in lowered for marker in _CHART_INTENT_MARKERS)
 
 
 def _format_telegram_command(command: dict[str, str]) -> str:
@@ -235,6 +370,7 @@ class TelegramChatHandler:
             chart_figure_caption,
             extract_charts,
             render_chart,
+            render_rows_chart,
             strip_charts,
         )
 
@@ -244,15 +380,36 @@ class TelegramChatHandler:
             for index, block in enumerate(chart_blocks, start=1):
                 try:
                     img = render_chart(block.code, {}, extra_namespace=extra_ns)
-                    if img:
-                        self._poller.send_photo(
-                            img, caption=chart_figure_caption(index, block.title)
+                    if img is None and query_rows:
+                        logger.warning(
+                            "Chart render failed for '%s'; using rows fallback",
+                            block.title,
                         )
+                        img = render_rows_chart(query_rows, title=block.title)
+                    if img is None:
+                        logger.warning(
+                            "Chart render produced no image: %s", block.title
+                        )
+                        continue
+                    self._poller.send_photo(
+                        img, caption=chart_figure_caption(index, block.title)
+                    )
                 except Exception:
                     logger.warning(
                         "Chart render failed: %s", block.title, exc_info=True
                     )
             reply = strip_charts(reply)
+        elif query_rows and _message_wants_chart(text):
+            try:
+                img = render_rows_chart(query_rows)
+                if img is not None:
+                    self._poller.send_photo(
+                        img, caption=chart_figure_caption(1, "Trend")
+                    )
+                else:
+                    logger.warning("Rows auto-chart produced no image")
+            except Exception:
+                logger.warning("Rows auto-chart failed", exc_info=True)
 
         self._conversation.add("assistant", reply)
 
@@ -1414,8 +1571,6 @@ class TelegramChatHandler:
             logger.warning("Baselines computation failed", exc_info=True)
             baselines = None
 
-        import json as _json
-
         messages = build_messages(
             ctx,
             health_data_text=render_health_data(health_data, prompt_kind="chat"),
@@ -1432,6 +1587,10 @@ class TelegramChatHandler:
 
         tools = all_chat_tools()
         query_rows: list[dict] = []
+        tool_results_for_synthesis: list[str] = []
+        seen_tool_calls: set[tuple[str, str]] = set()
+        seen_tool_results: set[tuple[str, str]] = set()
+        stopped_for_repeated_tool = False
         deferred_edits: list = []
         route = (
             {"model": self._daemon.model}
@@ -1456,7 +1615,28 @@ class TelegramChatHandler:
             )
 
             if not result.tool_calls:
+                if _looks_like_internal_tool_markup(result.text):
+                    logger.warning(
+                        "Chat returned internal tool markup without tool calls; "
+                        "forcing clean synthesis"
+                    )
+                    break
                 return result, deferred_edits, query_rows
+
+            repeated = [
+                signature
+                for signature in (_tool_call_signature(tc) for tc in result.tool_calls)
+                if signature in seen_tool_calls
+            ]
+            if repeated:
+                logger.warning(
+                    "Chat repeated tool call(s); forcing final synthesis: %s",
+                    repeated,
+                )
+                stopped_for_repeated_tool = True
+                break
+            for tc in result.tool_calls:
+                seen_tool_calls.add(_tool_call_signature(tc))
 
             # Append the assistant message with tool calls so the LLM sees
             # its own calls in the next iteration.
@@ -1473,9 +1653,11 @@ class TelegramChatHandler:
                 raw_args = tc.function.arguments
                 try:
                     args = (
-                        _json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+                        json.loads(raw_args) if isinstance(raw_args, str) else raw_args
                     )
-                except (ValueError, _json.JSONDecodeError):
+                except (ValueError, json.JSONDecodeError):
+                    args = {}
+                if not isinstance(args, dict):
                     args = {}
 
                 if fn_name == "run_sql":
@@ -1495,15 +1677,26 @@ class TelegramChatHandler:
                     # Keep latest query rows for chart rendering.
                     if fn_name == "run_sql":
                         try:
-                            parsed = _json.loads(tool_result)
+                            parsed = json.loads(tool_result)
                             if isinstance(parsed, list):
                                 query_rows.clear()
                                 query_rows.extend(parsed)
                                 logger.info("run_sql returned %d rows", len(parsed))
                             elif isinstance(parsed, dict) and "error" in parsed:
                                 logger.warning("run_sql error: %s", parsed["error"])
-                        except (ValueError, _json.JSONDecodeError):
+                        except (ValueError, json.JSONDecodeError):
                             pass
+                    tool_results_for_synthesis.append(
+                        _format_tool_result_for_synthesis(fn_name, args, tool_result)
+                    )
+                    if fn_name == "run_sql":
+                        signature = _tool_result_signature(fn_name, tool_result)
+                        if signature in seen_tool_results:
+                            logger.warning(
+                                "Chat repeated run_sql result; forcing final synthesis"
+                            )
+                            stopped_for_repeated_tool = True
+                        seen_tool_results.add(signature)
 
                 messages.append(
                     {
@@ -1512,30 +1705,31 @@ class TelegramChatHandler:
                         "content": tool_result,
                     }
                 )
+            if stopped_for_repeated_tool:
+                break
 
         # If we exhausted iterations with an empty text (model still wanted
         # to call tools), force one final synthesis pass without tools so
         # the user never sees a blank reply.
         assert result is not None
-        if not result.text.strip():
+        if (
+            stopped_for_repeated_tool
+            or result.tool_calls
+            or not result.text.strip()
+            or _looks_like_internal_tool_markup(result.text)
+        ):
             logger.warning(
-                "Chat loop exited with empty text (tool_calls=%s); forcing final synthesis",
+                "Chat loop forcing final synthesis (tool_calls=%s repeated=%s)",
                 bool(result.tool_calls),
+                stopped_for_repeated_tool,
             )
-            if result.tool_calls:
-                messages.append(result.raw_message)
-                for tc in result.tool_calls:
-                    messages.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": tc.id,
-                            "content": _json.dumps(
-                                {"error": load_prompt_text("tool_budget_chat")}
-                            ),
-                        }
-                    )
+            budget_prompt = load_prompt_text("tool_budget_chat").strip()
             result = call_llm(
-                messages,
+                _plain_synthesis_messages(
+                    messages,
+                    tool_results_for_synthesis,
+                    f"{budget_prompt}\n\n{_CHAT_FINAL_SYNTHESIS}",
+                ),
                 **route,
                 tools=None,
                 temperature=temperature,
@@ -1545,5 +1739,44 @@ class TelegramChatHandler:
                 max_tokens=MAX_TOKENS_CHAT,
                 metadata={"iteration": "final_synthesis"},
             )
+
+        if _looks_like_internal_tool_markup(result.text):
+            logger.warning(
+                "Chat final synthesis returned internal tool markup; retrying once"
+            )
+            result = call_llm(
+                _plain_synthesis_messages(
+                    messages,
+                    tool_results_for_synthesis,
+                    _CHAT_TOOL_MARKUP_RETRY,
+                ),
+                **route,
+                tools=None,
+                temperature=temperature,
+                reasoning_effort=reasoning_effort,
+                conn=conn,
+                request_type="chat",
+                max_tokens=MAX_TOKENS_CHAT,
+                metadata={"iteration": "final_synthesis_tool_markup_retry"},
+            )
+            if _looks_like_internal_tool_markup(result.text):
+                logger.error(
+                    "Chat final synthesis retry still returned internal tool markup"
+                )
+                raw_response_text = result.text
+                result.text = _CHAT_TOOL_MARKUP_FALLBACK
+                if result.llm_call_id is not None:
+                    from store import update_llm_call_response
+
+                    update_llm_call_response(
+                        conn,
+                        result.llm_call_id,
+                        result.text,
+                        metadata_patch={
+                            "postprocessed_response_text": True,
+                            "postprocess_reason": "internal_tool_markup_fallback",
+                            "raw_response_text": raw_response_text,
+                        },
+                    )
 
         return result, deferred_edits, query_rows

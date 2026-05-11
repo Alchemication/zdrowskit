@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 
@@ -23,6 +24,7 @@ from store import (
     insert_manual_sleep,
     store_snapshots,
     update_feedback_reason,
+    update_llm_call_response,
 )
 
 
@@ -339,6 +341,36 @@ class TestLogLlmCall:
         assert row["request_type"] == "insights"
         assert row["model"] == "test-model"
         assert row["cost"] == 0.01
+
+    def test_update_response_merges_metadata(
+        self, in_memory_db: sqlite3.Connection
+    ) -> None:
+        row_id = log_llm_call(
+            in_memory_db,
+            request_type="chat",
+            model="test-model",
+            messages=[{"role": "user", "content": "test"}],
+            response_text="<tool_call>",
+            metadata={"iteration": "final_synthesis"},
+        )
+
+        update_llm_call_response(
+            in_memory_db,
+            row_id,
+            "Clean fallback.",
+            metadata_patch={"postprocessed_response_text": True},
+        )
+
+        row = in_memory_db.execute(
+            "SELECT response_text, metadata_json FROM llm_call WHERE id = ?",
+            (row_id,),
+        ).fetchone()
+
+        assert row["response_text"] == "Clean fallback."
+        assert json.loads(row["metadata_json"]) == {
+            "iteration": "final_synthesis",
+            "postprocessed_response_text": True,
+        }
 
 
 class TestLlmFeedback:

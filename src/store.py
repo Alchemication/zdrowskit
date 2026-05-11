@@ -470,6 +470,49 @@ def log_llm_call(
     return cursor.lastrowid
 
 
+def update_llm_call_response(
+    conn: sqlite3.Connection,
+    llm_call_id: int,
+    response_text: str,
+    *,
+    metadata_patch: dict | None = None,
+) -> None:
+    """Update the stored response text for a post-processed LLM call.
+
+    Args:
+        conn: Open database connection returned by open_db().
+        llm_call_id: Row id in the ``llm_call`` table.
+        response_text: User-facing response text after product post-processing.
+        metadata_patch: Optional metadata fields to merge into ``metadata_json``.
+    """
+    row = conn.execute(
+        "SELECT metadata_json FROM llm_call WHERE id = ?", (llm_call_id,)
+    ).fetchone()
+    if row is None:
+        return
+
+    metadata = {}
+    if row["metadata_json"]:
+        try:
+            parsed = json.loads(row["metadata_json"])
+            if isinstance(parsed, dict):
+                metadata = parsed
+        except (TypeError, ValueError, json.JSONDecodeError):
+            metadata = {}
+    if metadata_patch:
+        metadata.update(metadata_patch)
+
+    conn.execute(
+        """
+        UPDATE llm_call
+        SET response_text = ?, metadata_json = ?
+        WHERE id = ?
+        """,
+        (response_text, json.dumps(metadata) if metadata else None, llm_call_id),
+    )
+    conn.commit()
+
+
 def log_feedback(
     conn: sqlite3.Connection,
     llm_call_id: int,

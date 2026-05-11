@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import daemon as daemon_module
@@ -17,7 +18,9 @@ from context_edit import (
     new_feedback_entry,
 )
 from daemon import ZdrowskitDaemon
+from daemon_telegram_chat import _looks_like_internal_tool_markup
 from events import query_events
+from llm import LLMResult
 from notification_prefs import load_notification_prefs
 from store import log_llm_call, open_db
 
@@ -543,6 +546,544 @@ class TestTelegramFeedbackFlow:
         daemon._poller.edit_message_reply_markup.assert_called_once()
         assert daemon._poller.edit_message_reply_markup.call_args.args[0] == 44
         daemon._poller.send_message_with_keyboard.assert_not_called()
+
+
+class TestChatReplyLoop:
+    def test_detects_internal_tool_markup(self) -> None:
+        assert _looks_like_internal_tool_markup("<｜｜DSML｜｜tool_calls>")
+        assert _looks_like_internal_tool_markup('<tool_call name="run_sql">')
+        assert _looks_like_internal_tool_markup('{"tool_calls": []}')
+        assert not _looks_like_internal_tool_markup("W01: **6:04/km**")
+
+    def test_final_synthesis_retries_internal_tool_markup(self, tmp_path: Path) -> None:
+        daemon = _make_daemon(tmp_path)
+        daemon._chat._conversation = MagicMock()
+        daemon._chat._conversation.to_messages.return_value = [
+            {
+                "role": "user",
+                "content": "What's my avg running speed per km by week in 2026?",
+            }
+        ]
+        conn = open_db(daemon.db)
+
+        tool_call = SimpleNamespace(
+            id="call_1",
+            function=SimpleNamespace(
+                name="run_sql",
+                arguments='{"query": "SELECT 1"}',
+            ),
+        )
+        first_result = LLMResult(
+            text="",
+            model="test-model",
+            input_tokens=1,
+            output_tokens=1,
+            total_tokens=2,
+            latency_s=0.1,
+            tool_calls=[tool_call],
+            raw_message={
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "function": {
+                            "name": "run_sql",
+                            "arguments": '{"query": "SELECT 1"}',
+                        },
+                    }
+                ],
+            },
+        )
+        markup_result = LLMResult(
+            text=(
+                "<｜｜DSML｜｜tool_calls>\n"
+                '<｜｜DSML｜｜invoke name="run_sql">\n'
+                "</｜｜DSML｜｜invoke>\n"
+                "</｜｜DSML｜｜tool_calls>"
+            ),
+            model="test-model",
+            input_tokens=1,
+            output_tokens=1,
+            total_tokens=2,
+            latency_s=0.1,
+            raw_message={
+                "role": "assistant",
+                "content": "<｜｜DSML｜｜tool_calls>",
+            },
+        )
+        retry_result = LLMResult(
+            text="By week: **W01 6:04/km**, **W02 5:58/km**.",
+            model="test-model",
+            input_tokens=1,
+            output_tokens=1,
+            total_tokens=2,
+            latency_s=0.1,
+        )
+
+        seen_messages: list[list[dict]] = []
+        seen_kwargs: list[dict] = []
+
+        def fake_call_llm(messages: list[dict], **kwargs: object) -> LLMResult:
+            seen_messages.append([dict(message) for message in messages])
+            seen_kwargs.append(dict(kwargs))
+            return [first_result, markup_result, retry_result][len(seen_messages) - 1]
+
+        with (
+            patch("config.MAX_TOOL_ITERATIONS", 1),
+            patch(
+                "llm_context.load_context", return_value={"prompt": "p", "soul": "s"}
+            ),
+            patch(
+                "llm_context.build_messages",
+                return_value=[
+                    {"role": "system", "content": "system"},
+                    {"role": "user", "content": "context"},
+                ],
+            ),
+            patch(
+                "llm_health.build_llm_data",
+                return_value={
+                    "current_week": {"summary": {"week_label": "2026-W19"}},
+                    "history": [],
+                    "week_complete": False,
+                },
+            ),
+            patch("llm_health.render_health_data", return_value="health"),
+            patch("baselines.compute_baselines", return_value=None),
+            patch("tools.all_chat_tools", return_value=[{"type": "function"}]),
+            patch("tools.execute_tool", return_value='[{"week": "2026-W01"}]'),
+            patch("llm.call_llm", side_effect=fake_call_llm),
+        ):
+            result, _edits, rows = daemon._chat._chat_reply(conn)
+
+        assert result.text == "By week: **W01 6:04/km**, **W02 5:58/km**."
+        assert rows == [{"week": "2026-W01"}]
+        assert seen_kwargs[1]["tools"] is None
+        assert seen_kwargs[1]["metadata"] == {"iteration": "final_synthesis"}
+        assert seen_kwargs[2]["tools"] is None
+        assert seen_kwargs[2]["metadata"] == {
+            "iteration": "final_synthesis_tool_markup_retry"
+        }
+
+        final_synthesis_messages = seen_messages[1]
+        protocol_messages = [
+            message
+            for message in final_synthesis_messages
+            if message.get("role") == "tool"
+            or (message.get("role") == "assistant" and message.get("tool_calls"))
+        ]
+        assert protocol_messages == []
+        assert final_synthesis_messages[-1]["role"] == "user"
+        assert (
+            "tool budget exhausted, answer now"
+            in final_synthesis_messages[-1]["content"]
+        )
+        assert '[{"week": "2026-W01"}]' in final_synthesis_messages[-1]["content"]
+
+    def test_final_markup_fallback_updates_logged_response(
+        self, tmp_path: Path
+    ) -> None:
+        daemon = _make_daemon(tmp_path)
+        daemon._chat._conversation = MagicMock()
+        daemon._chat._conversation.to_messages.return_value = [
+            {"role": "user", "content": "What's my running pace trend?"}
+        ]
+        conn = open_db(daemon.db)
+        retry_call_id = log_llm_call(
+            conn,
+            request_type="chat",
+            model="test-model",
+            messages=[{"role": "user", "content": "retry"}],
+            response_text="<｜｜DSML｜｜tool_calls>",
+            metadata={"iteration": "final_synthesis_tool_markup_retry"},
+        )
+
+        tool_call = SimpleNamespace(
+            id="call_1",
+            function=SimpleNamespace(
+                name="run_sql",
+                arguments='{"query": "SELECT 1"}',
+            ),
+        )
+        first_result = LLMResult(
+            text="",
+            model="test-model",
+            input_tokens=1,
+            output_tokens=1,
+            total_tokens=2,
+            latency_s=0.1,
+            tool_calls=[tool_call],
+            raw_message={"role": "assistant", "content": "", "tool_calls": []},
+        )
+        markup_result = LLMResult(
+            text="<｜｜DSML｜｜tool_calls>",
+            model="test-model",
+            input_tokens=1,
+            output_tokens=1,
+            total_tokens=2,
+            latency_s=0.1,
+        )
+        retry_markup_result = LLMResult(
+            text="<｜｜DSML｜｜tool_calls>",
+            model="test-model",
+            input_tokens=1,
+            output_tokens=1,
+            total_tokens=2,
+            latency_s=0.1,
+            llm_call_id=retry_call_id,
+        )
+
+        def fake_call_llm(messages: list[dict], **kwargs: object) -> LLMResult:
+            return [first_result, markup_result, retry_markup_result][
+                fake_call_llm.call_count
+            ]
+
+        fake_call_llm.call_count = 0
+
+        def counted_call_llm(messages: list[dict], **kwargs: object) -> LLMResult:
+            result = fake_call_llm(messages, **kwargs)
+            fake_call_llm.call_count += 1
+            return result
+
+        with (
+            patch("config.MAX_TOOL_ITERATIONS", 1),
+            patch(
+                "llm_context.load_context", return_value={"prompt": "p", "soul": "s"}
+            ),
+            patch(
+                "llm_context.build_messages",
+                return_value=[
+                    {"role": "system", "content": "system"},
+                    {"role": "user", "content": "context"},
+                ],
+            ),
+            patch(
+                "llm_health.build_llm_data",
+                return_value={
+                    "current_week": {"summary": {"week_label": "2026-W19"}},
+                    "history": [],
+                    "week_complete": False,
+                },
+            ),
+            patch("llm_health.render_health_data", return_value="health"),
+            patch("baselines.compute_baselines", return_value=None),
+            patch("tools.all_chat_tools", return_value=[{"type": "function"}]),
+            patch("tools.execute_tool", return_value='[{"week": "2026-W01"}]'),
+            patch("llm.call_llm", side_effect=counted_call_llm),
+        ):
+            result, _edits, _rows = daemon._chat._chat_reply(conn)
+
+        assert (
+            result.text
+            == "I couldn't turn the tool results into a clean Telegram reply. Try again with a narrower question."
+        )
+        row = conn.execute(
+            "SELECT response_text, metadata_json FROM llm_call WHERE id = ?",
+            (retry_call_id,),
+        ).fetchone()
+        assert row["response_text"] == result.text
+        metadata = json.loads(row["metadata_json"])
+        assert metadata["postprocessed_response_text"] is True
+        assert metadata["postprocess_reason"] == "internal_tool_markup_fallback"
+        assert metadata["raw_response_text"] == "<｜｜DSML｜｜tool_calls>"
+
+    def test_repeated_tool_call_forces_clean_final_synthesis(
+        self, tmp_path: Path
+    ) -> None:
+        daemon = _make_daemon(tmp_path)
+        daemon._chat._conversation = MagicMock()
+        daemon._chat._conversation.to_messages.return_value = [
+            {
+                "role": "user",
+                "content": "What's my avg running speed per km by week in 2026?",
+            }
+        ]
+        conn = open_db(daemon.db)
+
+        raw_args = '{"query": "SELECT 1", "limit": 200}'
+        tool_call = SimpleNamespace(
+            id="call_1",
+            function=SimpleNamespace(name="run_sql", arguments=raw_args),
+        )
+        repeated_tool_call = SimpleNamespace(
+            id="call_2",
+            function=SimpleNamespace(
+                name="run_sql",
+                arguments='{"limit": 200, "query": "SELECT 1"}',
+            ),
+        )
+        first_result = LLMResult(
+            text="",
+            model="test-model",
+            input_tokens=1,
+            output_tokens=1,
+            total_tokens=2,
+            latency_s=0.1,
+            tool_calls=[tool_call],
+            raw_message={
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"id": "call_1"}],
+            },
+        )
+        repeated_result = LLMResult(
+            text="",
+            model="test-model",
+            input_tokens=1,
+            output_tokens=1,
+            total_tokens=2,
+            latency_s=0.1,
+            tool_calls=[repeated_tool_call],
+            raw_message={
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"id": "call_2"}],
+            },
+        )
+        final_result = LLMResult(
+            text="Figure 1 shows the trend.",
+            model="test-model",
+            input_tokens=1,
+            output_tokens=1,
+            total_tokens=2,
+            latency_s=0.1,
+        )
+
+        seen_messages: list[list[dict]] = []
+        seen_kwargs: list[dict] = []
+
+        def fake_call_llm(messages: list[dict], **kwargs: object) -> LLMResult:
+            seen_messages.append([dict(message) for message in messages])
+            seen_kwargs.append(dict(kwargs))
+            return [first_result, repeated_result, final_result][len(seen_messages) - 1]
+
+        with (
+            patch("config.MAX_TOOL_ITERATIONS", 8),
+            patch(
+                "llm_context.load_context", return_value={"prompt": "p", "soul": "s"}
+            ),
+            patch(
+                "llm_context.build_messages",
+                return_value=[
+                    {"role": "system", "content": "system"},
+                    {"role": "user", "content": "context"},
+                ],
+            ),
+            patch(
+                "llm_health.build_llm_data",
+                return_value={
+                    "current_week": {"summary": {"week_label": "2026-W19"}},
+                    "history": [],
+                    "week_complete": False,
+                },
+            ),
+            patch("llm_health.render_health_data", return_value="health"),
+            patch("baselines.compute_baselines", return_value=None),
+            patch("tools.all_chat_tools", return_value=[{"type": "function"}]),
+            patch(
+                "tools.execute_tool", return_value='[{"week": "2026-W01"}]'
+            ) as exec_tool,
+            patch("llm.call_llm", side_effect=fake_call_llm),
+        ):
+            result, _edits, rows = daemon._chat._chat_reply(conn)
+
+        assert result.text == "Figure 1 shows the trend."
+        assert rows == [{"week": "2026-W01"}]
+        exec_tool.assert_called_once()
+        assert len(seen_messages) == 3
+        assert seen_kwargs[2]["tools"] is None
+        assert seen_kwargs[2]["metadata"] == {"iteration": "final_synthesis"}
+        final_messages = seen_messages[2]
+        assert not any(message.get("role") == "tool" for message in final_messages)
+        assert not any(message.get("tool_calls") for message in final_messages)
+        assert '[{"week": "2026-W01"}]' in final_messages[-1]["content"]
+
+    def test_repeated_run_sql_result_forces_clean_final_synthesis(
+        self, tmp_path: Path
+    ) -> None:
+        daemon = _make_daemon(tmp_path)
+        daemon._chat._conversation = MagicMock()
+        daemon._chat._conversation.to_messages.return_value = [
+            {"role": "user", "content": "Chart my running pace by week."}
+        ]
+        conn = open_db(daemon.db)
+
+        first_call = SimpleNamespace(
+            id="call_1",
+            function=SimpleNamespace(
+                name="run_sql",
+                arguments='{"query": "SELECT week, avg_pace FROM weekly"}',
+            ),
+        )
+        second_call = SimpleNamespace(
+            id="call_2",
+            function=SimpleNamespace(
+                name="run_sql",
+                arguments='{"query": "SELECT week, avg_pace FROM weekly ORDER BY week"}',
+            ),
+        )
+        first_result = LLMResult(
+            text="",
+            model="test-model",
+            input_tokens=1,
+            output_tokens=1,
+            total_tokens=2,
+            latency_s=0.1,
+            tool_calls=[first_call],
+            raw_message={"role": "assistant", "content": "", "tool_calls": []},
+        )
+        second_result = LLMResult(
+            text="",
+            model="test-model",
+            input_tokens=1,
+            output_tokens=1,
+            total_tokens=2,
+            latency_s=0.1,
+            tool_calls=[second_call],
+            raw_message={"role": "assistant", "content": "", "tool_calls": []},
+        )
+        final_result = LLMResult(
+            text="Figure 1 shows the trend.",
+            model="test-model",
+            input_tokens=1,
+            output_tokens=1,
+            total_tokens=2,
+            latency_s=0.1,
+        )
+
+        seen_kwargs: list[dict] = []
+
+        def fake_call_llm(messages: list[dict], **kwargs: object) -> LLMResult:
+            seen_kwargs.append(dict(kwargs))
+            return [first_result, second_result, final_result][len(seen_kwargs) - 1]
+
+        with (
+            patch("config.MAX_TOOL_ITERATIONS", 8),
+            patch(
+                "llm_context.load_context", return_value={"prompt": "p", "soul": "s"}
+            ),
+            patch(
+                "llm_context.build_messages",
+                return_value=[
+                    {"role": "system", "content": "system"},
+                    {"role": "user", "content": "context"},
+                ],
+            ),
+            patch(
+                "llm_health.build_llm_data",
+                return_value={
+                    "current_week": {"summary": {"week_label": "2026-W19"}},
+                    "history": [],
+                    "week_complete": False,
+                },
+            ),
+            patch("llm_health.render_health_data", return_value="health"),
+            patch("baselines.compute_baselines", return_value=None),
+            patch("tools.all_chat_tools", return_value=[{"type": "function"}]),
+            patch(
+                "tools.execute_tool",
+                return_value='[{"week": "2026-W01", "avg_pace": 6.06}]',
+            ) as exec_tool,
+            patch("llm.call_llm", side_effect=fake_call_llm),
+        ):
+            result, _edits, rows = daemon._chat._chat_reply(conn)
+
+        assert result.text == "Figure 1 shows the trend."
+        assert rows == [{"week": "2026-W01", "avg_pace": 6.06}]
+        assert exec_tool.call_count == 2
+        assert len(seen_kwargs) == 3
+        assert seen_kwargs[2]["tools"] is None
+        assert seen_kwargs[2]["metadata"] == {"iteration": "final_synthesis"}
+
+    def test_failed_chat_chart_uses_rows_fallback(self, tmp_path: Path) -> None:
+        daemon = _make_daemon(tmp_path)
+        daemon._chat._poller = MagicMock()
+        daemon._chat._conversation = MagicMock()
+        daemon._poller.send_reply.return_value = 900
+        result = LLMResult(
+            text='<chart title="Weekly Pace">\nfig.update_yaxis(ticktext=)\n</chart>\nPace is improving.',
+            model="test-model",
+            input_tokens=1,
+            output_tokens=1,
+            total_tokens=2,
+            latency_s=0.1,
+        )
+        rows = [
+            {"week": "2026-W01", "avg_pace": 6.06},
+            {"week": "2026-W02", "avg_pace": 5.97},
+            {"week": "2026-W03", "avg_pace": 5.82},
+        ]
+
+        with (
+            patch.object(daemon._chat, "_chat_reply", return_value=(result, [], rows)),
+            patch.object(
+                daemon._chat, "_start_placeholder_animation", return_value=(None, None)
+            ),
+            patch.object(daemon._chat, "_stop_placeholder_animation"),
+            patch("charts.render_chart", return_value=None) as render_chart,
+            patch(
+                "charts.render_rows_chart", return_value=b"\x89PNGfallback"
+            ) as render_rows_chart,
+        ):
+            daemon._handle_telegram_message(
+                {
+                    "message_id": 1000,
+                    "text": "What's my avg running speed trend per km by week in 2026?",
+                }
+            )
+
+        render_chart.assert_called_once()
+        render_rows_chart.assert_called_once_with(rows, title="Weekly Pace")
+        daemon._poller.send_photo.assert_called_once_with(
+            b"\x89PNGfallback", caption="**Figure 1. Weekly Pace**"
+        )
+        daemon._poller.edit_message.assert_called_once_with(900, "Pace is improving.")
+
+    def test_chat_with_chart_intent_auto_renders_rows_without_chart_block(
+        self, tmp_path: Path
+    ) -> None:
+        daemon = _make_daemon(tmp_path)
+        daemon._chat._poller = MagicMock()
+        daemon._chat._conversation = MagicMock()
+        daemon._poller.send_reply.return_value = 901
+        result = LLMResult(
+            text="Pace improved from W01 to W18.",
+            model="test-model",
+            input_tokens=1,
+            output_tokens=1,
+            total_tokens=2,
+            latency_s=0.1,
+        )
+        rows = [
+            {"week": "2026-W01", "avg_pace_min_km": 6.06},
+            {"week": "2026-W18", "avg_pace_min_km": 5.67},
+        ]
+
+        with (
+            patch.object(daemon._chat, "_chat_reply", return_value=(result, [], rows)),
+            patch.object(
+                daemon._chat, "_start_placeholder_animation", return_value=(None, None)
+            ),
+            patch.object(daemon._chat, "_stop_placeholder_animation"),
+            patch(
+                "charts.render_rows_chart", return_value=b"\x89PNGauto"
+            ) as render_rows_chart,
+        ):
+            daemon._handle_telegram_message(
+                {
+                    "message_id": 1001,
+                    "text": "What's my avg running speed trend per km by week in 2026?",
+                }
+            )
+
+        render_rows_chart.assert_called_once_with(rows)
+        daemon._poller.send_photo.assert_called_once_with(
+            b"\x89PNGauto", caption="**Figure 1. Trend**"
+        )
+        daemon._poller.edit_message.assert_called_once_with(
+            901, "Pace improved from W01 to W18."
+        )
 
 
 class TestNotifyFlow:
