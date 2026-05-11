@@ -24,7 +24,7 @@ import sys
 import threading
 import time
 from contextlib import contextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Iterator
 
@@ -43,6 +43,11 @@ from config import (
 from daemon_notify_flow import (  # noqa: F401
     PendingNotifyClarification,
     PendingNotifyProposal,
+)
+from llm_verify import (
+    VerificationSuppression,
+    register_suppression_listener,
+    unregister_suppression_listener,
 )
 
 if TYPE_CHECKING:
@@ -187,11 +192,17 @@ class _LastErrorCapture(logging.Handler):
     ``logger.error(...)`` and then call ``sys.exit(1)``; by the time the
     daemon's ``except SystemExit`` runs, the exception object is gone but
     the log message is still useful for telling the user what broke.
+
+    Also captures the most recent :class:`VerificationSuppression` emitted
+    by the verifier during the wrapped block, so the daemon can attach
+    rich detail buttons to the failure notice without re-querying the
+    events table (which would race across categories).
     """
 
     def __init__(self) -> None:
         super().__init__(level=logging.ERROR)
         self.last_message: str | None = None
+        self.last_suppression: VerificationSuppression | None = None
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
@@ -200,21 +211,28 @@ class _LastErrorCapture(logging.Handler):
             # Never let logging-side failures break command execution.
             pass
 
+    def _record_suppression(self, snapshot: VerificationSuppression) -> None:
+        self.last_suppression = snapshot
+
 
 @contextmanager
 def _capture_last_error() -> Iterator[_LastErrorCapture]:
-    """Capture the last ERROR-level log message during the wrapped block.
+    """Capture errors and verifier suppressions during the wrapped block.
 
     The handler is attached to the root logger so it sees errors emitted
     by any module the wrapped command touches (commands, llm, store, ...).
-    It is removed unconditionally on exit, even if the block raises.
+    A verifier suppression listener is registered alongside so the daemon
+    can show the user *why* a report was blocked without a time-window
+    DB query. Both are released unconditionally on exit.
     """
     capture = _LastErrorCapture()
     root = logging.getLogger()
     root.addHandler(capture)
+    register_suppression_listener(capture._record_suppression)
     try:
         yield capture
     finally:
+        unregister_suppression_listener(capture._record_suppression)
         root.removeHandler(capture)
 
 
@@ -654,71 +672,18 @@ class ZdrowskitDaemon:
 
     @staticmethod
     def _truncate_notice(text: str, limit: int) -> str:
-        """Return *text* trimmed for a compact Telegram notice."""
-        stripped = " ".join(text.split())
+        """Return *text* trimmed for a Telegram notice, preserving newlines."""
+        stripped = text.strip()
         if len(stripped) <= limit:
             return stripped
         return stripped[: limit - 3].rstrip() + "..."
-
-    def _latest_verifier_failure_notice(
-        self,
-        category: str,
-    ) -> dict[str, str | int | None] | None:
-        """Return details for the most recent verifier suppression."""
-        from store import open_db
-
-        cutoff = (datetime.now(timezone.utc) - timedelta(minutes=15)).isoformat()
-        conn = open_db(self.db)
-        try:
-            row = conn.execute(
-                """
-                SELECT e.llm_call_id, c.trace_id, c.metadata_json
-                FROM events e
-                LEFT JOIN llm_call c ON c.id = e.llm_call_id
-                WHERE e.category = ?
-                  AND e.kind = 'verifier_suppressed'
-                  AND e.ts >= ?
-                ORDER BY e.ts DESC, e.id DESC
-                LIMIT 1
-                """,
-                (category, cutoff),
-            ).fetchone()
-        finally:
-            conn.close()
-        if row is None or row["llm_call_id"] is None:
-            return None
-
-        try:
-            metadata = json.loads(row["metadata_json"] or "{}")
-        except (TypeError, ValueError, json.JSONDecodeError):
-            metadata = {}
-
-        verification = next(
-            (
-                value
-                for key, value in metadata.items()
-                if key.endswith("_verification") and isinstance(value, dict)
-            ),
-            {},
-        )
-        issues = verification.get("issues") if isinstance(verification, dict) else None
-        first_issue = issues[0] if isinstance(issues, list) and issues else {}
-        problem = first_issue.get("problem") if isinstance(first_issue, dict) else None
-        return {
-            "source_call_id": row["llm_call_id"],
-            "trace_id": row["trace_id"],
-            "verifier_call_id": verification.get("verifier_call_id")
-            if isinstance(verification, dict)
-            else None,
-            "problem": self._truncate_notice(str(problem), 180) if problem else None,
-        }
 
     def _notify_user_failure(
         self,
         operation: str,
         error_text: str | None,
         *,
-        category: str | None = None,
+        detail: VerificationSuppression | None = None,
     ) -> None:
         """Send a brief failure notice to Telegram so the user knows.
 
@@ -731,38 +696,19 @@ class ZdrowskitDaemon:
             operation: Short human-readable label, e.g. "Weekly review".
             error_text: The captured error message, or None if nothing was
                 captured (rare — falls back to a generic notice).
-            category: Optional event category for verifier-specific details.
+            detail: Verifier suppression snapshot captured during the
+                failing run; when present, the notice gets a richer
+                summary plus inline Details / Trace buttons.
         """
         poller = self._chat._poller
         if poller is None:
             # Telegram not configured — nothing to notify.
             return
 
-        detail = None
-        if category and error_text and "verification failed" in error_text.lower():
-            detail = self._latest_verifier_failure_notice(category)
-
         buttons: list[list[dict[str, str]]] = []
-        if detail:
-            problem = detail.get("problem")
-            text = f"**{operation} failed**\n\nVerifier blocked it."
-            if problem:
-                text += f"\n\n{problem}"
-            text += "\n\nThe report was not sent."
-            row = [
-                {
-                    "text": "Details",
-                    "callback_data": f"faildetail:{detail['source_call_id']}",
-                }
-            ]
-            if detail.get("trace_id") is not None:
-                row.append(
-                    {
-                        "text": f"Trace {detail['trace_id']}",
-                        "callback_data": f"llmlog:trace:{detail['trace_id']}",
-                    }
-                )
-            buttons.append(row)
+        if detail is not None and detail.source_llm_call_id is not None:
+            text = self._format_verifier_failure_text(operation, detail)
+            buttons.append(self._verifier_failure_buttons(detail))
         elif error_text:
             text = f"**{operation} failed**\n\n{self._truncate_notice(error_text, 600)}"
         else:
@@ -772,6 +718,38 @@ class ZdrowskitDaemon:
             poller.send_message_with_keyboard(text, buttons)
         except Exception:
             logger.warning("Failed to send failure notice to Telegram", exc_info=True)
+
+    def _format_verifier_failure_text(
+        self,
+        operation: str,
+        detail: VerificationSuppression,
+    ) -> str:
+        """Build the user-facing text for a verifier-suppressed failure."""
+        lines = [f"**{operation} failed**", "", "Verifier blocked it."]
+        if detail.first_issue is not None and detail.first_issue.problem:
+            lines.extend(["", self._truncate_notice(detail.first_issue.problem, 180)])
+        lines.extend(["", "The report was not sent."])
+        return "\n".join(lines)
+
+    @staticmethod
+    def _verifier_failure_buttons(
+        detail: VerificationSuppression,
+    ) -> list[dict[str, str]]:
+        """Inline buttons for a verifier-suppressed failure notice."""
+        row: list[dict[str, str]] = [
+            {
+                "text": "Details",
+                "callback_data": f"faildetail:{detail.source_llm_call_id}",
+            }
+        ]
+        if detail.trace_id is not None:
+            row.append(
+                {
+                    "text": f"Trace {detail.trace_id}",
+                    "callback_data": f"llmlog:trace:{detail.trace_id}",
+                }
+            )
+        return row
 
     def _attach_feedback_button(
         self,

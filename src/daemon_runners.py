@@ -472,11 +472,12 @@ class DaemonRunnerHandler:
             except SystemExit:
                 # Snapshot before our own logger.error overwrites the capture.
                 captured = cap.last_message
+                suppression = cap.last_suppression
                 logger.error("Manual review report failed (%s)", week)
                 self._d._notify_user_failure(
                     f"Manual review ({week})",
                     captured,
-                    category="insights",
+                    detail=suppression,
                 )
 
     def _run_weekly_report(self) -> None:
@@ -542,13 +543,17 @@ class DaemonRunnerHandler:
                 self._d._run_coach(week="last", skip_import=True)
             except SystemExit:
                 captured = cap.last_message
+                suppression = cap.last_suppression
                 logger.error("Weekly review report failed")
-                self._d._state["last_review_failure_ts"] = datetime.now().isoformat()
+                # Suppress same-day retries: the scheduler ticks every 30
+                # minutes and the report window stays open until midnight,
+                # so without this we'd re-run (and re-notify) every tick.
+                self._d._state["last_review_skip_date"] = date.today().isoformat()
                 _save_state(self._d._state)
                 self._d._notify_user_failure(
                     "Weekly review",
                     captured,
-                    category="insights",
+                    detail=suppression,
                 )
                 self._d._record_event(
                     "insights",
@@ -619,13 +624,15 @@ class DaemonRunnerHandler:
                 )
             except SystemExit:
                 captured = cap.last_message
+                suppression = cap.last_suppression
                 logger.error("Mid-week progress report failed")
-                self._d._state["last_progress_failure_ts"] = datetime.now().isoformat()
+                # See _run_weekly_report — same retry-suppression rationale.
+                self._d._state["last_progress_skip_date"] = date.today().isoformat()
                 _save_state(self._d._state)
                 self._d._notify_user_failure(
                     "Mid-week progress",
                     captured,
-                    category="insights",
+                    detail=suppression,
                 )
                 self._d._record_event(
                     "insights",
@@ -752,11 +759,12 @@ class DaemonRunnerHandler:
                     )
             except SystemExit:
                 captured = cap.last_message
+                suppression = cap.last_suppression
                 logger.error("Nudge failed (trigger: %s)", trigger)
                 self._d._notify_user_failure(
                     f"Nudge ({trigger})",
                     captured,
-                    category="nudge",
+                    detail=suppression,
                 )
                 self._d._record_event(
                     "nudge",
@@ -888,11 +896,12 @@ class DaemonRunnerHandler:
                     )
             except SystemExit:
                 captured = cap.last_message
+                suppression = cap.last_suppression
                 logger.error("Coaching review failed")
                 self._d._notify_user_failure(
                     "Coaching review",
                     captured,
-                    category="coach",
+                    detail=suppression,
                 )
                 self._d._record_event(
                     "coach",

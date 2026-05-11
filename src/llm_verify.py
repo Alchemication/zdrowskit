@@ -129,6 +129,50 @@ class VerificationResult:
     rewrite_call_id: int | None = None
 
 
+@dataclass
+class VerificationSuppression:
+    """Snapshot of a verifier suppression for downstream surfaces.
+
+    Surfaced via :func:`register_suppression_listener` so callers (the
+    daemon's failure-capture context) can attach detail buttons to the
+    user-facing failure notice without re-querying the events table.
+    """
+
+    kind: VerificationKind
+    source_llm_call_id: int | None
+    verifier_call_id: int | None
+    trace_id: int | None
+    verdict: Verdict
+    confidence: str
+    first_issue: VerificationIssue | None
+
+
+SuppressionListener = Callable[[VerificationSuppression], None]
+_suppression_listeners: list[SuppressionListener] = []
+
+
+def register_suppression_listener(listener: SuppressionListener) -> None:
+    """Subscribe to verifier suppression events."""
+    _suppression_listeners.append(listener)
+
+
+def unregister_suppression_listener(listener: SuppressionListener) -> None:
+    """Unsubscribe a verifier suppression listener."""
+    try:
+        _suppression_listeners.remove(listener)
+    except ValueError:
+        pass
+
+
+def _notify_suppression(snapshot: VerificationSuppression) -> None:
+    """Fan out a suppression snapshot to all registered listeners."""
+    for listener in list(_suppression_listeners):
+        try:
+            listener(snapshot)
+        except Exception:
+            logger.warning("Suppression listener raised", exc_info=True)
+
+
 _MEMORY_BLOCK_RE = re.compile(r"<memory>.*?</memory>", re.DOTALL | re.IGNORECASE)
 
 
@@ -143,21 +187,25 @@ def _span_contains(spans: list[tuple[int, int]], index: int) -> bool:
 
 
 def _issue_is_memory_only(draft: str, issue: VerificationIssue) -> bool:
-    """Return True when a verifier issue points only at the memory block."""
+    """Return True when a verifier issue points only at the memory block.
+
+    Only quote-anchored issues qualify: a verifier finding without a
+    localized quote can't be proven memory-only, so we err on the safe
+    side and keep the fail verdict for the user to inspect.
+    """
     spans = _memory_spans(draft)
     if not spans:
         return False
 
     quote = issue.quote.strip()
-    if quote:
-        starts = [
-            match.start()
-            for match in re.finditer(re.escape(quote), draft, flags=re.IGNORECASE)
-        ]
-        return bool(starts) and all(_span_contains(spans, start) for start in starts)
+    if not quote:
+        return False
 
-    issue_text = f"{issue.problem} {issue.correction}".lower()
-    return "memory" in issue_text or "<memory>" in issue_text
+    starts = [
+        match.start()
+        for match in re.finditer(re.escape(quote), draft, flags=re.IGNORECASE)
+    ]
+    return bool(starts) and all(_span_contains(spans, start) for start in starts)
 
 
 def _downgrade_memory_only_failure(
@@ -359,6 +407,7 @@ def _finalize_failed_verification(
     source_llm_call_id: int | None,
     result: VerificationResult,
     strict: bool,
+    trace_id: int | None = None,
 ) -> VerificationResult:
     """Persist a verifier failure consistently and return it."""
     _update_call_metadata(
@@ -378,6 +427,7 @@ def _finalize_failed_verification(
         result=result,
         source_llm_call_id=source_llm_call_id,
         strict=strict,
+        trace_id=trace_id,
     )
     return result
 
@@ -522,12 +572,16 @@ def _emit_verification_event(
     result: VerificationResult,
     source_llm_call_id: int | None,
     strict: bool,
+    trace_id: int | None = None,
 ) -> None:
     """Record a verifier outcome to the events log.
 
     Surfaces verifier suppressions in `events`, alongside other daemon
     decisions, so the user can see how often verification killed or
-    rewrote an output without grepping `llm-log`.
+    rewrote an output without grepping `llm-log`. When the verdict
+    suppresses output, also fans out a :class:`VerificationSuppression`
+    snapshot to registered listeners so the daemon can attach detail
+    buttons to the user-facing failure notice.
     """
     category = _EVENT_CATEGORY[kind]
     counts = _issue_counts(result.issues)
@@ -566,6 +620,18 @@ def _emit_verification_event(
         },
         llm_call_id=source_llm_call_id,
     )
+    if event_kind == "verifier_suppressed":
+        _notify_suppression(
+            VerificationSuppression(
+                kind=kind,
+                source_llm_call_id=source_llm_call_id,
+                verifier_call_id=result.verifier_call_id,
+                trace_id=trace_id,
+                verdict=result.verdict,
+                confidence=result.confidence,
+                first_issue=result.issues[0] if result.issues else None,
+            )
+        )
 
 
 def verify_and_rewrite(
@@ -639,6 +705,7 @@ def verify_and_rewrite(
             result=result,
             source_llm_call_id=source_llm_call_id,
             strict=strict,
+            trace_id=trace_id,
         )
         return result
 
@@ -712,6 +779,7 @@ def verify_and_rewrite(
                     source_llm_call_id=source_llm_call_id,
                     result=result,
                     strict=strict,
+                    trace_id=trace_id,
                 )
         parsed = parse_verification_result(verifier_result.text)
         parsed.verifier_call_id = verifier_call_id
@@ -735,6 +803,7 @@ def verify_and_rewrite(
             source_llm_call_id=source_llm_call_id,
             result=result,
             strict=strict,
+            trace_id=trace_id,
         )
 
     if guard_issues:
@@ -776,6 +845,7 @@ def verify_and_rewrite(
             result=parsed,
             source_llm_call_id=source_llm_call_id,
             strict=strict,
+            trace_id=trace_id,
         )
         return parsed
 
@@ -792,6 +862,7 @@ def verify_and_rewrite(
             result=parsed,
             source_llm_call_id=source_llm_call_id,
             strict=strict,
+            trace_id=trace_id,
         )
         return parsed
 
@@ -843,6 +914,7 @@ def verify_and_rewrite(
             result=parsed,
             source_llm_call_id=source_llm_call_id,
             strict=strict,
+            trace_id=trace_id,
         )
         return parsed
 
@@ -864,5 +936,6 @@ def verify_and_rewrite(
         result=parsed,
         source_llm_call_id=source_llm_call_id,
         strict=strict,
+        trace_id=trace_id,
     )
     return parsed

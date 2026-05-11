@@ -19,7 +19,7 @@ from context_edit import (
 )
 from daemon import ZdrowskitDaemon
 from daemon_telegram_chat import _looks_like_internal_tool_markup
-from events import query_events, record_event
+from events import query_events
 from llm import LLMResult
 from notification_prefs import load_notification_prefs
 from store import create_llm_trace, log_llm_call, open_db
@@ -63,7 +63,7 @@ class TestWeeklyReportScheduling:
 
         assert events == ["insights", "record", "coach:last:True"]
 
-    def test_weekly_report_failure_records_failure_without_suppressing_retry(
+    def test_weekly_report_failure_suppresses_same_day_retry(
         self, tmp_path: Path
     ) -> None:
         daemon = _make_daemon(tmp_path)
@@ -75,18 +75,35 @@ class TestWeeklyReportScheduling:
         ):
             daemon._run_weekly_report()
 
-        assert "last_review_skip_date" not in daemon._state
-        assert "last_review_failure_ts" in daemon._state
+        today = daemon_runners_module.date.today().isoformat()
+        assert daemon._state["last_review_skip_date"] == today
         state = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
-        assert "last_review_skip_date" not in state
-        assert "last_review_failure_ts" in state
+        assert state["last_review_skip_date"] == today
         notify_failure.assert_called_once_with(
             "Weekly review",
             None,
-            category="insights",
+            detail=None,
         )
 
-    def test_midweek_report_failure_records_failure_without_suppressing_retry(
+    def test_weekly_report_does_not_re_run_after_failure_same_day(
+        self, tmp_path: Path
+    ) -> None:
+        """Guard the retry-spam regression: a failed run must mark the day
+        as skipped so the next scheduler tick is a no-op."""
+        daemon = _make_daemon(tmp_path)
+        insights = MagicMock(side_effect=SystemExit(1))
+
+        with (
+            patch.object(daemon, "_run_import"),
+            patch("cmd_insights.cmd_insights", insights),
+            patch.object(daemon, "_notify_user_failure"),
+        ):
+            daemon._run_weekly_report()
+            daemon._run_weekly_report()
+
+        assert insights.call_count == 1
+
+    def test_midweek_report_failure_suppresses_same_day_retry(
         self, tmp_path: Path
     ) -> None:
         daemon = _make_daemon(tmp_path)
@@ -98,15 +115,14 @@ class TestWeeklyReportScheduling:
         ):
             daemon._runners._run_midweek_report()
 
-        assert "last_progress_skip_date" not in daemon._state
-        assert "last_progress_failure_ts" in daemon._state
+        today = daemon_runners_module.date.today().isoformat()
+        assert daemon._state["last_progress_skip_date"] == today
         state = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
-        assert "last_progress_skip_date" not in state
-        assert "last_progress_failure_ts" in state
+        assert state["last_progress_skip_date"] == today
         notify_failure.assert_called_once_with(
             "Mid-week progress",
             None,
-            category="insights",
+            detail=None,
         )
 
 
@@ -3058,45 +3074,31 @@ class TestFailureCapture:
     def test_notify_user_failure_sends_verifier_summary_and_buttons(
         self, tmp_path: Path
     ) -> None:
+        from llm_verify import VerificationIssue, VerificationSuppression
+
         daemon = _make_daemon(tmp_path)
         daemon._chat._poller = MagicMock()
-        conn = open_db(tmp_path / "test.db")
-        trace_id = create_llm_trace(conn, "insights")
-        source_id = log_llm_call(
-            conn,
-            request_type="insights",
-            model="draft-model",
-            messages=[],
-            response_text="draft",
-            metadata={
-                "insights_verification": {
-                    "verdict": "fail",
-                    "confidence": "high",
-                    "verifier_call_id": 99,
-                    "issues": [
-                        {
-                            "severity": "critical",
-                            "problem": "False Monday streak claim.",
-                            "correction": "Remove the streak.",
-                            "evidence": "W18 Monday was a rest day.",
-                        }
-                    ],
-                }
-            },
-            trace_id=trace_id,
-        )
-        record_event(
-            conn,
-            "insights",
-            "verifier_suppressed",
-            "insights suppressed by verifier",
-            llm_call_id=source_id,
+
+        detail = VerificationSuppression(
+            kind="insights",
+            source_llm_call_id=42,
+            verifier_call_id=99,
+            trace_id=7,
+            verdict="fail",
+            confidence="high",
+            first_issue=VerificationIssue(
+                severity="critical",
+                quote="streak",
+                problem="False Monday streak claim.",
+                correction="Remove the streak.",
+                evidence="W18 Monday was a rest day.",
+            ),
         )
 
         daemon._notify_user_failure(
             "Weekly review",
             "Insights verification failed; refusing to save/send report",
-            category="insights",
+            detail=detail,
         )
 
         sent_text = daemon._poller.send_message_with_keyboard.call_args.args[0]
@@ -3107,13 +3109,37 @@ class TestFailureCapture:
         assert "The report was not sent." in sent_text
         assert buttons == [
             [
-                {"text": "Details", "callback_data": f"faildetail:{source_id}"},
-                {
-                    "text": f"Trace {trace_id}",
-                    "callback_data": f"llmlog:trace:{trace_id}",
-                },
+                {"text": "Details", "callback_data": "faildetail:42"},
+                {"text": "Trace 7", "callback_data": "llmlog:trace:7"},
             ]
         ]
+
+    def test_capture_records_verifier_suppression(self, tmp_path: Path) -> None:
+        from llm_verify import (
+            VerificationIssue,
+            VerificationSuppression,
+            _notify_suppression,
+        )
+
+        snapshot = VerificationSuppression(
+            kind="insights",
+            source_llm_call_id=11,
+            verifier_call_id=22,
+            trace_id=33,
+            verdict="fail",
+            confidence="high",
+            first_issue=VerificationIssue(
+                severity="critical",
+                quote="q",
+                problem="problem",
+                correction="fix",
+            ),
+        )
+
+        with daemon_module._capture_last_error() as cap:
+            _notify_suppression(snapshot)
+
+        assert cap.last_suppression is snapshot
 
     def test_notify_user_failure_truncates_long_errors(self, tmp_path: Path) -> None:
         daemon = _make_daemon(tmp_path)
