@@ -37,6 +37,12 @@ uv run python main.py notify reset all
 
 LLM evals have their own runner. See [LLM evals](evals.md).
 
+```bash
+uv run python -m evals.run
+uv run python -m evals.matrix --feature chat --models deepseek/deepseek-v4-flash,deepseek/deepseek-v4-pro --reasoning-efforts high
+uv run python -m evals.leaderboard render
+```
+
 ## Data Directory Override
 
 Override the default iCloud data directory with `--data-dir` or the `HEALTH_DATA_DIR` environment variable.

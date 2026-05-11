@@ -29,17 +29,12 @@ from model_prefs import resolve_model_route  # noqa: E402
 from store import connect_db  # noqa: E402
 
 
-def _resolved_model_label() -> str:
-    """Render the verifier model for result reporting."""
-    return resolve_model_route("verification").primary
-
-
 def run_verify_case(
     case: Any,
     *,
     cache: Any = None,
     refresh_cache: bool = False,
-) -> tuple[Any, str]:
+) -> tuple[Any, str, dict[str, Any]]:
     """Run one verifier eval case and return its execution + model label.
 
     The verifier surface (``insights`` / ``coach`` / ``nudge``) is taken from
@@ -70,6 +65,7 @@ def run_verify_case(
     )
     verifier_route = resolve_model_route("verification")
     rewrite_route = resolve_model_route("verification_rewrite")
+    fallback_models = [verifier_route.fallback] if verifier_route.fallback else []
     with tempfile.TemporaryDirectory() as tmp:
         conn = connect_db(Path(tmp) / "eval.db", migrate=True)
         try:
@@ -82,9 +78,7 @@ def run_verify_case(
                 metadata=metadata,
                 model=verifier_route.primary,
                 rewrite_model=rewrite_route.primary,
-                fallback_models=(
-                    [verifier_route.fallback] if verifier_route.fallback else None
-                ),
+                fallback_models=fallback_models or None,
                 temperature=verifier_route.temperature,
                 reasoning_effort=verifier_route.reasoning_effort,
                 rewrite_temperature=rewrite_route.temperature,
@@ -116,7 +110,22 @@ def run_verify_case(
             cache_hits=wrapper.hits,
             cache_misses=wrapper.misses,
         ),
-        _resolved_model_label(),
+        verifier_route.primary,
+        {
+            "feature": str(case.feature),
+            "kind": kind,
+            "primary": verifier_route.primary,
+            "fallback_models": fallback_models,
+            "reasoning_effort": verifier_route.reasoning_effort,
+            "temperature": verifier_route.temperature,
+            "rewrite_primary": rewrite_route.primary,
+            "rewrite_fallback_models": (
+                [rewrite_route.fallback] if rewrite_route.fallback else []
+            ),
+            "rewrite_reasoning_effort": rewrite_route.reasoning_effort,
+            "rewrite_temperature": rewrite_route.temperature,
+            "source": "model_prefs:verification",
+        },
     )
 
 

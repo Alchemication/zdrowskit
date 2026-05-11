@@ -45,6 +45,8 @@ uv run python -m evals.run chat_log_life_disruption     # one case
 uv run python -m evals.run --feature chat               # feature filter
 uv run python -m evals.run --details                    # debug failed cases
 uv run python -m evals.run --record                     # persist a run to evals/leaderboard/runs.jsonl
+uv run python -m evals.matrix --feature chat --models deepseek/deepseek-v4-flash,deepseek/deepseek-v4-pro --reasoning-efforts high --record
+uv run python -m evals.matrix --production --record     # current configured smoke suite
 uv run python -m evals.leaderboard render               # rebuild evals/leaderboard.md from raw history
 uv run python -m evals.leaderboard render-html          # rebuild evals/leaderboard.html with filters and sortable views
 ```
@@ -58,11 +60,37 @@ Some models reject a `temperature` parameter (for example `claude-opus-4-7`). Fo
 - `chat` — exercises the full chat tool loop end-to-end, taking the model from `--model`.
 - `nudge_verify` and `insights_verify` — exercise the production verifier path (`verify_and_rewrite` with the rewriter disabled) for nudges and weekly insights respectively. Both run through the same `evals/run_verify.py` runner; the surface (`nudge` / `insights`) is taken from `fixture.kind`. Models and the Pydantic response schema are resolved by the production path at runtime. Override the verifier model via `ZDROWSKIT_VERIFICATION_MODEL` or change its `reasoning_effort` through `main.py models` to A/B verifier behavior (on DeepSeek, `high`/`max` engage thinking via call_llm's translation).
 
+## Model Matrices
+
+Use `evals.run` for one smoke run and `evals.matrix` for comparisons.
+
+Chat is the only current feature where `--model` directly changes the evaluated production path:
+
+```bash
+uv run python -m evals.matrix \
+  --feature chat \
+  --models deepseek/deepseek-v4-flash,deepseek/deepseek-v4-pro,anthropic/claude-sonnet-4-6 \
+  --reasoning-efforts high \
+  --no-temperature \
+  --record
+```
+
+Verifier features resolve `model_prefs` at runtime. To compare verifier models, change the `verification` route with `uv run python main.py models`, then run:
+
+```bash
+uv run python -m evals.matrix --feature nudge_verify --record
+uv run python -m evals.matrix --feature insights_verify --record
+```
+
+Recorded runs now store both the requested CLI model and the actual per-case route. Mixed all-case runs are useful as production smoke checks, but model decisions should be made from feature-scoped sections because verifier cases do not use the chat `--model`.
+
 ## Leaderboard
 
 Recorded leaderboard runs live in `evals/leaderboard/runs.jsonl`. The generated Markdown snapshot lives in `evals/leaderboard.md`.
 
 Comparisons are scope-aware: runs over different case sets are rendered in separate sections rather than ranked together.
+
+Each recorded run includes per-feature pass/fail summaries and per-case route metadata. This keeps all-case smoke runs honest when different features resolve different production model routes.
 
 The interactive HTML report lives in `evals/leaderboard.html` and is generated from the same raw JSONL history.
 

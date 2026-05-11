@@ -39,18 +39,20 @@ def compute_run_fingerprint(
     *,
     git_sha: str,
     case_set_id: str,
-    model: str,
+    requested_model: str,
     reasoning_effort: str | None,
     max_tool_iterations: int,
+    route_set_id: str,
 ) -> str:
     """Return a stable fingerprint for one comparable eval run."""
     return _stable_hash(
         {
             "git_sha": git_sha,
             "case_set_id": case_set_id,
-            "model": model,
+            "requested_model": requested_model,
             "reasoning_effort": reasoning_effort,
             "max_tool_iterations": max_tool_iterations,
+            "route_set_id": route_set_id,
         }
     )
 
@@ -66,7 +68,7 @@ def build_run_record(
     *,
     results: list[EvalResult],
     case_ids: list[str],
-    model: str,
+    requested_model: str,
     reasoning_effort: str | None,
     max_tool_iterations: int,
     feature_filter: str | None,
@@ -79,27 +81,31 @@ def build_run_record(
     context = repo_context or get_repo_context()
     case_set_id = compute_case_set_id(sorted_case_ids)
     summary = _build_summary_metrics(results)
+    route_set_id = _compute_route_set_id(results)
     record = {
         "run_id": run_id or uuid.uuid4().hex,
         "created_at": created_at or _utc_now_iso(),
-        "model": model,
+        "requested_model": requested_model,
         "reasoning_effort": reasoning_effort,
         "max_tool_iterations": max_tool_iterations,
         "case_ids": sorted_case_ids,
         "case_count": len(sorted_case_ids),
         "feature_filter": feature_filter,
         "case_set_id": case_set_id,
+        "route_set_id": route_set_id,
         "git_sha": str(context.get("git_sha", "unknown")),
         "dirty": bool(context.get("dirty", False)),
         "summary": summary,
+        "feature_summary": _build_feature_summary(results),
         "per_case": [_build_case_result(result) for result in results],
     }
     record["run_fingerprint"] = compute_run_fingerprint(
         git_sha=record["git_sha"],
         case_set_id=record["case_set_id"],
-        model=model,
+        requested_model=requested_model,
         reasoning_effort=reasoning_effort,
         max_tool_iterations=max_tool_iterations,
+        route_set_id=route_set_id,
     )
     return record
 
@@ -150,8 +156,8 @@ def render_leaderboard_markdown(runs: list[dict[str, Any]]) -> str:
                 "",
                 "Case IDs: " + (", ".join(case_ids) if case_ids else "-"),
                 "",
-                "| Model | Reasoning | Accuracy | Passed | Failed | Avg Latency | p95 Latency | Total Cost | Avg Cost | Revision | Failed Cases |",
-                "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |",
+                "| Model | Reasoning | Accuracy | Passed | Failed | Routes | Avg Latency | p95 Latency | Total Cost | Avg Cost | Revision | Failed Cases |",
+                "| --- | --- | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | --- | --- |",
             ]
         )
         for row in section["rows"]:
@@ -160,11 +166,12 @@ def render_leaderboard_markdown(runs: list[dict[str, Any]]) -> str:
                 "| "
                 + " | ".join(
                     [
-                        row["model"].split("/")[-1],
+                        row["requested_model"].split("/")[-1],
                         _display_reasoning_effort(row.get("reasoning_effort")),
                         _format_percent(float(summary["accuracy"])),
                         str(summary["passed"]),
                         str(summary["failed"]),
+                        _format_run_routes(row),
                         _format_optional_seconds(summary.get("avg_latency_s")),
                         _format_optional_seconds(summary.get("p95_latency_s")),
                         _format_optional_cost(summary.get("total_cost")),
@@ -175,6 +182,9 @@ def render_leaderboard_markdown(runs: list[dict[str, Any]]) -> str:
                 )
                 + " |"
             )
+        feature_lines = _format_feature_summary(section["rows"][0])
+        if feature_lines:
+            lines.extend(["", *feature_lines])
         lines.append("")
     return "\n".join(lines)
 
@@ -598,6 +608,7 @@ def render_leaderboard_html(runs: list[dict[str, Any]]) -> str:
                       <th>Accuracy</th>
                       <th>Passed</th>
                       <th>Failed</th>
+                      <th>Routes</th>
                       <th>Avg Latency</th>
                       <th>p95 Latency</th>
                       <th>Total Cost</th>
@@ -610,7 +621,7 @@ def render_leaderboard_html(runs: list[dict[str, Any]]) -> str:
                 </table>
               </div>
               <div class="footnote">
-                Latest-only mode is on by default so repeated reruns do not drown model comparisons.
+                Latest-only mode is on by default so repeated reruns do not drown model and route comparisons.
               </div>
             </section>
           </section>
@@ -687,7 +698,7 @@ def render_leaderboard_html(runs: list[dict[str, Any]]) -> str:
         const seen = new Set();
         const kept = [];
         for (const row of [...rows].sort((a, b) => b.created_at.localeCompare(a.created_at))) {{
-          const key = `${{row.model}}::${{row.reasoning_effort || "none"}}`;
+          const key = `${{row.requested_model}}::${{row.reasoning_effort || "none"}}::${{row.route_set_id}}`;
           if (seen.has(key)) continue;
           seen.add(key);
           kept.push(row);
@@ -698,14 +709,14 @@ def render_leaderboard_html(runs: list[dict[str, Any]]) -> str:
       function applyFilters(section) {{
         const query = state.query.trim().toLowerCase();
         let rows = latestOnly(section.runs);
-        rows = rows.filter((row) => state.model === "all" || row.model === state.model);
+        rows = rows.filter((row) => state.model === "all" || row.requested_model === state.model);
         rows = rows.filter((row) => state.reasoning === "all" || (row.reasoning_effort || "none") === state.reasoning);
         rows = rows.filter((row) => !state.failedOnly || row.summary.failed > 0);
         rows = rows.filter((row) => !state.dirtyOnly || row.dirty);
         rows = rows.filter((row) => {{
           if (!query) return true;
           const haystack = [
-            row.model,
+            row.requested_model,
             row.model_display,
             row.reasoning_effort || "none",
             row.git_sha_short,
@@ -742,7 +753,7 @@ def render_leaderboard_html(runs: list[dict[str, Any]]) -> str:
         els.body.innerHTML = "";
         if (!rows.length) {{
           const tr = document.createElement("tr");
-          tr.innerHTML = `<td colspan="10" class="muted">No runs match the current filters.</td>`;
+          tr.innerHTML = `<td colspan="11" class="muted">No runs match the current filters.</td>`;
           els.body.appendChild(tr);
           return;
         }}
@@ -764,6 +775,7 @@ def render_leaderboard_html(runs: list[dict[str, Any]]) -> str:
             </td>
             <td>${{row.summary.passed}}</td>
             <td>${{row.summary.failed}}</td>
+            <td class="failed-cases">${{row.routes || "—"}}</td>
             <td>${{fmtSeconds(row.summary.avg_latency_s)}}</td>
             <td>${{fmtSeconds(row.summary.p95_latency_s)}}</td>
             <td>${{fmtCost(row.summary.total_cost)}}</td>
@@ -802,7 +814,7 @@ def render_leaderboard_html(runs: list[dict[str, Any]]) -> str:
 
       function refreshDynamicOptions() {{
         const section = getSection();
-        const models = Array.from(new Set(section.runs.map((row) => row.model))).sort();
+        const models = Array.from(new Set(section.runs.map((row) => row.requested_model))).sort();
         const reasoning = Array.from(new Set(section.runs.map((row) => row.reasoning_effort || "none"))).sort();
         buildOptions(els.model, [{{ value: "all", label: "All models" }}, ...models.map((model) => ({{ value: model, label: model.split("/").pop() }}))], state.model);
         buildOptions(els.reasoning, [{{ value: "all", label: "All reasoning levels" }}, ...reasoning.map((value) => ({{ value, label: value }}))], state.reasoning);
@@ -846,7 +858,7 @@ def record_run(
     *,
     results: list[EvalResult],
     case_ids: list[str],
-    model: str,
+    requested_model: str,
     reasoning_effort: str | None,
     max_tool_iterations: int,
     feature_filter: str | None,
@@ -864,7 +876,7 @@ def record_run(
     record = build_run_record(
         results=results,
         case_ids=case_ids,
-        model=model,
+        requested_model=requested_model,
         reasoning_effort=reasoning_effort,
         max_tool_iterations=max_tool_iterations,
         feature_filter=feature_filter,
@@ -982,17 +994,74 @@ def _build_summary_metrics(results: list[EvalResult]) -> dict[str, Any]:
     }
 
 
+def _build_feature_summary(results: list[EvalResult]) -> dict[str, Any]:
+    """Build per-feature pass/fail and route summaries for a run."""
+    grouped: dict[str, list[EvalResult]] = {}
+    for result in results:
+        grouped.setdefault(result.feature, []).append(result)
+    summary: dict[str, Any] = {}
+    for feature, feature_results in sorted(grouped.items()):
+        metrics = _build_summary_metrics(feature_results)
+        routes = sorted(
+            {
+                _route_label(result.route or {"primary": result.model})
+                for result in feature_results
+            }
+        )
+        summary[feature] = {
+            "case_count": len(feature_results),
+            "accuracy": metrics["accuracy"],
+            "passed": metrics["passed"],
+            "failed": metrics["failed"],
+            "routes": routes,
+        }
+    return summary
+
+
 def _build_case_result(result: EvalResult) -> dict[str, Any]:
     """Build one per-case leaderboard outcome row."""
     execution = result.execution
     return {
         "case_id": result.case_id,
+        "feature": result.feature,
+        "case_kind": result.case_kind,
+        "model": result.model,
+        "route": result.route,
         "passed": result.passed,
         "failure_names": [failure.name for failure in result.failures],
         "error": result.error,
         "latency_s": execution.latency_s if execution is not None else None,
         "cost": execution.cost if execution is not None else None,
     }
+
+
+def _compute_route_set_id(results: list[EvalResult]) -> str:
+    """Return a stable fingerprint for the actual per-case model routes."""
+    route_payload = [
+        {
+            "case_id": result.case_id,
+            "feature": result.feature,
+            "model": result.model,
+            "route": result.route,
+        }
+        for result in sorted(results, key=lambda item: item.case_id)
+    ]
+    return _stable_hash(route_payload)
+
+
+def _route_label(route: dict[str, Any]) -> str:
+    """Return a compact route label for reports."""
+    primary = str(route["primary"])
+    effort = route.get("reasoning_effort")
+    fallback_models = route.get("fallback_models") or []
+    label = primary.split("/")[-1]
+    if effort:
+        label += f" ({effort})"
+    if fallback_models:
+        fallback = str(fallback_models[0]).split("/")[-1]
+        extra = "" if len(fallback_models) == 1 else f"+{len(fallback_models) - 1}"
+        label += f" -> {fallback}{extra}"
+    return label
 
 
 def _group_runs_for_sections(runs: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
@@ -1036,12 +1105,16 @@ def _build_sections(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _rank_section_rows(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Return one latest row per model/reasoning pair, ranked for display."""
-    latest_by_identity: dict[tuple[str, str | None], dict[str, Any]] = {}
+    """Return one latest row per requested model, reasoning, and route."""
+    latest_by_identity: dict[tuple[str, str | None, str | None], dict[str, Any]] = {}
     for run in sorted(
         runs, key=lambda run: str(run.get("created_at", "")), reverse=True
     ):
-        key = (str(run["model"]), run.get("reasoning_effort"))
+        key = (
+            str(run["requested_model"]),
+            run.get("reasoning_effort"),
+            run.get("route_set_id"),
+        )
         latest_by_identity.setdefault(key, run)
     rows = list(latest_by_identity.values())
     rows.sort(
@@ -1090,11 +1163,49 @@ def _format_revision(run: dict[str, Any]) -> str:
 def _format_failed_cases(run: dict[str, Any]) -> str:
     """Format failed case ids for one leaderboard row."""
     failed_case_ids = [
-        str(case["case_id"])
-        for case in run.get("per_case", [])
-        if not bool(case.get("passed", False))
+        str(case["case_id"]) for case in run["per_case"] if not bool(case["passed"])
     ]
     return ", ".join(failed_case_ids) if failed_case_ids else "-"
+
+
+def _format_run_routes(run: dict[str, Any]) -> str:
+    """Format route labels for one leaderboard row."""
+    parts: list[str] = []
+    for feature, summary in sorted(run["feature_summary"].items()):
+        routes = summary["routes"]
+        route_label = ", ".join(str(route) for route in routes) if routes else "-"
+        parts.append(f"{feature}: {route_label}")
+    return "<br>".join(parts)
+
+
+def _format_feature_summary(run: dict[str, Any]) -> list[str]:
+    """Render a per-feature breakdown under mixed-scope markdown sections."""
+    feature_summary = run["feature_summary"]
+    if len(feature_summary) <= 1:
+        return []
+    lines = [
+        "Latest-row feature breakdown:",
+        "",
+        "| Feature | Cases | Accuracy | Passed | Failed | Routes |",
+        "| --- | ---: | ---: | ---: | ---: | --- |",
+    ]
+    for feature, summary in sorted(feature_summary.items()):
+        routes = summary["routes"]
+        lines.append(
+            "| "
+            + " | ".join(
+                [
+                    str(feature),
+                    str(summary["case_count"]),
+                    _format_percent(float(summary["accuracy"])),
+                    str(summary["passed"]),
+                    str(summary["failed"]),
+                    ", ".join(str(route) for route in routes) if routes else "-",
+                ]
+            )
+            + " |"
+        )
+    return lines
 
 
 def _build_html_payload(runs: list[dict[str, Any]]) -> dict[str, Any]:
@@ -1119,17 +1230,18 @@ def _run_for_html(run: dict[str, Any]) -> dict[str, Any]:
     return {
         "run_id": run["run_id"],
         "created_at": run["created_at"],
-        "model": run["model"],
-        "model_display": str(run["model"]).split("/")[-1],
+        "requested_model": run["requested_model"],
+        "model_display": str(run["requested_model"]).split("/")[-1],
+        "route_set_id": run["route_set_id"],
         "reasoning_effort": run.get("reasoning_effort"),
+        "feature_summary": run["feature_summary"],
+        "routes": _format_run_routes(run),
         "summary": run["summary"],
         "git_sha_short": str(run.get("git_sha", "unknown"))[:7],
         "dirty": bool(run.get("dirty", False)),
         "revision_label": _format_revision(run),
         "failed_cases": [
-            str(case["case_id"])
-            for case in run.get("per_case", [])
-            if not bool(case.get("passed", False))
+            str(case["case_id"]) for case in run["per_case"] if not bool(case["passed"])
         ],
     }
 

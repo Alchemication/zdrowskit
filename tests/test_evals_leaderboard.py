@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from evals import leaderboard
+from evals import matrix as eval_matrix
 from evals import run as eval_run
 from evals.framework import AssertionResult, EvalExecution, EvalResult, load_cases
 
@@ -17,6 +18,9 @@ def _eval_result(
     case_id: str,
     *,
     passed: bool,
+    feature: str = "chat",
+    model: str = "anthropic/test-model",
+    route: dict | None = None,
     latency_s: float = 1.0,
     cost: float | None = 0.01,
 ) -> EvalResult:
@@ -25,11 +29,20 @@ def _eval_result(
         assertions = [AssertionResult(name="failed_assertion", passed=False)]
     return EvalResult(
         case_id=case_id,
-        feature="chat",
+        feature=feature,
         case_kind="real_regression",
-        model="anthropic/test-model",
+        model=model,
         source_feedback_id=1,
         source_llm_call_id=2,
+        route=route
+        or {
+            "feature": feature,
+            "primary": model,
+            "fallback_models": [],
+            "reasoning_effort": "medium",
+            "temperature": None,
+            "source": "test",
+        },
         assertions=assertions,
         execution=EvalExecution(
             text="Done",
@@ -48,7 +61,7 @@ def _build_record(
     *,
     case_ids: list[str],
     results: list[EvalResult],
-    model: str,
+    requested_model: str,
     reasoning_effort: str | None,
     created_at: str,
     run_id: str,
@@ -57,7 +70,7 @@ def _build_record(
     return leaderboard.build_run_record(
         results=results,
         case_ids=case_ids,
-        model=model,
+        requested_model=requested_model,
         reasoning_effort=reasoning_effort,
         max_tool_iterations=5,
         feature_filter=feature_filter,
@@ -84,22 +97,83 @@ class TestIdentity:
         first = leaderboard.compute_run_fingerprint(
             git_sha="abc",
             case_set_id="case-set",
-            model="anthropic/test-model",
+            requested_model="anthropic/test-model",
             reasoning_effort=None,
             max_tool_iterations=5,
+            route_set_id="route-a",
         )
         second = leaderboard.compute_run_fingerprint(
             git_sha="abc",
             case_set_id="case-set",
-            model="anthropic/test-model",
+            requested_model="anthropic/test-model",
             reasoning_effort="high",
             max_tool_iterations=5,
+            route_set_id="route-a",
+        )
+
+        assert first != second
+
+    def test_run_fingerprint_changes_with_route_set(self) -> None:
+        first = leaderboard.compute_run_fingerprint(
+            git_sha="abc",
+            case_set_id="case-set",
+            requested_model="anthropic/test-model",
+            reasoning_effort=None,
+            max_tool_iterations=5,
+            route_set_id="route-a",
+        )
+        second = leaderboard.compute_run_fingerprint(
+            git_sha="abc",
+            case_set_id="case-set",
+            requested_model="anthropic/test-model",
+            reasoning_effort=None,
+            max_tool_iterations=5,
+            route_set_id="route-b",
         )
 
         assert first != second
 
 
 class TestRecording:
+    def test_build_record_includes_actual_case_routes_and_feature_summary(
+        self,
+    ) -> None:
+        chat = _eval_result(
+            "case-chat",
+            passed=True,
+            feature="chat",
+            model="deepseek/chat",
+        )
+        verifier = _eval_result(
+            "case-verify",
+            passed=False,
+            feature="nudge_verify",
+            model="deepseek/verifier",
+            route={
+                "feature": "nudge_verify",
+                "primary": "deepseek/verifier",
+                "fallback_models": ["anthropic/fallback"],
+                "reasoning_effort": "high",
+                "temperature": None,
+                "source": "model_prefs:verification",
+            },
+        )
+
+        record = _build_record(
+            case_ids=["case-chat", "case-verify"],
+            results=[chat, verifier],
+            requested_model="deepseek/chat",
+            reasoning_effort="high",
+            created_at="2026-04-11T10:00:00Z",
+            run_id="run-routes",
+        )
+
+        assert record["requested_model"] == "deepseek/chat"
+        assert record["route_set_id"]
+        assert record["feature_summary"]["chat"]["passed"] == 1
+        assert record["feature_summary"]["nudge_verify"]["failed"] == 1
+        assert record["per_case"][1]["route"]["primary"] == "deepseek/verifier"
+
     def test_record_run_skips_duplicate_by_default(self, tmp_path: Path) -> None:
         runs_path = tmp_path / "runs.jsonl"
         markdown_path = tmp_path / "leaderboard.md"
@@ -109,7 +183,7 @@ class TestRecording:
         first = leaderboard.record_run(
             results=[result],
             case_ids=["case-1"],
-            model="anthropic/test-model",
+            requested_model="anthropic/test-model",
             reasoning_effort="medium",
             max_tool_iterations=5,
             feature_filter="chat",
@@ -121,7 +195,7 @@ class TestRecording:
         second = leaderboard.record_run(
             results=[result],
             case_ids=["case-1"],
-            model="anthropic/test-model",
+            requested_model="anthropic/test-model",
             reasoning_effort="medium",
             max_tool_iterations=5,
             feature_filter="chat",
@@ -149,7 +223,7 @@ class TestRecording:
         leaderboard.record_run(
             results=[result],
             case_ids=["case-1"],
-            model="anthropic/test-model",
+            requested_model="anthropic/test-model",
             reasoning_effort="medium",
             max_tool_iterations=5,
             feature_filter="chat",
@@ -161,7 +235,7 @@ class TestRecording:
         forced = leaderboard.record_run(
             results=[result],
             case_ids=["case-1"],
-            model="anthropic/test-model",
+            requested_model="anthropic/test-model",
             reasoning_effort="medium",
             max_tool_iterations=5,
             feature_filter="chat",
@@ -187,7 +261,7 @@ class TestRendering:
                 _eval_result("case-a", passed=True, latency_s=1.0, cost=0.02),
                 _eval_result("case-b", passed=True, latency_s=3.0, cost=0.04),
             ],
-            model="anthropic/model-a",
+            requested_model="anthropic/model-a",
             reasoning_effort="medium",
             created_at="2026-04-11T10:00:00Z",
             run_id="run-full",
@@ -196,7 +270,7 @@ class TestRendering:
         subset = _build_record(
             case_ids=["case-a"],
             results=[_eval_result("case-a", passed=False, latency_s=2.0, cost=0.03)],
-            model="anthropic/model-b",
+            requested_model="anthropic/model-b",
             reasoning_effort=None,
             created_at="2026-04-12T10:00:00Z",
             run_id="run-subset",
@@ -211,7 +285,7 @@ class TestRendering:
         latest_worse = _build_record(
             case_ids=["case-a"],
             results=[_eval_result("case-a", passed=False, latency_s=3.0, cost=0.03)],
-            model="anthropic/model-a",
+            requested_model="anthropic/model-a",
             reasoning_effort="medium",
             created_at="2026-04-12T10:00:00Z",
             run_id="run-a-new",
@@ -219,7 +293,7 @@ class TestRendering:
         older_better = _build_record(
             case_ids=["case-a"],
             results=[_eval_result("case-a", passed=True, latency_s=1.0, cost=0.01)],
-            model="anthropic/model-a",
+            requested_model="anthropic/model-a",
             reasoning_effort="medium",
             created_at="2026-04-11T10:00:00Z",
             run_id="run-a-old",
@@ -227,7 +301,7 @@ class TestRendering:
         model_b = _build_record(
             case_ids=["case-a"],
             results=[_eval_result("case-a", passed=True, latency_s=2.0, cost=0.02)],
-            model="anthropic/model-b",
+            requested_model="anthropic/model-b",
             reasoning_effort="medium",
             created_at="2026-04-11T09:00:00Z",
             run_id="run-b",
@@ -242,6 +316,44 @@ class TestRendering:
             "| model-a | medium | 0.0% |"
         )
 
+    def test_render_keeps_distinct_routes_for_same_requested_model(self) -> None:
+        route_a = _build_record(
+            case_ids=["case-a"],
+            results=[
+                _eval_result(
+                    "case-a",
+                    passed=True,
+                    model="anthropic/requested",
+                    route={"primary": "provider/route-a"},
+                )
+            ],
+            requested_model="anthropic/requested",
+            reasoning_effort=None,
+            created_at="2026-04-11T10:00:00Z",
+            run_id="run-route-a",
+        )
+        route_b = _build_record(
+            case_ids=["case-a"],
+            results=[
+                _eval_result(
+                    "case-a",
+                    passed=False,
+                    model="anthropic/requested",
+                    route={"primary": "provider/route-b"},
+                )
+            ],
+            requested_model="anthropic/requested",
+            reasoning_effort=None,
+            created_at="2026-04-12T10:00:00Z",
+            run_id="run-route-b",
+        )
+
+        markdown = leaderboard.render_leaderboard_markdown([route_a, route_b])
+
+        assert markdown.count("| requested | none |") == 2
+        assert "route-a" in markdown
+        assert "route-b" in markdown
+
     def test_render_html_contains_filters_and_run_data(self) -> None:
         run = _build_record(
             case_ids=["case-a", "case-b"],
@@ -249,7 +361,7 @@ class TestRendering:
                 _eval_result("case-a", passed=True, latency_s=1.0, cost=0.02),
                 _eval_result("case-b", passed=False, latency_s=3.0, cost=0.04),
             ],
-            model="anthropic/model-a",
+            requested_model="anthropic/model-a",
             reasoning_effort="medium",
             created_at="2026-04-11T10:00:00Z",
             run_id="run-html",
@@ -373,7 +485,7 @@ class TestCli:
         record = _build_record(
             case_ids=["case-a"],
             results=[_eval_result("case-a", passed=True)],
-            model="anthropic/model-a",
+            requested_model="anthropic/model-a",
             reasoning_effort="medium",
             created_at="2026-04-11T10:00:00Z",
             run_id="run-a",
@@ -409,7 +521,7 @@ class TestCli:
         record = _build_record(
             case_ids=["case-a"],
             results=[_eval_result("case-a", passed=True)],
-            model="anthropic/model-a",
+            requested_model="anthropic/model-a",
             reasoning_effort="medium",
             created_at="2026-04-11T10:00:00Z",
             run_id="run-a",
@@ -435,3 +547,38 @@ class TestCli:
         html = html_path.read_text(encoding="utf-8")
         assert "scope-filter" in html
         assert "Feedback Eval Leaderboard" in html
+
+
+class TestMatrix:
+    def test_build_matrix_runs_expands_chat_models_and_reasoning(self) -> None:
+        cases = load_cases()
+
+        runs = eval_matrix.build_matrix_runs(
+            cases,
+            feature="chat",
+            production=False,
+            case_ids=["chat_explicit_add_to_log"],
+            models=["model-a", "model-b"],
+            reasoning_efforts=["none", "high"],
+            temperature=None,
+        )
+
+        assert len(runs) == 4
+        assert {run.model for run in runs} == {"model-a", "model-b"}
+        assert {run.reasoning_effort for run in runs} == {None, "high"}
+        assert all(
+            [case.id for case in run.cases] == ["chat_explicit_add_to_log"]
+            for run in runs
+        )
+
+    def test_build_matrix_rejects_multiple_models_for_verifier_feature(self) -> None:
+        with pytest.raises(ValueError, match="production model_prefs"):
+            eval_matrix.build_matrix_runs(
+                load_cases(),
+                feature="nudge_verify",
+                production=False,
+                case_ids=None,
+                models=["model-a", "model-b"],
+                reasoning_efforts=["none"],
+                temperature=None,
+            )

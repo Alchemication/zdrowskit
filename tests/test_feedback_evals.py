@@ -206,6 +206,8 @@ class TestChatRunner:
         result = run_case(case, model="test-model")
 
         assert result.passed
+        assert result.route["primary"] == "test-model"
+        assert result.route["source"] == "eval_cli"
         assert result.execution is not None
         assert result.execution.tool_calls[0].name == "update_context"
         assert mock_call.call_count == 2
@@ -767,6 +769,10 @@ class TestChatRunner:
         assert second.execution.cache_misses == 0
         assert second.execution.input_tokens == 100
         assert first.model == "deepseek/deepseek-v4-pro"
+        assert first.route["primary"] == "deepseek/deepseek-v4-pro"
+        assert first.route["fallback_models"] == ["anthropic/claude-opus-4-7"]
+        assert first.route["reasoning_effort"] == "high"
+        assert first.route["rewrite_primary"] == "deepseek/deepseek-v4-flash"
         assert mock_call.call_args.kwargs["model"] == "deepseek/deepseek-v4-pro"
         assert mock_call.call_args.kwargs["fallback_models"] == [
             "anthropic/claude-opus-4-7"

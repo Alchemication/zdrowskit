@@ -317,9 +317,9 @@
       <h1>Feedback Eval Leaderboard</h1>
       <div class="lede">Feedback-derived regression scorecard for zdrowskit evals. Sections compare only runs over the same recorded case set; this is not a general benchmark.</div>
     </section>
-    <div id="app"></div>
+    <div class="empty-state"><h2>No recorded eval runs yet</h2><p>Use <code>uv run python -m evals.run --record</code> to add the first run.</p></div>
   </main>
-  <script id="leaderboard-data" type="application/json">{"sections": [{"case_count": 10, "case_ids": ["chat_explicit_add_to_log", "chat_log_life_disruption", "chat_log_social_rest_day", "chat_plan_lookup_no_log", "chat_running_speed_trend_chart_text_independent", "chat_running_speed_trend_pace_format", "chat_strategy_change_updates_weekly_plan", "chat_tempo_end_counts", "chat_tempo_short_warmup_negative", "nudge_verify_hrv_direction_reversal"], "case_set_id": "3590f468ddb91923a33bbf9ab4cd42817d989dbb18322de93e1afd6e7530472b", "feature_filter": null, "latest_created_at": "2026-05-01T18:49:16Z", "runs": [{"created_at": "2026-05-01T18:49:16Z", "dirty": false, "failed_cases": ["chat_tempo_short_warmup_negative"], "git_sha_short": "82b6160", "model": "deepseek/deepseek-v4-pro", "model_display": "deepseek-v4-pro", "reasoning_effort": null, "revision_label": "82b6160", "run_id": "4e6a5659b83e4d0194f4202d82f60b77", "summary": {"accuracy": 90.0, "avg_cost": 0.0016556071, "avg_latency_s": 20.93138420409523, "cache_hits": 5, "cache_misses": 15, "failed": 1, "input_tokens": 148861, "output_tokens": 10224, "p95_latency_s": 58.16968320775777, "passed": 9, "total_cost": 0.016556071, "total_tokens": 159085}}, {"created_at": "2026-05-01T18:46:20Z", "dirty": true, "failed_cases": ["chat_log_life_disruption", "chat_log_social_rest_day", "chat_strategy_change_updates_weekly_plan", "chat_tempo_end_counts", "chat_tempo_short_warmup_negative"], "git_sha_short": "d27dc12", "model": "anthropic/claude-haiku-4-5", "model_display": "claude-haiku-4-5", "reasoning_effort": null, "revision_label": "d27dc12*", "run_id": "891cc5acc9014f12b756df551c3a734c", "summary": {"accuracy": 50.0, "avg_cost": 0.0140492172, "avg_latency_s": 4.958139870734885, "cache_hits": 16, "cache_misses": 0, "failed": 5, "input_tokens": 128871, "output_tokens": 7121, "p95_latency_s": 14.526503500062972, "passed": 5, "total_cost": 0.140492172, "total_tokens": 135992}}, {"created_at": "2026-05-01T18:46:15Z", "dirty": true, "failed_cases": ["chat_tempo_short_warmup_negative"], "git_sha_short": "d27dc12", "model": "anthropic/claude-opus-4-6", "model_display": "claude-opus-4-6", "reasoning_effort": null, "revision_label": "d27dc12*", "run_id": "a8e0660cac934d498c69929466841d0a", "summary": {"accuracy": 90.0, "avg_cost": 0.0693832172, "avg_latency_s": 9.987237975094468, "cache_hits": 16, "cache_misses": 0, "failed": 1, "input_tokens": 129446, "output_tokens": 7166, "p95_latency_s": 18.229242542292923, "passed": 9, "total_cost": 0.693832172, "total_tokens": 136612}}, {"created_at": "2026-05-01T18:46:10Z", "dirty": true, "failed_cases": ["chat_tempo_end_counts", "chat_tempo_short_warmup_negative"], "git_sha_short": "d27dc12", "model": "anthropic/claude-sonnet-4-6", "model_display": "claude-sonnet-4-6", "reasoning_effort": null, "revision_label": "d27dc12*", "run_id": "6797a939de734e81a117b3e36652da97", "summary": {"accuracy": 80.0, "avg_cost": 0.0412891172, "avg_latency_s": 8.24971350855194, "cache_hits": 16, "cache_misses": 0, "failed": 2, "input_tokens": 129259, "output_tokens": 6892, "p95_latency_s": 17.955357917118818, "passed": 8, "total_cost": 0.41289117200000003, "total_tokens": 136151}}, {"created_at": "2026-05-01T18:32:38Z", "dirty": true, "failed_cases": ["chat_log_social_rest_day", "chat_running_speed_trend_chart_text_independent", "chat_tempo_end_counts", "chat_tempo_short_warmup_negative"], "git_sha_short": "d27dc12", "model": "deepseek/deepseek-v4-flash", "model_display": "deepseek-v4-flash", "reasoning_effort": null, "revision_label": "d27dc12*", "run_id": "17dadce4ba894a1eb582700d84486761", "summary": {"accuracy": 60.0, "avg_cost": 0.0006331996000000001, "avg_latency_s": 20.531182220997287, "cache_hits": 0, "cache_misses": 24, "failed": 4, "input_tokens": 184577, "output_tokens": 9429, "p95_latency_s": 110.25656862510368, "passed": 6, "total_cost": 0.006331996, "total_tokens": 194006}}]}]}</script>
+  <script id="leaderboard-data" type="application/json">{"sections": []}</script>
   <script>
     const payload = JSON.parse(document.getElementById("leaderboard-data").textContent || "{}");
     if (payload.sections && payload.sections.length) {
@@ -388,6 +388,7 @@
                       <th>Accuracy</th>
                       <th>Passed</th>
                       <th>Failed</th>
+                      <th>Routes</th>
                       <th>Avg Latency</th>
                       <th>p95 Latency</th>
                       <th>Total Cost</th>
@@ -400,7 +401,7 @@
                 </table>
               </div>
               <div class="footnote">
-                Latest-only mode is on by default so repeated reruns do not drown model comparisons.
+                Latest-only mode is on by default so repeated reruns do not drown model and route comparisons.
               </div>
             </section>
           </section>
@@ -477,7 +478,7 @@
         const seen = new Set();
         const kept = [];
         for (const row of [...rows].sort((a, b) => b.created_at.localeCompare(a.created_at))) {
-          const key = `${row.model}::${row.reasoning_effort || "none"}`;
+          const key = `${row.requested_model}::${row.reasoning_effort || "none"}::${row.route_set_id}`;
           if (seen.has(key)) continue;
           seen.add(key);
           kept.push(row);
@@ -488,14 +489,14 @@
       function applyFilters(section) {
         const query = state.query.trim().toLowerCase();
         let rows = latestOnly(section.runs);
-        rows = rows.filter((row) => state.model === "all" || row.model === state.model);
+        rows = rows.filter((row) => state.model === "all" || row.requested_model === state.model);
         rows = rows.filter((row) => state.reasoning === "all" || (row.reasoning_effort || "none") === state.reasoning);
         rows = rows.filter((row) => !state.failedOnly || row.summary.failed > 0);
         rows = rows.filter((row) => !state.dirtyOnly || row.dirty);
         rows = rows.filter((row) => {
           if (!query) return true;
           const haystack = [
-            row.model,
+            row.requested_model,
             row.model_display,
             row.reasoning_effort || "none",
             row.git_sha_short,
@@ -532,7 +533,7 @@
         els.body.innerHTML = "";
         if (!rows.length) {
           const tr = document.createElement("tr");
-          tr.innerHTML = `<td colspan="10" class="muted">No runs match the current filters.</td>`;
+          tr.innerHTML = `<td colspan="11" class="muted">No runs match the current filters.</td>`;
           els.body.appendChild(tr);
           return;
         }
@@ -554,6 +555,7 @@
             </td>
             <td>${row.summary.passed}</td>
             <td>${row.summary.failed}</td>
+            <td class="failed-cases">${row.routes || "—"}</td>
             <td>${fmtSeconds(row.summary.avg_latency_s)}</td>
             <td>${fmtSeconds(row.summary.p95_latency_s)}</td>
             <td>${fmtCost(row.summary.total_cost)}</td>
@@ -592,7 +594,7 @@
 
       function refreshDynamicOptions() {
         const section = getSection();
-        const models = Array.from(new Set(section.runs.map((row) => row.model))).sort();
+        const models = Array.from(new Set(section.runs.map((row) => row.requested_model))).sort();
         const reasoning = Array.from(new Set(section.runs.map((row) => row.reasoning_effort || "none"))).sort();
         buildOptions(els.model, [{ value: "all", label: "All models" }, ...models.map((model) => ({ value: model, label: model.split("/").pop() }))], state.model);
         buildOptions(els.reasoning, [{ value: "all", label: "All reasoning levels" }, ...reasoning.map((value) => ({ value, label: value }))], state.reasoning);

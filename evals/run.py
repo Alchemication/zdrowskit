@@ -144,7 +144,7 @@ def main() -> None:
         outcome = leaderboard.record_run(
             results=results,
             case_ids=[case.id for case in selected],
-            model=args.model,
+            requested_model=args.model,
             reasoning_effort=reasoning_effort,
             max_tool_iterations=args.max_tool_iterations,
             feature_filter=args.feature,

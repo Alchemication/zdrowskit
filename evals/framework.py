@@ -127,6 +127,7 @@ class EvalResult:
     model: str
     source_feedback_id: int
     source_llm_call_id: int
+    route: dict[str, Any] = field(default_factory=dict)
     assertions: list[AssertionResult] = field(default_factory=list)
     execution: EvalExecution | None = None
     error: str | None = None
@@ -288,6 +289,14 @@ def run_case(
     )
     try:
         if case.feature == "chat":
+            result.route = _eval_route(
+                feature=case.feature,
+                primary=model,
+                fallback_models=[],
+                reasoning_effort=reasoning_effort,
+                temperature=temperature,
+                source="eval_cli",
+            )
             execution = _run_chat_case(
                 case,
                 model=model,
@@ -300,7 +309,7 @@ def run_case(
         elif case.feature in {"nudge_verify", "insights_verify"}:
             from evals.run_verify import run_verify_case
 
-            execution, result.model = run_verify_case(
+            execution, result.model, result.route = run_verify_case(
                 case,
                 cache=cache,
                 refresh_cache=refresh_cache,
@@ -321,6 +330,26 @@ def run_case(
     except Exception as exc:
         result.error = f"{type(exc).__name__}: {exc}"
     return result
+
+
+def _eval_route(
+    *,
+    feature: str,
+    primary: str,
+    fallback_models: list[str] | None,
+    reasoning_effort: str | None,
+    temperature: float | None,
+    source: str,
+) -> dict[str, Any]:
+    """Return a JSON-safe route description for one eval case."""
+    return {
+        "feature": feature,
+        "primary": primary,
+        "fallback_models": list(fallback_models or []),
+        "reasoning_effort": reasoning_effort,
+        "temperature": temperature,
+        "source": source,
+    }
 
 
 def run_assertions(
