@@ -25,6 +25,7 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
+from aggregator import collapse_adjacent_run_sessions
 from config import APP_HOME
 from db.migrations import apply_migrations
 from models import DailySnapshot, WorkoutSnapshot, WorkoutSplit
@@ -159,7 +160,7 @@ def store_snapshots(conn: sqlite3.Connection, snapshots: list[DailySnapshot]) ->
             )
             # Clear stale workout rows before re-inserting the current set.
             conn.execute("DELETE FROM workout WHERE date = ?", (s.date,))
-            for w in s.workouts:
+            for w in collapse_adjacent_run_sessions(s.workouts):
                 conn.execute(
                     """
                     INSERT INTO workout (

@@ -258,6 +258,59 @@ class TestUpsertReplacesWorkouts:
 
         assert [w.counts_as_lift for w in loaded[0].workouts] == [False, True]
 
+    def test_adjacent_run_records_are_collapsed_before_insert(
+        self, in_memory_db: sqlite3.Connection
+    ) -> None:
+        """Persisted imported workouts should store one row per training run."""
+        day = DailySnapshot(
+            date="2026-05-11",
+            workouts=[
+                WorkoutSnapshot(
+                    type="Outdoor Run",
+                    category="run",
+                    start_utc="2026-05-11T04:58:34Z",
+                    duration_min=18.8,
+                    hr_avg=157.0,
+                    hr_max=176,
+                    active_energy_kj=1037.0,
+                    gpx_distance_km=3.457,
+                    gpx_elevation_gain_m=4.94,
+                    splits=[
+                        WorkoutSplit(km_index=1, pace_min_km=5.6339),
+                        WorkoutSplit(km_index=2, pace_min_km=5.6033),
+                        WorkoutSplit(km_index=3, pace_min_km=5.147),
+                    ],
+                ),
+                WorkoutSnapshot(
+                    type="Outdoor Run",
+                    category="run",
+                    start_utc="2026-05-11T05:17:25Z",
+                    duration_min=9.1,
+                    hr_avg=172.0,
+                    hr_max=176,
+                    active_energy_kj=514.0,
+                    gpx_distance_km=1.746,
+                    gpx_elevation_gain_m=0.7,
+                    splits=[WorkoutSplit(km_index=1, pace_min_km=5.1653)],
+                ),
+            ],
+        )
+
+        store_snapshots(in_memory_db, [day])
+
+        raw_rows = in_memory_db.execute(
+            "SELECT * FROM workout WHERE date = ?", ("2026-05-11",)
+        ).fetchall()
+        loaded = load_snapshots(in_memory_db)
+
+        assert len(raw_rows) == 1
+        assert len(loaded[0].workouts) == 1
+        workout = loaded[0].workouts[0]
+        assert workout.duration_min == pytest.approx(27.9)
+        assert workout.gpx_distance_km == pytest.approx(5.203)
+        assert workout.hr_avg == pytest.approx(161.9, abs=0.1)
+        assert [split.km_index for split in workout.splits] == [1, 2, 3, 4]
+
 
 class TestRoundTripNullWorkoutFields:
     def test_all_optional_fields_none(self, in_memory_db: sqlite3.Connection) -> None:

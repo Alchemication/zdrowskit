@@ -11,10 +11,14 @@ Example:
 """
 
 from __future__ import annotations
-import statistics
-from datetime import date
 
-from models import DailySnapshot, WeeklySummary, WorkoutSnapshot
+import statistics
+from datetime import date, datetime, timedelta
+
+from models import DailySnapshot, WeeklySummary, WorkoutSnapshot, WorkoutSplit
+
+ADJACENT_RUN_SESSION_GAP_MIN = 5.0
+"""Maximum gap between run records that still counts as one training session."""
 
 
 def _nonnull(values: list) -> list:
@@ -120,6 +124,180 @@ def _best_run_pace(runs: list[WorkoutSnapshot]) -> float | None:
     return min(paces) if paces else None
 
 
+def _workout_start(workout: WorkoutSnapshot) -> datetime | None:
+    """Parse a workout start timestamp.
+
+    Args:
+        workout: Workout snapshot with an ISO UTC start timestamp.
+
+    Returns:
+        Parsed datetime, or None if the timestamp is unavailable/malformed.
+    """
+    if not workout.start_utc:
+        return None
+    try:
+        return datetime.fromisoformat(workout.start_utc.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _workout_end(workout: WorkoutSnapshot) -> datetime | None:
+    """Return a workout end timestamp when start and duration are known."""
+    start = _workout_start(workout)
+    if start is None:
+        return None
+    return start + timedelta(minutes=workout.duration_min)
+
+
+def _weighted_mean(
+    workouts: list[WorkoutSnapshot],
+    attr: str,
+    *,
+    weights: list[float] | None = None,
+) -> float | None:
+    """Return a duration-weighted mean for a numeric workout attribute."""
+    numerator = 0.0
+    denominator = 0.0
+    for index, workout in enumerate(workouts):
+        value = getattr(workout, attr)
+        if value is None:
+            continue
+        weight = weights[index] if weights is not None else workout.duration_min
+        if weight <= 0:
+            continue
+        numerator += float(value) * weight
+        denominator += weight
+    if denominator == 0:
+        return None
+    return numerator / denominator
+
+
+def _sum_optional(workouts: list[WorkoutSnapshot], attr: str) -> float | None:
+    """Sum a numeric workout attribute, preserving None when all values are missing."""
+    values = [getattr(workout, attr) for workout in workouts]
+    nonnull = _nonnull(values)
+    if not nonnull:
+        return None
+    return sum(nonnull)
+
+
+def _merge_run_session(workouts: list[WorkoutSnapshot]) -> WorkoutSnapshot:
+    """Merge adjacent run records into one training-session snapshot."""
+    if len(workouts) == 1:
+        return workouts[0]
+
+    first = workouts[0]
+    total_duration = sum(workout.duration_min for workout in workouts)
+    distance_km = _sum_optional(workouts, "gpx_distance_km")
+    elevation_m = _sum_optional(workouts, "gpx_elevation_gain_m")
+    active_energy_kj = sum(workout.active_energy_kj for workout in workouts)
+    distance_weights = [
+        workout.gpx_distance_km or workout.duration_min for workout in workouts
+    ]
+    hr_mins = _nonnull([workout.hr_min for workout in workouts])
+    hr_maxes = _nonnull([workout.hr_max for workout in workouts])
+    max_speed_p95s = _nonnull([workout.gpx_max_speed_p95_ms for workout in workouts])
+    humidity = _weighted_mean(workouts, "humidity_pct", weights=distance_weights)
+    speed_ms = None
+    if distance_km is not None and total_duration > 0:
+        speed_ms = round((distance_km * 1000.0) / (total_duration * 60.0), 4)
+
+    return WorkoutSnapshot(
+        type=first.type,
+        category=first.category,
+        counts_as_lift=first.counts_as_lift,
+        start_utc=first.start_utc,
+        duration_min=total_duration,
+        hr_min=min(hr_mins) if hr_mins else None,
+        hr_avg=_weighted_mean(workouts, "hr_avg"),
+        hr_max=max(hr_maxes) if hr_maxes else None,
+        active_energy_kj=active_energy_kj,
+        intensity_kcal_per_hr_kg=_weighted_mean(workouts, "intensity_kcal_per_hr_kg"),
+        temperature_c=_weighted_mean(
+            workouts, "temperature_c", weights=distance_weights
+        ),
+        humidity_pct=round(humidity) if humidity is not None else None,
+        gpx_distance_km=distance_km,
+        gpx_elevation_gain_m=elevation_m,
+        gpx_avg_speed_ms=speed_ms,
+        gpx_max_speed_p95_ms=max(max_speed_p95s) if max_speed_p95s else None,
+        splits=[
+            WorkoutSplit(
+                km_index=index,
+                pace_min_km=split.pace_min_km,
+                avg_speed_ms=split.avg_speed_ms,
+                elevation_gain_m=split.elevation_gain_m,
+                elevation_loss_m=split.elevation_loss_m,
+            )
+            for index, split in enumerate(
+                [split for workout in workouts for split in workout.splits],
+                start=1,
+            )
+        ],
+    )
+
+
+def collapse_adjacent_run_sessions(
+    workouts: list[WorkoutSnapshot],
+    *,
+    gap_min: float = ADJACENT_RUN_SESSION_GAP_MIN,
+) -> list[WorkoutSnapshot]:
+    """Collapse back-to-back run records into training sessions.
+
+    Apple Watch can split one continuous run into multiple workouts. For weekly
+    target counts, adjacent run records with only a tiny pause between them are
+    one training run, while separated runs still count independently.
+
+    Args:
+        workouts: Workout snapshots for any date range.
+        gap_min: Maximum gap in minutes between run records to merge.
+
+    Returns:
+        Workout snapshots with adjacent runs merged and other workouts untouched.
+    """
+    if not workouts:
+        return []
+
+    sorted_workouts = sorted(workouts, key=lambda workout: workout.start_utc or "")
+    collapsed: list[WorkoutSnapshot] = []
+    pending_runs: list[WorkoutSnapshot] = []
+
+    def flush_runs() -> None:
+        nonlocal pending_runs
+        if pending_runs:
+            collapsed.append(_merge_run_session(pending_runs))
+            pending_runs = []
+
+    for workout in sorted_workouts:
+        if workout.category != "run":
+            flush_runs()
+            collapsed.append(workout)
+            continue
+
+        if not pending_runs:
+            pending_runs.append(workout)
+            continue
+
+        previous = pending_runs[-1]
+        previous_end = _workout_end(previous)
+        current_start = _workout_start(workout)
+        if previous_end is None or current_start is None:
+            flush_runs()
+            pending_runs.append(workout)
+            continue
+
+        gap = current_start - previous_end
+        if timedelta(0) <= gap <= timedelta(minutes=gap_min):
+            pending_runs.append(workout)
+        else:
+            flush_runs()
+            pending_runs.append(workout)
+
+    flush_runs()
+    collapsed.sort(key=lambda workout: workout.start_utc or "")
+    return collapsed
+
+
 def summarise(snapshots: list[DailySnapshot]) -> WeeklySummary:
     """Compute a WeeklySummary from a list of DailySnapshots.
 
@@ -134,7 +312,9 @@ def summarise(snapshots: list[DailySnapshot]) -> WeeklySummary:
     Returns:
         A fully populated WeeklySummary dataclass.
     """
-    all_workouts = [w for s in snapshots for w in s.workouts]
+    all_workouts = collapse_adjacent_run_sessions(
+        [w for s in snapshots for w in s.workouts]
+    )
     runs = [w for w in all_workouts if w.category == "run"]
     lifts = [w for w in all_workouts if w.counts_as_lift]
     walks = [w for w in all_workouts if w.category == "walk"]

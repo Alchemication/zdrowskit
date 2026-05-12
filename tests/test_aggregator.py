@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from models import DailySnapshot, WorkoutSnapshot
+from models import DailySnapshot, WorkoutSnapshot, WorkoutSplit
 from aggregator import (
     _best_run_pace,
     _hrv_trend,
     _nonnull,
     _safe_mean,
     _week_label,
+    collapse_adjacent_run_sessions,
     summarise,
 )
 
@@ -277,3 +278,68 @@ class TestSummarise:
         assert summary.lift_count == 2
         assert summary.total_lift_min == 63.0
         assert summary.avg_lift_hr == 108.0
+
+    def test_adjacent_run_records_count_as_one_session(self) -> None:
+        snaps = [
+            DailySnapshot(
+                date="2026-05-11",
+                workouts=[
+                    WorkoutSnapshot(
+                        type="Outdoor Run",
+                        category="run",
+                        start_utc="2026-05-11T04:58:34Z",
+                        duration_min=20.0,
+                        hr_avg=150.0,
+                        hr_max=174,
+                        gpx_distance_km=3.0,
+                        gpx_elevation_gain_m=4.0,
+                        splits=[WorkoutSplit(km_index=1, pace_min_km=6.0)],
+                    ),
+                    WorkoutSnapshot(
+                        type="Outdoor Run",
+                        category="run",
+                        start_utc="2026-05-11T05:18:35Z",
+                        duration_min=10.0,
+                        hr_avg=180.0,
+                        hr_max=182,
+                        gpx_distance_km=2.0,
+                        gpx_elevation_gain_m=1.0,
+                        splits=[WorkoutSplit(km_index=1, pace_min_km=5.5)],
+                    ),
+                ],
+            )
+        ]
+
+        summary = summarise(snaps)
+        collapsed = collapse_adjacent_run_sessions(snaps[0].workouts)
+
+        assert summary.run_count == 1
+        assert summary.total_run_km == 5.0
+        assert summary.avg_run_km == 5.0
+        assert summary.best_pace_min_per_km == 6.0
+        assert summary.avg_run_hr == 160.0
+        assert summary.peak_run_hr == 182
+        assert summary.avg_elevation_gain_m == 5.0
+        assert [split.km_index for split in collapsed[0].splits] == [1, 2]
+
+    def test_separated_run_records_still_count_independently(self) -> None:
+        runs = [
+            WorkoutSnapshot(
+                type="Outdoor Run",
+                category="run",
+                start_utc="2026-05-11T07:00:00Z",
+                duration_min=30.0,
+                gpx_distance_km=5.0,
+            ),
+            WorkoutSnapshot(
+                type="Outdoor Run",
+                category="run",
+                start_utc="2026-05-11T12:00:00Z",
+                duration_min=25.0,
+                gpx_distance_km=4.0,
+            ),
+        ]
+
+        collapsed = collapse_adjacent_run_sessions(runs)
+
+        assert len(collapsed) == 2
