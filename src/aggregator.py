@@ -312,9 +312,9 @@ def summarise(snapshots: list[DailySnapshot]) -> WeeklySummary:
     Returns:
         A fully populated WeeklySummary dataclass.
     """
-    all_workouts = collapse_adjacent_run_sessions(
-        [w for s in snapshots for w in s.workouts]
-    )
+    all_workouts = [
+        w for s in snapshots for w in collapse_adjacent_run_sessions(s.workouts)
+    ]
     runs = [w for w in all_workouts if w.category == "run"]
     lifts = [w for w in all_workouts if w.counts_as_lift]
     walks = [w for w in all_workouts if w.category == "walk"]

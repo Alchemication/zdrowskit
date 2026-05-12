@@ -343,3 +343,36 @@ class TestSummarise:
         collapsed = collapse_adjacent_run_sessions(runs)
 
         assert len(collapsed) == 2
+
+    def test_cross_midnight_runs_are_not_merged_across_days(self) -> None:
+        snaps = [
+            DailySnapshot(
+                date="2026-05-11",
+                workouts=[
+                    WorkoutSnapshot(
+                        type="Outdoor Run",
+                        category="run",
+                        start_utc="2026-05-11T23:55:00Z",
+                        duration_min=4.0,
+                        gpx_distance_km=0.8,
+                    ),
+                ],
+            ),
+            DailySnapshot(
+                date="2026-05-12",
+                workouts=[
+                    WorkoutSnapshot(
+                        type="Outdoor Run",
+                        category="run",
+                        start_utc="2026-05-12T00:00:30Z",
+                        duration_min=20.0,
+                        gpx_distance_km=4.0,
+                    ),
+                ],
+            ),
+        ]
+
+        summary = summarise(snaps)
+
+        assert summary.run_count == 2
+        assert summary.total_run_km == 4.8
