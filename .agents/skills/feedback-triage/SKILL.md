@@ -50,7 +50,7 @@ If prompt data was wrong, fix the data assembly path and add deterministic cover
 
 ## Decide
 
-- **Verifier introduced the bug**: model-quality issue. A/B verifier route reasoning via `main.py models` or Telegram `/models` (DeepSeek `high` engages thinking; `medium` leaves it off). Capture as `nudge_verify` or `insights_verify` real_regression if reproducible (surface set by `fixture.kind`).
+- **Verifier introduced the bug**: model-quality issue. A/B verifier route reasoning via `main.py models` or Telegram `/models` (DeepSeek `high` engages thinking; `medium` leaves it off). Capture as `verification_judge` real_regression if reproducible (surface — `nudge` / `insights` / `coach` — set by `fixture.kind`).
 - **Source draft already had it**: prompt/context/model issue. Capture as `chat` or the relevant source surface if reproducible.
 - **Rewriter mangled a correct correction**: rewriter prompt/model issue.
 - **Data resync caused user confusion**: product/prompt issue, not an eval.
@@ -72,7 +72,7 @@ Archives under `~/Documents/zdrowskit/Nudges/` are historical records. Do not de
 
 A real regression should reproduce at least roughly 20% under the same config. Below that, capture only if high-impact or structurally likely to recur. Run 5x as the cheap check.
 
-When stage and surface are clear, switch to `llm-evals`. Supported eval features today: `chat` (full tool loop, `--model`-driven), `nudge_verify`, and `insights_verify` (both verifier-only, env-driven, sharing the same `run_verify.py` runner).
+When stage and surface are clear, switch to `llm-evals`. Supported eval features today: `chat` (full tool loop, `--model`-driven) and `verification_judge` (verifier-only, env-driven; `fixture.kind` selects `nudge` / `insights` / `coach`). Both share the `run_verify.py` runner for the verifier path.
 
 ## Pitfalls
 
