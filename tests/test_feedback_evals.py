@@ -14,12 +14,13 @@ import llm
 import pytest
 
 from evals.framework import (
+    AssertionResult,
     CapturedToolCall,
     EvalCache,
-    AssertionResult,
     EvalExecution,
     EvalResult,
     JudgeResponse,
+    _eval_tool_result,
     load_cases,
     print_result_details,
     print_results,
@@ -173,6 +174,20 @@ class TestCaseLoading:
 
 
 class TestChatRunner:
+    def test_update_context_tool_result_rejects_invalid_log_append(self) -> None:
+        tool_call = CapturedToolCall(
+            name="update_context",
+            arguments={
+                "file": "log",
+                "action": "append",
+                "content": "- 2026-05-17 — " + ("weekend logistics " * 12),
+                "summary": "Log weekend family constraint",
+            },
+            tool_call_id="call_1",
+        )
+
+        assert _eval_tool_result(tool_call, {}).startswith("Not proposed:")
+
     def test_chat_case_captures_context_update_without_mutating(
         self,
         monkeypatch: pytest.MonkeyPatch,

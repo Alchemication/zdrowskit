@@ -2069,7 +2069,13 @@ class TelegramChatHandler:
                     edit = context_edit_from_tool_call(tc)
                     if edit:
                         deferred_edits.append(edit)
-                    tool_result = "Proposed. User will be asked to confirm."
+                        tool_result = "Proposed. User will be asked to confirm."
+                    else:
+                        tool_result = (
+                            "Not proposed: invalid context update. If this was a "
+                            "log append, use exactly one '- YYYY-MM-DD ...' line "
+                            "under 160 chars."
+                        )
                 else:
                     tool_result = execute_tool(fn_name, args, self._daemon.db)
                     # Keep latest query rows for chart rendering.

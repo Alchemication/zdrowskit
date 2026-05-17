@@ -235,7 +235,13 @@ def cmd_coach(
                 edit = context_edit_from_tool_call(tc)
                 if edit:
                     raw_edits.append(edit)
-                tool_result = "Proposed. User will be asked to confirm."
+                    tool_result = "Proposed. User will be asked to confirm."
+                else:
+                    tool_result = (
+                        "Not proposed: invalid context update. Check the "
+                        "update_context schema, target section, and compact "
+                        "log-entry rules before retrying."
+                    )
             elif fn_name == "run_sql":
                 logger.info("Coach SQL: %s", args_dict.get("query", "")[:200])
                 tool_result = execute_run_sql(Path(args.db), args_dict)

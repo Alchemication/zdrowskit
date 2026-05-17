@@ -814,6 +814,133 @@ class TestChatReplyLoop:
         assert metadata["postprocess_reason"] == "internal_tool_markup_fallback"
         assert metadata["raw_response_text"] == "<｜｜DSML｜｜tool_calls>"
 
+    def test_invalid_context_update_reports_failure_and_allows_retry(
+        self, tmp_path: Path
+    ) -> None:
+        daemon = _make_daemon(tmp_path)
+        daemon._chat._conversation = MagicMock()
+        daemon._chat._conversation.to_messages.return_value = [
+            {
+                "role": "user",
+                "content": ("Weekends are harder than weekdays with family logistics."),
+            }
+        ]
+        conn = open_db(daemon.db)
+
+        invalid_args = json.dumps(
+            {
+                "file": "log",
+                "action": "append",
+                "content": "- 2026-05-17 — " + ("weekend logistics " * 12),
+                "summary": "Log weekend family constraint",
+            }
+        )
+        valid_args = json.dumps(
+            {
+                "file": "log",
+                "action": "append",
+                "content": (
+                    "- 2026-05-17 — family logistics make weekends harder; "
+                    "prefer key sessions on weekdays"
+                ),
+                "summary": "Log weekend family constraint",
+            }
+        )
+        invalid_call = SimpleNamespace(
+            id="call_1",
+            function=SimpleNamespace(name="update_context", arguments=invalid_args),
+        )
+        valid_call = SimpleNamespace(
+            id="call_2",
+            function=SimpleNamespace(name="update_context", arguments=valid_args),
+        )
+        invalid_result = LLMResult(
+            text="",
+            model="test-model",
+            input_tokens=1,
+            output_tokens=1,
+            total_tokens=2,
+            latency_s=0.1,
+            tool_calls=[invalid_call],
+            raw_message={
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"id": "call_1"}],
+            },
+        )
+        retry_result = LLMResult(
+            text="",
+            model="test-model",
+            input_tokens=1,
+            output_tokens=1,
+            total_tokens=2,
+            latency_s=0.1,
+            tool_calls=[valid_call],
+            raw_message={
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"id": "call_2"}],
+            },
+        )
+        final_result = LLMResult(
+            text="Queued a shorter note for review.",
+            model="test-model",
+            input_tokens=1,
+            output_tokens=1,
+            total_tokens=2,
+            latency_s=0.1,
+        )
+
+        seen_messages: list[list[dict]] = []
+
+        def fake_call_llm(messages: list[dict], **_kwargs: object) -> LLMResult:
+            seen_messages.append([dict(message) for message in messages])
+            return [invalid_result, retry_result, final_result][len(seen_messages) - 1]
+
+        with (
+            patch("config.MAX_TOOL_ITERATIONS", 8),
+            patch(
+                "llm_context.load_context", return_value={"prompt": "p", "soul": "s"}
+            ),
+            patch(
+                "llm_context.build_messages",
+                return_value=[
+                    {"role": "system", "content": "system"},
+                    {"role": "user", "content": "context"},
+                ],
+            ),
+            patch(
+                "llm_health.build_llm_data",
+                return_value={
+                    "current_week": {"summary": {"week_label": "2026-W20"}},
+                    "history": [],
+                    "week_complete": False,
+                },
+            ),
+            patch("llm_health.render_health_data", return_value="health"),
+            patch("baselines.compute_baselines", return_value=None),
+            patch("tools.all_chat_tools", return_value=[{"type": "function"}]),
+            patch("tools.execute_tool") as execute_tool,
+            patch("llm.call_llm", side_effect=fake_call_llm),
+        ):
+            result, edits, _rows = daemon._chat._chat_reply(conn)
+
+        assert result.text == "Queued a shorter note for review."
+        assert len(edits) == 1
+        assert edits[0].content == json.loads(valid_args)["content"]
+        execute_tool.assert_not_called()
+
+        assert any(
+            message.get("role") == "tool"
+            and str(message.get("content", "")).startswith("Not proposed:")
+            for message in seen_messages[1]
+        )
+        assert any(
+            message.get("role") == "tool"
+            and message.get("content") == "Proposed. User will be asked to confirm."
+            for message in seen_messages[2]
+        )
+
     def test_repeated_tool_call_forces_clean_final_synthesis(
         self, tmp_path: Path
     ) -> None:

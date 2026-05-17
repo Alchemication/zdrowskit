@@ -1197,6 +1197,27 @@ def _tool_call_namespace(raw_tool_call: Any) -> Any:
 
 def _eval_tool_result(tool_call: CapturedToolCall, fixture: dict[str, Any]) -> str:
     if tool_call.name == "update_context":
+        if tool_call.arguments.get("action") not in {"append", "replace_section"}:
+            return (
+                "Not proposed: invalid context update. Check the update_context "
+                "schema, target section, and compact log-entry rules before "
+                "retrying."
+            )
+        normalized_edit = context_edit_from_tool_call(
+            SimpleNamespace(
+                id=tool_call.tool_call_id,
+                function=SimpleNamespace(
+                    name=tool_call.name,
+                    arguments=json.dumps(tool_call.arguments),
+                ),
+            )
+        )
+        if normalized_edit is None:
+            return (
+                "Not proposed: invalid context update. Check the update_context "
+                "schema, target section, and compact log-entry rules before "
+                "retrying."
+            )
         return "Proposed. User will be asked to confirm."
     if tool_call.name == "run_sql":
         return _execute_seed_sql(tool_call.arguments, fixture.get("db_seed"))
