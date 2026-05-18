@@ -28,7 +28,7 @@ from pathlib import Path
 from aggregator import collapse_adjacent_run_sessions
 from config import APP_HOME
 from db.migrations import apply_migrations
-from locations import resolve_workout_location
+from locations import prefetch_locations, resolve_workout_location
 from models import DailySnapshot, WorkoutSnapshot, WorkoutSplit
 
 logger = logging.getLogger(__name__)
@@ -83,9 +83,11 @@ def open_db(path: Path) -> sqlite3.Connection:
 def store_snapshots(conn: sqlite3.Connection, snapshots: list[DailySnapshot]) -> int:
     """Upsert DailySnapshots and their workouts into the database.
 
-    Each day is replaced atomically: the daily row is upserted, existing
-    workout rows for that date are deleted, then the current workouts are
-    inserted. The entire batch runs in a single transaction.
+    Each day is replaced atomically inside its own transaction: the daily row
+    is upserted, existing workout rows for that date are deleted, then the
+    current workouts are inserted. Reverse-geocoding for new coordinates runs
+    in a prefetch pass before the per-day writes start so the SQLite writer
+    is not held open across long network round-trips.
 
     Args:
         conn: Open database connection returned by open_db().
@@ -100,22 +102,26 @@ def store_snapshots(conn: sqlite3.Connection, snapshots: list[DailySnapshot]) ->
         for snapshot in snapshots
     ]
     total_workouts = sum(len(workouts) for _, workouts in collapsed_by_day)
-    location_candidates = sum(
-        1
+    route_coords = [
+        (w.location_lat, w.location_lon)
         for _, workouts in collapsed_by_day
-        for workout in workouts
-        if workout.location_lat is not None and workout.location_lon is not None
-    )
+        for w in workouts
+        if w.location_lat is not None and w.location_lon is not None
+    ]
     logger.info(
         "Storing %d day(s), %d workout(s), %d route workout(s) with location data",
         len(snapshots),
         total_workouts,
-        location_candidates,
+        len(route_coords),
     )
 
+    # Resolve locations outside the per-day write txn so network sleeps
+    # don't hold the SQLite writer and so cached results survive Ctrl-C.
+    prefetch_locations(conn, route_coords, seen_at=now)
+
     stored_workouts = 0
-    with conn:
-        for index, (s, workouts) in enumerate(collapsed_by_day, start=1):
+    for index, (s, workouts) in enumerate(collapsed_by_day, start=1):
+        with conn:
             conn.execute(
                 """
                 INSERT OR REPLACE INTO daily (
@@ -250,14 +256,14 @@ def store_snapshots(conn: sqlite3.Connection, snapshots: list[DailySnapshot]) ->
                         ],
                     )
                 stored_workouts += 1
-            if index == len(collapsed_by_day) or index % 250 == 0:
-                logger.info(
-                    "Stored %d/%d day(s), %d/%d workout(s)",
-                    index,
-                    len(collapsed_by_day),
-                    stored_workouts,
-                    total_workouts,
-                )
+        if index == len(collapsed_by_day) or index % 250 == 0:
+            logger.info(
+                "Stored %d/%d day(s), %d/%d workout(s)",
+                index,
+                len(collapsed_by_day),
+                stored_workouts,
+                total_workouts,
+            )
     logger.info("Stored %d day(s) to database", len(snapshots))
     return len(snapshots)
 

@@ -33,7 +33,6 @@ _LOCALITY_KEYS = (
 )
 _REGION_KEYS = ("state", "county", "region", "state_district")
 _last_request_at = 0.0
-_failed_cache_keys: set[tuple[float, float]] = set()
 
 
 def _rounded_coord(lat: float, lon: float) -> tuple[float, float]:
@@ -120,6 +119,42 @@ def _reverse_geocode(lat: float, lon: float) -> tuple[dict[str, Any], str] | Non
 def _geocoder_disabled() -> bool:
     """Return whether external reverse geocoding is disabled."""
     return LOCATION_GEOCODER.strip().lower() in {"", "off", "none", "disabled"}
+
+
+def _is_failed_cached(
+    conn: sqlite3.Connection,
+    lat_round: float,
+    lon_round: float,
+) -> bool:
+    """Check whether a coordinate has a recorded failure."""
+    row = conn.execute(
+        """
+        SELECT 1 FROM location_point_failed
+        WHERE lat_round = ? AND lon_round = ?
+        """,
+        (lat_round, lon_round),
+    ).fetchone()
+    return row is not None
+
+
+def _record_failure(
+    conn: sqlite3.Connection,
+    lat_round: float,
+    lon_round: float,
+    seen_at: str,
+) -> None:
+    """Persist (or bump) a reverse-geocode failure so future runs can skip it."""
+    conn.execute(
+        """
+        INSERT INTO location_point_failed (
+            lat_round, lon_round, last_attempt_at, attempt_count
+        ) VALUES (?, ?, ?, 1)
+        ON CONFLICT(lat_round, lon_round) DO UPDATE SET
+            last_attempt_at = excluded.last_attempt_at,
+            attempt_count   = attempt_count + 1
+        """,
+        (lat_round, lon_round, seen_at),
+    )
 
 
 def _find_location(
@@ -220,10 +255,10 @@ def resolve_workout_location(
     ).fetchone()
     if cached:
         return int(cached["location_id"])
-    if _geocoder_disabled() or (lat_round, lon_round) in _failed_cache_keys:
+    if _geocoder_disabled() or _is_failed_cached(conn, lat_round, lon_round):
         return None
 
-    logger.info(
+    logger.debug(
         "Resolving workout location %.2f, %.2f via %s",
         lat_round,
         lon_round,
@@ -231,7 +266,7 @@ def resolve_workout_location(
     )
     geocoded = _reverse_geocode(lat_round, lon_round)
     if geocoded is None:
-        _failed_cache_keys.add((lat_round, lon_round))
+        _record_failure(conn, lat_round, lon_round, timestamp)
         return None
 
     payload, source = geocoded
@@ -266,3 +301,73 @@ def resolve_workout_location(
         "Resolved workout location %.2f, %.2f -> %s", lat_round, lon_round, place
     )
     return location_id
+
+
+def prefetch_locations(
+    conn: sqlite3.Connection,
+    coords: list[tuple[float | None, float | None]],
+    *,
+    seen_at: str | None = None,
+    progress_every: int = 25,
+) -> None:
+    """Resolve a batch of route coordinates, committing each result eagerly.
+
+    Splits the geocoder-bound work out of any enclosing write transaction so
+    that long backfills don't hold the SQLite write lock for hours and so that
+    each completed lookup is durably cached even if the run is interrupted.
+
+    Args:
+        conn: Open database connection (no enclosing ``with conn:`` expected).
+        coords: Raw ``(lat, lon)`` pairs from workouts; ``None`` entries and
+            duplicates after rounding are filtered out.
+        seen_at: Timestamp recorded on new cache rows.
+        progress_every: Emit an INFO progress line every N new network lookups.
+    """
+    if _geocoder_disabled():
+        return
+
+    timestamp = seen_at or datetime.now(timezone.utc).isoformat()
+    rounded: set[tuple[float, float]] = set()
+    for lat, lon in coords:
+        if lat is None or lon is None:
+            continue
+        rounded.add(_rounded_coord(lat, lon))
+    if not rounded:
+        return
+
+    cached_keys = {
+        (row["lat_round"], row["lon_round"])
+        for row in conn.execute(
+            "SELECT lat_round, lon_round FROM location_point_cache"
+        ).fetchall()
+    }
+    failed_keys = {
+        (row["lat_round"], row["lon_round"])
+        for row in conn.execute(
+            "SELECT lat_round, lon_round FROM location_point_failed"
+        ).fetchall()
+    }
+    to_fetch = sorted(rounded - cached_keys - failed_keys)
+    if not to_fetch:
+        logger.info("Geocode prefetch: %d coordinate(s) already cached", len(rounded))
+        return
+
+    logger.info(
+        "Geocode prefetch: %d new coordinate(s) (cached=%d, failed=%d, unique=%d)",
+        len(to_fetch),
+        len(rounded & cached_keys),
+        len(rounded & failed_keys),
+        len(rounded),
+    )
+    started = time.monotonic()
+    for index, (lat_round, lon_round) in enumerate(to_fetch, start=1):
+        resolve_workout_location(conn, lat_round, lon_round, seen_at=timestamp)
+        if index % progress_every == 0 or index == len(to_fetch):
+            elapsed = time.monotonic() - started
+            rate = index / elapsed if elapsed > 0 else 0.0
+            logger.info(
+                "Geocoded %d/%d new coordinate(s) (%.2f/s)",
+                index,
+                len(to_fetch),
+                rate,
+            )

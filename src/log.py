@@ -47,7 +47,9 @@ def setup_logging(verbose: bool = False) -> None:
     """
     level = logging.DEBUG if verbose else logging.INFO
     handler = logging.StreamHandler(sys.stderr)
-    handler.setFormatter(_ColorFormatter("%(levelname)s %(message)s"))
+    handler.setFormatter(
+        _ColorFormatter("%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
+    )
     root = logging.getLogger()
     root.setLevel(level)
     root.handlers.clear()
