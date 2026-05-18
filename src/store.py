@@ -95,8 +95,27 @@ def store_snapshots(conn: sqlite3.Connection, snapshots: list[DailySnapshot]) ->
         Number of days written.
     """
     now = datetime.now(timezone.utc).isoformat()
+    collapsed_by_day = [
+        (snapshot, collapse_adjacent_run_sessions(snapshot.workouts))
+        for snapshot in snapshots
+    ]
+    total_workouts = sum(len(workouts) for _, workouts in collapsed_by_day)
+    location_candidates = sum(
+        1
+        for _, workouts in collapsed_by_day
+        for workout in workouts
+        if workout.location_lat is not None and workout.location_lon is not None
+    )
+    logger.info(
+        "Storing %d day(s), %d workout(s), %d route workout(s) with location data",
+        len(snapshots),
+        total_workouts,
+        location_candidates,
+    )
+
+    stored_workouts = 0
     with conn:
-        for s in snapshots:
+        for index, (s, workouts) in enumerate(collapsed_by_day, start=1):
             conn.execute(
                 """
                 INSERT OR REPLACE INTO daily (
@@ -161,7 +180,7 @@ def store_snapshots(conn: sqlite3.Connection, snapshots: list[DailySnapshot]) ->
             )
             # Clear stale workout rows before re-inserting the current set.
             conn.execute("DELETE FROM workout WHERE date = ?", (s.date,))
-            for w in collapse_adjacent_run_sessions(s.workouts):
+            for w in workouts:
                 location_id = resolve_workout_location(
                     conn,
                     w.location_lat,
@@ -230,6 +249,15 @@ def store_snapshots(conn: sqlite3.Connection, snapshots: list[DailySnapshot]) ->
                             for split in w.splits
                         ],
                     )
+                stored_workouts += 1
+            if index == len(collapsed_by_day) or index % 250 == 0:
+                logger.info(
+                    "Stored %d/%d day(s), %d/%d workout(s)",
+                    index,
+                    len(collapsed_by_day),
+                    stored_workouts,
+                    total_workouts,
+                )
     logger.info("Stored %d day(s) to database", len(snapshots))
     return len(snapshots)
 

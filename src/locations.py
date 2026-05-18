@@ -33,6 +33,7 @@ _LOCALITY_KEYS = (
 )
 _REGION_KEYS = ("state", "county", "region", "state_district")
 _last_request_at = 0.0
+_failed_cache_keys: set[tuple[float, float]] = set()
 
 
 def _rounded_coord(lat: float, lon: float) -> tuple[float, float]:
@@ -104,7 +105,7 @@ def _reverse_geocode_nominatim(lat: float, lon: float) -> dict[str, Any]:
 def _reverse_geocode(lat: float, lon: float) -> tuple[dict[str, Any], str] | None:
     """Reverse-geocode a coordinate with the configured provider."""
     provider = LOCATION_GEOCODER.strip().lower()
-    if provider in {"", "off", "none", "disabled"}:
+    if _geocoder_disabled():
         return None
     if provider != "nominatim":
         logger.warning("Unsupported location geocoder: %s", LOCATION_GEOCODER)
@@ -114,6 +115,11 @@ def _reverse_geocode(lat: float, lon: float) -> tuple[dict[str, Any], str] | Non
     except Exception as exc:
         logger.warning("Location reverse geocode failed: %s", exc)
         return None
+
+
+def _geocoder_disabled() -> bool:
+    """Return whether external reverse geocoding is disabled."""
+    return LOCATION_GEOCODER.strip().lower() in {"", "off", "none", "disabled"}
 
 
 def _find_location(
@@ -214,6 +220,8 @@ def resolve_workout_location(
     ).fetchone()
     if cached:
         return int(cached["location_id"])
+    if _geocoder_disabled() or (lat_round, lon_round) in _failed_cache_keys:
+        return None
 
     logger.info(
         "Resolving workout location %.2f, %.2f via %s",
@@ -223,6 +231,7 @@ def resolve_workout_location(
     )
     geocoded = _reverse_geocode(lat_round, lon_round)
     if geocoded is None:
+        _failed_cache_keys.add((lat_round, lon_round))
         return None
 
     payload, source = geocoded
@@ -248,5 +257,12 @@ def resolve_workout_location(
             timestamp,
             timestamp,
         ),
+    )
+    place = fields["label"]
+    country = fields["country"]
+    if country and country.lower() not in place.lower():
+        place = f"{place}, {country}"
+    logger.info(
+        "Resolved workout location %.2f, %.2f -> %s", lat_round, lon_round, place
     )
     return location_id

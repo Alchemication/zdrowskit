@@ -80,6 +80,19 @@ def cmd_import(args: argparse.Namespace) -> None:
     if not snapshots:
         logger.warning("No snapshots parsed from %s", data_dir)
         return
+    workout_count = sum(len(snapshot.workouts) for snapshot in snapshots)
+    route_workout_count = sum(
+        1
+        for snapshot in snapshots
+        for workout in snapshot.workouts
+        if workout.location_lat is not None and workout.location_lon is not None
+    )
+    logger.info(
+        "Parsed %d day(s), %d workout(s), %d route workout(s) with location data",
+        len(snapshots),
+        workout_count,
+        route_workout_count,
+    )
 
     conn = open_db(Path(args.db))
     n = store_snapshots(conn, snapshots)
