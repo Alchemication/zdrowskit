@@ -59,6 +59,13 @@ class WorkoutSnapshot:
         gpx_elevation_gain_m: Positive elevation gain in metres from GPX.
         gpx_avg_speed_ms: Mean speed in m/s from GPX speed field.
         gpx_max_speed_p95_ms: 95th-percentile speed in m/s (filters GPS spikes).
+        location_lat: Coarse representative latitude used to resolve locality.
+        location_lon: Coarse representative longitude used to resolve locality.
+        location_id: Linked locality row in the database, if resolved.
+        location_label: Human-readable locality label from the linked location.
+        location_locality: City/town/village from the linked location.
+        location_country: Country from the linked location.
+        location_country_code: ISO-like lower-case country code.
         splits: Derived per-km splits for route-bearing workouts.
     """
 
@@ -79,6 +86,13 @@ class WorkoutSnapshot:
     gpx_elevation_gain_m: float | None = None
     gpx_avg_speed_ms: float | None = None
     gpx_max_speed_p95_ms: float | None = None
+    location_lat: float | None = None
+    location_lon: float | None = None
+    location_id: int | None = None
+    location_label: str | None = None
+    location_locality: str | None = None
+    location_country: str | None = None
+    location_country_code: str | None = None
     splits: list[WorkoutSplit] = field(default_factory=list)
 
     def __post_init__(self) -> None:

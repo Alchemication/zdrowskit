@@ -192,6 +192,21 @@ def _extract_route_stats(w: dict) -> dict[str, float | None]:
     }
 
 
+def _extract_start_location(w: dict) -> tuple[float, float] | None:
+    """Return the first valid route coordinate for locality lookup."""
+    route = w.get("route", [])
+    if not isinstance(route, list):
+        return None
+    for point in route:
+        if not isinstance(point, dict):
+            continue
+        lat = _finite_float(point.get("latitude"))
+        lon = _finite_float(point.get("longitude"))
+        if lat is not None and lon is not None:
+            return lat, lon
+    return None
+
+
 def _finite_float(value: object) -> float | None:
     """Return a finite float or None for invalid/missing values."""
     try:
@@ -509,6 +524,7 @@ def parse_workouts(path: Path) -> list[WorkoutSnapshot]:
         route_stats = _extract_route_stats(w)
         category = _category(name)
         splits = _extract_splits(w, category, route_stats["gpx_elevation_gain_m"])
+        start_location = _extract_start_location(w)
 
         snapshots.append(
             WorkoutSnapshot(
@@ -528,6 +544,8 @@ def parse_workouts(path: Path) -> list[WorkoutSnapshot]:
                 gpx_elevation_gain_m=route_stats["gpx_elevation_gain_m"],
                 gpx_avg_speed_ms=route_stats["gpx_avg_speed_ms"],
                 gpx_max_speed_p95_ms=route_stats["gpx_max_speed_p95_ms"],
+                location_lat=start_location[0] if start_location else None,
+                location_lon=start_location[1] if start_location else None,
                 splits=splits,
             )
         )

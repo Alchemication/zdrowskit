@@ -28,6 +28,7 @@ from pathlib import Path
 from aggregator import collapse_adjacent_run_sessions
 from config import APP_HOME
 from db.migrations import apply_migrations
+from locations import resolve_workout_location
 from models import DailySnapshot, WorkoutSnapshot, WorkoutSplit
 
 logger = logging.getLogger(__name__)
@@ -161,6 +162,12 @@ def store_snapshots(conn: sqlite3.Connection, snapshots: list[DailySnapshot]) ->
             # Clear stale workout rows before re-inserting the current set.
             conn.execute("DELETE FROM workout WHERE date = ?", (s.date,))
             for w in collapse_adjacent_run_sessions(s.workouts):
+                location_id = resolve_workout_location(
+                    conn,
+                    w.location_lat,
+                    w.location_lon,
+                    seen_at=now,
+                )
                 conn.execute(
                     """
                     INSERT INTO workout (
@@ -170,7 +177,7 @@ def store_snapshots(conn: sqlite3.Connection, snapshots: list[DailySnapshot]) ->
                         temperature_c, humidity_pct,
                         gpx_distance_km, gpx_elevation_gain_m,
                         gpx_avg_speed_ms, gpx_max_speed_p95_ms,
-                        imported_at
+                        location_id, imported_at
                     ) VALUES (
                         ?, ?, ?, ?, ?, ?,
                         ?, ?, ?,
@@ -178,7 +185,7 @@ def store_snapshots(conn: sqlite3.Connection, snapshots: list[DailySnapshot]) ->
                         ?, ?,
                         ?, ?,
                         ?, ?,
-                        ?
+                        ?, ?
                     )
                     """,
                     (
@@ -199,6 +206,7 @@ def store_snapshots(conn: sqlite3.Connection, snapshots: list[DailySnapshot]) ->
                         w.gpx_elevation_gain_m,
                         w.gpx_avg_speed_ms,
                         w.gpx_max_speed_p95_ms,
+                        location_id,
                         now,
                     ),
                 )
@@ -279,9 +287,14 @@ def load_snapshots(
     # Load all workouts for the matched date range in one query.
     workout_rows = conn.execute(
         f"""
-        SELECT * FROM workout
-        WHERE date IN ({placeholders})
-        ORDER BY date ASC, start_utc ASC
+        SELECT w.*, l.label AS location_label,
+               l.locality AS location_locality,
+               l.country AS location_country,
+               l.country_code AS location_country_code
+        FROM workout w
+        LEFT JOIN location l ON l.id = w.location_id
+        WHERE w.date IN ({placeholders})
+        ORDER BY w.date ASC, w.start_utc ASC
         """,
         dates,
     ).fetchall()
@@ -330,6 +343,11 @@ def load_snapshots(
                 gpx_elevation_gain_m=row["gpx_elevation_gain_m"],
                 gpx_avg_speed_ms=row["gpx_avg_speed_ms"],
                 gpx_max_speed_p95_ms=row["gpx_max_speed_p95_ms"],
+                location_id=row["location_id"],
+                location_label=row["location_label"],
+                location_locality=row["location_locality"],
+                location_country=row["location_country"],
+                location_country_code=row["location_country_code"],
                 splits=splits_by_start.get(row["start_utc"], []),
             )
         )
@@ -702,6 +720,7 @@ _WORKOUT_CLONE_COLUMNS = (
     "gpx_elevation_gain_m",
     "gpx_avg_speed_ms",
     "gpx_max_speed_p95_ms",
+    "location_id",
 )
 
 

@@ -147,6 +147,14 @@ def _format_workout_line(workout: dict) -> str:
     if elevation:
         parts.append(f"elev +{elevation}")
 
+    location = workout.get("location_label") or workout.get("location_locality")
+    country = workout.get("location_country")
+    if location:
+        location_text = str(location)
+        if country and str(country).lower() not in location_text.lower():
+            location_text = f"{location_text}, {country}"
+        parts.append(location_text)
+
     splits_text = _format_splits(workout.get("splits"))
     if splits_text:
         parts.append(f"splits {splits_text}")
@@ -825,6 +833,10 @@ def _build_today_snapshot(days: list[dict], today_iso: str) -> dict | None:
                 "pace_min_per_km": pace_min_per_km,
                 "avg_hr": w.get("hr_avg"),
                 "elevation_gain_m": w.get("gpx_elevation_gain_m"),
+                "location_label": w.get("location_label"),
+                "location_locality": w.get("location_locality"),
+                "location_country": w.get("location_country"),
+                "location_country_code": w.get("location_country_code"),
             }
         )
 

@@ -12,9 +12,10 @@
 - Identity: `type`, `category` (`run` / `lift` / `walk` / `cycle` / `other`)
 - Core fields: `duration_min`, `hr_min`, `hr_avg`, `hr_max`, `active_energy_kj`, `intensity_kcal_per_hr_kg`
 - Environment: `temperature_c`, `humidity_pct`
+- Location: `location_id`, `location_label`, `location_locality`, `location_region`, `location_country`, `location_country_code` (route workouts only; locality-level, not precise GPS)
 - GPX fields: `gpx_distance_km`, `gpx_elevation_gain_m`, `gpx_avg_speed_ms`, `gpx_max_speed_p95_ms`
 - Pace tip: `duration_min / gpx_distance_km` = min/km when `gpx_distance_km IS NOT NULL`
-- Use `workout_all` as the canonical source for workout questions: runs, pace, splits/proxies, distance, elevation, workout HR, and session trends.
+- Use `workout_all` as the canonical source for workout questions: runs, pace, splits/proxies, distance, elevation, workout HR, location/travel context, and session trends.
 
 **workout_split** — one row per completed 1 km split for imported route-based runs
 

@@ -34,6 +34,7 @@ Notes:
 
 - Sleep data is pre-aggregated nightly totals, with no per-segment breakdown.
 - Workout routes are embedded as `route` arrays with latitude, longitude, altitude, speed, and timestamp. zdrowskit derives per-km splits from these when present.
+- Route workouts are also reverse-geocoded during import into locality-level locations (for example Crosshaven, Warsaw, Malaga). Full route coordinates are not stored in SQLite. Set `ZDROWSKIT_LOCATION_GEOCODER=off` to disable the external lookup; the default provider is Nominatim and results are looked up/cached by coarse start coordinate.
 
 ## Historical Backfill
 

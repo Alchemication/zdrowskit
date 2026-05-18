@@ -66,6 +66,14 @@ def _env_int(name: str, default: int) -> int:
     return int(raw.strip())
 
 
+def _env_float(name: str, default: float) -> float:
+    """Return a float from an environment variable."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return float(raw.strip())
+
+
 MAX_HISTORY_ENTRIES: int = 8
 """Maximum number of entries to retain in history.md."""
 
@@ -134,6 +142,27 @@ MAX_TOKENS_LOG_FLOW: int = _env_int("ZDROWSKIT_MAX_TOKENS_LOG_FLOW", 4096)
 
 MAX_TOKENS_ADD_CLONE: int = _env_int("ZDROWSKIT_MAX_TOKENS_ADD_CLONE", 512)
 """Output token budget for /add historical workout clone selection."""
+
+LOCATION_GEOCODER: str = os.environ.get("ZDROWSKIT_LOCATION_GEOCODER", "nominatim")
+"""Reverse geocoder for workout localities. Use ``off`` to disable."""
+
+LOCATION_COORD_DECIMALS: int = _env_int("ZDROWSKIT_LOCATION_COORD_DECIMALS", 3)
+"""Decimal places for locality lookup/cache (~100 m at the default)."""
+
+LOCATION_HTTP_TIMEOUT_S: float = _env_float("ZDROWSKIT_LOCATION_HTTP_TIMEOUT_S", 8.0)
+"""Network timeout for sparse reverse-geocoding cache misses."""
+
+LOCATION_MIN_REQUEST_INTERVAL_S: float = _env_float(
+    "ZDROWSKIT_LOCATION_MIN_REQUEST_INTERVAL_S",
+    1.1,
+)
+"""Minimum delay between public reverse-geocoder requests."""
+
+LOCATION_USER_AGENT: str = os.environ.get(
+    "ZDROWSKIT_LOCATION_USER_AGENT",
+    "zdrowskit/0.1 personal health import",
+)
+"""User-Agent sent to public reverse-geocoding services."""
 
 MAX_TOKENS_VERIFICATION: int = _env_int("ZDROWSKIT_MAX_TOKENS_VERIFICATION", 8192)
 """Output token budget for evidence-bound verifier passes."""

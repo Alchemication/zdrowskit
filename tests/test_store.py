@@ -133,6 +133,56 @@ class TestStoreAndLoad:
         assert w.splits[0].pace_min_km == 6.0
         assert w.splits[1].elevation_gain_m == 10.0
 
+    def test_workout_location_round_trip(
+        self,
+        in_memory_db: sqlite3.Connection,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Workout locality should load via the workout -> location link."""
+        now = "2026-05-17T12:00:00+00:00"
+        cursor = in_memory_db.execute(
+            """
+            INSERT INTO location (
+                label, locality, region, country, country_code, source,
+                created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "Crosshaven",
+                "Crosshaven",
+                "County Cork",
+                "Ireland",
+                "ie",
+                "test",
+                now,
+                now,
+            ),
+        )
+        location_id = int(cursor.lastrowid)
+        monkeypatch.setattr(
+            "store.resolve_workout_location",
+            lambda conn, lat, lon, seen_at=None: location_id,
+        )
+
+        workout = WorkoutSnapshot(
+            type="Outdoor Run",
+            category="run",
+            start_utc="2026-05-17T07:00:00Z",
+            duration_min=30.0,
+            location_lat=51.8,
+            location_lon=-8.3,
+        )
+        store_snapshots(
+            in_memory_db,
+            [DailySnapshot(date="2026-05-17", workouts=[workout])],
+        )
+
+        loaded = load_snapshots(in_memory_db)
+
+        assert loaded[0].workouts[0].location_id == location_id
+        assert loaded[0].workouts[0].location_label == "Crosshaven"
+        assert loaded[0].workouts[0].location_country_code == "ie"
+
     def test_manual_sleep_overrides_imported_sleep(
         self, in_memory_db: sqlite3.Connection
     ) -> None:
@@ -496,7 +546,7 @@ class TestMigrations:
 
         applied = apply_migrations(conn)
 
-        assert len(applied) == 9
+        assert len(applied) == 10
         statuses = list_migrations(conn)
         assert all(status.status == "applied" for status in statuses)
         schema = get_live_schema(conn)
@@ -509,6 +559,8 @@ class TestMigrations:
         assert "CREATE TABLE events" in schema
         assert "CREATE TABLE workout_split" in schema
         assert "CREATE TABLE llm_trace" in schema
+        assert "CREATE TABLE location" in schema
+        assert "CREATE TABLE location_point_cache" in schema
 
     def test_adopts_legacy_schema_and_applies_missing(self) -> None:
         conn = sqlite3.connect(":memory:")

@@ -119,6 +119,7 @@ class TestMigration:
         sources = [r["source"] for r in rows]
         assert "import" in sources
         assert "manual" in sources
+        assert "location_label" in rows[0].keys()
         # 3 imported + 1 manual = 4
         assert len(rows) == 4
 

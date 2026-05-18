@@ -221,6 +221,13 @@ def _merge_run_session(workouts: list[WorkoutSnapshot]) -> WorkoutSnapshot:
         gpx_elevation_gain_m=elevation_m,
         gpx_avg_speed_ms=speed_ms,
         gpx_max_speed_p95_ms=max(max_speed_p95s) if max_speed_p95s else None,
+        location_lat=first.location_lat,
+        location_lon=first.location_lon,
+        location_id=first.location_id,
+        location_label=first.location_label,
+        location_locality=first.location_locality,
+        location_country=first.location_country,
+        location_country_code=first.location_country_code,
         splits=[
             WorkoutSplit(
                 km_index=index,

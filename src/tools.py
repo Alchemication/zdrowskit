@@ -52,7 +52,7 @@ def run_sql_tool() -> list[dict]:
                     "data including manual entries). Both '_all' views have a "
                     "'source' column. Prefer 'workout_all' for workout/session "
                     "questions (runs, pace, distance, elevation, workout HR, "
-                    "session trends), 'workout_split' for within-run pacing and "
+                    "location, session trends), 'workout_split' for within-run pacing and "
                     "contiguous PR segments, and 'daily' for day-level health "
                     "metrics (HRV, resting HR, steps, recovery, mobility). See "
                     "the schema reference in your system prompt for column "

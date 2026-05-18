@@ -585,6 +585,8 @@ class TestPromptRenderers:
                                 "gpx_distance_km": 5.27,
                                 "gpx_elevation_gain_m": 12.4,
                                 "hr_avg": 152.2,
+                                "location_label": "Crosshaven",
+                                "location_country": "Ireland",
                             }
                         ],
                     },
@@ -641,6 +643,7 @@ class TestPromptRenderers:
         assert "2026-W14" in rendered
         assert "42.9 ms" in rendered
         assert "0.78" in rendered
+        assert "Crosshaven, Ireland" in rendered
         assert "pending sync" in rendered
         assert "null" not in rendered
         assert "```json" not in rendered

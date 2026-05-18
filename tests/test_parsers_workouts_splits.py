@@ -59,6 +59,8 @@ class TestParseWorkoutSplits:
         workouts = parse_workouts(path)
 
         assert len(workouts) == 1
+        assert workouts[0].location_lat == 0.0
+        assert workouts[0].location_lon == 0.0
         splits = workouts[0].splits
         assert len(splits) == 3
         assert [split.km_index for split in splits] == [1, 2, 3]
