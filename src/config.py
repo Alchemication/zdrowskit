@@ -146,8 +146,8 @@ MAX_TOKENS_ADD_CLONE: int = _env_int("ZDROWSKIT_MAX_TOKENS_ADD_CLONE", 512)
 LOCATION_GEOCODER: str = os.environ.get("ZDROWSKIT_LOCATION_GEOCODER", "nominatim")
 """Reverse geocoder for workout localities. Use ``off`` to disable."""
 
-LOCATION_COORD_DECIMALS: int = _env_int("ZDROWSKIT_LOCATION_COORD_DECIMALS", 3)
-"""Decimal places for locality lookup/cache (~100 m at the default)."""
+LOCATION_COORD_DECIMALS: int = _env_int("ZDROWSKIT_LOCATION_COORD_DECIMALS", 2)
+"""Decimal places for locality lookup/cache (~1 km at the default)."""
 
 LOCATION_HTTP_TIMEOUT_S: float = _env_float("ZDROWSKIT_LOCATION_HTTP_TIMEOUT_S", 8.0)
 """Network timeout for sparse reverse-geocoding cache misses."""

@@ -215,6 +215,12 @@ def resolve_workout_location(
     if cached:
         return int(cached["location_id"])
 
+    logger.info(
+        "Resolving workout location %.2f, %.2f via %s",
+        lat_round,
+        lon_round,
+        LOCATION_GEOCODER,
+    )
     geocoded = _reverse_geocode(lat_round, lon_round)
     if geocoded is None:
         return None

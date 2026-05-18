@@ -37,7 +37,7 @@ class TestResolveWorkoutLocation:
         second_id = resolve_workout_location(conn, 51.80981, -8.35799)
 
         assert first_id == second_id
-        assert calls == [(51.81, -8.358)]
+        assert calls == [(51.81, -8.36)]
         location = conn.execute("SELECT * FROM location").fetchone()
         assert location["label"] == "Crosshaven"
         assert location["country_code"] == "ie"
