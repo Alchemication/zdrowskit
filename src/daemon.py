@@ -1027,23 +1027,27 @@ def _setup_logging(foreground: bool) -> None:
     Args:
         foreground: If True, also log to stderr with colours.
     """
+    from log import LOG_FORMAT, LevelFormatter, quiet_noisy_loggers
+
     root = logging.getLogger()
     root.setLevel(logging.INFO)
+    root.handlers.clear()
 
     LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
     file_handler = logging.handlers.TimedRotatingFileHandler(
         LOG_FILE, when="midnight", backupCount=7, encoding="utf-8"
     )
-    file_handler.setFormatter(
-        logging.Formatter("%(asctime)s %(levelname)-8s %(name)s: %(message)s")
-    )
+    file_handler.setFormatter(LevelFormatter(LOG_FORMAT, use_color=False))
     root.addHandler(file_handler)
+    quiet_noisy_loggers()
 
     if foreground:
-        # Reuse the project's coloured stderr handler
-        from log import setup_logging as _setup_colour
-
-        _setup_colour()
+        # Add a coloured stderr handler alongside the file handler.
+        stderr_handler = logging.StreamHandler(sys.stderr)
+        stderr_handler.setFormatter(
+            LevelFormatter(LOG_FORMAT, use_color=sys.stderr.isatty())
+        )
+        root.addHandler(stderr_handler)
 
 
 def main() -> None:
