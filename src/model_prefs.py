@@ -29,7 +29,6 @@ from config import (
     DEFAULT_CHAT_MODEL,
     DEFAULT_COACH_MODEL,
     DEFAULT_INSIGHTS_MODEL,
-    DEFAULT_LOG_FLOW_MODEL,
     DEFAULT_NOTIFY_MODEL,
     DEFAULT_NUDGE_MODEL,
     FALLBACK_FLASH_MODEL,
@@ -52,7 +51,6 @@ PRO_FEATURES: tuple[str, ...] = (
 )
 FLASH_FEATURES: tuple[str, ...] = (
     "notify",
-    "log_flow",
     "add_clone",
     "verification_rewrite",
 )
@@ -60,7 +58,6 @@ FEATURES: tuple[str, ...] = PRO_FEATURES + FLASH_FEATURES
 ASYNC_QUALITY_FEATURES: tuple[str, ...] = ("insights", "coach", "nudge")
 FLASH_REASONING_FEATURES: tuple[str, ...] = (
     "chat",
-    "log_flow",
     "add_clone",
     "verification_rewrite",
 )
@@ -76,7 +73,6 @@ FEATURE_LABELS: dict[str, str] = {
     "nudge": "Nudges",
     "chat": "Chat",
     "notify": "Notify parser",
-    "log_flow": "Log flow",
     "add_clone": "Add workout",
     "verification": "Verifier",
     "verification_rewrite": "Verifier rewrite",
@@ -87,7 +83,7 @@ TELEGRAM_FEATURE_GROUPS: dict[str, tuple[str, ...]] = {
     "reports": ("insights",),
     "coach": ("coach",),
     "nudges": ("nudge",),
-    "utilities": ("notify", "log_flow", "add_clone"),
+    "utilities": ("notify", "add_clone"),
 }
 
 # Capability tier shown next to each model in Telegram buttons. Helps users
@@ -158,12 +154,6 @@ def default_model_prefs() -> dict[str, Any]:
                 "temperature": None,
             },
             "notify": {"profile": "flash", "primary": DEFAULT_NOTIFY_MODEL},
-            "log_flow": {
-                "profile": "flash",
-                "primary": DEFAULT_LOG_FLOW_MODEL,
-                "reasoning_effort": "high",
-                "temperature": None,
-            },
             "add_clone": {
                 "profile": "flash",
                 "primary": DEFAULT_ADD_CLONE_MODEL,
@@ -211,7 +201,6 @@ def selectable_models() -> list[str]:
         DEFAULT_NUDGE_MODEL,
         DEFAULT_CHAT_MODEL,
         DEFAULT_NOTIFY_MODEL,
-        DEFAULT_LOG_FLOW_MODEL,
         DEFAULT_ADD_CLONE_MODEL,
         VERIFICATION_MODEL,
         VERIFICATION_REWRITE_MODEL,
@@ -332,20 +321,6 @@ def _is_legacy_default_override(
             and override.get("fallback") == PRIMARY_PRO_MODEL
             and override.get("reasoning_effort") is None
             and override.get("temperature") is None
-        )
-    if feature == "log_flow":
-        return (
-            override.get("profile") == "flash"
-            and override.get("primary") == ANTHROPIC_HAIKU_MODEL
-            and override.get("fallback") == PRIMARY_FLASH_MODEL
-            and "reasoning_effort" not in override
-            and "temperature" not in override
-        ) or (
-            override.get("profile") == "flash"
-            and override.get("primary") == PRIMARY_FLASH_MODEL
-            and "fallback" not in override
-            and "reasoning_effort" not in override
-            and "temperature" not in override
         )
     if feature in {"add_clone", "verification_rewrite"}:
         return (

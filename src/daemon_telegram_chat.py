@@ -224,7 +224,7 @@ class TelegramChatHandler:
         ``db``, ``model``, ``context_dir``, ``_state``, ``_lock``,
         ``_stop_event``, ``_pending_rejection_reasons``,
         ``_pending_feedback_reasons``, ``_self_originated_writes``,
-        ``_add_flow``, ``_notify_flow``, ``_log_flow``, and various helper methods.
+        ``_add_flow``, ``_notify_flow``, and various helper methods.
     """
 
     def __init__(self, daemon: "ZdrowskitDaemon") -> None:
@@ -310,11 +310,6 @@ class TelegramChatHandler:
             return
 
         message_id = message["message_id"]
-
-        # `+ note` free-text intercept for /log — must land BEFORE the chat
-        # LLM path so the note text is not consumed as a chat turn.
-        if self._daemon._log_flow.maybe_consume_note(text, message_id):
-            return
 
         # Handle bot commands before the LLM.
         if text.startswith("/"):
@@ -586,8 +581,6 @@ class TelegramChatHandler:
             self._daemon._notify_flow.handle_command(request_text, message_id)
         elif cmd == "/models":
             self._daemon._model_flow.handle_command(message_id)
-        elif cmd == "/log":
-            self._daemon._log_flow.handle_command(message_id)
         elif cmd == "/status":
             self._poller.send_reply(
                 "\n".join(self._daemon._build_status_lines()),
@@ -1639,9 +1632,6 @@ class TelegramChatHandler:
 
         elif data.startswith("model_"):
             self._daemon._model_flow.handle_callback(cb_id, data, msg_id)
-
-        elif data.startswith("log_"):
-            self._daemon._log_flow.handle_callback(cb_id, data, msg_id)
 
         elif data.startswith("agent:"):
             self._handle_agent_callback(cb_id, data, msg_id)

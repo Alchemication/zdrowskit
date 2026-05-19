@@ -32,7 +32,6 @@ The daemon runs a Telegram long-polling listener alongside the file watcher. Sen
 Telegram commands include:
 
 ```text
-/log
 /add
 /codex
 /claude

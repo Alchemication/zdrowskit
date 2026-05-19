@@ -7,7 +7,6 @@ import json
 from config import (
     ANTHROPIC_HAIKU_MODEL,
     ANTHROPIC_OPUS_4_7_MODEL,
-    DEEPSEEK_FLASH_MODEL,
     FALLBACK_PRO_MODEL,
     PRIMARY_FLASH_MODEL,
     PRIMARY_PRO_MODEL,
@@ -40,14 +39,6 @@ class TestModelPrefs:
         route = resolve_model_route("chat", path=tmp_path / "models.json")
 
         assert route.primary == PRIMARY_FLASH_MODEL
-        assert route.fallback == ANTHROPIC_HAIKU_MODEL
-        assert route.call_kwargs()["reasoning_effort"] == "high"
-        assert route.call_kwargs()["temperature"] is None
-
-    def test_log_flow_defaults_to_deepseek_flash_with_haiku_fallback(self, tmp_path):
-        route = resolve_model_route("log_flow", path=tmp_path / "models.json")
-
-        assert route.primary == DEEPSEEK_FLASH_MODEL
         assert route.fallback == ANTHROPIC_HAIKU_MODEL
         assert route.call_kwargs()["reasoning_effort"] == "high"
         assert route.call_kwargs()["temperature"] is None
@@ -144,9 +135,7 @@ class TestModelPrefs:
         assert nudge.primary == ANTHROPIC_OPUS_4_7_MODEL
         assert nudge.reasoning_effort == "high"
 
-    def test_legacy_default_chat_and_log_flow_routes_migrate_to_new_defaults(
-        self, tmp_path
-    ):
+    def test_legacy_default_chat_route_migrates_to_new_defaults(self, tmp_path):
         path = tmp_path / "models.json"
         path.write_text(
             json.dumps(
@@ -159,26 +148,16 @@ class TestModelPrefs:
                             "reasoning_effort": None,
                             "temperature": 0.7,
                         },
-                        "log_flow": {
-                            "profile": "flash",
-                            "primary": ANTHROPIC_HAIKU_MODEL,
-                            "fallback": PRIMARY_FLASH_MODEL,
-                        },
                     },
                 }
             )
         )
 
         chat = resolve_model_route("chat", path=path)
-        log_flow = resolve_model_route("log_flow", path=path)
 
         assert chat.primary == PRIMARY_FLASH_MODEL
         assert chat.reasoning_effort == "high"
         assert chat.temperature is None
-        assert log_flow.primary == PRIMARY_FLASH_MODEL
-        assert log_flow.fallback == ANTHROPIC_HAIKU_MODEL
-        assert log_flow.reasoning_effort == "high"
-        assert log_flow.temperature is None
 
     def test_legacy_default_flash_utility_routes_migrate_to_new_defaults(
         self, tmp_path

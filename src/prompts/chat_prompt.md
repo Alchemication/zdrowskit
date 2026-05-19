@@ -358,9 +358,8 @@ What each file is for:
 
 ### Log-entry style (when calling `update_context` with file=`log`)
 
-The log is read back by future LLM calls and by the `/log` flow. The same
-rules apply to both paths — keep entries compact, factual, and
-concept-rich:
+The log is read back by future LLM calls — keep entries compact, factual,
+and concept-rich:
 
 - Append exactly one bullet line: `- YYYY-MM-DD ...` (≤ 160 chars, single line)
 - Tokens are bracketed, lowercase, 1–3 words each

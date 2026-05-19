@@ -30,7 +30,7 @@ A `Reset all` button on the main panel and `uv run python main.py models reset -
 
 Insights, coach, and nudges default to `anthropic/claude-opus-4-7` with `reasoning_effort=high`, temperature omitted, and `deepseek/deepseek-v4-pro` fallback. Chat defaults to `deepseek/deepseek-v4-flash` with `reasoning_effort=high` (engages DeepSeek thinking), temperature omitted, and `anthropic/claude-haiku-4-5` fallback.
 
-Lightweight utility surfaces, including `/notify` interpretation, `/log` flow building, and `/add` workout clone selection, default to `deepseek/deepseek-v4-flash` with `anthropic/claude-haiku-4-5` fallback. `/log`, `/add`, and verifier rewrites use `reasoning_effort=high` with temperature omitted; `/notify` stays plain Flash. On the DeepSeek primary, `high` engages thinking via translated `extra_body`; on the Anthropic fallback, the same effort is sent natively.
+Lightweight utility surfaces, including `/notify` interpretation and `/add` workout clone selection, default to `deepseek/deepseek-v4-flash` with `anthropic/claude-haiku-4-5` fallback. `/add` and verifier rewrites use `reasoning_effort=high` with temperature omitted; `/notify` stays plain Flash. On the DeepSeek primary, `high` engages thinking via translated `extra_body`; on the Anthropic fallback, the same effort is sent natively.
 
 Logged LLM calls record the effective model, and fallback calls include `requested_model` and `fallback_used` in params/metadata.
 
@@ -84,8 +84,6 @@ ZDROWSKIT_COACH_MODEL=anthropic/claude-opus-4-7
 ZDROWSKIT_NUDGE_MODEL=anthropic/claude-opus-4-7
 ZDROWSKIT_CHAT_MODEL=deepseek/deepseek-v4-flash
 ZDROWSKIT_NOTIFY_MODEL=deepseek/deepseek-v4-flash
-ZDROWSKIT_LOG_FLOW_MODEL=deepseek/deepseek-v4-flash
-# /log uses anthropic/claude-haiku-4-5 as its flash profile fallback
 ZDROWSKIT_ADD_CLONE_MODEL=deepseek/deepseek-v4-flash
 
 ZDROWSKIT_MAX_TOKENS_DEFAULT=4096
@@ -94,7 +92,6 @@ ZDROWSKIT_MAX_TOKENS_COACH=8192
 ZDROWSKIT_MAX_TOKENS_CHAT=4096
 ZDROWSKIT_MAX_TOKENS_NUDGE=4096
 ZDROWSKIT_MAX_TOKENS_NOTIFY=512
-ZDROWSKIT_MAX_TOKENS_LOG_FLOW=4096
 ZDROWSKIT_MAX_TOKENS_ADD_CLONE=512
 ZDROWSKIT_MAX_TOKENS_VERIFICATION=8192
 ZDROWSKIT_MAX_TOKENS_VERIFICATION_REWRITE=4096

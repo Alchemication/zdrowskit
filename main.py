@@ -428,7 +428,6 @@ def main() -> None:
         "nudge",
         "chat",
         "notify",
-        "log_flow",
         "add_clone",
         "verification",
         "verification_rewrite",

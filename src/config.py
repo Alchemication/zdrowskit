@@ -137,9 +137,6 @@ turns need enough room to finish cleanly."""
 MAX_TOKENS_NOTIFY: int = _env_int("ZDROWSKIT_MAX_TOKENS_NOTIFY", 512)
 """Output token budget for /notify preference interpretation."""
 
-MAX_TOKENS_LOG_FLOW: int = _env_int("ZDROWSKIT_MAX_TOKENS_LOG_FLOW", 4096)
-"""Output token budget for /log tap-flow generation and follow-up steps."""
-
 MAX_TOKENS_ADD_CLONE: int = _env_int("ZDROWSKIT_MAX_TOKENS_ADD_CLONE", 512)
 """Output token budget for /add historical workout clone selection."""
 
@@ -262,12 +259,6 @@ DEFAULT_NOTIFY_MODEL: str = os.environ.get(
     PRIMARY_FLASH_MODEL,
 )
 """Default model for /notify intent interpretation."""
-
-DEFAULT_LOG_FLOW_MODEL: str = os.environ.get(
-    "ZDROWSKIT_LOG_FLOW_MODEL",
-    PRIMARY_FLASH_MODEL,
-)
-"""Default model for /log tap-flow generation."""
 
 DEFAULT_ADD_CLONE_MODEL: str = os.environ.get(
     "ZDROWSKIT_ADD_CLONE_MODEL",

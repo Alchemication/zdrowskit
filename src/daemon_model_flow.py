@@ -1,8 +1,8 @@
 """/models Telegram command flow.
 
 Button-first control panel for model routing. Mirrors the ergonomics of the
-/log and /add flows: token-scoped sessions with TTL, isolated primary action
-buttons, demoted cancel buttons, and confirmation step before persisting any
+/add flow: token-scoped sessions with TTL, isolated primary action buttons,
+demoted cancel buttons, and confirmation step before persisting any
 multi-field change.
 """
 

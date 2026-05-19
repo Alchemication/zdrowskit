@@ -5,7 +5,6 @@ from __future__ import annotations
 import sqlite3
 import json
 from contextlib import AbstractContextManager, ExitStack
-from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import call, patch
@@ -15,7 +14,6 @@ from cmd_coach import cmd_coach
 from cmd_insights import cmd_insights
 from cmd_llm_common import apply_verification
 from cmd_llm_log import cmd_llm_log
-from cmd_log_flow import _query_today_snapshot, build_log_flow
 from cmd_notify_interpreter import interpret_notify_request
 from cmd_nudge import cmd_nudge
 import commands as commands_module
@@ -164,7 +162,6 @@ class TestSetupCommand:
 class TestTelegramBotCommands:
     def test_registered_bot_commands_match_telegram_surface(self) -> None:
         assert TELEGRAM_BOT_COMMANDS == [
-            {"command": "log", "description": "Log today's context"},
             {"command": "add", "description": "Add workout or sleep"},
             {"command": "codex", "description": "Ask Codex about this repo"},
             {"command": "claude", "description": "Ask Claude about this repo"},
@@ -193,77 +190,6 @@ class TestTelegramBotCommands:
             description = command["description"]
             assert "\n" not in description
             assert len(description) <= 40
-
-
-class TestLogFlowSnapshot:
-    def test_uses_previous_night_sleep_in_today_snapshot(
-        self, in_memory_db: sqlite3.Connection
-    ) -> None:
-        in_memory_db.execute(
-            """
-            INSERT INTO daily (date, imported_at, sleep_total_h, sleep_efficiency_pct)
-            VALUES (?, ?, ?, ?)
-            """,
-            ("2026-04-19", "2026-04-20T08:00:00+00:00", 7.5, 94.0),
-        )
-        snapshot = _query_today_snapshot(in_memory_db, date(2026, 4, 20))
-        assert "Last night: 7.50h, 94% efficiency" in snapshot
-
-    def test_build_log_flow_retries_fallback_after_empty_primary_response(
-        self, in_memory_db: sqlite3.Connection
-    ) -> None:
-        seen_models: list[str] = []
-
-        def fake_call_llm(_messages: list[dict], **kwargs: object) -> LLMResult:
-            model = str(kwargs["model"])
-            assert kwargs["max_tokens"] == 4096
-            assert kwargs["temperature"] is None
-            assert kwargs["reasoning_effort"] == "high"
-            seen_models.append(model)
-            if model == "primary-model":
-                return LLMResult(
-                    text="",
-                    model="primary-model",
-                    input_tokens=1,
-                    output_tokens=1024,
-                    total_tokens=1025,
-                    latency_s=0.1,
-                )
-            return LLMResult(
-                text=(
-                    '{"steps":[{"id":"state","question":"How did today feel?",'
-                    '"options":["rest day","solid"],"multi_select":false,'
-                    '"optional":false}]}'
-                ),
-                model="fallback-model",
-                input_tokens=1,
-                output_tokens=20,
-                total_tokens=21,
-                latency_s=0.1,
-            )
-
-        with (
-            patch(
-                "cmd_log_flow.load_context", return_value={"prompt": "x", "soul": "y"}
-            ),
-            patch("cmd_log_flow.open_db", return_value=in_memory_db),
-            patch("cmd_log_flow.build_messages", return_value=[]),
-            patch(
-                "cmd_log_flow.route_kwargs",
-                return_value={
-                    "model": "primary-model",
-                    "fallback_models": ["fallback-model"],
-                    "reasoning_effort": "high",
-                    "temperature": None,
-                },
-            ),
-            patch("cmd_log_flow.call_llm", side_effect=fake_call_llm),
-        ):
-            flow = build_log_flow(db="ignored.db")
-
-        assert seen_models == ["primary-model", "fallback-model"]
-        assert flow.model == "fallback-model"
-        assert flow.steps[0].options == ["rest day", "solid"]
 
 
 class TestVerificationGate:
