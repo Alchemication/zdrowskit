@@ -633,6 +633,7 @@ def build_review_facts(
     feedback_present = (
         bool(context)
         and context.get("coach_feedback", "(not provided)") != "(not provided)"
+        and context.get("coach_feedback") != "(none)"
     )
 
     lines = [

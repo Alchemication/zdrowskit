@@ -111,9 +111,10 @@ a list of recent coach sessions.
 
 ## Recent Coaching Feedback
 
-The user's thumbs-down reactions to your prior coach reviews. This is the
-strongest signal you have about what was wrong with your previous reasoning
-— take it seriously.
+Recent accept/reject history for context edits proposed by chat and coach.
+Rejected entries, especially those with reasons, are the strongest signal
+about what was wrong with previous reasoning. Accepted entries are lower-signal
+confirmation that the underlying fact or constraint was worth recording.
 
 {coach_feedback}
 
@@ -149,9 +150,10 @@ or exact detail beyond this compact view.
 ### Read Recent Coaching Feedback first
 
 Before deciding anything, read the **Recent Coaching Feedback** section
-above and identify the underlying concerns. Was a prior review too long,
-too verbose, missed the point, ignored a constraint, gave bad advice, or
-restated obvious data? If a feedback item points at a pattern (e.g.
+above and identify the underlying concerns. Prioritize rejected entries and
+their reasons. Was a prior review too long, too verbose, missed the point,
+ignored a constraint, gave bad advice, or restated obvious data? If a feedback
+item points at a pattern (e.g.
 "always too long when no changes are needed"), apply that lesson here even
 if this week looks different.
 

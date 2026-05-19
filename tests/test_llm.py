@@ -157,7 +157,11 @@ class TestLoadContext:
     def test_coach_feedback_trimmed(self, tmp_path: Path) -> None:
         (tmp_path / "insights_prompt.md").write_text("template")
         entries = "\n\n".join(
-            f"## 2026-03-{i:02d}\n\nFeedback ID: cf_{i}\nDecision: rejected"
+            f"## 2026-03-{i:02d}\n\n"
+            f"Feedback ID: cf_{i}\n"
+            "Source: coach\n"
+            "Target: strategy.md\n"
+            "Decision: accepted"
             for i in range(1, 12)
         )
         (tmp_path / "coach_feedback.md").write_text(entries)
@@ -165,6 +169,100 @@ class TestLoadContext:
         assert "Feedback ID: cf_11" in ctx["coach_feedback"]
         assert "Feedback ID: cf_4" in ctx["coach_feedback"]
         assert "Feedback ID: cf_3" not in ctx["coach_feedback"]
+
+    def test_coach_feedback_filters_prompt_noise(self, tmp_path: Path) -> None:
+        (tmp_path / "insights_prompt.md").write_text("template")
+        entries = "\n\n".join(
+            [
+                "\n".join(
+                    [
+                        "## 2026-03-01",
+                        "Feedback ID: cf_1",
+                        "Source: chat",
+                        "Target: log.md",
+                        "Decision: accepted",
+                        "Summary: Logged useful context.",
+                    ]
+                ),
+                "\n".join(
+                    [
+                        "## 2026-03-02",
+                        "Feedback ID: cf_2",
+                        "Source: chat",
+                        "Target: log.md",
+                        "Decision: rejected",
+                        "Summary: Bad log append.",
+                        "Reason: /clear",
+                    ]
+                ),
+                "\n".join(
+                    [
+                        "## 2026-03-03",
+                        "Feedback ID: cf_3",
+                        "Source: chat",
+                        "Target: strategy.md",
+                        "Decision: rejected",
+                        "Summary: Bad strategy edit.",
+                        "Reason: Too broad.",
+                    ]
+                ),
+                "\n".join(
+                    [
+                        "## 2026-03-04",
+                        "Feedback ID: cf_4",
+                        "Source: coach",
+                        "Target: strategy.md",
+                        "Decision: accepted",
+                        "Summary: Useful strategy edit.",
+                    ]
+                ),
+                "\n".join(
+                    [
+                        "## 2026-03-05",
+                        "Feedback ID: cf_5",
+                        "Source: coach",
+                        "Target: strategy.md",
+                        "Decision: rejected",
+                        "Summary: Rejected with no reason.",
+                    ]
+                ),
+                "\n".join(
+                    [
+                        "## 2026-03-06",
+                        "Feedback ID: cf_6",
+                        "Source: coach",
+                        "Target: strategy.md",
+                        "Decision: rejected",
+                        "Summary: Command noise.",
+                        "Reason: /clear",
+                    ]
+                ),
+            ]
+        )
+        (tmp_path / "coach_feedback.md").write_text(entries)
+        ctx = load_context(tmp_path, prompts_dir=tmp_path)
+        assert "Feedback ID: cf_3" in ctx["coach_feedback"]
+        assert "Feedback ID: cf_4" in ctx["coach_feedback"]
+        assert "Feedback ID: cf_1" not in ctx["coach_feedback"]
+        assert "Feedback ID: cf_2" not in ctx["coach_feedback"]
+        assert "Feedback ID: cf_5" not in ctx["coach_feedback"]
+        assert "Feedback ID: cf_6" not in ctx["coach_feedback"]
+
+    def test_coach_feedback_returns_none_when_only_noise(self, tmp_path: Path) -> None:
+        (tmp_path / "insights_prompt.md").write_text("template")
+        (tmp_path / "coach_feedback.md").write_text(
+            "\n".join(
+                [
+                    "## 2026-03-01",
+                    "Feedback ID: cf_1",
+                    "Source: chat",
+                    "Target: log.md",
+                    "Decision: accepted",
+                ]
+            )
+        )
+        ctx = load_context(tmp_path, prompts_dir=tmp_path)
+        assert ctx["coach_feedback"] == "(none)"
 
 
 class TestRepoPrompts:
@@ -453,11 +551,12 @@ class TestCharts:
 
     def test_coach_prompt_uses_recent_coaching_feedback(self) -> None:
         """Coach must read the Recent Coaching Feedback section before
-        producing a review, so prior thumbs-down items inform the next one."""
+        producing a review, so prior rejected entries inform the next one."""
         prompt = (PROMPTS_DIR / "coach_prompt.md").read_text(encoding="utf-8")
         normalized = " ".join(prompt.split())
         assert "Read Recent Coaching Feedback first" in normalized
-        assert "thumbs-down" in normalized
+        assert "Recent accept/reject history" in normalized
+        assert "Prioritize rejected entries" in normalized
         assert "Do not mention the feedback in your response" in normalized
         assert "## Recent Coaching Feedback" in prompt
 

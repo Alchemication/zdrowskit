@@ -81,7 +81,7 @@ MAX_LOG_ENTRIES: int = 5
 """Maximum number of entries to inject from log.md into LLM prompts."""
 
 MAX_COACH_FEEDBACK_ENTRIES: int = 8
-"""Maximum number of entries to inject from coach_feedback.md into prompts."""
+"""Maximum strategy/coach feedback entries to inject into prompts."""
 
 MAX_CONVERSATION_MESSAGES: int = 20
 """Maximum number of messages to keep in the in-memory chat conversation buffer."""

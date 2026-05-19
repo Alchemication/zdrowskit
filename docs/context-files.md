@@ -14,3 +14,9 @@ The `insights`, `coach`, `nudge`, and `chat` commands use markdown files from `~
 Example user context files are in `examples/context/`.
 
 The journal (`log.md`) is what makes this different from a dashboard. Numbers say what happened. The journal says why. The LLM connects both.
+
+`coach_feedback.md` is retained as a full audit log on disk. Prompt context is
+filtered to recent strategy/coach-relevant entries so ordinary chat log appends
+do not pollute future coaching reviews. Approved strategy edits are included as
+positive signal; rejected edits are included only when they have a meaningful
+reason.

@@ -78,6 +78,54 @@ def _recent_history(content: str, n: int) -> str:
     return "\n\n".join(entries[-n:]) + "\n"
 
 
+def _feedback_entry_value(entry: str, field: str) -> str | None:
+    """Return a single-line field value from a rendered feedback entry."""
+    prefix = f"{field}: "
+    for line in entry.splitlines():
+        if line.startswith(prefix):
+            value = line[len(prefix) :].strip()
+            return value or None
+    return None
+
+
+def _has_meaningful_rejection_reason(entry: str) -> bool:
+    """Return whether a rejected entry has useful coaching feedback."""
+    reason = _feedback_entry_value(entry, "Reason")
+    if reason is None:
+        return False
+    return not reason.startswith("/")
+
+
+def _recent_coach_feedback(content: str, n: int) -> str:
+    """Return recent strategy/coach feedback entries for prompt context.
+
+    ``coach_feedback.md`` is an audit log for context-edit decisions from both
+    chat and coach. For prompt context, accepted log appends are noise: their
+    facts already live in ``log.md``. Keep approved strategy/coach edits as
+    positive examples, and rejected strategy/coach edits only when they include
+    a meaningful reason.
+    """
+    parts = re.split(r"(?m)(?=^## )", content)
+    entries = [p.strip() for p in parts if p.strip() and p.strip().startswith("## ")]
+    relevant = [
+        entry
+        for entry in entries
+        if ("Source: coach" in entry or "Target: strategy.md" in entry)
+        and (
+            "Decision: accepted" in entry
+            or (
+                "Decision: rejected" in entry
+                and _has_meaningful_rejection_reason(entry)
+            )
+        )
+    ]
+    if not relevant:
+        return "(none)"
+    if n > 0:
+        relevant = relevant[-n:]
+    return "\n\n".join(relevant) + "\n"
+
+
 def load_context(
     context_dir: Path,
     prompt_file: str = "insights_prompt",
@@ -134,7 +182,7 @@ def load_context(
             if name == "history":
                 content = _recent_history(content, history_limit)
             elif name == "coach_feedback":
-                content = _recent_history(content, MAX_COACH_FEEDBACK_ENTRIES)
+                content = _recent_coach_feedback(content, MAX_COACH_FEEDBACK_ENTRIES)
             elif name == "log":
                 content = _recent_history(content, log_limit)
             result[name] = content
