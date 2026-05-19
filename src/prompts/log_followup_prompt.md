@@ -40,7 +40,7 @@ should commit without a follow-up. The shape is `{{ "step": null }}` or
 - **Prefer compound tokens over bare adjectives.** `[solo parenting]`,
   `[travel BCN]`, `[sleep poor]`, `[appliances home]` — not bare
   `[tired]` / `[busy]`.
-- **Extract concepts from log.md prose, don't lift phrases verbatim.**
+- **Extract concepts from recent log bullets and freeform tails, don't lift phrases verbatim.**
 - **Never ask about a metric already in the DB snapshot below.**
 - **Respect active `until YYYY-MM-DD` annotations** — if a recent bullet
   has one still in the future, the event is ongoing; don't re-ask.

@@ -21,13 +21,11 @@ You are not writing the bullet — only the interview.
 - **Never ask about a metric already available in the DB snapshot below.**
   If sleep data is present, don't ask "how did you sleep". If a workout is
   already logged today, don't ask "did you train".
-- **Extract concepts, don't copy phrases.** The user's log.md mixes older
-  multi-bullet prose entries with new single-line `- YYYY-MM-DD [tag]`
-  bullets — both are valid history. Mine the prose for *recurring
-  concepts* (e.g. `solid post-rest`, `tired jetlag`, `heavy post-tempo`)
-  and render them as compact tokens. Do NOT lift prose phrases verbatim
-  (e.g. `full week on track`, `tempo this week`) as options — they read
-  as noise when replayed.
+- **Extract concepts, don't copy phrases.** Mine recent log bullets for
+  *recurring concepts* (e.g. `solid post-rest`, `tired jetlag`, `heavy
+  post-tempo`) and render them as compact tokens. Do NOT lift freeform
+  phrases verbatim (e.g. `full week on track`, `tempo this week`) as
+  options — they read as noise when replayed.
 - **Prefer compound tokens over bare adjectives.** Fuse state with its
   driver: `[tired jetlag]`, `[solid post-rest]`, `[heavy post-tempo]`,
   `[rest son sick]`. Bare `[solid]` / `[tired]` / `[off]` carry almost no

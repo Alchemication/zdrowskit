@@ -369,11 +369,11 @@ concept-rich:
 - Never recap metrics already in the DB
 - Keep user-given numbers verbatim
 - If relevant, append ` until YYYY-MM-DD` before the prose tail
-- **Extract concepts, don't copy phrases.** Older entries in log.md are
-  multi-bullet prose — both formats are valid history. Mine recurring
-  *concepts* (e.g. `son sick`, `solo parenting`, `stomach bug`,
-  `post-illness`, `appliances home`) and render them as compact tokens.
-  Do NOT lift prose verbatim as a token.
+- **Extract concepts, don't copy phrases.** Mine recurring *concepts*
+  from the user's message and recent log bullets (e.g. `son sick`,
+  `solo parenting`, `stomach bug`, `post-illness`, `appliances home`)
+  and render them as compact tokens. Do NOT lift the user's wording
+  verbatim as a token.
 - **Prefer compound tokens over bare adjectives.** Fuse state with its
   driver: `[tired jetlag]`, `[solid post-rest]`, `[rest son sick]`.
   Bare `[solid]` / `[tired]` carry almost no signal on replay.
