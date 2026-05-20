@@ -273,21 +273,33 @@ concerning, green `#2ecc71` good, blue `#3498db` neutral); use
 ### Memory block
 
 After your report, include a `<memory>` block with 2-3 bullet points to
-carry forward into next week's prompt. Use it for things the DB cannot
-recover later — not for stats next week's report will recompute.
+carry forward into future prompts. Use it for durable continuity the DB
+cannot recover later — not for stats the next report will recompute.
+
+Memory must not create a hidden plan. Any prescription / commitment stored
+here must already be stated in the visible **This Week's Priorities** or
+**Next Week** section, so the user can see the standard they will be judged
+against later.
+
+Choose the memory shape from the report type:
+
+- Mid-week progress check: carry forward current-week open actions, remaining
+  targets, and watch points. Do not plan next week early.
+- Full-week review: carry forward next-week commitments, unresolved adherence
+  threads, and predictions to test.
 
 **Do store:**
 
-- Prescriptions / commitments for next week with a concrete target and
-  trigger day. There is no plan table, so if you don't write it here you
-  can't check adherence next week.
+- User-visible prescriptions / commitments with a concrete target and trigger
+  day. There is no plan table, so if you don't write it here you can't check
+  adherence later.
 - Adherence counters and open threads (e.g. "tempo N weeks overdue since
   W13") so they don't reset.
 - Predictions to test (e.g. "VO2max should rebound above 45 if next 2
   weeks stay clean") — `## Recent Coaching History` exists so you can
   check whether they held up.
-- Causal attributions inferred from user notes (e.g. "HRV dips this
-  week were sleep-driven — son disruptions, not training load").
+- Causal attributions supported by user notes or visible evidence. Use
+  "likely" when inferential; do not turn a guess into settled lore.
 - Behavioral / pattern flags ("back-loading 3rd consecutive week",
   "Saturday night is the recurring sleep weak link").
 
@@ -299,7 +311,7 @@ them here wastes the 2-3 slots.
 Example:
 
 <memory>
-- Prescribed 2.5 km tempo @ 5:10–5:15/km for W15, must happen by Wednesday
-- Tempo now 2 weeks overdue (last completed W13 at 5:09/km) — adherence gap, not fitness
-- HRV crash-rebound cycle is sleep-driven (son disruptions), not overtraining
+- Visible W15 priority: 2.5 km tempo @ 5:10–5:15/km by Wednesday
+- Midweek open thread: tempo not yet done; check by Wed before calling it overdue
+- HRV dip likely sleep-driven (son disruptions noted); verify rebound before increasing load
 </memory>

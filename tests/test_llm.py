@@ -537,6 +537,18 @@ class TestCharts:
         assert "## Recent User Notes" in prompt
         assert "## Recent Coaching History" in prompt
 
+    def test_weekly_report_memory_contract_handles_midweek_runs(self) -> None:
+        prompt = (PROMPTS_DIR / "insights_prompt.md").read_text(encoding="utf-8")
+        normalized = " ".join(prompt.split())
+
+        assert "Memory must not create a hidden plan" in normalized
+        assert "already be stated in the visible" in normalized
+        assert "Mid-week progress check" in normalized
+        assert "current-week open actions" in normalized
+        assert "Do not plan next week early" in normalized
+        assert "likely" in normalized
+        assert "settled lore" in normalized
+
     def test_weekly_report_prompt_requires_run_sql_before_training_review(self) -> None:
         """The Training Review template needs per-workout fields the summary
         layer does not contain. The prompt must say so explicitly."""
