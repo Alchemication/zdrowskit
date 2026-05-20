@@ -272,12 +272,34 @@ concerning, green `#2ecc71` good, blue `#3498db` neutral); use
 
 ### Memory block
 
-After your report, include a `<memory>` block with 2-3 bullet points that
-you want to remember for next week's report. These will be appended to your
-history file. Example:
+After your report, include a `<memory>` block with 2-3 bullet points to
+carry forward into next week's prompt. Use it for things the DB cannot
+recover later — not for stats next week's report will recompute.
+
+**Do store:**
+
+- Prescriptions / commitments for next week with a concrete target and
+  trigger day. There is no plan table, so if you don't write it here you
+  can't check adherence next week.
+- Adherence counters and open threads (e.g. "tempo N weeks overdue since
+  W13") so they don't reset.
+- Predictions to test (e.g. "VO2max should rebound above 45 if next 2
+  weeks stay clean") — `## Recent Coaching History` exists so you can
+  check whether they held up.
+- Causal attributions inferred from user notes (e.g. "HRV dips this
+  week were sleep-driven — son disruptions, not training load").
+- Behavioral / pattern flags ("back-loading 3rd consecutive week",
+  "Saturday night is the recurring sleep weak link").
+
+**Do NOT store** weekly counts, distance, average HRV/RHR, sleep duration,
+VO2max readings, or other rollups already in the Baselines / Health Data
+sections. Next week's prompt receives these directly from the DB; repeating
+them here wastes the 2-3 slots.
+
+Example:
 
 <memory>
-- HRV trending down for 2 weeks (58 → 52 → 47), monitor closely
-- Skipped tempo run again; 2nd week in a row
-- Long run pace improving despite perceived effort increase
+- Prescribed 2.5 km tempo @ 5:10–5:15/km for W15, must happen by Wednesday
+- Tempo now 2 weeks overdue (last completed W13 at 5:09/km) — adherence gap, not fitness
+- HRV crash-rebound cycle is sleep-driven (son disruptions), not overtraining
 </memory>
