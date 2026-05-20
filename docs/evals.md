@@ -11,12 +11,12 @@ uv run python main.py llm-log --id N
 
 ## Philosophy
 
-- Start every eval cluster with a `real_regression` case from one real failure.
+- Start every eval cluster with a `real_regression` case from one real failure. This is the default and the preferred shape; reach for the hidden-artifact exception below only when a thumbs-down is structurally impossible.
 - Add only the minimum synthetic cases needed to broaden the surface around that failure, such as an explicit positive control or a false-positive guard.
 - Keep synthetic cases tied to the original feedback using `source_feedback_id`, `source_llm_call_id`, and `derived_from.hypothesis`.
-- Hidden artifacts that users cannot directly thumbs-down, such as stripped `<memory>` blocks, may use `source_feedback_id: 0`. Ground them in a stored LLM call / trace and explain the lack of direct feedback in `notes`.
+- Hidden-artifact exception: when the artifact under test is structurally invisible to the user (for example the `<memory>` block is stripped by `cmd_insights` before delivery, so a thumbs-down cannot reach it), a cluster may anchor on a stored LLM call / trace instead of a feedback row. Set `source_feedback_id: 0`, point `source_llm_call_id` and `derived_from.trace_id` at the real call, and explain why direct feedback is unavailable in `notes`. The anchor case is still treated as the "real" regression for the cluster even though `case_kind` is `synthetic_negative`.
 - Prefer structured fixtures over pasted raw transcripts: pinned date, context snippets, conversation turns, and only the health data needed for the case.
-- Use deterministic assertions first: tool called/not called, argument matching, text contains/does-not-contain, memory block checks, max word count, and forbidden openings.
+- Use deterministic assertions first: tool called/not called, argument matching, text contains/does-not-contain, memory block checks, max word count, and forbidden openings. For `memory_contains` and `text_contains`, the assertion passes only when **all** patterns match (AND); for `memory_absent` and `text_absent`, the assertion fails as soon as **any** pattern matches (OR). To express "any of these is fine" in a single check, combine them into one regex with `|`.
 - Use `judge_assertions` only for narrow semantic invariants that deterministic checks would make brittle. The runner evaluates deterministic assertions first, then makes one structured judge call only when those pass.
 
 ## LLM-as-Judge

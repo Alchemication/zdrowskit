@@ -872,7 +872,57 @@ def _run_chat_case(
     )
     messages.extend(_fixture_turns(fixture))
 
-    tools = all_chat_tools()
+    return run_tool_loop(
+        case=case,
+        fixture=fixture,
+        messages=messages,
+        tools=all_chat_tools(),
+        model=model,
+        max_tokens=int(fixture.get("max_tokens", 1024)),
+        max_tool_iterations=max_tool_iterations,
+        reasoning_effort=reasoning_effort,
+        temperature=temperature,
+        cache=cache,
+        refresh_cache=refresh_cache,
+    )
+
+
+def run_tool_loop(
+    *,
+    case: EvalCase,
+    fixture: dict[str, Any],
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]],
+    model: str,
+    max_tokens: int,
+    max_tool_iterations: int,
+    reasoning_effort: str | None,
+    temperature: float | None,
+    cache: EvalCache | None,
+    refresh_cache: bool,
+    extra_metadata: dict[str, Any] | None = None,
+) -> EvalExecution:
+    """Drive a tool-calling LLM loop against fixture-seeded tool results.
+
+    Args:
+        case: Eval case providing id / source_feedback_id for trace metadata.
+        fixture: Fixture dict; tool results are resolved against ``db_seed``.
+        messages: Initial messages (system + user). Mutated as turns are added.
+        tools: Tool list passed to the model.
+        model: Model identifier.
+        max_tokens: Per-call max_tokens.
+        max_tool_iterations: Hard cap on tool-call iterations.
+        reasoning_effort: Reasoning effort knob, see ``src/llm.py``.
+        temperature: Sampling temperature; ``None`` to omit.
+        cache: Optional eval cache.
+        refresh_cache: When true, bypass cached hits.
+        extra_metadata: Extra trace metadata merged into each call.
+
+    Returns:
+        Aggregated ``EvalExecution`` with tokens, latency, cost, and the final
+        assistant text.
+    """
+    extras = dict(extra_metadata or {})
     captured: list[CapturedToolCall] = []
     input_tokens = 0
     output_tokens = 0
@@ -881,34 +931,40 @@ def _run_chat_case(
     cost = 0.0
     cache_hits = 0
     cache_misses = 0
-
     last_result: Any = None
+
+    def _accumulate(result: Any, cache_hit: bool) -> None:
+        nonlocal input_tokens, output_tokens, total_tokens
+        nonlocal latency_s, cost, cache_hits, cache_misses
+        if cache_hit:
+            cache_hits += 1
+        else:
+            cache_misses += 1
+        input_tokens += int(getattr(result, "input_tokens", 0) or 0)
+        output_tokens += int(getattr(result, "output_tokens", 0) or 0)
+        total_tokens += int(getattr(result, "total_tokens", 0) or 0)
+        latency_s += float(getattr(result, "latency_s", 0.0) or 0.0)
+        if getattr(result, "cost", None) is not None:
+            cost += float(result.cost)
+
     for iteration in range(max_tool_iterations):
         last_result, cache_hit = _call_llm_for_eval(
             messages=messages,
             model=model,
-            max_tokens=int(fixture.get("max_tokens", 1024)),
+            max_tokens=max_tokens,
             reasoning_effort=reasoning_effort,
             temperature=temperature,
             tools=tools,
             metadata={
                 "eval_case_id": case.id,
                 "source_feedback_id": case.source_feedback_id,
+                **extras,
                 "iteration": iteration,
             },
             cache=cache,
             refresh_cache=refresh_cache,
         )
-        if cache_hit:
-            cache_hits += 1
-        else:
-            cache_misses += 1
-        input_tokens += int(getattr(last_result, "input_tokens", 0) or 0)
-        output_tokens += int(getattr(last_result, "output_tokens", 0) or 0)
-        total_tokens += int(getattr(last_result, "total_tokens", 0) or 0)
-        latency_s += float(getattr(last_result, "latency_s", 0.0) or 0.0)
-        if getattr(last_result, "cost", None) is not None:
-            cost += float(last_result.cost)
+        _accumulate(last_result, cache_hit)
 
         tool_calls = _result_tool_calls(last_result)
         if not tool_calls:
@@ -941,28 +997,20 @@ def _run_chat_case(
         last_result, cache_hit = _call_llm_for_eval(
             messages=messages,
             model=model,
-            max_tokens=int(fixture.get("max_tokens", 1024)),
+            max_tokens=max_tokens,
             reasoning_effort=reasoning_effort,
             temperature=temperature,
             tools=None,
             metadata={
                 "eval_case_id": case.id,
                 "source_feedback_id": case.source_feedback_id,
+                **extras,
                 "iteration": "final_synthesis",
             },
             cache=cache,
             refresh_cache=refresh_cache,
         )
-        if cache_hit:
-            cache_hits += 1
-        else:
-            cache_misses += 1
-        input_tokens += int(getattr(last_result, "input_tokens", 0) or 0)
-        output_tokens += int(getattr(last_result, "output_tokens", 0) or 0)
-        total_tokens += int(getattr(last_result, "total_tokens", 0) or 0)
-        latency_s += float(getattr(last_result, "latency_s", 0.0) or 0.0)
-        if getattr(last_result, "cost", None) is not None:
-            cost += float(last_result.cost)
+        _accumulate(last_result, cache_hit)
 
     return EvalExecution(
         text=str(getattr(last_result, "text", "") if last_result is not None else ""),
