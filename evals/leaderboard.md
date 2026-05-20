@@ -38,3 +38,23 @@ Case IDs: `verification_judge_insights_unsupported_vo2max_recency_w15`, `verific
 | Model | Reasoning | Accuracy | Passed | Failed | Routes | Avg Latency | p95 Latency | Total Cost | Avg Cost | Revision | Failed Cases |
 | --- | --- | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | --- | --- |
 | deepseek-v4-pro | high | 50.0% | 1 | 1 | verification_judge: deepseek-v4-pro (high) | 141.12s | 180.85s | $0.0074 | $0.0037 | 4977a16* | verification_judge_insights_unsupported_vo2max_recency_w15 |
+
+## 1 cases · feature=all · case set `ab7d75487c5e`
+
+Latest recorded: `2026-05-20T09:03:27Z`
+
+Case IDs: `verification_judge_insights_midweek_memory_contract_w20`
+
+| Model | Reasoning | Accuracy | Passed | Failed | Routes | Avg Latency | p95 Latency | Total Cost | Avg Cost | Revision | Failed Cases |
+| --- | --- | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | --- | --- |
+| deepseek-v4-pro | high | 100.0% | 1 | 0 | verification_judge: deepseek-v4-pro (high) | 135.99s | 135.99s | $0.0046 | $0.0046 | 51471a1* | - |
+
+## 1 cases · feature=all · case set `08ce45cee00a`
+
+Latest recorded: `2026-05-20T09:03:21Z`
+
+Case IDs: `insights_midweek_memory_current_week_w20`
+
+| Model | Reasoning | Accuracy | Passed | Failed | Routes | Avg Latency | p95 Latency | Total Cost | Avg Cost | Revision | Failed Cases |
+| --- | --- | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | --- | --- |
+| claude-opus-4-7 | high | 0.0% | 0 | 1 | insights: claude-opus-4-7 (high) | 51.57s | 51.57s | $0.2364 | $0.2364 | 51471a1* | insights_midweek_memory_current_week_w20 |

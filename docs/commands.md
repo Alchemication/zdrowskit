@@ -40,6 +40,7 @@ LLM evals have their own runner. See [LLM evals](evals.md).
 ```bash
 uv run python -m evals.run
 uv run python -m evals.matrix --feature chat --models deepseek/deepseek-v4-flash,deepseek/deepseek-v4-pro --reasoning-efforts high
+uv run python -m evals.matrix --feature insights --models anthropic/claude-opus-4-7,deepseek/deepseek-v4-pro --reasoning-efforts high
 uv run python -m evals.leaderboard render
 ```
 

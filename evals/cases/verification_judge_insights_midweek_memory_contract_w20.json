@@ -1,0 +1,89 @@
+{
+  "id": "verification_judge_insights_midweek_memory_contract_w20",
+  "feature": "verification_judge",
+  "case_kind": "synthetic_negative",
+  "source_feedback_id": 0,
+  "source_llm_call_id": 808,
+  "derived_from": {
+    "feedback_id": null,
+    "llm_call_id": 808,
+    "verifier_call_id": 809,
+    "rewrite_call_id": 810,
+    "trace_id": 551,
+    "history_entry": "2026-W20",
+    "hypothesis": "Hidden insights memory cannot receive direct thumbs-down feedback because cmd_insights strips <memory> before delivery. Past history entries show DB rollups, hidden prescriptions, and strong causal/prediction claims. For mid-week reports, the verifier should catch memory that stores DB-derivable weekly stats, plans next week before the week is complete, or creates a commitment absent from the visible priorities."
+  },
+  "intent": "The insights verifier must flag mid-week memory blocks that violate the memory contract: no hidden plans, no premature next-week planning, and no DB-rollup summaries that the next prompt can recompute.",
+  "fixture": {
+    "kind": "insights",
+    "draft": "# W20 Progress Check - Adam (Thu, 14 May)\n\n## Week at a Glance\nTempo box is already ticked Monday, strength A is done, and today's easy run puts the week at 10.2 km. One more easy run plus Strength B closes the current week cleanly.\n\n## Training Review\n\n**Mon 11** - Warm-up + tempo run\n  Tempo done by Monday; front-loading is holding.\n\n**Tue 12** - Strength A\n  Appropriate volume after Tuesday's HRV dip.\n\n**Thu 14** - 5.1 km easy run\n  HR was high for the pace; keep the next run genuinely easy.\n\n## Recovery Status\nMaintain. HRV is responsive but volatile; do not add intensity this week.\n\n## This Week's Priorities\n1. One more easy 5 km Fri or Sat at 5:45-6:00/km, keeping HR under 160.\n2. Strength B before Sunday.\n3. Protect Friday night sleep.\n\n<memory>\n- W20 so far: 3 runs / 1 lift / 10.2 km, HRV avg 61.5 ms, sleep 6.8h, VO2max 45.2\n- Prescribed W21: tempo by Wednesday if HRV >=50, protect sleep duration\n- Easy-run HR cost is sleep-driven, not fitness\n</memory>",
+    "evidence": {
+      "health_data_text": "### Target Week Summary\n- Week: 2026-W20 (2026-05-11 - 2026-05-14).\n- Logged so far: 3 runs, 1 lift, 0 walks.\n- Running: 10.2 km total, best pace 5:12/km, avg run HR 172 bpm, avg elev 5 m.\n- Recovery: avg HRV 61.5 ms, avg resting HR 54 bpm, avg recovery index 1.14.\n- Sleep: 4/4 nights tracked; 6.8 h avg; efficiency 95.2%.\n- VO2max latest: 45.2.\n\n#### Monday 11 May\n- Workouts: Outdoor Run (3.5 km; 19 min; 5:27/km; avg HR 175 bpm) | Outdoor Run (1.7 km; 9 min; 5:12/km; avg HR 172 bpm).\n\n#### Tuesday 12 May\n- Recovery: HRV 46.1 ms, resting HR 53 bpm.\n- Workouts: Traditional Strength Training (54 min; avg HR 82 bpm).\n\n#### Wednesday 13 May\n- Recovery: HRV 49.0 ms, resting HR 54 bpm.\n- Workouts: none logged.\n\n#### Thursday 14 May\n- Recovery: HRV 69.1 ms, resting HR 58 bpm.\n- Sleep: 6.3 h.\n- Workouts: Outdoor Run (5.1 km; 28 min; 5:34/km; avg HR 170 bpm).",
+      "review_facts": "## Shared Review Facts\n- Reviewed week: **2026-W20 (2026-05-11 - 2026-05-14)**. Status: in progress.\n- Training snapshot: **3** runs, **1** lift, **10.2 km** run volume.\n- Recovery verdict: **back off**. HRV 61.5 ms (declining), resting HR 54.2 bpm, sleep 6.8 h at 95.2% efficiency.\n- User notes are available in `log.md`; treat them as ground truth for constraints.",
+      "baselines": null,
+      "milestones": "(not provided)",
+      "week_complete": false,
+      "week_label": "2026-W20",
+      "tool_calls": [
+        {
+          "tool": "run_sql",
+          "arguments": "{\"query\":\"SELECT date, type, category, duration_min, hr_avg, gpx_distance_km FROM workout_all WHERE date BETWEEN '2026-05-11' AND '2026-05-14'\"}",
+          "result": "[{\"date\":\"2026-05-11\",\"type\":\"Outdoor Run\",\"category\":\"run\",\"duration_min\":18.82,\"hr_avg\":175.12,\"gpx_distance_km\":3.457},{\"date\":\"2026-05-11\",\"type\":\"Outdoor Run\",\"category\":\"run\",\"duration_min\":9.08,\"hr_avg\":172.17,\"gpx_distance_km\":1.746},{\"date\":\"2026-05-12\",\"type\":\"Traditional Strength Training\",\"category\":\"lift\",\"duration_min\":54.06,\"hr_avg\":81.82,\"gpx_distance_km\":null},{\"date\":\"2026-05-14\",\"type\":\"Outdoor Run\",\"category\":\"run\",\"duration_min\":28.16,\"hr_avg\":169.53,\"gpx_distance_km\":5.052}]"
+        }
+      ]
+    },
+    "source_messages": [
+      {
+        "role": "system",
+        "content": "You are a concise health coach. Follow the task prompt exactly."
+      },
+      {
+        "role": "user",
+        "content": "Today is 2026-05-14 (Thursday). This is a mid-week progress check (Mon-Thursday). The week is not over - do not flag missing sessions for days that haven't happened yet.\n\nReport section: **This Week's Priorities** (if week is incomplete) or **Next Week** (if complete).\n\nMemory block rules: Memory must not create a hidden plan. Any prescription / commitment stored here must already be stated in the visible **This Week's Priorities** or **Next Week** section. Mid-week progress check: carry forward current-week open actions, remaining targets, and watch points. Do not plan next week early. Do NOT store weekly counts, distance, average HRV/RHR, sleep duration, VO2max readings, or other rollups already in the Baselines / Health Data sections."
+      }
+    ],
+    "metadata": {
+      "week": "current",
+      "months": 3,
+      "week_label": "2026-W20"
+    }
+  },
+  "assertions": [
+    {
+      "type": "text_absent",
+      "name": "verifier_did_not_pass_bad_midweek_memory",
+      "patterns": [
+        "re:\"verdict\":\\s*\"pass\""
+      ]
+    },
+    {
+      "type": "text_contains",
+      "name": "verifier_mentions_memory",
+      "patterns": [
+        "re:(?i)memory"
+      ]
+    },
+    {
+      "type": "text_contains",
+      "name": "verifier_flags_contract_or_rollup",
+      "patterns": [
+        "re:(?i)(hidden|next[- ]week|W21|rollup|DB|recompute|weekly stats|commitment|premature)"
+      ]
+    },
+    {
+      "type": "text_absent",
+      "name": "verifier_did_not_fail_with_empty_response",
+      "patterns": [
+        "re:Verifier\\s+returned\\s+an\\s+empty\\s+response",
+        "re:Verifier\\s+failed\\s+or\\s+returned\\s+malformed\\s+JSON"
+      ]
+    }
+  ],
+  "judge_assertions": [
+    {
+      "name": "flags_midweek_memory_contract_violation",
+      "statement": "The verifier output identifies at least one memory-block issue caused by a mid-week report storing DB-derivable rollups, planning W21 before W20 is complete, or creating a hidden commitment that is absent from This Week's Priorities."
+    }
+  ],
+  "notes": "Synthetic negative grounded in hidden history.md patterns and the W20 midweek insights trace 551 (source call 808, verifier 809, rewrite 810). There is no direct thumbs-down feedback because cmd_insights strips <memory> before the report is delivered, so source_feedback_id is 0 by design."
+}

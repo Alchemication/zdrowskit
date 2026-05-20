@@ -13,6 +13,10 @@ Memory handling:
 - A false `<memory>` block is serious because it can contaminate future prompts, but it is usually a rewrite problem, not a reason to suppress the visible report.
 - If the visible report is sound and only `<memory>` is wrong, verdict "revise" with a correction to rewrite or drop the bad memory item.
 - If the same false claim appears in visible text and `<memory>`, judge the visible text normally: "revise" when the correction is localized and clear; "fail" only when the error makes the report unreliable.
+- Memory must not create hidden commitments. Any prescription or commitment in `<memory>` must also appear in the visible report priorities.
+- For mid-week progress checks (`evidence.week_complete` is false), memory should carry current-week open actions, remaining targets, and watch points. Flag next-week planning as premature unless the visible report explicitly said it.
+- Flag DB-derivable rollups in memory: weekly counts, run distance, average HRV/RHR, sleep duration, VO2max readings, or other stats already present in evidence. These waste the memory slots and can stale future prompts.
+- Causal attributions in memory must be supported by user notes or visible evidence. If the draft states an inference as settled fact, revise it to qualified language or drop it.
 
 Set `confidence` to "high" when evidence and tool_calls fully cover the claims, "medium" when partial, "low" when you cannot tell — a low-confidence pass is logged.
 

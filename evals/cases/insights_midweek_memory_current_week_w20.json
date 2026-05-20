@@ -1,0 +1,332 @@
+{
+  "id": "insights_midweek_memory_current_week_w20",
+  "feature": "insights",
+  "case_kind": "synthetic_negative",
+  "source_feedback_id": 0,
+  "source_llm_call_id": 808,
+  "derived_from": {
+    "feedback_id": null,
+    "llm_call_id": 808,
+    "verifier_call_id": 809,
+    "rewrite_call_id": 810,
+    "trace_id": 551,
+    "latest_completed_insights_call_id": 852,
+    "latest_completed_verifier_call_id": 853,
+    "latest_completed_trace_id": 576,
+    "history_entry": "2026-W20",
+    "hypothesis": "Hidden insights memory cannot receive direct thumbs-down feedback because cmd_insights strips <memory> before delivery. The W20 midweek trace produced memory with false precision and DB-recomputable rollups; the writer should instead store visible current-week open actions and watch points."
+  },
+  "intent": "For an unfinished W20 progress report, the insights writer should produce a memory block that carries current-week open actions and watch points, without DB-rollup summary stats or hidden next-week planning.",
+  "fixture": {
+    "today": "2026-05-14",
+    "week": "current",
+    "week_complete": false,
+    "context": {
+      "me": "# Profile\n\n- Adam, 42M, rebuilding running consistency and strength.\n- Wife + 3-year-old; family constraints often affect sleep and training timing.\n",
+      "strategy": "# Strategy\n\n## Goals - Current focus\n\n- Hold 3 runs + 2 lifts/week at 15+ km volume.\n- Build tempo capacity toward 3 km @ sub-5:10/km.\n- Sleep tracking compliance above 70%.\n\n## Weekly Plan\n\n- Week runs Monday to Sunday.\n- Target: 3 runs + 2 strength sessions per week (~15 km+ total running).\n- Tempo is the top-priority weekly run; schedule it by Thursday.\n- Remaining runs easy at 5:30-6:00/km.\n- Strength A: Push + core.\n- Strength B: Pull + core.\n- Prefer not to stack run + strength on the same day.\n",
+      "log": "# Log\n\n- 2026-05-11 [tempo done] [watch glitch] - actual tempo 2+ km @ 5:12/km despite split data; W20 tempo done.\n- 2026-05-13 [rest day] [tired hrv recovery] - rest day after HRV dip; easy 5k planned Thu/Fri.\n",
+      "history": "## 2026-W19\n\n- W19: targets met (3 runs / 2 lifts / 15.3 km) despite Poland funeral Thu-Sat - strong consistency under disruption.\n- HRV crashed to 34.8 ms Sat (travel/sleep driven), rebounded to 52.0 Sun - system responsive.\n- W20 tempo completed Mon 11 May (2+ km @ 5:12/km per user note despite watch glitch).\n- Sat night sleep remains the recurring weak link.\n",
+      "coach_feedback": "(none)"
+    },
+    "review_facts": "## Shared Review Facts\n- Reviewed week: **2026-W20 (2026-05-11 - 2026-05-14)**. Status: in progress.\n- Training snapshot: **3** runs, **1** lift, **10.2 km** run volume.\n- Recovery verdict: **back off**. HRV 61.5 ms (declining), resting HR 54.2 bpm, sleep 6.8 h at 95.2% efficiency.\n- vs previous week: run volume -5.0 km, HRV +16.2 ms, resting HR +0.9 bpm.\n- User notes are available in `log.md`; treat them as ground truth for constraints.",
+    "milestones": "(not provided)",
+    "max_tokens": 4096,
+    "health_data": {
+      "current_week": {
+        "summary": {
+          "week_label": "2026-W20 (2026-05-11 - 2026-05-14)",
+          "run_count": 3,
+          "lift_count": 1,
+          "walk_count": 0,
+          "total_run_km": 10.2,
+          "best_pace_min_per_km": 5.2,
+          "avg_run_hr": 172,
+          "avg_elevation_gain_m": 5,
+          "total_lift_min": 54,
+          "avg_lift_hr": 82,
+          "avg_steps": 6098,
+          "avg_exercise_min": 38,
+          "avg_active_energy_kj": 2400,
+          "avg_hrv_ms": 61.5,
+          "avg_resting_hr": 54.2,
+          "avg_recovery_index": 1.14,
+          "hrv_trend": "declining",
+          "sleep_nights_total": 4,
+          "sleep_nights_tracked": 4,
+          "avg_sleep_total_h": 6.8,
+          "avg_sleep_efficiency_pct": 95.2,
+          "avg_sleep_deep_h": 1.0,
+          "avg_sleep_core_h": 4.0,
+          "avg_sleep_rem_h": 1.8,
+          "avg_sleep_awake_h": 0.4
+        },
+        "days": [
+          {
+            "date": "2026-05-11",
+            "steps": 9116,
+            "exercise_min": 38,
+            "distance_km": 8.5,
+            "hrv_ms": 82.0,
+            "resting_hr": 52,
+            "recovery_index": 1.58,
+            "sleep_status": "tracked",
+            "sleep_total_h": 6.7,
+            "sleep_efficiency_pct": 97.6,
+            "workouts": [
+              {
+                "type": "Outdoor Run",
+                "category": "run",
+                "duration_min": 18.82,
+                "gpx_distance_km": 3.457,
+                "hr_avg": 175.12,
+                "gpx_elevation_gain_m": 5,
+                "splits": [
+                  {"km_index": 1, "pace_min_km": 5.63},
+                  {"km_index": 2, "pace_min_km": 5.6},
+                  {"km_index": 3, "pace_min_km": 5.15}
+                ]
+              },
+              {
+                "type": "Outdoor Run",
+                "category": "run",
+                "duration_min": 9.08,
+                "gpx_distance_km": 1.746,
+                "hr_avg": 172.17,
+                "gpx_elevation_gain_m": 1,
+                "splits": [
+                  {"km_index": 1, "pace_min_km": 5.17}
+                ]
+              }
+            ]
+          },
+          {
+            "date": "2026-05-12",
+            "steps": 5930,
+            "exercise_min": 73,
+            "distance_km": 4.3,
+            "hrv_ms": 46.1,
+            "resting_hr": 53,
+            "recovery_index": 0.87,
+            "sleep_status": "tracked",
+            "sleep_total_h": 6.3,
+            "sleep_efficiency_pct": 97.9,
+            "workouts": [
+              {
+                "type": "Traditional Strength Training",
+                "category": "lift",
+                "duration_min": 54.06,
+                "hr_avg": 81.82
+              }
+            ]
+          },
+          {
+            "date": "2026-05-13",
+            "steps": 3541,
+            "exercise_min": 9,
+            "distance_km": 2.5,
+            "hrv_ms": 49.0,
+            "resting_hr": 54,
+            "recovery_index": 0.91,
+            "sleep_status": "tracked",
+            "sleep_total_h": 7.8,
+            "sleep_efficiency_pct": 91.0,
+            "workouts": []
+          },
+          {
+            "date": "2026-05-14",
+            "steps": 5803,
+            "exercise_min": 33,
+            "distance_km": 5.9,
+            "hrv_ms": 69.1,
+            "resting_hr": 58,
+            "recovery_index": 1.19,
+            "sleep_status": "tracked",
+            "sleep_total_h": 6.3,
+            "sleep_efficiency_pct": 96.8,
+            "workouts": [
+              {
+                "type": "Outdoor Run",
+                "category": "run",
+                "duration_min": 28.16,
+                "gpx_distance_km": 5.052,
+                "hr_avg": 169.53,
+                "gpx_elevation_gain_m": 10,
+                "splits": [
+                  {"km_index": 1, "pace_min_km": 5.67},
+                  {"km_index": 2, "pace_min_km": 5.57},
+                  {"km_index": 3, "pace_min_km": 5.62},
+                  {"km_index": 4, "pace_min_km": 5.62},
+                  {"km_index": 5, "pace_min_km": 5.47}
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "history": [
+        {
+          "summary": {
+            "week_label": "2026-W19 (2026-05-04 - 2026-05-10)",
+            "run_count": 3,
+            "lift_count": 2,
+            "walk_count": 3,
+            "total_run_km": 15.3,
+            "avg_hrv_ms": 45.3,
+            "avg_resting_hr": 53.3,
+            "avg_sleep_total_h": 6.5
+          }
+        }
+      ]
+    },
+    "db_seed": {
+      "tables": {
+        "workout_all": [
+          {
+            "date": "2026-05-11",
+            "type": "Outdoor Run",
+            "category": "run",
+            "duration_min": 18.82,
+            "hr_avg": 175.12,
+            "gpx_distance_km": 3.457,
+            "gpx_elevation_gain_m": 5,
+            "source": "auto_export"
+          },
+          {
+            "date": "2026-05-11",
+            "type": "Outdoor Run",
+            "category": "run",
+            "duration_min": 9.08,
+            "hr_avg": 172.17,
+            "gpx_distance_km": 1.746,
+            "gpx_elevation_gain_m": 1,
+            "source": "auto_export"
+          },
+          {
+            "date": "2026-05-12",
+            "type": "Traditional Strength Training",
+            "category": "lift",
+            "duration_min": 54.06,
+            "hr_avg": 81.82,
+            "gpx_distance_km": null,
+            "gpx_elevation_gain_m": null,
+            "source": "auto_export"
+          },
+          {
+            "date": "2026-05-14",
+            "type": "Outdoor Run",
+            "category": "run",
+            "duration_min": 28.16,
+            "hr_avg": 169.53,
+            "gpx_distance_km": 5.052,
+            "gpx_elevation_gain_m": 10,
+            "source": "auto_export"
+          }
+        ],
+        "daily": [
+          {
+            "date": "2026-05-11",
+            "hrv_ms": 82.0,
+            "resting_hr": 52,
+            "recovery_index": 1.58,
+            "sleep_total_h": 6.7,
+            "sleep_efficiency_pct": 97.6,
+            "vo2max": 45.2
+          },
+          {
+            "date": "2026-05-12",
+            "hrv_ms": 46.1,
+            "resting_hr": 53,
+            "recovery_index": 0.87,
+            "sleep_total_h": 6.3,
+            "sleep_efficiency_pct": 97.9,
+            "vo2max": 45.2
+          },
+          {
+            "date": "2026-05-13",
+            "hrv_ms": 49.0,
+            "resting_hr": 54,
+            "recovery_index": 0.91,
+            "sleep_total_h": 7.8,
+            "sleep_efficiency_pct": 91.0,
+            "vo2max": 45.2
+          },
+          {
+            "date": "2026-05-14",
+            "hrv_ms": 69.1,
+            "resting_hr": 58,
+            "recovery_index": 1.19,
+            "sleep_total_h": 6.3,
+            "sleep_efficiency_pct": 96.8,
+            "vo2max": 45.2
+          }
+        ],
+        "workout_split": [
+          {
+            "date": "2026-05-11",
+            "workout_type": "Outdoor Run",
+            "start_utc": "2026-05-11T07:00:00Z",
+            "km_index": 3,
+            "pace_min_km": 5.147
+          },
+          {
+            "date": "2026-05-11",
+            "workout_type": "Outdoor Run",
+            "start_utc": "2026-05-11T07:10:00Z",
+            "km_index": 1,
+            "pace_min_km": 5.165
+          },
+          {
+            "date": "2026-05-14",
+            "workout_type": "Outdoor Run",
+            "start_utc": "2026-05-14T07:30:00Z",
+            "km_index": 1,
+            "pace_min_km": 5.67
+          }
+        ]
+      }
+    }
+  },
+  "assertions": [
+    {
+      "type": "tool_called",
+      "name": "queries_report_rows",
+      "tool": "run_sql",
+      "min_count": 1
+    },
+    {
+      "type": "memory_present",
+      "name": "includes_memory_block"
+    },
+    {
+      "type": "memory_contains",
+      "name": "memory_carries_current_week_actions",
+      "patterns": [
+        "re:(?i)(easy\\s*(5\\s*km|5k)|5\\s*km\\s*easy|5k\\s*easy)",
+        "re:(?i)Strength\\s*B"
+      ]
+    },
+    {
+      "type": "memory_contains",
+      "name": "memory_carries_current_week_watchpoint",
+      "patterns": [
+        "re:(?i)(watch|check|protect|keep)",
+        "re:(?i)(HR|heart rate|sleep)"
+      ]
+    },
+    {
+      "type": "memory_absent",
+      "name": "memory_does_not_plan_next_week",
+      "patterns": [
+        "re:(?i)\\bW21\\b|next[- ]week|Prescribed W21"
+      ]
+    },
+    {
+      "type": "memory_absent",
+      "name": "memory_omits_db_rollups",
+      "patterns": [
+        "re:(?i)(\\b3\\s*runs\\b|\\b1\\s*lifts?\\b|\\b10\\.2\\s*km\\b|avg\\s+HRV|HRV\\s+avg|sleep\\s+6\\.8|VO2max\\s+45\\.2|61\\.5\\s*ms)"
+      ]
+    }
+  ],
+  "notes": "Synthetic writer-side case grounded in W20 midweek insights trace 551 (source call 808, verifier 809, rewrite 810). The most recent completed W20 insights report trace 576 also required verifier correction of memory false precision. There is no direct thumbs-down feedback because cmd_insights strips <memory> before delivery, so source_feedback_id is 0 by design."
+}

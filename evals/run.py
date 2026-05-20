@@ -4,6 +4,7 @@ Usage:
     uv run python -m evals.run
     uv run python -m evals.run chat_log_life_disruption
     uv run python -m evals.run --feature chat
+    uv run python -m evals.run --feature insights
 """
 
 from __future__ import annotations

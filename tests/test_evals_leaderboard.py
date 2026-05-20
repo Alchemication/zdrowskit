@@ -598,3 +598,23 @@ class TestMatrix:
             == ["verification_judge_nudge_hrv_direction_reversal"]
             for run in runs
         )
+
+    def test_build_matrix_expands_insights_models(self) -> None:
+        runs = eval_matrix.build_matrix_runs(
+            load_cases(),
+            feature="insights",
+            production=False,
+            case_ids=["insights_midweek_memory_current_week_w20"],
+            models=["model-a", "model-b"],
+            reasoning_efforts=["none", "high"],
+            temperature=None,
+        )
+
+        assert len(runs) == 4
+        assert {run.model for run in runs} == {"model-a", "model-b"}
+        assert {run.reasoning_effort for run in runs} == {None, "high"}
+        assert all(
+            [case.id for case in run.cases]
+            == ["insights_midweek_memory_current_week_w20"]
+            for run in runs
+        )

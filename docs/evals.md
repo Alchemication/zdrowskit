@@ -14,8 +14,9 @@ uv run python main.py llm-log --id N
 - Start every eval cluster with a `real_regression` case from one real failure.
 - Add only the minimum synthetic cases needed to broaden the surface around that failure, such as an explicit positive control or a false-positive guard.
 - Keep synthetic cases tied to the original feedback using `source_feedback_id`, `source_llm_call_id`, and `derived_from.hypothesis`.
+- Hidden artifacts that users cannot directly thumbs-down, such as stripped `<memory>` blocks, may use `source_feedback_id: 0`. Ground them in a stored LLM call / trace and explain the lack of direct feedback in `notes`.
 - Prefer structured fixtures over pasted raw transcripts: pinned date, context snippets, conversation turns, and only the health data needed for the case.
-- Use deterministic assertions first: tool called/not called, argument matching, text contains/does-not-contain, max word count, and forbidden openings.
+- Use deterministic assertions first: tool called/not called, argument matching, text contains/does-not-contain, memory block checks, max word count, and forbidden openings.
 - Use `judge_assertions` only for narrow semantic invariants that deterministic checks would make brittle. The runner evaluates deterministic assertions first, then makes one structured judge call only when those pass.
 
 ## LLM-as-Judge
@@ -43,9 +44,11 @@ The judge runs **only when every deterministic assertion passes**. This keeps ju
 uv run python -m evals.run                              # all feedback-derived eval cases
 uv run python -m evals.run chat_log_life_disruption     # one case
 uv run python -m evals.run --feature chat               # feature filter
+uv run python -m evals.run --feature insights           # insights writer cases
 uv run python -m evals.run --details                    # debug failed cases
 uv run python -m evals.run --record                     # persist a run to evals/leaderboard/runs.jsonl
 uv run python -m evals.matrix --feature chat --models deepseek/deepseek-v4-flash,deepseek/deepseek-v4-pro --reasoning-efforts high --record
+uv run python -m evals.matrix --feature insights --models anthropic/claude-opus-4-7,deepseek/deepseek-v4-pro --reasoning-efforts high --record
 uv run python -m evals.matrix --production --record     # current configured smoke suite
 uv run python -m evals.leaderboard render               # rebuild evals/leaderboard.md from raw history
 uv run python -m evals.leaderboard render-html          # rebuild evals/leaderboard.html with filters and sortable views
@@ -58,17 +61,18 @@ Some models reject a `temperature` parameter (for example `claude-opus-4-7`). Fo
 ## Supported features
 
 - `chat` — exercises the full chat tool loop end-to-end, taking the model from `--model`.
+- `insights` — exercises the insights writer prompt and `run_sql` tool loop, taking the model from `--model`. It does not call verification/rewrite, render charts, save reports, update history, or send Telegram messages.
 - `verification_judge` — exercises only the verifier prompt and structured response schema. The surface (`nudge`, `insights`, or `coach`) comes from `fixture.kind`. It does not call `verify_and_rewrite`, resolve `model_prefs`, write DB rows, or invoke rewrites.
 
 ## Model Matrices
 
 Use `evals.run` for one smoke run and `evals.matrix` for comparisons.
 
-Direct LLM features take `--models` from the matrix runner:
+Direct LLM features (`chat`, `insights`) take `--models` from the matrix runner:
 
 ```bash
 uv run python -m evals.matrix \
-  --feature chat \
+  --feature insights \
   --models deepseek/deepseek-v4-flash,deepseek/deepseek-v4-pro,anthropic/claude-sonnet-4-6 \
   --reasoning-efforts high \
   --no-temperature \

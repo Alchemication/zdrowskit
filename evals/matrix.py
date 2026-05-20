@@ -2,6 +2,7 @@
 
 Usage:
     uv run python -m evals.matrix --feature chat --models deepseek/deepseek-v4-flash,deepseek/deepseek-v4-pro --reasoning-efforts high
+    uv run python -m evals.matrix --feature insights --models anthropic/claude-opus-4-7,deepseek/deepseek-v4-pro --reasoning-efforts high
     uv run python -m evals.matrix --production --record
 """
 
@@ -23,7 +24,7 @@ from evals.framework import (
 )
 from evals.run import _normalize_reasoning_effort, _run_selected_cases, select_cases
 
-DIRECT_MODEL_FEATURES = {"chat", "verification_judge"}
+DIRECT_MODEL_FEATURES = {"chat", "insights", "verification_judge"}
 
 
 @dataclass(frozen=True)

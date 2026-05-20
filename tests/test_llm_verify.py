@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 import sqlite3
 
 from config import (
@@ -21,6 +22,12 @@ from llm_verify import (
     verify_and_rewrite,
 )
 from store import log_llm_call
+
+
+def _prompt_text(name: str) -> str:
+    return (Path(__file__).resolve().parents[1] / "src" / "prompts" / name).read_text(
+        encoding="utf-8"
+    )
 
 
 class TestParseVerificationResult:
@@ -54,6 +61,18 @@ class TestParseVerificationResult:
 
         assert result.verdict == "revise"
         assert result.issues[0].evidence == "no matching workout"
+
+
+class TestVerifierPromptContract:
+    def test_insights_verifier_checks_hidden_memory_contract(self) -> None:
+        prompt = _prompt_text("verify_insights_prompt.md")
+        normalized = " ".join(prompt.split())
+
+        assert "Memory must not create hidden commitments" in normalized
+        assert "evidence.week_complete" in normalized
+        assert "Flag next-week planning as premature" in normalized
+        assert "Flag DB-derivable rollups in memory" in normalized
+        assert "Causal attributions in memory must be supported" in normalized
 
 
 class TestDeterministicVerificationIssues:

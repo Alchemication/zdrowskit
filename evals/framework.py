@@ -318,6 +318,18 @@ def run_case(
                 cache=cache,
                 refresh_cache=refresh_cache,
             )
+        elif case.feature == "insights":
+            from evals.run_insights import run_insights_case
+
+            execution, result.model, result.route = run_insights_case(
+                case,
+                model=model,
+                max_tool_iterations=max_tool_iterations,
+                reasoning_effort=reasoning_effort,
+                temperature=temperature,
+                cache=cache,
+                refresh_cache=refresh_cache,
+            )
         else:
             raise ValueError(f"Unsupported eval feature: {case.feature}")
         result.execution = execution
@@ -782,6 +794,16 @@ def _case_from_dict(raw: dict[str, Any], path: Path) -> EvalCase:
             raise ValueError(
                 f"{path} {feature} fixture must include draft, evidence, "
                 "and source_messages"
+            )
+    elif feature == "insights":
+        has_health_context = "health_data" in fixture or "health_data_text" in fixture
+        if (
+            not all(key in fixture for key in ("today", "context"))
+            or not has_health_context
+        ):
+            raise ValueError(
+                f"{path} insights fixture must include today, context, and "
+                "health_data or health_data_text"
             )
     else:
         raise ValueError(f"{path} unsupported feature: {feature}")
@@ -1284,6 +1306,12 @@ def _evaluate_assertion(
         return _assert_text_absent(name, assertion, execution)
     if atype == "text_without_chart_absent":
         return _assert_text_without_chart_absent(name, assertion, execution)
+    if atype == "memory_present":
+        return _assert_memory_present(name, execution)
+    if atype == "memory_contains":
+        return _assert_memory_contains(name, assertion, execution)
+    if atype == "memory_absent":
+        return _assert_memory_absent(name, assertion, execution)
     if atype == "word_count_max":
         return _assert_word_count_max(name, assertion, execution)
     if atype == "forbidden_opening":
@@ -1415,6 +1443,59 @@ def _assert_text_without_chart_absent(
     )
 
 
+def _assert_memory_present(name: str, execution: EvalExecution) -> AssertionResult:
+    memory = _memory_block(execution.text)
+    return AssertionResult(
+        name=name,
+        passed=memory is not None,
+        detail="" if memory is not None else "No <memory> block found.",
+    )
+
+
+def _assert_memory_contains(
+    name: str,
+    assertion: dict[str, Any],
+    execution: EvalExecution,
+) -> AssertionResult:
+    memory = _memory_block(execution.text)
+    if memory is None:
+        return AssertionResult(
+            name=name, passed=False, detail="No <memory> block found."
+        )
+    missing = [
+        pattern
+        for pattern in assertion.get("patterns", [])
+        if not _text_matches(memory, str(pattern))
+    ]
+    return AssertionResult(
+        name=name,
+        passed=not missing,
+        detail="" if not missing else f"Missing from memory: {missing}",
+    )
+
+
+def _assert_memory_absent(
+    name: str,
+    assertion: dict[str, Any],
+    execution: EvalExecution,
+) -> AssertionResult:
+    memory = _memory_block(execution.text)
+    if memory is None:
+        return AssertionResult(
+            name=name, passed=False, detail="No <memory> block found."
+        )
+    present = [
+        pattern
+        for pattern in assertion.get("patterns", [])
+        if _text_matches(memory, str(pattern))
+    ]
+    return AssertionResult(
+        name=name,
+        passed=not present,
+        detail="" if not present else f"Present in memory: {present}",
+    )
+
+
 def _assert_forbidden_opening(
     name: str,
     assertion: dict[str, Any],
@@ -1430,6 +1511,11 @@ def _assert_forbidden_opening(
                 detail=f"Started with forbidden opening: {pattern_text}",
             )
     return AssertionResult(name=name, passed=True)
+
+
+def _memory_block(text: str) -> str | None:
+    match = re.search(r"<memory>(.*?)</memory>", text, re.DOTALL | re.IGNORECASE)
+    return match.group(1).strip() if match else None
 
 
 def _value_matches(actual: Any, expected: Any) -> bool:
