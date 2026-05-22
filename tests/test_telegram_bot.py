@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import io
 import json
 import threading
+import urllib.error
 from unittest.mock import MagicMock, patch
 
 from notify import chunk_text
@@ -113,6 +115,19 @@ class TestConversationBuffer:
 # ---------------------------------------------------------------------------
 # TelegramPoller
 # ---------------------------------------------------------------------------
+
+
+def _telegram_http_error(description: str) -> urllib.error.HTTPError:
+    body = json.dumps(
+        {"ok": False, "error_code": 400, "description": description}
+    ).encode()
+    return urllib.error.HTTPError(
+        "https://api.telegram.org/botfake/editMessageText",
+        400,
+        "Bad Request",
+        {},
+        io.BytesIO(body),
+    )
 
 
 class TestTelegramPollerGetUpdates:
@@ -226,6 +241,49 @@ class TestTelegramPollerSendReply:
 
         payload = json.loads(mock_urlopen.call_args[0][0].data)
         assert payload["reply_markup"] == {"force_reply": True, "selective": True}
+
+
+class TestTelegramPollerEditMessageWithKeyboard:
+    def test_retries_plain_text_after_html_error(self) -> None:
+        poller = TelegramPoller("fake-token", "12345")
+
+        with patch(
+            "telegram_bot.urllib.request.urlopen",
+            side_effect=[
+                _telegram_http_error("Bad Request: can't parse entities"),
+                MagicMock(),
+            ],
+        ) as mock_urlopen:
+            poller.edit_message_with_keyboard(
+                99,
+                "**done**",
+                [[{"text": "OK", "callback_data": "ok"}]],
+            )
+
+        assert mock_urlopen.call_count == 2
+        html_payload = json.loads(mock_urlopen.call_args_list[0][0][0].data)
+        plain_payload = json.loads(mock_urlopen.call_args_list[1][0][0].data)
+        assert html_payload["parse_mode"] == "HTML"
+        assert plain_payload["text"] == "**done**"
+        assert "parse_mode" not in plain_payload
+
+    def test_suppresses_redundant_edit_without_plain_retry(self) -> None:
+        poller = TelegramPoller("fake-token", "12345")
+
+        with patch(
+            "telegram_bot.urllib.request.urlopen",
+            side_effect=_telegram_http_error(
+                "Bad Request: message is not modified: specified new message "
+                "content and reply markup are exactly the same"
+            ),
+        ) as mock_urlopen:
+            poller.edit_message_with_keyboard(
+                99,
+                "Codex: on",
+                [[{"text": "Turn off", "callback_data": "agent:off:codex"}]],
+            )
+
+        mock_urlopen.assert_called_once()
 
 
 class TestTelegramPollerPollLoop:

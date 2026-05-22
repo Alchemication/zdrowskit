@@ -31,6 +31,41 @@ logger = logging.getLogger(__name__)
 _POLL_ERROR_RETRY_S = 5
 
 
+def _telegram_http_error_detail(exc: urllib.error.HTTPError) -> str:
+    """Return Telegram's JSON error description when available.
+
+    Args:
+        exc: HTTP error raised by ``urllib``.
+
+    Returns:
+        A compact description from Telegram's response body, or the HTTP
+        status string when the body is unavailable.
+    """
+    try:
+        raw = exc.read()
+    except Exception:
+        raw = b""
+    try:
+        text = raw.decode("utf-8").strip() if isinstance(raw, bytes) else str(raw)
+    except UnicodeDecodeError:
+        text = ""
+    if text:
+        try:
+            body = json.loads(text)
+        except json.JSONDecodeError:
+            return text
+        description = body.get("description")
+        if isinstance(description, str) and description.strip():
+            return description.strip()
+        return text
+    return f"HTTP {exc.code}: {exc.reason}"
+
+
+def _is_redundant_edit(detail: str) -> bool:
+    """Return True when Telegram rejected an edit because nothing changed."""
+    return "message is not modified" in detail.lower()
+
+
 class ConversationBuffer:
     """Fixed-size buffer of recent chat messages.
 
@@ -284,9 +319,15 @@ class TelegramPoller:
         )
         try:
             urllib.request.urlopen(req)  # noqa: S310
-        except urllib.error.HTTPError:
+        except urllib.error.HTTPError as exc:
+            detail = _telegram_http_error_detail(exc)
+            if _is_redundant_edit(detail):
+                logger.debug("Telegram edit for message %d unchanged", message_id)
+                return
             logger.warning(
-                "HTML edit failed for message %d, retrying plain text", message_id
+                "HTML edit failed for message %d (%s), retrying plain text",
+                message_id,
+                detail,
             )
             payload["text"] = plain_chunks[0]
             del payload["parse_mode"]
@@ -296,6 +337,15 @@ class TelegramPoller:
             )
             try:
                 urllib.request.urlopen(req)  # noqa: S310
+            except urllib.error.HTTPError as exc:
+                detail = _telegram_http_error_detail(exc)
+                if _is_redundant_edit(detail):
+                    logger.debug("Telegram edit for message %d unchanged", message_id)
+                    return
+                logger.warning(
+                    "Failed to edit message %d (%s)", message_id, detail, exc_info=True
+                )
+                return
             except Exception:
                 logger.warning("Failed to edit message %d", message_id, exc_info=True)
                 return
@@ -336,9 +386,15 @@ class TelegramPoller:
         )
         try:
             urllib.request.urlopen(req)  # noqa: S310
-        except urllib.error.HTTPError:
+        except urllib.error.HTTPError as exc:
+            detail = _telegram_http_error_detail(exc)
+            if _is_redundant_edit(detail):
+                logger.debug("Telegram edit for message %d unchanged", message_id)
+                return
             logger.warning(
-                "HTML edit failed for message %d, retrying plain text", message_id
+                "HTML edit failed for message %d (%s), retrying plain text",
+                message_id,
+                detail,
             )
             payload["text"] = text
             del payload["parse_mode"]
@@ -348,6 +404,14 @@ class TelegramPoller:
             )
             try:
                 urllib.request.urlopen(req)  # noqa: S310
+            except urllib.error.HTTPError as exc:
+                detail = _telegram_http_error_detail(exc)
+                if _is_redundant_edit(detail):
+                    logger.debug("Telegram edit for message %d unchanged", message_id)
+                    return
+                logger.warning(
+                    "Failed to edit message %d (%s)", message_id, detail, exc_info=True
+                )
             except Exception:
                 logger.warning("Failed to edit message %d", message_id, exc_info=True)
         except Exception:
