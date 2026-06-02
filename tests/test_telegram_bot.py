@@ -170,6 +170,30 @@ class TestTelegramPollerGetUpdates:
 
         assert updates == []
 
+    def test_returns_empty_on_malformed_body(self) -> None:
+        """A non-JSON gateway page must not raise out of get_updates."""
+        poller = TelegramPoller("fake-token", "12345")
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = b"<html>502 Bad Gateway</html>"
+        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+        mock_resp.__exit__ = MagicMock(return_value=False)
+
+        with patch("telegram_bot.urllib.request.urlopen", return_value=mock_resp):
+            updates = poller.get_updates(offset=0)
+
+        assert updates == []
+
+    def test_returns_empty_on_409_conflict(self) -> None:
+        """A 409 (another poller) is swallowed, not raised."""
+        poller = TelegramPoller("fake-token", "12345")
+        err = urllib.error.HTTPError(
+            url="x", code=409, msg="Conflict", hdrs=None, fp=io.BytesIO(b"{}")
+        )
+        with patch("telegram_bot.urllib.request.urlopen", side_effect=err):
+            updates = poller.get_updates(offset=0)
+
+        assert updates == []
+
 
 class TestTelegramPollerSendReply:
     def test_sends_single_chunk(self) -> None:
@@ -360,3 +384,46 @@ class TestTelegramPollerPollLoop:
         poller.poll_loop(callback, stop)
 
         callback.assert_not_called()
+
+    def test_malformed_update_does_not_kill_loop(self) -> None:
+        """A bad update (e.g. missing update_id) must not stop polling.
+
+        Regression: an uncaught exception in the loop body used to silently
+        kill the daemon poller thread, breaking inbound chat with no log.
+        """
+        poller = TelegramPoller("fake-token", "12345")
+        callback = MagicMock()
+        stop = threading.Event()
+
+        bad_batch = [
+            {"message": {"chat": {"id": 12345}, "text": "boom"}}
+        ]  # no update_id
+        good_batch = [
+            {
+                "update_id": 5,
+                "message": {
+                    "message_id": 11,
+                    "chat": {"id": 12345},
+                    "text": "hello",
+                },
+            }
+        ]
+
+        call_count = 0
+
+        def fake_get_updates(offset, timeout=30):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return bad_batch
+            if call_count == 2:
+                return good_batch
+            stop.set()
+            return []
+
+        poller.get_updates = fake_get_updates
+        poller.poll_loop(callback, stop)
+
+        # The loop survived the bad batch and still delivered the good message.
+        callback.assert_called_once()
+        assert callback.call_args[0][0]["text"] == "hello"

@@ -287,8 +287,26 @@ class TelegramPoller:
                 return data.get("result", [])
             logger.warning("Telegram getUpdates not ok: %s", data)
             return []
+        except urllib.error.HTTPError as exc:
+            # 409 Conflict means another getUpdates poller is running for the
+            # same token; surface it loudly since it silently breaks inbound
+            # chat. Network/transient HTTP errors stay at debug.
+            if exc.code == 409:
+                logger.warning(
+                    "Telegram getUpdates conflict (409): another poller is "
+                    "running for this bot token — inbound chat will not work"
+                )
+            else:
+                logger.debug("Telegram polling HTTP error: %s", exc)
+            return []
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             logger.debug("Telegram polling error: %s", exc)
+            return []
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            # Telegram occasionally returns a non-JSON gateway page (HTML 5xx)
+            # during outages. Treat as a transient error, never let it escape
+            # and kill the polling thread.
+            logger.warning("Telegram getUpdates returned malformed body: %s", exc)
             return []
 
     def edit_message(self, message_id: int, text: str) -> None:
@@ -707,45 +725,81 @@ class TelegramPoller:
 
         with ThreadPoolExecutor(max_workers=2, thread_name_prefix="tg-handler") as pool:
             while not stop_event.is_set():
-                updates = self.get_updates(offset)
-                if not updates and stop_event.is_set():
-                    break
-
-                for update in updates:
-                    offset = update["update_id"] + 1
-
-                    # Handle inline keyboard callbacks.
-                    cb = update.get("callback_query")
-                    if cb and on_callback:
-                        cb_chat_id = str(
-                            cb.get("message", {}).get("chat", {}).get("id", "")
-                        )
-                        if cb_chat_id == self._chat_id:
-                            pool.submit(self._safe_call, on_callback, cb)
-                        continue
-
-                    msg = update.get("message")
-                    if not msg:
-                        continue
-
-                    # Security: only process messages from the configured chat.
-                    msg_chat_id = str(msg.get("chat", {}).get("id", ""))
-                    if msg_chat_id != self._chat_id:
-                        logger.debug(
-                            "Ignoring message from chat %s (expected %s)",
-                            msg_chat_id,
-                            self._chat_id,
-                        )
-                        continue
-
-                    if not msg.get("text"):
-                        continue
-
-                    pool.submit(self._safe_call, on_message, msg)
-
-                # On error (empty updates not from timeout), brief pause.
-                if not updates and not stop_event.is_set():
+                try:
+                    offset, had_updates = self._poll_once(
+                        offset, on_message, on_callback, pool
+                    )
+                except Exception:
+                    # A malformed update or unexpected error must never kill
+                    # the polling thread — that silently breaks inbound chat
+                    # with no crash and no log. Log and keep polling.
+                    logger.exception("Telegram poll iteration failed; continuing")
                     stop_event.wait(_POLL_ERROR_RETRY_S)
+                    continue
+
+                # Brief pause on an empty batch (long-poll timeout or a
+                # transient get_updates error) to avoid a tight spin loop.
+                if not had_updates and not stop_event.is_set():
+                    stop_event.wait(_POLL_ERROR_RETRY_S)
+
+        logger.warning(
+            "Telegram poll loop exited (stop_event set=%s)", stop_event.is_set()
+        )
+
+    def _poll_once(
+        self,
+        offset: int,
+        on_message: callable,
+        on_callback: callable | None,
+        pool: ThreadPoolExecutor,
+    ) -> tuple[int, bool]:
+        """Fetch and dispatch one batch of updates.
+
+        Args:
+            offset: Update offset to request.
+            on_message: Callback receiving a Telegram message dict.
+            on_callback: Optional callback for inline keyboard button presses.
+            pool: Executor to dispatch handlers onto.
+
+        Returns:
+            A tuple of the offset to use on the next call and whether any
+            updates were received in this batch.
+        """
+        updates = self.get_updates(offset)
+        if not updates:
+            return offset, False
+
+        for update in updates:
+            offset = update["update_id"] + 1
+
+            # Handle inline keyboard callbacks.
+            cb = update.get("callback_query")
+            if cb and on_callback:
+                cb_chat_id = str(cb.get("message", {}).get("chat", {}).get("id", ""))
+                if cb_chat_id == self._chat_id:
+                    pool.submit(self._safe_call, on_callback, cb)
+                continue
+
+            msg = update.get("message")
+            if not msg:
+                continue
+
+            # Security: only process messages from the configured chat.
+            msg_chat_id = str(msg.get("chat", {}).get("id", ""))
+            if msg_chat_id != self._chat_id:
+                logger.debug(
+                    "Ignoring message from chat %s (expected %s)",
+                    msg_chat_id,
+                    self._chat_id,
+                )
+                continue
+
+            if not msg.get("text"):
+                continue
+
+            pool.submit(self._safe_call, on_message, msg)
+
+        return offset, True
 
     @staticmethod
     def _safe_call(fn: callable, *args: object) -> None:
