@@ -18,6 +18,31 @@ Recorded eval history has no backward-compatibility contract. Keep the schema cl
 - Prefer structured fixtures: pinned date, context snippets, conversation turns, and only the health data needed for the behavior under test.
 - Prefer deterministic assertions. Add LLM-as-judge only for narrow semantic invariants where tool-call, argument, text, word-count, or forbidden-opening assertions would be brittle or fake-precise.
 
+## Silent failures (no thumbs-down to anchor on)
+
+Thumbs-down feedback remains the preferred seed — start from `--feedback` whenever possible. But some LLM outputs are *never user-visible*, so no thumbs-down can ever land. The feedback queue is blind to these by construction.
+
+Recurring blind-spot classes in this project:
+
+- **Verifier suppression** — a nudge / insights / coach response is generated, the verifier rejects it, nothing ships to Telegram. Lives in `llm_calls` as `nudge_verify`, `insights_verify`, etc.
+- **Stripped-from-output blocks** — the LLM emits structured side-channel content that is removed before the user sees the message. The `<memory>` block in insights is the live example: extracted server-side, appended to `history.md`, but stripped from the Telegram-visible text. A wrong or missing memory extraction never produces a thumbs-down.
+- **Verifier-rewritten text** — the user only sees the rewrite, so the original draft's flaws never collect feedback.
+- **Tool-use omissions** — the model produces a plausible-looking answer without calling the tool it should have. The user has nothing concrete to flag.
+
+For all of these, the LLM call log replaces the feedback queue as the seed:
+
+- Browse with `uv run python main.py llm-log --last N` (optionally `--json` and grep by request type) and inspect candidates with `--id N`. The prompt shows the candidate output + context, the response shows what was produced (verdict, memory block, rewrite, tool calls or lack thereof).
+- A case is worth adding when *you* judge the silent output was wrong on review: a nudge was suppressed that you'd have wanted, memory dropped a signal that should have carried, the rewrite mangled the draft, the model skipped a needed tool call. Reviewer judgment replaces the user's thumbs-down as the signal.
+
+Provenance for silent-failure cases:
+
+- `source_llm_call_id`: the call that produced the silent output.
+- `source_feedback_id`: omit — there is no feedback row.
+- `derived_from.hypothesis`: state the reviewer judgment plainly, e.g. "verifier suppressed a reasonable post-run nudge because it read tempo phrasing as a contradiction" or "insights memory dropped the recurring evening-headache pattern that should carry across weeks."
+- `case_kind` is still `real_regression` — the trace is real; only the seed differs.
+
+Pick the feature to match what the case exercises: `verification_judge` for suppression/rewrite verdicts (`fixture.kind` picks `nudge` / `insights` / `coach`), and the relevant generation feature (e.g. `insights`) for memory-extraction or tool-use cases. Don't route silent-failure cases through full multi-step pipelines just to recreate the symptom.
+
 ## LLM-as-judge assertions
 
 Use optional `judge_assertions` for semantic reasoning quality, not broad taste judgements. Keep each statement concrete and independently checkable. Good examples: “The response says or clearly implies that 3 km easy followed by 2 km tempo counts as the prescribed tempo block.” Bad examples: “The response gives good coaching advice.”
