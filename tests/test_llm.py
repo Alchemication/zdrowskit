@@ -919,8 +919,12 @@ class TestCallLlm:
         assert result.cost == 0.05
         assert result.latency_s >= 0
 
+    @patch("llm.datetime")
     @patch("llm.litellm")
-    def test_cost_fallback_on_exception(self, mock_litellm: MagicMock) -> None:
+    def test_cost_fallback_on_exception(
+        self, mock_litellm: MagicMock, mock_datetime: MagicMock
+    ) -> None:
+        mock_datetime.now.return_value = datetime(2026, 5, 1, tzinfo=UTC)
         mock_litellm.completion.return_value = self._mock_response()
         mock_litellm.completion_cost.side_effect = Exception("no pricing")
 

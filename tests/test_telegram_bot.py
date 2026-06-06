@@ -159,6 +159,9 @@ class TestTelegramPollerGetUpdates:
 
         assert len(updates) == 1
         assert updates[0]["message"]["text"] == "hello"
+        status = poller.status()
+        assert status["last_poll_update_count"] == 1
+        assert status["last_poll_at"] is not None
 
     def test_returns_empty_on_error(self) -> None:
         poller = TelegramPoller("fake-token", "12345")
@@ -310,7 +313,45 @@ class TestTelegramPollerEditMessageWithKeyboard:
         mock_urlopen.assert_called_once()
 
 
+class TestTelegramPollerOutboundTimeouts:
+    def test_callback_answer_uses_short_timeout(self) -> None:
+        poller = TelegramPoller("fake-token", "12345")
+
+        with patch("telegram_bot.urllib.request.urlopen") as mock_urlopen:
+            poller.answer_callback_query("callback-1")
+
+        assert mock_urlopen.call_args.kwargs["timeout"] > 0
+
+
 class TestTelegramPollerPollLoop:
+    def test_status_records_dispatched_message(self) -> None:
+        poller = TelegramPoller("fake-token", "12345")
+        callback = MagicMock()
+        pool = MagicMock()
+        poller.get_updates = MagicMock(
+            return_value=[
+                {
+                    "update_id": 1,
+                    "message": {
+                        "message_id": 10,
+                        "chat": {"id": 12345},
+                        "text": "hello",
+                    },
+                }
+            ]
+        )
+
+        offset, had_updates = poller._poll_once(0, callback, None, pool)
+
+        assert offset == 2
+        assert had_updates is True
+        status = poller.status()
+        assert status["last_message_id"] == "10"
+        assert status["last_message_at"] is not None
+        pool.submit.assert_called_once_with(
+            poller._safe_call, callback, poller.get_updates.return_value[0]["message"]
+        )
+
     def test_filters_by_chat_id(self) -> None:
         """Messages from other chats should be ignored."""
         poller = TelegramPoller("fake-token", "12345")

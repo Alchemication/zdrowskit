@@ -234,6 +234,16 @@ class TelegramChatHandler:
         self._poller = None  # type: ignore[assignment]
         self._conversation = None  # type: ignore[assignment]
         self._pending_edits = None  # type: ignore[assignment]
+        self._status_lock = threading.Lock()
+        self._handler_status: dict[str, object] = {
+            "active_handlers": 0,
+            "last_handler_start_at": None,
+            "last_handler_kind": None,
+            "last_handler_id": None,
+            "last_handler_done_at": None,
+            "last_handler_error_at": None,
+            "last_handler_error": None,
+        }
 
     def start(self) -> None:
         """Start Telegram long-polling in a daemon thread.
@@ -262,13 +272,85 @@ class TelegramChatHandler:
 
         thread = threading.Thread(
             target=self._poller.poll_loop,
-            args=(self._handle_telegram_message, self._daemon._stop_event),
-            kwargs={"on_callback": self._handle_telegram_callback},
+            args=(
+                self._handle_telegram_message_monitored,
+                self._daemon._stop_event,
+            ),
+            kwargs={"on_callback": self._handle_telegram_callback_monitored},
             daemon=True,
             name="telegram-poller",
         )
         thread.start()
         logger.info("Telegram chat listener started")
+
+    def telegram_status(self) -> dict[str, object]:
+        """Return a compact snapshot of Telegram poller and handler health."""
+        poller_status = self._poller.status() if self._poller is not None else {}
+        if not isinstance(poller_status, dict):
+            poller_status = {}
+        with self._status_lock:
+            handler_status = dict(self._handler_status)
+        return {
+            "configured": self._poller is not None,
+            "poller": poller_status,
+            "handler": handler_status,
+        }
+
+    def _record_handler_start(self, kind: str, item_id: object) -> None:
+        """Record one Telegram handler starting."""
+        with self._status_lock:
+            self._handler_status["active_handlers"] = (
+                int(self._handler_status.get("active_handlers") or 0) + 1
+            )
+            self._handler_status["last_handler_start_at"] = datetime.now(
+                tz=timezone.utc
+            ).isoformat()
+            self._handler_status["last_handler_kind"] = kind
+            self._handler_status["last_handler_id"] = str(item_id)
+
+    def _record_handler_done(self) -> None:
+        """Record one Telegram handler finishing."""
+        with self._status_lock:
+            active = int(self._handler_status.get("active_handlers") or 0)
+            self._handler_status["active_handlers"] = max(active - 1, 0)
+            self._handler_status["last_handler_done_at"] = datetime.now(
+                tz=timezone.utc
+            ).isoformat()
+
+    def _record_handler_error(self, exc: Exception) -> None:
+        """Record one Telegram handler failure."""
+        with self._status_lock:
+            active = int(self._handler_status.get("active_handlers") or 0)
+            self._handler_status["active_handlers"] = max(active - 1, 0)
+            self._handler_status["last_handler_error_at"] = datetime.now(
+                tz=timezone.utc
+            ).isoformat()
+            self._handler_status["last_handler_error"] = (
+                f"{type(exc).__name__}: {_clip_text(exc, 120)}"
+            )
+
+    def _handle_telegram_message_monitored(self, message: dict) -> None:
+        """Run message handling while recording lifecycle status."""
+        text = (message.get("text") or "").strip()
+        if not text:
+            return
+        self._record_handler_start("message", message.get("message_id"))
+        try:
+            self._handle_telegram_message(message)
+        except Exception as exc:
+            self._record_handler_error(exc)
+            raise
+        self._record_handler_done()
+
+    def _handle_telegram_callback_monitored(self, callback_query: dict) -> None:
+        """Run callback handling while recording lifecycle status."""
+        self._record_handler_start("callback", callback_query.get("id"))
+        try:
+            self._handle_telegram_callback(callback_query)
+        except Exception as exc:
+            self._record_handler_error(exc)
+            raise
+        self._record_handler_done()
 
     # ------------------------------------------------------------------
     # Message handling

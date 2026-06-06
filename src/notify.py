@@ -23,6 +23,7 @@ import time
 from html import escape as html_escape
 
 logger = logging.getLogger(__name__)
+_TELEGRAM_REQUEST_TIMEOUT_S = 15
 
 
 def md_to_telegram_html(md_text: str) -> str:
@@ -219,7 +220,9 @@ def _send_telegram_chunk(
         url, data=data, headers={"Content-Type": "application/json"}
     )
     try:
-        with urllib.request.urlopen(req) as resp:  # noqa: S310
+        with urllib.request.urlopen(  # noqa: S310
+            req, timeout=_TELEGRAM_REQUEST_TIMEOUT_S
+        ) as resp:
             body = json.loads(resp.read().decode("utf-8"))
         if body.get("ok"):
             return body["result"]["message_id"]
@@ -243,7 +246,9 @@ def _send_telegram_chunk(
         url, data=data, headers={"Content-Type": "application/json"}
     )
     try:
-        with urllib.request.urlopen(req) as resp:  # noqa: S310
+        with urllib.request.urlopen(  # noqa: S310
+            req, timeout=_TELEGRAM_REQUEST_TIMEOUT_S
+        ) as resp:
             body = json.loads(resp.read().decode("utf-8"))
         if body.get("ok"):
             return body["result"]["message_id"]
@@ -378,7 +383,7 @@ def send_telegram_photo(
     )
 
     try:
-        urllib.request.urlopen(req)  # noqa: S310
+        urllib.request.urlopen(req, timeout=_TELEGRAM_REQUEST_TIMEOUT_S)  # noqa: S310
         logger.info("Telegram photo sent")
         return True
     except Exception as e:

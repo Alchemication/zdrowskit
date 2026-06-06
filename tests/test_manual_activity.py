@@ -657,6 +657,24 @@ class TestAddFlowReorder:
 
 
 class TestAddFlowSleep:
+    def test_sleep_date_retap_recovers_duration_picker(self, tmp_path) -> None:
+        handler = _make_add_handler(tmp_path / "test.db")
+        handler._pending["a1"] = __import__("daemon_add_flow").PendingAdd(
+            step="pick_sleep_dur",
+            message_id=100,
+            created_at=time.monotonic(),
+            date="2026-04-21",
+        )
+
+        handler.handle_callback("cb1", "add_dt:a1:yest", 100)
+
+        pending = handler._pending["a1"]
+        assert pending.step == "pick_sleep_dur"
+        handler._poller.edit_message_with_keyboard.assert_called()
+        call_args = handler._poller.edit_message_with_keyboard.call_args.args
+        assert call_args[0] == 100
+        assert "Roughly how long did you sleep?" in call_args[1]
+
     def test_sleep_duration_advances_to_feel_picker(self, tmp_path) -> None:
         handler = _make_add_handler(tmp_path / "test.db")
         handler._pending["a1"] = __import__("daemon_add_flow").PendingAdd(

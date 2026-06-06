@@ -47,7 +47,8 @@ the Telegram menu: `/notify`, `/review [current|last]`, `/coach [current|last]`,
 
 `/tutorial` opens a 9-step guided tour of the system with Next/Back/Exit buttons.
 
-`/status` shows bot state, data coverage, recent activity, and notification state.
+`/status` shows bot state, Telegram delivery/handler health, data coverage,
+recent activity, and notification state.
 
 `/codex` and `/claude` are mirror commands for the two supported coding
 agents — both run the local CLI against the repo with workspace-edit

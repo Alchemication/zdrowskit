@@ -1423,6 +1423,23 @@ class TestTelegramCommands:
     def test_status_includes_system_and_data_summary(self, tmp_path: Path) -> None:
         daemon = _make_daemon(tmp_path)
         daemon._chat._poller = MagicMock()
+        daemon._chat._poller.status.return_value = {
+            "last_poll_at": "2026-04-05T09:31:00+00:00",
+            "last_poll_update_count": 1,
+            "last_message_at": "2026-04-05T09:31:02+00:00",
+            "last_message_id": "55",
+            "last_callback_at": "2026-04-05T09:30:00+00:00",
+            "last_callback_data": "add_dt:a1:yest",
+        }
+        daemon._chat._handler_status.update(
+            {
+                "active_handlers": 0,
+                "last_handler_start_at": "2026-04-05T09:31:02+00:00",
+                "last_handler_kind": "message",
+                "last_handler_id": "55",
+                "last_handler_done_at": "2026-04-05T09:31:05+00:00",
+            }
+        )
         daemon._state.update(
             {
                 "nudge_count_today": 2,
@@ -1465,6 +1482,13 @@ class TestTelegramCommands:
         assert "- Nudges today: 2/2" in sent
         assert "- Last report: 2026-04-05 " in sent
         assert "- Last coach run: 2026-04-05 " in sent
+        assert "- Telegram: on; last poll: 2026-04-05 " in sent
+        assert "- Telegram last message: 55 at 2026-04-05 " in sent
+        assert "- Telegram last callback: add_dt:a1:yest at 2026-04-05 " in sent
+        assert (
+            "- Telegram handler: active 0; last start message 55 at 2026-04-05 " in sent
+        )
+        assert "- Telegram handler error: never" in sent
         assert "- Queued nudges: 1" in sent
         assert "- Active mutes: none" in sent
         assert "- Data: 1 days, 1 workouts (2026-04-04 to 2026-04-04)" in sent

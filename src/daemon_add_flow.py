@@ -515,10 +515,10 @@ class AddFlowHandler:
         else:
             return
 
-        if pending.step == "pick_workout_date":
+        if pending.step in {"pick_workout_date", "pick_feel"} and pending.workout_type:
             pending.step = "pick_feel"
             self._show_workout_feel_picker(add_id, pending, msg_id)
-        elif pending.step == "pick_sleep_date":
+        elif pending.step in {"pick_sleep_date", "pick_sleep_dur"}:
             self._show_sleep_duration_picker(add_id, pending, msg_id)
 
     def _show_workout_feel_picker(
@@ -586,6 +586,12 @@ class AddFlowHandler:
             self._handle_workout_feel(cb_id, add_id, pending, param, msg_id)
         elif pending.step == "pick_sleep_feel":
             self._handle_sleep_feel(cb_id, add_id, pending, param, msg_id)
+        elif pending.step == "confirm_workout" and pending.clone_row:
+            self._poller.answer_callback_query(cb_id)
+            self._show_workout_confirm(add_id, pending, msg_id)
+        elif pending.step == "confirm_sleep" and pending.sleep_total_h:
+            self._poller.answer_callback_query(cb_id)
+            self._show_sleep_confirm(add_id, pending, msg_id)
         else:
             self._poller.answer_callback_query(cb_id, "Unexpected state.")
 

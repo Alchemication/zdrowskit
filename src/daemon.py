@@ -376,6 +376,62 @@ class ZdrowskitDaemon:
             ),
         ]
 
+        telegram = self._chat.telegram_status()
+        if telegram.get("configured"):
+            poller = telegram.get("poller")
+            handler = telegram.get("handler")
+            poller = poller if isinstance(poller, dict) else {}
+            handler = handler if isinstance(handler, dict) else {}
+
+            last_poll_count = poller.get("last_poll_update_count")
+            count_label = (
+                str(last_poll_count) if last_poll_count is not None else "unknown"
+            )
+            lines.append(
+                "- Telegram: on; "
+                f"last poll: {self._format_status_timestamp(poller.get('last_poll_at'))} "
+                f"({count_label} updates)"
+            )
+            lines.append(
+                "- Telegram last message: "
+                f"{poller.get('last_message_id') or 'none'} at "
+                f"{self._format_status_timestamp(poller.get('last_message_at'))}"
+            )
+            callback_label = poller.get("last_callback_data") or "none"
+            lines.append(
+                "- Telegram last callback: "
+                f"{callback_label} at "
+                f"{self._format_status_timestamp(poller.get('last_callback_at'))}"
+            )
+            active_handlers = handler.get("active_handlers") or 0
+            last_handler_kind = handler.get("last_handler_kind") or "none"
+            last_handler_id = handler.get("last_handler_id") or ""
+            lines.append(
+                "- Telegram handler: "
+                f"active {active_handlers}; "
+                f"last start {last_handler_kind} {last_handler_id} at "
+                f"{self._format_status_timestamp(handler.get('last_handler_start_at'))}; "
+                f"done {self._format_status_timestamp(handler.get('last_handler_done_at'))}"
+            )
+            poll_error = poller.get("last_poll_error")
+            if poll_error:
+                lines.append(
+                    "- Telegram poll error: "
+                    f"{self._format_status_timestamp(poller.get('last_poll_error_at'))} "
+                    f"{poll_error}"
+                )
+            handler_error = handler.get("last_handler_error")
+            if handler_error:
+                lines.append(
+                    "- Telegram handler error: "
+                    f"{self._format_status_timestamp(handler.get('last_handler_error_at'))} "
+                    f"{handler_error}"
+                )
+            else:
+                lines.append("- Telegram handler error: never")
+        else:
+            lines.append("- Telegram: off")
+
         if queue_len:
             lines.append(f"- Queued nudges: {queue_len}")
 

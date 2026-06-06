@@ -21,6 +21,7 @@ import urllib.error
 import urllib.request
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
 
 from config import MAX_CONVERSATION_MESSAGES
 from notify import chunk_text, md_to_telegram_html, send_telegram_photo
@@ -29,6 +30,8 @@ logger = logging.getLogger(__name__)
 
 # Retry delay after a polling error before trying again.
 _POLL_ERROR_RETRY_S = 5
+_TELEGRAM_HANDLER_WORKERS = 4
+_TELEGRAM_REQUEST_TIMEOUT_S = 15
 
 
 def _telegram_http_error_detail(exc: urllib.error.HTTPError) -> str:
@@ -190,6 +193,59 @@ class TelegramPoller:
         self._token = bot_token
         self._chat_id = chat_id
         self._base_url = f"https://api.telegram.org/bot{bot_token}"
+        self._status_lock = threading.Lock()
+        self._status: dict[str, object] = {
+            "started_at": datetime.now(tz=UTC).isoformat(),
+            "last_poll_at": None,
+            "last_poll_update_count": None,
+            "last_poll_error_at": None,
+            "last_poll_error": None,
+            "last_update_at": None,
+            "last_message_at": None,
+            "last_message_id": None,
+            "last_callback_at": None,
+            "last_callback_id": None,
+            "last_callback_message_id": None,
+            "last_callback_data": None,
+        }
+
+    def status(self) -> dict[str, object]:
+        """Return a thread-safe snapshot of Telegram delivery state."""
+        with self._status_lock:
+            return dict(self._status)
+
+    def _record_poll_result(self, update_count: int) -> None:
+        """Record one getUpdates result."""
+        with self._status_lock:
+            self._status["last_poll_at"] = datetime.now(tz=UTC).isoformat()
+            self._status["last_poll_update_count"] = update_count
+
+    def _record_poll_error(self, error: str) -> None:
+        """Record one getUpdates failure."""
+        with self._status_lock:
+            self._status["last_poll_at"] = datetime.now(tz=UTC).isoformat()
+            self._status["last_poll_error_at"] = self._status["last_poll_at"]
+            self._status["last_poll_error"] = error[:160]
+
+    def _record_message_dispatch(self, message_id: object) -> None:
+        """Record a text message dispatched to the daemon handler."""
+        with self._status_lock:
+            now = datetime.now(tz=UTC).isoformat()
+            self._status["last_update_at"] = now
+            self._status["last_message_at"] = now
+            self._status["last_message_id"] = str(message_id)
+
+    def _record_callback_dispatch(
+        self, callback_id: object, message_id: object, data: object
+    ) -> None:
+        """Record an inline callback dispatched to the daemon handler."""
+        with self._status_lock:
+            now = datetime.now(tz=UTC).isoformat()
+            self._status["last_update_at"] = now
+            self._status["last_callback_at"] = now
+            self._status["last_callback_id"] = str(callback_id)
+            self._status["last_callback_message_id"] = str(message_id)
+            self._status["last_callback_data"] = str(data or "")[:80]
 
     def send_typing(self) -> None:
         """Send a 'typing...' chat action indicator."""
@@ -201,7 +257,7 @@ class TelegramPoller:
             url, data=data, headers={"Content-Type": "application/json"}
         )
         try:
-            urllib.request.urlopen(req)  # noqa: S310
+            urllib.request.urlopen(req, timeout=_TELEGRAM_REQUEST_TIMEOUT_S)  # noqa: S310
         except Exception:
             logger.debug("Failed to send typing indicator", exc_info=True)
 
@@ -257,7 +313,7 @@ class TelegramPoller:
                 url, data=data, headers={"Content-Type": "application/json"}
             )
             try:
-                urllib.request.urlopen(req)  # noqa: S310
+                urllib.request.urlopen(req, timeout=_TELEGRAM_REQUEST_TIMEOUT_S)  # noqa: S310
             except Exception:
                 logger.debug("Animation edit failed", exc_info=True)
             i += 1
@@ -284,8 +340,11 @@ class TelegramPoller:
             with urllib.request.urlopen(req, timeout=timeout + 10) as resp:  # noqa: S310
                 data = json.loads(resp.read().decode("utf-8"))
             if data.get("ok"):
-                return data.get("result", [])
+                result = data.get("result", [])
+                self._record_poll_result(len(result))
+                return result
             logger.warning("Telegram getUpdates not ok: %s", data)
+            self._record_poll_error(str(data)[:160])
             return []
         except urllib.error.HTTPError as exc:
             # 409 Conflict means another getUpdates poller is running for the
@@ -296,17 +355,21 @@ class TelegramPoller:
                     "Telegram getUpdates conflict (409): another poller is "
                     "running for this bot token — inbound chat will not work"
                 )
+                self._record_poll_error("409 Conflict: another poller is running")
             else:
                 logger.debug("Telegram polling HTTP error: %s", exc)
+                self._record_poll_error(f"HTTPError {exc.code}: {exc.reason}")
             return []
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             logger.debug("Telegram polling error: %s", exc)
+            self._record_poll_error(f"{type(exc).__name__}: {exc}")
             return []
         except (json.JSONDecodeError, UnicodeDecodeError) as exc:
             # Telegram occasionally returns a non-JSON gateway page (HTML 5xx)
             # during outages. Treat as a transient error, never let it escape
             # and kill the polling thread.
             logger.warning("Telegram getUpdates returned malformed body: %s", exc)
+            self._record_poll_error(f"{type(exc).__name__}: {exc}")
             return []
 
     def edit_message(self, message_id: int, text: str) -> None:
@@ -336,7 +399,7 @@ class TelegramPoller:
             url, data=data, headers={"Content-Type": "application/json"}
         )
         try:
-            urllib.request.urlopen(req)  # noqa: S310
+            urllib.request.urlopen(req, timeout=_TELEGRAM_REQUEST_TIMEOUT_S)  # noqa: S310
         except urllib.error.HTTPError as exc:
             detail = _telegram_http_error_detail(exc)
             if _is_redundant_edit(detail):
@@ -354,7 +417,7 @@ class TelegramPoller:
                 url, data=data, headers={"Content-Type": "application/json"}
             )
             try:
-                urllib.request.urlopen(req)  # noqa: S310
+                urllib.request.urlopen(req, timeout=_TELEGRAM_REQUEST_TIMEOUT_S)  # noqa: S310
             except urllib.error.HTTPError as exc:
                 detail = _telegram_http_error_detail(exc)
                 if _is_redundant_edit(detail):
@@ -403,7 +466,7 @@ class TelegramPoller:
             url, data=data, headers={"Content-Type": "application/json"}
         )
         try:
-            urllib.request.urlopen(req)  # noqa: S310
+            urllib.request.urlopen(req, timeout=_TELEGRAM_REQUEST_TIMEOUT_S)  # noqa: S310
         except urllib.error.HTTPError as exc:
             detail = _telegram_http_error_detail(exc)
             if _is_redundant_edit(detail):
@@ -421,7 +484,7 @@ class TelegramPoller:
                 url, data=data, headers={"Content-Type": "application/json"}
             )
             try:
-                urllib.request.urlopen(req)  # noqa: S310
+                urllib.request.urlopen(req, timeout=_TELEGRAM_REQUEST_TIMEOUT_S)  # noqa: S310
             except urllib.error.HTTPError as exc:
                 detail = _telegram_http_error_detail(exc)
                 if _is_redundant_edit(detail):
@@ -463,7 +526,7 @@ class TelegramPoller:
             url, data=data, headers={"Content-Type": "application/json"}
         )
         try:
-            urllib.request.urlopen(req)  # noqa: S310
+            urllib.request.urlopen(req, timeout=_TELEGRAM_REQUEST_TIMEOUT_S)  # noqa: S310
         except Exception:
             logger.warning(
                 "Failed to edit reply markup for message %d",
@@ -521,7 +584,9 @@ class TelegramPoller:
                 url, data=data, headers={"Content-Type": "application/json"}
             )
             try:
-                with urllib.request.urlopen(req) as resp:  # noqa: S310
+                with urllib.request.urlopen(  # noqa: S310
+                    req, timeout=_TELEGRAM_REQUEST_TIMEOUT_S
+                ) as resp:
                     body = json.loads(resp.read().decode("utf-8"))
                 if body.get("ok") and first_message_id is None:
                     first_message_id = body["result"]["message_id"]
@@ -534,7 +599,9 @@ class TelegramPoller:
                     url, data=data, headers={"Content-Type": "application/json"}
                 )
                 try:
-                    with urllib.request.urlopen(req) as resp:  # noqa: S310
+                    with urllib.request.urlopen(  # noqa: S310
+                        req, timeout=_TELEGRAM_REQUEST_TIMEOUT_S
+                    ) as resp:
                         body = json.loads(resp.read().decode("utf-8"))
                     if body.get("ok") and first_message_id is None:
                         first_message_id = body["result"]["message_id"]
@@ -631,7 +698,9 @@ class TelegramPoller:
             url, data=data, headers={"Content-Type": "application/json"}
         )
         try:
-            with urllib.request.urlopen(req) as resp:  # noqa: S310
+            with urllib.request.urlopen(  # noqa: S310
+                req, timeout=_TELEGRAM_REQUEST_TIMEOUT_S
+            ) as resp:
                 body = json.loads(resp.read().decode("utf-8"))
             if body.get("ok"):
                 return body["result"]["message_id"]
@@ -644,7 +713,9 @@ class TelegramPoller:
                 url, data=data, headers={"Content-Type": "application/json"}
             )
             try:
-                with urllib.request.urlopen(req) as resp:  # noqa: S310
+                with urllib.request.urlopen(  # noqa: S310
+                    req, timeout=_TELEGRAM_REQUEST_TIMEOUT_S
+                ) as resp:
                     body = json.loads(resp.read().decode("utf-8"))
                 if body.get("ok"):
                     return body["result"]["message_id"]
@@ -670,7 +741,7 @@ class TelegramPoller:
             url, data=data, headers={"Content-Type": "application/json"}
         )
         try:
-            urllib.request.urlopen(req)  # noqa: S310
+            urllib.request.urlopen(req, timeout=_TELEGRAM_REQUEST_TIMEOUT_S)  # noqa: S310
         except Exception:
             logger.debug("Failed to answer callback query", exc_info=True)
 
@@ -693,7 +764,9 @@ class TelegramPoller:
             url, data=data, headers={"Content-Type": "application/json"}
         )
         try:
-            with urllib.request.urlopen(req) as resp:  # noqa: S310
+            with urllib.request.urlopen(  # noqa: S310
+                req, timeout=_TELEGRAM_REQUEST_TIMEOUT_S
+            ) as resp:
                 body = json.loads(resp.read().decode("utf-8"))
             return body.get("ok", False)
         except Exception:
@@ -723,7 +796,10 @@ class TelegramPoller:
         offset = 0
         logger.info("Telegram poller started (chat_id=%s)", self._chat_id)
 
-        with ThreadPoolExecutor(max_workers=2, thread_name_prefix="tg-handler") as pool:
+        with ThreadPoolExecutor(
+            max_workers=_TELEGRAM_HANDLER_WORKERS,
+            thread_name_prefix="tg-handler",
+        ) as pool:
             while not stop_event.is_set():
                 try:
                     offset, had_updates = self._poll_once(
@@ -777,6 +853,17 @@ class TelegramPoller:
             if cb and on_callback:
                 cb_chat_id = str(cb.get("message", {}).get("chat", {}).get("id", ""))
                 if cb_chat_id == self._chat_id:
+                    self._record_callback_dispatch(
+                        cb.get("id"),
+                        cb.get("message", {}).get("message_id"),
+                        cb.get("data", ""),
+                    )
+                    logger.info(
+                        "Dispatching Telegram callback id=%s message_id=%s data=%s",
+                        cb.get("id"),
+                        cb.get("message", {}).get("message_id"),
+                        str(cb.get("data", ""))[:80],
+                    )
                     pool.submit(self._safe_call, on_callback, cb)
                 continue
 
@@ -797,6 +884,11 @@ class TelegramPoller:
             if not msg.get("text"):
                 continue
 
+            logger.info(
+                "Dispatching Telegram message id=%s",
+                msg.get("message_id"),
+            )
+            self._record_message_dispatch(msg.get("message_id"))
             pool.submit(self._safe_call, on_message, msg)
 
         return offset, True
