@@ -45,6 +45,11 @@ the Telegram menu: `/notify`, `/review [current|last]`, `/coach [current|last]`,
 `/models`, `/context [name]`, `/events [N] [category]`,
 `/llm_log [N|id ID|trace ID]`, and `/tutorial`.
 
+Use `/events usage [N]` to inspect privacy-safe Telegram usage metrics over
+the last `N` days (default 30). It records command names and normalized inline
+button actions only; command arguments, message text, callback tokens, and
+button payload values are not stored.
+
 `/tutorial` opens a 9-step guided tour of the system with Next/Back/Exit buttons.
 
 `/status` shows bot state, Telegram delivery/handler health, data coverage,

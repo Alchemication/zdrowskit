@@ -19,7 +19,7 @@ from context_edit import (
 )
 from daemon import ZdrowskitDaemon
 from daemon_telegram_chat import _looks_like_internal_tool_markup
-from events import query_events
+from events import query_events, query_telegram_usage
 from llm import LLMResult
 from notification_prefs import load_notification_prefs
 from store import create_llm_trace, log_llm_call, open_db
@@ -1362,6 +1362,68 @@ class TestNotifyFlow:
 
 
 class TestTelegramCommands:
+    def test_command_usage_records_name_without_arguments(self, tmp_path: Path) -> None:
+        daemon = _make_daemon(tmp_path)
+        daemon._chat._poller = MagicMock()
+        daemon._chat._conversation = MagicMock()
+
+        daemon._handle_command("/clear private health detail", 40)
+
+        conn = open_db(daemon.db)
+        rows = query_events(conn, category="telegram", kind="command")
+        assert len(rows) == 1
+        assert rows[0]["summary"] == "Telegram command: /clear"
+        assert rows[0]["details"] == {"action": "clear"}
+
+    def test_callback_usage_discards_tokens_and_parameters(
+        self, tmp_path: Path
+    ) -> None:
+        daemon = _make_daemon(tmp_path)
+        daemon._chat._poller = MagicMock()
+
+        with patch.object(daemon._model_flow, "handle_callback"):
+            daemon._handle_telegram_callback(
+                {
+                    "id": "cb_usage",
+                    "data": "model_group:chat",
+                    "message": {"message_id": 41},
+                }
+            )
+
+        conn = open_db(daemon.db)
+        rows = query_events(conn, category="telegram", kind="callback")
+        assert len(rows) == 1
+        assert rows[0]["summary"] == "Telegram callback: model_group"
+        assert rows[0]["details"] == {"action": "model_group"}
+
+    def test_events_usage_shows_aggregated_telegram_metrics(
+        self, tmp_path: Path
+    ) -> None:
+        daemon = _make_daemon(tmp_path)
+        daemon._chat._poller = MagicMock()
+        daemon._record_event(
+            "telegram",
+            "command",
+            "Telegram command: /clear",
+            {"action": "clear"},
+        )
+        daemon._record_event(
+            "telegram",
+            "command",
+            "Telegram command: /clear",
+            {"action": "clear"},
+        )
+
+        daemon._handle_command("/events usage 30", 42)
+
+        daemon._poller.send_reply.assert_called_once()
+        sent = daemon._poller.send_reply.call_args.args[0]
+        assert "*Telegram usage*" in sent
+        assert "`/clear` — 2 use(s)" in sent
+        conn = open_db(daemon.db)
+        rows = query_telegram_usage(conn)
+        assert any(row["action"] == "events" for row in rows)
+
     def test_review_runs_last_week_insights_flow(self, tmp_path: Path) -> None:
         daemon = _make_daemon(tmp_path)
         daemon._chat._poller = MagicMock()
@@ -1519,7 +1581,7 @@ class TestTelegramCommands:
         assert "Advanced commands:" in sent
         assert "/review [current|last] — Run weekly report (default: last)" in sent
         assert "/context [name] — View context files" in sent
-        assert "/events [N] [category] — Recent system events" in sent
+        assert "/events [N|usage N] [category] — Recent system events" in sent
         assert "/llm_log [N|id ID|trace ID] — Recent LLM traces" in sent
         assert "/codex — Open Codex panel" in sent
         assert "/claude — Open Claude panel" in sent

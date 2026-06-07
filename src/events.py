@@ -6,7 +6,7 @@ inspect how often things happen and how the system reacts.
 
 Each event has:
     - category: coarse filter group (nudge, import, notify, chat, context,
-      coach, insights, daemon)
+      coach, insights, daemon, telegram)
     - kind: fine-grained action within the category (fired, llm_skip,
       rate_limited, quiet_deferred, ...)
     - summary: one-line human-readable description
@@ -32,7 +32,49 @@ CATEGORIES = (
     "coach",
     "insights",
     "daemon",
+    "telegram",
 )
+
+
+def normalize_telegram_command(text: str) -> str | None:
+    """Return a privacy-safe command name from a Telegram message.
+
+    Arguments are intentionally discarded because they may contain health
+    details, notification preferences, or coding-agent prompts.
+
+    Args:
+        text: Full Telegram message text beginning with ``/``.
+
+    Returns:
+        Canonical command name without the leading slash, or None when the
+        input is not a command.
+    """
+    first = text.strip().split(maxsplit=1)[0] if text.strip() else ""
+    if not first.startswith("/"):
+        return None
+    command = first[1:].split("@", 1)[0].lower().replace("-", "_")
+    return command or None
+
+
+def normalize_telegram_callback(data: str) -> str | None:
+    """Return a stable callback action without volatile callback payloads.
+
+    Most callback data uses ``action:token:parameter``. Only the action is
+    retained. Agent callbacks use ``agent:action:kind``; both action and kind
+    are stable product choices, so they are retained while session data is not.
+
+    Args:
+        data: Raw Telegram callback data.
+
+    Returns:
+        Normalized action name, or None for empty/malformed data.
+    """
+    parts = [part.strip().lower() for part in data.split(":")]
+    if not parts or not parts[0]:
+        return None
+    if parts[0] == "agent" and len(parts) >= 3:
+        return f"agent_{parts[1]}_{parts[2]}"
+    return parts[0]
 
 
 def record_event(
@@ -135,3 +177,64 @@ def query_events(
         }
         for r in rows
     ]
+
+
+def query_telegram_usage(
+    conn: sqlite3.Connection,
+    *,
+    since: str | None = None,
+    until: str | None = None,
+) -> list[dict]:
+    """Aggregate privacy-safe Telegram command and callback usage.
+
+    Args:
+        conn: Open database connection.
+        since: ISO timestamp (inclusive lower bound).
+        until: ISO timestamp (exclusive upper bound).
+
+    Returns:
+        Rows with kind, action, count, first_used, and last_used, ordered by
+        count then recency.
+    """
+    clauses = ["category = 'telegram'", "kind IN ('command', 'callback')"]
+    params: list[str] = []
+    if since:
+        clauses.append("ts >= ?")
+        params.append(since)
+    if until:
+        clauses.append("ts < ?")
+        params.append(until)
+
+    rows = conn.execute(
+        "SELECT ts, kind, details_json FROM events "
+        f"WHERE {' AND '.join(clauses)} ORDER BY ts, id",
+        params,
+    ).fetchall()
+    aggregated: dict[tuple[str, str], dict] = {}
+    for row in rows:
+        try:
+            details = json.loads(row[2]) if row[2] else {}
+        except (TypeError, json.JSONDecodeError):
+            continue
+        action = details.get("action")
+        if not isinstance(action, str) or not action:
+            continue
+        key = (row[1], action)
+        entry = aggregated.setdefault(
+            key,
+            {
+                "kind": row[1],
+                "action": action,
+                "count": 0,
+                "first_used": row[0],
+                "last_used": row[0],
+            },
+        )
+        entry["count"] += 1
+        entry["last_used"] = row[0]
+
+    return sorted(
+        aggregated.values(),
+        key=lambda entry: (entry["count"], entry["last_used"]),
+        reverse=True,
+    )

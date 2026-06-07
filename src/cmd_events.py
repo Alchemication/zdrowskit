@@ -14,7 +14,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from events import CATEGORIES, query_events
+from events import CATEGORIES, query_events, query_telegram_usage
 from store import open_db
 
 logger = logging.getLogger(__name__)
@@ -29,6 +29,7 @@ _CATEGORY_STYLE: dict[str, str] = {
     "coach": "bright_magenta",
     "insights": "bright_blue",
     "daemon": "white",
+    "telegram": "bright_cyan",
 }
 
 _KIND_STYLE: dict[str, str] = {
@@ -46,6 +47,8 @@ _KIND_STYLE: dict[str, str] = {
     "edited": "bold yellow",
     "start": "bold white",
     "stop": "dim white",
+    "command": "bold cyan",
+    "callback": "cyan",
 }
 
 
@@ -85,6 +88,20 @@ def cmd_events(args: argparse.Namespace) -> None:
             sys.exit(1)
 
     conn = open_db(Path(args.db))
+    if getattr(args, "usage", False):
+        if getattr(args, "category", None) or getattr(args, "kind", None):
+            logger.error(
+                "--usage cannot be combined with --category or --kind. "
+                "Use --since to limit the usage window."
+            )
+            sys.exit(1)
+        rows = query_telegram_usage(conn, since=since)
+        if getattr(args, "json", False):
+            print(json.dumps(rows, indent=2, default=str))
+            return
+        _print_usage_table(rows, since_label=getattr(args, "since", None))
+        return
+
     rows = query_events(
         conn,
         category=getattr(args, "category", None),
@@ -142,6 +159,40 @@ def cmd_events(args: argparse.Namespace) -> None:
     )
 
 
+def _print_usage_table(rows: list[dict], *, since_label: str | None) -> None:
+    """Print an aggregated Telegram usage table."""
+    if not rows:
+        print("No Telegram usage events match the filter.")
+        return
+
+    from rich.console import Console
+    from rich.table import Table
+
+    table = Table(title="Telegram usage", show_lines=False, pad_edge=False)
+    table.add_column("kind", no_wrap=True)
+    table.add_column("action", no_wrap=True)
+    table.add_column("uses", justify="right", no_wrap=True)
+    table.add_column("last used", no_wrap=True)
+
+    for row in rows:
+        action = f"/{row['action']}" if row["kind"] == "command" else row["action"]
+        try:
+            last_used = (
+                datetime.fromisoformat(row["last_used"])
+                .astimezone()
+                .strftime("%Y-%m-%d %H:%M")
+            )
+        except ValueError:
+            last_used = row["last_used"]
+        table.add_row(row["kind"], action, str(row["count"]), last_used)
+
+    console = Console()
+    console.print(table)
+    console.print(
+        f"[dim]{len(rows)} action(s). Since: {since_label or 'all time'}[/dim]"
+    )
+
+
 def format_events_for_telegram(rows: list[dict]) -> str:
     """Format events as a grouped-by-day Telegram message.
 
@@ -174,4 +225,41 @@ def format_events_for_telegram(rows: list[dict]) -> str:
     return "\n".join(lines)
 
 
-__all__ = ["cmd_events", "format_events_for_telegram", "CATEGORIES"]
+def format_usage_for_telegram(rows: list[dict]) -> str:
+    """Format aggregated Telegram usage for Telegram delivery.
+
+    Args:
+        rows: Usage rows as returned by ``query_telegram_usage``.
+
+    Returns:
+        Compact command and callback usage summary.
+    """
+    if not rows:
+        return "No Telegram usage recorded in this window."
+
+    lines = ["*Telegram usage*"]
+    for kind, heading in (("command", "Commands"), ("callback", "Buttons")):
+        kind_rows = [row for row in rows if row["kind"] == kind]
+        if not kind_rows:
+            continue
+        lines.extend(["", f"*{heading}*"])
+        for row in kind_rows:
+            action = f"/{row['action']}" if kind == "command" else row["action"]
+            try:
+                last_used = (
+                    datetime.fromisoformat(row["last_used"])
+                    .astimezone()
+                    .strftime("%b %d %H:%M")
+                )
+            except ValueError:
+                last_used = row["last_used"]
+            lines.append(f"`{action}` — {row['count']} use(s), last {last_used}")
+    return "\n".join(lines)
+
+
+__all__ = [
+    "cmd_events",
+    "format_events_for_telegram",
+    "format_usage_for_telegram",
+    "CATEGORIES",
+]

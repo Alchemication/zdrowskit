@@ -187,7 +187,10 @@ def _format_telegram_command(command: dict[str, str]) -> str:
     if name == "add":
         return f"/add — {description} (workouts, sleep)"
     if name == "events":
-        return f"/events [N] [category] — {description} (default: last 3 days)"
+        return (
+            f"/events [N|usage N] [category] — {description} "
+            "(events: 3 days, usage: 30 days)"
+        )
     if name == "llm_log":
         return f"/llm_log [N|id ID|trace ID] — {description}"
     return f"/{name} — {description}"
@@ -328,6 +331,18 @@ class TelegramChatHandler:
             self._handler_status["last_handler_error"] = (
                 f"{type(exc).__name__}: {_clip_text(exc, 120)}"
             )
+
+    def _record_usage(self, kind: str, action: str | None) -> None:
+        """Record a privacy-safe Telegram interaction metric."""
+        if not action:
+            return
+        label = f"/{action}" if kind == "command" else action
+        self._daemon._record_event(
+            "telegram",
+            kind,
+            f"Telegram {kind}: {label}",
+            {"action": action},
+        )
 
     def _handle_telegram_message_monitored(self, message: dict) -> None:
         """Run message handling while recording lifecycle status."""
@@ -591,7 +606,11 @@ class TelegramChatHandler:
             text: The full message text starting with ``/``.
             message_id: Telegram message ID for replies.
         """
-        cmd = text.split()[0].lower().split("@")[0]  # strip @botname suffix
+        from events import normalize_telegram_command
+
+        command = normalize_telegram_command(text)
+        self._record_usage("command", command)
+        cmd = f"/{command}" if command else ""
 
         if cmd == "/clear":
             self._conversation.clear()
@@ -1146,12 +1165,13 @@ class TelegramChatHandler:
     # ------------------------------------------------------------------
 
     def _handle_events_command(self, text: str, message_id: int) -> None:
-        """Handle ``/events [N | category]`` — show recent system events.
+        """Handle ``/events [N | category | usage]`` diagnostics.
 
         With no argument, shows events from the last 3 days. A numeric
         argument overrides the day window; a category token (nudge,
         import, coach, …) filters to that category over the default 3-day
-        window. Combinations like ``/events nudge 7`` are supported.
+        window. ``/events usage [N]`` shows Telegram command and button
+        counts, defaulting to 30 days.
 
         Args:
             text: The full ``/events …`` message text.
@@ -1159,36 +1179,51 @@ class TelegramChatHandler:
         """
         from datetime import datetime, timedelta, timezone
 
-        from cmd_events import format_events_for_telegram
-        from events import CATEGORIES, query_events
+        from cmd_events import format_events_for_telegram, format_usage_for_telegram
+        from events import CATEGORIES, query_events, query_telegram_usage
         from store import open_db
 
         parts = text.split()[1:]
-        days = 3
+        usage = any(part.lower() == "usage" for part in parts)
+        days = 30 if usage else 3
         category: str | None = None
         for part in parts:
             if part.isdigit():
                 days = max(1, int(part))
+            elif part.lower() == "usage":
+                continue
             elif part.lower() in CATEGORIES:
                 category = part.lower()
             else:
                 self._poller.send_reply(
-                    "Usage: /events [N] [category]. "
+                    "Usage: /events [N] [category] or /events usage [N]. "
                     f"Categories: {', '.join(CATEGORIES)}.",
                     reply_to_message_id=message_id,
                 )
                 return
 
+        if usage and category:
+            self._poller.send_reply(
+                "Usage: /events usage [N]. Category filters apply only to the event log.",
+                reply_to_message_id=message_id,
+            )
+            return
+
         since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         conn = open_db(self._daemon.db)
         try:
-            rows = query_events(conn, category=category, since=since, limit=200)
+            if usage:
+                rows = query_telegram_usage(conn, since=since)
+            else:
+                rows = query_events(conn, category=category, since=since, limit=200)
         finally:
             conn.close()
 
         if not rows:
             scope = f"last {days}d"
-            if category:
+            if usage:
+                scope += " · Telegram usage"
+            elif category:
                 scope += f" · {category}"
             self._poller.send_reply(
                 f"No system events ({scope}).", reply_to_message_id=message_id
@@ -1196,9 +1231,12 @@ class TelegramChatHandler:
             return
 
         header_scope = f"last {days}d"
+        if usage:
+            body = format_usage_for_telegram(rows)
+        else:
+            body = format_events_for_telegram(rows)
         if category:
             header_scope += f" · {category}"
-        body = format_events_for_telegram(rows)
         self._poller.send_reply(
             f"_{header_scope}_\n{body}", reply_to_message_id=message_id
         )
@@ -1684,6 +1722,10 @@ class TelegramChatHandler:
         data = callback_query.get("data", "")
         msg = callback_query.get("message", {})
         msg_id = msg.get("message_id")
+
+        from events import normalize_telegram_callback
+
+        self._record_usage("callback", normalize_telegram_callback(data))
 
         if data.startswith("ctx_accept:"):
             edit_id = data.split(":", 1)[1]

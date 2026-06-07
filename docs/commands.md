@@ -30,6 +30,7 @@ uv run python main.py nudge --trigger log_update
 uv run python main.py llm-log --id 42 --feedback
 uv run python main.py llm-log --trace 7
 uv run python main.py events --since 3d --category nudge
+uv run python main.py events --usage --since 30d
 uv run python main.py db status
 uv run python main.py db schema
 uv run python main.py notify reset all

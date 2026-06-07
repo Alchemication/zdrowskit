@@ -501,6 +501,11 @@ def main() -> None:
         metavar="N",
         help="Maximum rows to show (default: 100)",
     )
+    p_events.add_argument(
+        "--usage",
+        action="store_true",
+        help="Aggregate Telegram command and inline-button usage",
+    )
     p_events.add_argument("--json", action="store_true", help="Output JSON")
     _add_db(p_events)
 
