@@ -228,6 +228,25 @@ class TestGoogleDriveImportCommand:
         assert result.drive_files_skipped == 4
         assemble.assert_not_called()
 
+    def test_rejects_unknown_import_source(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """argparse does not validate env-derived defaults against choices."""
+        args = SimpleNamespace(
+            source="goggle-drive",
+            data_dir=str(tmp_path / "import"),
+            db=str(tmp_path / "health.db"),
+        )
+
+        with (
+            patch.object(commands_module, "assemble") as assemble,
+            pytest.raises(SystemExit),
+        ):
+            cmd_import(args)
+
+        assemble.assert_not_called()
+        assert "ZDROWSKIT_IMPORT_SOURCE" in caplog.text
+
     def test_reports_missing_drive_configuration(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:

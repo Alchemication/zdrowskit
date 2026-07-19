@@ -148,8 +148,15 @@ def cmd_import(args: argparse.Namespace) -> ImportResult:
                 stored_days=0,
                 import_skipped=True,
             )
-    else:
+    elif source == "local":
         data_dir = resolve_data_dir(args.data_dir)
+    else:
+        logger.error(
+            "Unknown import source %r; use 'local' or 'google-drive' "
+            "(check ZDROWSKIT_IMPORT_SOURCE in .env).",
+            source,
+        )
+        sys.exit(1)
 
     if not data_dir.exists():
         logger.error("data directory not found: %s", data_dir)
