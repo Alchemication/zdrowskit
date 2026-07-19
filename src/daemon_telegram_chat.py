@@ -441,15 +441,10 @@ class TelegramChatHandler:
 
         self._conversation.add("user", text)
 
-        # Send a placeholder so the user sees immediate feedback, and
-        # animate the trailing dots so they know the bot is alive while
-        # the LLM call is in flight.
-        typing_prefix = "Typing "
+        # Keep this placeholder static. An animation thread editing the same
+        # message can finish after the final-response edit and overwrite it.
         placeholder_id = self._poller.send_reply(
-            f"{typing_prefix}.", reply_to_message_id=message_id
-        )
-        stop_anim, anim_thread = self._start_placeholder_animation(
-            placeholder_id, prefix=typing_prefix
+            "Working\u2026", reply_to_message_id=message_id
         )
 
         try:
@@ -461,7 +456,6 @@ class TelegramChatHandler:
             finally:
                 conn.close()
         except Exception:
-            self._stop_placeholder_animation(stop_anim, anim_thread)
             logger.error("Chat LLM call failed", exc_info=True)
             if placeholder_id:
                 self._poller.edit_message(
@@ -473,8 +467,6 @@ class TelegramChatHandler:
                     reply_to_message_id=message_id,
                 )
             return
-
-        self._stop_placeholder_animation(stop_anim, anim_thread)
 
         reply = result.text
 

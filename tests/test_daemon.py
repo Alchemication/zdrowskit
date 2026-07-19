@@ -575,6 +575,36 @@ class TestTelegramFeedbackFlow:
 
 
 class TestChatReplyLoop:
+    def test_chat_uses_static_working_placeholder(self, tmp_path: Path) -> None:
+        daemon = _make_daemon(tmp_path)
+        daemon._chat._poller = MagicMock()
+        daemon._chat._conversation = MagicMock()
+        daemon._poller.send_reply.return_value = 900
+        result = LLMResult(
+            text="Push done, pull still outstanding.",
+            model="test-model",
+            input_tokens=1,
+            output_tokens=1,
+            total_tokens=2,
+            latency_s=0.1,
+        )
+
+        with (
+            patch.object(daemon._chat, "_chat_reply", return_value=(result, [], [])),
+            patch.object(daemon._chat, "_start_placeholder_animation") as start_anim,
+        ):
+            daemon._handle_telegram_message(
+                {"message_id": 1000, "text": "Did I do both strength sessions?"}
+            )
+
+        daemon._poller.send_reply.assert_called_once_with(
+            "Working\u2026", reply_to_message_id=1000
+        )
+        start_anim.assert_not_called()
+        daemon._poller.edit_message.assert_called_once_with(
+            900, "Push done, pull still outstanding."
+        )
+
     def test_detects_internal_tool_markup(self) -> None:
         assert _looks_like_internal_tool_markup("<｜｜DSML｜｜tool_calls>")
         assert _looks_like_internal_tool_markup('<tool_call name="run_sql">')
