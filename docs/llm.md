@@ -36,7 +36,7 @@ Logged LLM calls record the effective model, and fallback calls include `request
 
 ## Cost Projection
 
-Providers bill in USD per million tokens. Prices below were checked on 2026-05-02 against [DeepSeek pricing](https://api-docs.deepseek.com/quick_start/pricing/) and [Anthropic's Opus 4.8 page](https://www.anthropic.com/claude/opus). Anthropic lists Opus 4.8 at $5/MTok input and $25/MTok output.
+Providers bill in USD per million tokens. Logged call costs use LiteLLM's pricing data, with provider-reported cost as a fallback. Consult [DeepSeek pricing](https://api-docs.deepseek.com/quick_start/pricing/) and [Anthropic pricing](https://www.anthropic.com/pricing) for current rates; the projections below use recent logged token sizes from this app.
 
 Current default routes:
 

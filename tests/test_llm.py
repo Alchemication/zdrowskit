@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import UTC, date, datetime
+from datetime import date, datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -35,7 +35,6 @@ from llm import (
     LLMResult,
     _call_with_retry,
     _completion_kwargs_for_model,
-    _deepseek_v4_cost,
     _fallback_chain,
     _is_overloaded,
     call_llm,
@@ -918,18 +917,14 @@ class TestCallLlm:
         assert result.cost == 0.05
         assert result.latency_s >= 0
 
-    @patch("llm.datetime")
     @patch("llm.litellm")
-    def test_cost_fallback_on_exception(
-        self, mock_litellm: MagicMock, mock_datetime: MagicMock
-    ) -> None:
-        mock_datetime.now.return_value = datetime(2026, 5, 1, tzinfo=UTC)
+    def test_missing_cost_returns_none(self, mock_litellm: MagicMock) -> None:
         mock_litellm.completion.return_value = self._mock_response()
         mock_litellm.completion_cost.side_effect = Exception("no pricing")
 
         result = call_llm([{"role": "user", "content": "test"}])
         assert result.model == DEFAULT_MODEL
-        assert result.cost == pytest.approx(0.000087)
+        assert result.cost is None
 
     @patch("llm.litellm")
     def test_uses_provider_reported_cost_when_litellm_missing(
@@ -946,42 +941,6 @@ class TestCallLlm:
         )
 
         assert result.cost == 0.0123
-
-    @patch("llm.litellm")
-    def test_direct_deepseek_v4_cost_fallback(self, mock_litellm: MagicMock) -> None:
-        response = self._mock_response(prompt_tokens=30_000, completion_tokens=5_000)
-        response.usage.prompt_cache_hit_tokens = 10_000
-        response.usage.prompt_cache_miss_tokens = 20_000
-        mock_litellm.completion.return_value = response
-        mock_litellm.completion_cost.side_effect = Exception("no pricing")
-
-        result = call_llm(
-            [{"role": "user", "content": "test"}],
-            model="deepseek/deepseek-v4-flash",
-        )
-
-        assert result.cost == pytest.approx(0.004228)
-
-    def test_direct_deepseek_v4_pro_pricing_window(self) -> None:
-        response = self._mock_response(
-            prompt_tokens=2_000_000, completion_tokens=1_000_000
-        )
-        response.usage.prompt_cache_hit_tokens = 1_000_000
-        response.usage.prompt_cache_miss_tokens = 1_000_000
-
-        discounted = _deepseek_v4_cost(
-            response,
-            "deepseek/deepseek-v4-pro",
-            at=datetime(2026, 5, 31, 15, 58, tzinfo=UTC),
-        )
-        list_price = _deepseek_v4_cost(
-            response,
-            "deepseek/deepseek-v4-pro",
-            at=datetime(2026, 5, 31, 15, 59, tzinfo=UTC),
-        )
-
-        assert discounted == pytest.approx(1.308625)
-        assert list_price == pytest.approx(5.2345)
 
     @patch("llm.litellm")
     def test_raw_message_preserves_reasoning_content(
