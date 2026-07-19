@@ -10,6 +10,10 @@ This guide covers local installation, first-run files, and the first LLM report.
 - LLM API keys for the providers you want to use
 - Telegram bot credentials if you want notifications and chat
 
+Google Drive is recommended for new installations because the daemon can poll
+it on macOS or Linux. The local/iCloud source remains available for existing
+macOS setups. See [Google Drive import](google-drive.md).
+
 ## First Run
 
 ```bash
@@ -35,6 +39,9 @@ uv run python main.py db schema
 
 # Get a weekly report (no LLM)
 uv run python main.py report
+
+# Run Drive polling / iCloud watching in the foreground
+uv run python src/daemon.py --foreground
 ```
 
 Normal CLI usage auto-applies pending SQLite migrations when the database is opened. Use `uv run python main.py db status` when you want to inspect schema state explicitly.

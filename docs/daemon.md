@@ -1,16 +1,46 @@
 # Daemon
 
-The daemon watches your iCloud health data folder and context files. When something meaningful happens, it decides whether to send a notification.
+The daemon imports health data, watches context files, and decides whether a
+meaningful change should produce a notification.
+
+Health ingestion depends on `ZDROWSKIT_IMPORT_SOURCE`:
+
+| Source | Behavior |
+|---|---|
+| `google-drive` | Poll the Metrics and Workouts folder IDs every five minutes by default; recommended for new installations |
+| `local` | Watch the local Auto Export directory for filesystem changes; retained as the default for compatibility with existing iCloud installations |
 
 ```bash
 # Test in foreground
 uv run python src/daemon.py --foreground
 
-# Install as a background service that starts automatically at login
+# macOS: install as a background service that starts automatically at login
 uv run python main.py daemon-install
 ```
 
+The foreground daemon runs on macOS and Linux. `daemon-install`,
+`daemon-restart`, and `daemon-stop` manage macOS `launchd`; use systemd or
+another process supervisor on Linux.
+
 What it watches and when it acts is covered in [Notifications](notifications.md): triggers, suppression rules, and cross-channel awareness.
+
+## Health Import
+
+For Google Drive, the daemon polls immediately on startup. This first pass fully
+imports an existing cache even when no Drive checksum changed. Later polls skip
+parsing and database access when every Drive file is current. New or changed
+files are downloaded atomically and enter the same `new_data` nudge flow as an
+iCloud file event.
+
+Configure the cadence in `.env`:
+
+```dotenv
+ZDROWSKIT_GOOGLE_DRIVE_POLL_INTERVAL_S=300
+```
+
+For local/iCloud imports, watchdog observes the data directory and retains the
+three-minute debounce that collapses a burst of filesystem events into one
+import.
 
 The checked-in plist under `launchd/` is a placeholder template. `daemon-install` generates the real plist with your checkout path, `uv` path, `HOME`, `PATH`, log location, and resolved Codex / Claude CLI paths if `codex` and/or `claude` are available. It currently installs one daemon instance for the current macOS user.
 
@@ -42,7 +72,8 @@ Logs rotate for 7 days.
 
 ## Operations
 
-Check if it is running. Look for a non-dash PID and exit code 0:
+On macOS, check if the launchd service is running. Look for a non-dash PID and
+exit code 0:
 
 ```bash
 launchctl list | grep zdrowskit

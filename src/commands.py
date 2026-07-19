@@ -26,6 +26,7 @@ import os
 import platform
 import shutil
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from xml.sax.saxutils import escape as xml_escape
 
@@ -34,6 +35,11 @@ from assembler import assemble
 from config import (
     APP_HOME,
     CONTEXT_DIR,
+    GOOGLE_DRIVE_METRICS_FOLDER_ID,
+    GOOGLE_DRIVE_POLL_INTERVAL_S,
+    GOOGLE_DRIVE_SERVICE_ACCOUNT,
+    GOOGLE_DRIVE_WORKOUTS_FOLDER_ID,
+    IMPORT_SOURCE,
     resolve_data_dir,
     resolve_google_drive_data_dir,
 )
@@ -61,18 +67,32 @@ LAUNCHD_LABEL = "com.zdrowskit.daemon"
 LAUNCHD_PLIST = f"{LAUNCHD_LABEL}.plist"
 
 
+@dataclass(frozen=True)
+class ImportResult:
+    """Outcome of one local or Google Drive health import."""
+
+    source: str
+    drive_files_downloaded: int
+    drive_files_skipped: int
+    parsed_days: int
+    stored_days: int
+    import_skipped: bool = False
+
+
 # ---------------------------------------------------------------------------
 # Subcommand handlers
 # ---------------------------------------------------------------------------
 
 
-def cmd_import(args: argparse.Namespace) -> None:
+def cmd_import(args: argparse.Namespace) -> ImportResult:
     """Handle the 'import' subcommand: parse export dir and upsert into DB.
 
     Args:
         args: Parsed CLI arguments with source, data_dir, and db attributes.
     """
     source = getattr(args, "source", "local")
+    drive_files_downloaded = 0
+    drive_files_skipped = 0
     if source == "google-drive":
         data_dir = resolve_google_drive_data_dir(args.data_dir)
         service_account = getattr(args, "google_drive_service_account", None)
@@ -106,11 +126,28 @@ def cmd_import(args: argparse.Namespace) -> None:
         except (DriveFetchError, OSError, ValueError) as exc:
             logger.error("Google Drive import failed: %s", exc)
             sys.exit(1)
-        logger.info(
+        log_fetch = (
+            logger.debug
+            if stats.downloaded == 0 and getattr(args, "skip_if_drive_unchanged", False)
+            else logger.info
+        )
+        log_fetch(
             "Google Drive fetch complete: %d downloaded, %d current",
             stats.downloaded,
             stats.skipped,
         )
+        drive_files_downloaded = stats.downloaded
+        drive_files_skipped = stats.skipped
+        if stats.downloaded == 0 and getattr(args, "skip_if_drive_unchanged", False):
+            logger.debug("Drive files are current; skipping data parse")
+            return ImportResult(
+                source=source,
+                drive_files_downloaded=0,
+                drive_files_skipped=drive_files_skipped,
+                parsed_days=0,
+                stored_days=0,
+                import_skipped=True,
+            )
     else:
         data_dir = resolve_data_dir(args.data_dir)
 
@@ -122,7 +159,13 @@ def cmd_import(args: argparse.Namespace) -> None:
     snapshots = assemble(data_dir)
     if not snapshots:
         logger.warning("No snapshots parsed from %s", data_dir)
-        return
+        return ImportResult(
+            source=source,
+            drive_files_downloaded=drive_files_downloaded,
+            drive_files_skipped=drive_files_skipped,
+            parsed_days=0,
+            stored_days=0,
+        )
     workout_count = sum(len(snapshot.workouts) for snapshot in snapshots)
     route_workout_count = sum(
         1
@@ -143,6 +186,13 @@ def cmd_import(args: argparse.Namespace) -> None:
     date_info = f"{dr[0]} – {dr[1]}" if dr else "unknown"
     print(f"Stored {n} day(s) from {snapshots[0].date} – {snapshots[-1].date}")
     print(f"Database now covers: {date_info}")
+    return ImportResult(
+        source=source,
+        drive_files_downloaded=drive_files_downloaded,
+        drive_files_skipped=drive_files_skipped,
+        parsed_days=len(snapshots),
+        stored_days=n,
+    )
 
 
 def cmd_report(args: argparse.Namespace) -> None:
@@ -348,7 +398,8 @@ def cmd_setup(args: argparse.Namespace) -> None:
     print(f"  1. Edit {CONTEXT_DIR / 'me.md'}")
     print(f"  2. Edit {CONTEXT_DIR / 'strategy.md'}")
     print("  3. Add at least one LLM API key to .env")
-    print("  4. Set up Auto Export on iPhone, then run: uv run python main.py import")
+    print("  4. Set up Auto Export with Google Drive (recommended) or iCloud")
+    print("  5. Import health data: uv run python main.py import")
     print("\nCheck readiness any time with: uv run python main.py doctor")
 
 
@@ -376,8 +427,58 @@ def cmd_doctor(args: argparse.Namespace) -> None:  # noqa: ARG001
         path = CONTEXT_DIR / name
         checks.append((f"context {name}", path.exists(), str(path), True))
 
-    data_dir = resolve_data_dir(None)
-    checks.append(("Auto Export data dir", data_dir.exists(), str(data_dir), True))
+    source_valid = IMPORT_SOURCE in {"local", "google-drive"}
+    checks.append(("import source", source_valid, IMPORT_SOURCE, True))
+    if IMPORT_SOURCE == "google-drive":
+        service_account = (
+            Path(GOOGLE_DRIVE_SERVICE_ACCOUNT).expanduser().resolve()
+            if GOOGLE_DRIVE_SERVICE_ACCOUNT
+            else None
+        )
+        checks.append(
+            (
+                "Drive service account",
+                bool(service_account and service_account.is_file()),
+                str(service_account) if service_account else "missing",
+                True,
+            )
+        )
+        checks.append(
+            (
+                "Drive Metrics folder",
+                bool(GOOGLE_DRIVE_METRICS_FOLDER_ID),
+                "configured" if GOOGLE_DRIVE_METRICS_FOLDER_ID else "missing",
+                True,
+            )
+        )
+        checks.append(
+            (
+                "Drive Workouts folder",
+                bool(GOOGLE_DRIVE_WORKOUTS_FOLDER_ID),
+                "configured" if GOOGLE_DRIVE_WORKOUTS_FOLDER_ID else "missing",
+                True,
+            )
+        )
+        checks.append(
+            (
+                "Drive poll interval",
+                GOOGLE_DRIVE_POLL_INTERVAL_S > 0,
+                f"{GOOGLE_DRIVE_POLL_INTERVAL_S}s",
+                True,
+            )
+        )
+        data_dir = resolve_google_drive_data_dir(None)
+        checks.append(
+            (
+                "Drive data cache",
+                data_dir.exists(),
+                f"{data_dir} (created by first import)",
+                False,
+            )
+        )
+    else:
+        data_dir = resolve_data_dir(None)
+        checks.append(("Auto Export data dir", data_dir.exists(), str(data_dir), True))
     checks.append(
         ("LLM API key", _env_has_any_model_key(), "DEEPSEEK/ANTHROPIC/OPENAI", True)
     )

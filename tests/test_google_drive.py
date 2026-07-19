@@ -197,6 +197,37 @@ class TestGoogleDriveImportCommand:
         )
         assemble_mock.assert_called_once_with(data_dir)
 
+    def test_daemon_poll_can_skip_parse_when_drive_is_current(
+        self, tmp_path: Path
+    ) -> None:
+        data_dir = tmp_path / "import"
+        data_dir.mkdir()
+        args = SimpleNamespace(
+            source="google-drive",
+            data_dir=str(data_dir),
+            google_drive_service_account=str(tmp_path / "service-account.json"),
+            google_drive_metrics_folder_id="metrics-folder",
+            google_drive_workouts_folder_id="workouts-folder",
+            google_drive_force=False,
+            google_drive_timeout=30.0,
+            skip_if_drive_unchanged=True,
+            db=str(tmp_path / "health.db"),
+        )
+
+        with (
+            patch.object(
+                commands_module,
+                "fetch_health_export",
+                return_value=FetchStats(downloaded=0, skipped=4),
+            ),
+            patch.object(commands_module, "assemble") as assemble,
+        ):
+            result = cmd_import(args)
+
+        assert result.import_skipped is True
+        assert result.drive_files_skipped == 4
+        assemble.assert_not_called()
+
     def test_reports_missing_drive_configuration(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:

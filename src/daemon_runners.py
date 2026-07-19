@@ -28,6 +28,7 @@ from config import (
 if TYPE_CHECKING:
     from cmd_coach import CoachProposal
     from cmd_llm_common import CommandResult
+    from commands import ImportResult
     from daemon import ZdrowskitDaemon
 
 logger = logging.getLogger(__name__)
@@ -380,24 +381,55 @@ class DaemonRunnerHandler:
     # Import
     # ------------------------------------------------------------------
 
-    def _run_import(self) -> None:
-        """Import the latest health data from the iCloud directory into the DB."""
+    def _run_import(
+        self,
+        *,
+        skip_if_drive_unchanged: bool = False,
+        record_no_changes: bool = True,
+    ) -> "ImportResult | None":
+        """Import the latest health data into the configured database.
+
+        Args:
+            skip_if_drive_unchanged: Skip parsing when a Drive poll downloads nothing.
+            record_no_changes: Whether to add a no-change event to the event log.
+
+        Returns:
+            Import result, or None when the command failed.
+        """
         from commands import cmd_import
 
         args = types.SimpleNamespace(
             data_dir=str(self._d.health_dir),
-            source="local",
+            source=self._d.import_source,
             db=str(self._d.db),
+            google_drive_service_account=(
+                str(self._d.google_drive_service_account)
+                if self._d.google_drive_service_account
+                else None
+            ),
+            google_drive_metrics_folder_id=self._d.google_drive_metrics_folder_id,
+            google_drive_workouts_folder_id=self._d.google_drive_workouts_folder_id,
+            google_drive_force=False,
+            google_drive_timeout=30.0,
+            skip_if_drive_unchanged=skip_if_drive_unchanged,
         )
-        before = self._data_snapshot()
-        try:
-            logger.info("Importing health data from %s", self._d.health_dir)
-            cmd_import(args)
-        except SystemExit:
-            logger.error("Import failed — proceeding with existing DB data")
-            self._d._record_event("import", "failed", "Health data import failed")
-            return
-        after = self._data_snapshot()
+        with self._d._import_lock:
+            before = self._data_snapshot()
+            try:
+                log_import = logger.debug if skip_if_drive_unchanged else logger.info
+                log_import(
+                    "Importing health data from %s (%s)",
+                    self._d.health_dir,
+                    self._d.import_source,
+                )
+                result = cmd_import(args)
+            except SystemExit:
+                logger.error("Import failed — proceeding with existing DB data")
+                self._d._record_event("import", "failed", "Health data import failed")
+                return None
+            if result.import_skipped:
+                return result
+            after = self._data_snapshot()
         changed = any(
             before.get(k) != after.get(k)
             for k in after
@@ -425,8 +457,9 @@ class DaemonRunnerHandler:
                 f"{delta['workouts_added']} workouts, {delta['sleep_added']} sleep"
             )
             self._d._record_event("import", "new_data", summary, delta)
-        else:
+        elif record_no_changes:
             self._d._record_event("import", "no_changes", "Import ran, no new rows")
+        return result
 
     # ------------------------------------------------------------------
     # Report runners

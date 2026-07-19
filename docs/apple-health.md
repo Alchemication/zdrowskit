@@ -63,5 +63,5 @@ Do this once per automation: Metrics and Workouts. The import is idempotent, so 
    uv run python main.py import
    ```
 
-4. For iCloud on macOS, run the daemon to watch and import new files automatically.
-5. For Google Drive, run `import` from a timer until Drive polling is integrated into the daemon.
+4. Run the daemon. It watches iCloud filesystem events or polls Google Drive,
+   depending on `ZDROWSKIT_IMPORT_SOURCE`.

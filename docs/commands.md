@@ -20,6 +20,7 @@ uv run python main.py telegram-setup      # register bot /commands for Telegram 
 uv run python main.py daemon-install      # generate + load launchd daemon plist
 uv run python main.py daemon-restart      # restart the background daemon
 uv run python main.py daemon-stop         # stop the background daemon
+uv run python src/daemon.py --foreground # run daemon directly on macOS/Linux
 ```
 
 Useful examples:
@@ -73,3 +74,6 @@ uv run python main.py import \
 
 Google Drive imports first update the local `Metrics/` and `Workouts/` cache,
 then run the same idempotent database import as a local source.
+
+The daemon uses the same source configuration. For Drive it polls immediately
+at startup and every `ZDROWSKIT_GOOGLE_DRIVE_POLL_INTERVAL_S` seconds afterward.

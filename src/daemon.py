@@ -1,7 +1,7 @@
-"""Filesystem watcher daemon for zdrowskit.
+"""Health import and notification daemon for zdrowskit.
 
-Monitors iCloud health data files and context .md files, triggering
-LLM-powered notifications when meaningful changes are detected.
+Polls Google Drive or monitors local health data files, watches context .md
+files, and triggers LLM-powered notifications when meaningful changes arrive.
 Also runs a Telegram long-polling listener for interactive chat.
 
 Public API:
@@ -30,12 +30,18 @@ from typing import TYPE_CHECKING, Iterator
 
 from config import (
     CONTEXT_DEBOUNCE_S,
+    GOOGLE_DRIVE_METRICS_FOLDER_ID,
+    GOOGLE_DRIVE_POLL_INTERVAL_S,
+    GOOGLE_DRIVE_SERVICE_ACCOUNT,
+    GOOGLE_DRIVE_WORKOUTS_FOLDER_ID,
     HEALTH_DEBOUNCE_S,
+    IMPORT_SOURCE,
     LOCK_FILE,
     LOG_FILE,
     SCHEDULED_CHECK_INTERVAL_S,
     STATE_FILE,
     resolve_data_dir,
+    resolve_google_drive_data_dir,
 )
 
 # Re-exported so tests and external callers can keep importing these names
@@ -52,6 +58,7 @@ from llm_verify import (
 
 if TYPE_CHECKING:
     from cmd_llm_common import CommandResult
+    from commands import ImportResult
     from context_edit import ContextEdit
     from context_edit import PendingContextEdit
 
@@ -256,6 +263,11 @@ class ZdrowskitDaemon:
         db: Path,
         context_dir: Path,
         health_dir: Path | None = None,
+        import_source: str = "local",
+        google_drive_service_account: Path | None = None,
+        google_drive_metrics_folder_id: str | None = None,
+        google_drive_workouts_folder_id: str | None = None,
+        google_drive_poll_interval_s: int = 5 * 60,
     ) -> None:
         """Initialise the daemon.
 
@@ -264,17 +276,66 @@ class ZdrowskitDaemon:
             db: Path to the SQLite database.
             context_dir: Path to the ContextFiles directory.
             health_dir: Path to the Auto Export data directory.
+            import_source: ``local`` filesystem events or ``google-drive`` polling.
+            google_drive_service_account: Service-account JSON path for Drive.
+            google_drive_metrics_folder_id: Auto Export Metrics folder ID.
+            google_drive_workouts_folder_id: Auto Export Workouts folder ID.
+            google_drive_poll_interval_s: Seconds between Drive API polls.
+
+        Raises:
+            ValueError: If the import source or Drive configuration is invalid.
         """
+        if import_source not in {"local", "google-drive"}:
+            raise ValueError(
+                f"Unknown import source {import_source!r}; use local or google-drive."
+            )
+        if google_drive_poll_interval_s <= 0:
+            raise ValueError("Google Drive poll interval must be greater than zero.")
+        if import_source == "google-drive":
+            missing = [
+                name
+                for name, value in (
+                    (
+                        "ZDROWSKIT_GOOGLE_DRIVE_SERVICE_ACCOUNT",
+                        google_drive_service_account,
+                    ),
+                    (
+                        "ZDROWSKIT_GOOGLE_DRIVE_METRICS_FOLDER_ID",
+                        google_drive_metrics_folder_id,
+                    ),
+                    (
+                        "ZDROWSKIT_GOOGLE_DRIVE_WORKOUTS_FOLDER_ID",
+                        google_drive_workouts_folder_id,
+                    ),
+                )
+                if not value
+            ]
+            if missing:
+                raise ValueError(
+                    "Google Drive daemon is missing configuration: "
+                    + ", ".join(missing)
+                )
+
         self.model = model
         self.db = db
         self.context_dir = context_dir
-        self.health_dir = health_dir or resolve_data_dir(None)
+        self.health_dir = health_dir or (
+            resolve_google_drive_data_dir(None)
+            if import_source == "google-drive"
+            else resolve_data_dir(None)
+        )
+        self.import_source = import_source
+        self.google_drive_service_account = google_drive_service_account
+        self.google_drive_metrics_folder_id = google_drive_metrics_folder_id
+        self.google_drive_workouts_folder_id = google_drive_workouts_folder_id
+        self.google_drive_poll_interval_s = google_drive_poll_interval_s
 
         self._state = _load_state()
         from config import NOTIFICATION_PREFS_PATH
 
         self._notification_prefs_path = NOTIFICATION_PREFS_PATH
         self._lock = threading.Lock()
+        self._import_lock = threading.RLock()
         self._stop_event = threading.Event()
         self._health_timer: threading.Timer | None = None
         self._health_debounce_count = 0
@@ -289,6 +350,7 @@ class ZdrowskitDaemon:
             value_type="int",
         )
         from daemon_add_flow import AddFlowHandler
+        from daemon_drive import GoogleDrivePollHandler
         from daemon_model_flow import ModelFlowHandler
         from daemon_notify_flow import NotifyFlowHandler
         from daemon_runners import DaemonRunnerHandler
@@ -299,6 +361,7 @@ class ZdrowskitDaemon:
         self._model_flow = ModelFlowHandler(self)
         self._chat = TelegramChatHandler(self)
         self._runners = DaemonRunnerHandler(self)
+        self._drive = GoogleDrivePollHandler(self)
         # Paths the daemon is about to write itself (e.g. accepted coach
         # edits). The watchdog handler consults this set to suppress the
         # follow-up `*_updated` nudge that would otherwise fire from the
@@ -352,6 +415,12 @@ class ZdrowskitDaemon:
 
         lines = [
             "System status:",
+            (
+                "- Health import: Google Drive "
+                f"(every {self.google_drive_poll_interval_s}s)"
+                if self.import_source == "google-drive"
+                else "- Health import: local filesystem watcher"
+            ),
             f"- Chat memory: {buffer_len} messages",
             f"- Nudges today: {nudge_count}/{effective['nudges']['max_per_day']}",
             f"- Last nudge: {self._format_status_timestamp(self._state.get('last_nudge_ts'))}",
@@ -618,9 +687,12 @@ class ZdrowskitDaemon:
             "Health data debounce settled; running import",
             {"debounce_s": HEALTH_DEBOUNCE_S, "file_events": file_events},
         )
-        before = self._runners._data_snapshot()
-        self._runners._run_import()
-        after = self._runners._data_snapshot()
+        with self._import_lock:
+            before = self._runners._data_snapshot()
+            result = self._runners._run_import()
+            after = self._runners._data_snapshot()
+        if result is None:
+            return
         trigger_context = self._runners._format_data_delta(before, after)
         self._state["last_data_snapshot"] = after
         _save_state(self._state)
@@ -675,9 +747,9 @@ class ZdrowskitDaemon:
         """Delegate to the runner handler."""
         self._runners._run_coach(**kwargs)
 
-    def _run_import(self) -> None:
+    def _run_import(self) -> "ImportResult | None":
         """Delegate to the runner handler."""
-        self._runners._run_import()
+        return self._runners._run_import()
 
     def _run_weekly_report(self) -> None:
         """Delegate to the runner handler."""
@@ -986,6 +1058,21 @@ class ZdrowskitDaemon:
             if scheduled_report_due(prefs, "midweek_report", now=now):
                 self._runners._run_midweek_report()
 
+    def _poll_google_drive_once(self, *, force_import: bool) -> bool:
+        """Delegate one Google Drive poll to the Drive handler.
+
+        Args:
+            force_import: Whether to parse an unchanged cache on this poll.
+
+        Returns:
+            Whether the poll and any required import succeeded.
+        """
+        return self._drive.poll_once(force_import=force_import)
+
+    def _google_drive_poll_loop(self) -> None:
+        """Delegate the recurring Google Drive loop to the Drive handler."""
+        self._drive.run()
+
     # ------------------------------------------------------------------
     # Main loop
     # ------------------------------------------------------------------
@@ -1009,21 +1096,22 @@ class ZdrowskitDaemon:
         self._lock_file.write(str(os.getpid()))
         self._lock_file.flush()
 
-        if not self.health_dir.exists():
+        if self.import_source == "local" and not self.health_dir.exists():
             logger.warning(
-                "iCloud health dir not found: %s — health triggers disabled",
+                "Local health data dir not found: %s — health triggers disabled",
                 self.health_dir,
             )
 
         logger.info("zdrowskit daemon starting")
         logger.info("Health data dir : %s", self.health_dir)
+        logger.info("Import source   : %s", self.import_source)
         logger.info("Context dir     : %s", self.context_dir)
         logger.info("Database        : %s", self.db)
         logger.info("State file      : %s", STATE_FILE)
 
         observer = Observer()
 
-        if self.health_dir.exists():
+        if self.import_source == "local" and self.health_dir.exists():
             observer.schedule(
                 _make_health_handler(self._schedule_health, self._schedule_health),
                 str(self.health_dir),
@@ -1055,6 +1143,18 @@ class ZdrowskitDaemon:
 
         logger.info("Daemon running — press Ctrl+C to stop")
         self._record_event("daemon", "start", "Daemon started")
+
+        if self.import_source == "google-drive":
+            logger.info(
+                "Google Drive polling every %ds", self.google_drive_poll_interval_s
+            )
+            drive_thread = threading.Thread(
+                target=self._google_drive_poll_loop,
+                daemon=True,
+                name="google-drive-poll",
+            )
+            drive_thread.start()
+
         try:
             while observer.is_alive():
                 observer.join(timeout=1)
@@ -1115,7 +1215,7 @@ def main() -> None:
     from store import default_db_path
 
     parser = argparse.ArgumentParser(
-        description="zdrowskit daemon — filesystem watcher and notification dispatcher"
+        description="zdrowskit health import and notification daemon"
     )
     parser.add_argument(
         "--foreground",
@@ -1134,6 +1234,37 @@ def main() -> None:
         help="Path to Auto Export health data folder",
     )
     parser.add_argument(
+        "--source",
+        choices=("local", "google-drive"),
+        default=IMPORT_SOURCE,
+        help="Health import source (default: ZDROWSKIT_IMPORT_SOURCE or local)",
+    )
+    parser.add_argument(
+        "--google-drive-service-account",
+        metavar="PATH",
+        default=GOOGLE_DRIVE_SERVICE_ACCOUNT,
+        help="Service-account JSON path",
+    )
+    parser.add_argument(
+        "--google-drive-metrics-folder-id",
+        metavar="ID",
+        default=GOOGLE_DRIVE_METRICS_FOLDER_ID,
+        help="Auto Export Metrics folder ID",
+    )
+    parser.add_argument(
+        "--google-drive-workouts-folder-id",
+        metavar="ID",
+        default=GOOGLE_DRIVE_WORKOUTS_FOLDER_ID,
+        help="Auto Export Workouts folder ID",
+    )
+    parser.add_argument(
+        "--google-drive-poll-interval",
+        type=int,
+        metavar="SECONDS",
+        default=GOOGLE_DRIVE_POLL_INTERVAL_S,
+        help="Drive polling interval in seconds",
+    )
+    parser.add_argument(
         "--model",
         metavar="MODEL",
         default=None,
@@ -1143,12 +1274,29 @@ def main() -> None:
 
     _setup_logging(args.foreground)
 
-    daemon = ZdrowskitDaemon(
-        model=args.model,
-        db=Path(args.db),
-        context_dir=CONTEXT_DIR,
-        health_dir=resolve_data_dir(args.data_dir),
-    )
+    try:
+        health_dir = (
+            resolve_google_drive_data_dir(args.data_dir)
+            if args.source == "google-drive"
+            else resolve_data_dir(args.data_dir)
+        )
+        daemon = ZdrowskitDaemon(
+            model=args.model,
+            db=Path(args.db),
+            context_dir=CONTEXT_DIR,
+            health_dir=health_dir,
+            import_source=args.source,
+            google_drive_service_account=(
+                Path(args.google_drive_service_account).expanduser().resolve()
+                if args.google_drive_service_account
+                else None
+            ),
+            google_drive_metrics_folder_id=args.google_drive_metrics_folder_id,
+            google_drive_workouts_folder_id=args.google_drive_workouts_folder_id,
+            google_drive_poll_interval_s=args.google_drive_poll_interval,
+        )
+    except ValueError as exc:
+        parser.error(str(exc))
     daemon.run()
 
 

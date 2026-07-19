@@ -108,7 +108,7 @@ flowchart TD
     user([User])
     install["daemon-install or daemon-restart"]
     daemon["launchd daemon"]
-    watcher["Watch iCloud health dir + editable context files"]
+    watcher["Poll Google Drive or watch iCloud + context files"]
     healthEvent{"Health file event?"}
     contextEvent{"me.md / log.md / strategy.md event?"}
     healthDebounce["Debounce health event"]

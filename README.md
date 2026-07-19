@@ -31,7 +31,7 @@ Three loops run continuously:
 
 - Apple Watch + iPhone
 - [Auto Export](https://apps.apple.com/app/myhealth-export-to-icloud/id6737380982) for scheduled Apple Health JSON export
-- A machine that runs Python; macOS with iCloud Drive is currently required only for the always-on daemon
+- A macOS or Linux machine that runs Python; Google Drive is recommended for portable daemon deployments
 - Python 3.12+ and [uv](https://github.com/astral-sh/uv)
 - A capable LLM provider API key
 - Telegram bot for notifications and chat
@@ -83,7 +83,7 @@ Run any command with `--help` for the full flag list. See [Commands](docs/comman
 | [Apple Health data export](docs/apple-health.md) | Auto Export setup, iCloud paths, historical backfill |
 | [Google Drive import](docs/google-drive.md) | Portable API fetch, service-account setup, multiple profiles |
 | [Commands](docs/commands.md) | CLI commands, useful flags, data directory override |
-| [Daemon](docs/daemon.md) | Always-on trainer mode, launchd install, state, logs, restart rules |
+| [Daemon](docs/daemon.md) | Drive polling, iCloud watching, service operation, state and logs |
 | [Telegram](docs/telegram.md) | Bot configuration, chat, commands, `/models`, `/notify` |
 | [Context files](docs/context-files.md) | `me.md`, `strategy.md`, `log.md`, generated memory files |
 | [Notifications](docs/notifications.md) | Notification types, preferences, triggers, suppression, rate limits |

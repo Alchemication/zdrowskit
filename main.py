@@ -85,7 +85,6 @@ Examples:
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from pathlib import Path
 
@@ -103,6 +102,12 @@ from cmd_models import cmd_models
 from cmd_nudge import cmd_nudge
 from cmd_notify import RESET_TARGETS as NOTIFY_RESET_TARGETS
 from cmd_notify import cmd_notify
+from config import (
+    GOOGLE_DRIVE_METRICS_FOLDER_ID,
+    GOOGLE_DRIVE_SERVICE_ACCOUNT,
+    GOOGLE_DRIVE_WORKOUTS_FOLDER_ID,
+    IMPORT_SOURCE,
+)
 from commands import (
     cmd_context,
     cmd_daemon_install,
@@ -155,25 +160,25 @@ def main() -> None:
     p_import.add_argument(
         "--source",
         choices=("local", "google-drive"),
-        default=os.environ.get("ZDROWSKIT_IMPORT_SOURCE", "local"),
+        default=IMPORT_SOURCE,
         help="Import source (default: local, or ZDROWSKIT_IMPORT_SOURCE)",
     )
     p_import.add_argument(
         "--google-drive-service-account",
         metavar="PATH",
-        default=os.environ.get("ZDROWSKIT_GOOGLE_DRIVE_SERVICE_ACCOUNT"),
+        default=GOOGLE_DRIVE_SERVICE_ACCOUNT,
         help="Service-account JSON path (or ZDROWSKIT_GOOGLE_DRIVE_SERVICE_ACCOUNT)",
     )
     p_import.add_argument(
         "--google-drive-metrics-folder-id",
         metavar="ID",
-        default=os.environ.get("ZDROWSKIT_GOOGLE_DRIVE_METRICS_FOLDER_ID"),
+        default=GOOGLE_DRIVE_METRICS_FOLDER_ID,
         help="Metrics folder ID (or ZDROWSKIT_GOOGLE_DRIVE_METRICS_FOLDER_ID)",
     )
     p_import.add_argument(
         "--google-drive-workouts-folder-id",
         metavar="ID",
-        default=os.environ.get("ZDROWSKIT_GOOGLE_DRIVE_WORKOUTS_FOLDER_ID"),
+        default=GOOGLE_DRIVE_WORKOUTS_FOLDER_ID,
         help="Workouts folder ID (or ZDROWSKIT_GOOGLE_DRIVE_WORKOUTS_FOLDER_ID)",
     )
     p_import.add_argument(

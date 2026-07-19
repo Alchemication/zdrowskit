@@ -5,8 +5,9 @@ JSON through the Drive API into a local cache, validates the payload type, and
 then runs the normal zdrowskit parser. It works anywhere Python and `uv` run,
 including a Raspberry Pi.
 
-The current daemon still watches an iCloud directory on macOS. Drive polling is
-not yet wired into the daemon; run `import` manually or from an external timer.
+Google Drive is the recommended transport for new installations. The runtime
+default remains `local` so existing iCloud installations do not break; selecting
+Drive explicitly in `.env` enables API polling in both `import` and the daemon.
 
 ## Auto Export Setup
 
@@ -60,6 +61,7 @@ ZDROWSKIT_IMPORT_SOURCE=google-drive
 ZDROWSKIT_GOOGLE_DRIVE_SERVICE_ACCOUNT=~/Documents/zdrowskit/secrets/service-account.json
 ZDROWSKIT_GOOGLE_DRIVE_METRICS_FOLDER_ID=METRICS_FOLDER_ID
 ZDROWSKIT_GOOGLE_DRIVE_WORKOUTS_FOLDER_ID=WORKOUTS_FOLDER_ID
+ZDROWSKIT_GOOGLE_DRIVE_POLL_INTERVAL_S=300
 HEALTH_DATA_DIR=~/Documents/zdrowskit/Imports/adam
 ```
 
@@ -82,6 +84,32 @@ The manifest makes polling idempotent: files whose Drive checksums are already
 current are skipped. Downloaded JSON is rejected if the configured Metrics
 folder does not contain `data.metrics` or the Workouts folder does not contain
 `data.workouts`.
+
+## Daemon Polling
+
+With `ZDROWSKIT_IMPORT_SOURCE=google-drive`, the daemon uses Drive API polling
+instead of filesystem events for health data:
+
+1. Poll immediately at startup and perform a full cache import.
+2. Poll every `ZDROWSKIT_GOOGLE_DRIVE_POLL_INTERVAL_S` seconds; the default is
+   five minutes.
+3. Compare Drive checksums with the local manifest.
+4. When files changed, download atomically, import, and run the existing
+   `new_data` notification flow.
+5. When nothing changed, skip parsing and database work.
+
+The iCloud three-minute filesystem debounce does not apply to Drive. Failed
+polls leave the existing cache and database intact and retry on the next interval.
+
+Run the daemon directly on macOS or Linux:
+
+```bash
+uv run python src/daemon.py --foreground
+```
+
+`uv run python main.py daemon-install` installs a macOS `launchd` service. On a
+Raspberry Pi or other Linux host, run the same daemon command under your normal
+service manager, such as systemd.
 
 ## Standalone Fetch
 
@@ -119,3 +147,6 @@ uv run python main.py import \
   --data-dir ~/Documents/zdrowskit/Imports/anna \
   --db ~/Documents/zdrowskit/anna.db
 ```
+
+The daemon currently owns one profile per process and app-home directory. A
+first-class multi-profile supervisor is separate future work.

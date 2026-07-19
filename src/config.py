@@ -15,7 +15,7 @@ Public groups:
     Verification: ENABLE_LLM_VERIFICATION, VERIFY_*, VERIFICATION_MODEL,
         VERIFICATION_REWRITE_MODEL, MAX_VERIFICATION_REVISIONS.
     Daemon: LOG_FILE, LOCK_FILE, STATE_FILE, debounce windows, nudge limits,
-        report cadence, and suppression timing.
+        report cadence, Google Drive polling, and suppression timing.
     Helpers: resolve_data_dir, resolve_google_drive_data_dir.
 
 Example:
@@ -44,6 +44,17 @@ AUTOEXPORT_DATA_DIR: Path = (
 """iCloud path where Auto Export app exports land."""
 GOOGLE_DRIVE_DATA_DIR: Path = APP_HOME / "Imports" / "google-drive"
 """Default local cache for Google Drive Auto Export files."""
+IMPORT_SOURCE: str = os.environ.get("ZDROWSKIT_IMPORT_SOURCE", "local").strip()
+"""Health import transport: ``local`` or ``google-drive``."""
+GOOGLE_DRIVE_SERVICE_ACCOUNT: str | None = os.environ.get(
+    "ZDROWSKIT_GOOGLE_DRIVE_SERVICE_ACCOUNT"
+)
+GOOGLE_DRIVE_METRICS_FOLDER_ID: str | None = os.environ.get(
+    "ZDROWSKIT_GOOGLE_DRIVE_METRICS_FOLDER_ID"
+)
+GOOGLE_DRIVE_WORKOUTS_FOLDER_ID: str | None = os.environ.get(
+    "ZDROWSKIT_GOOGLE_DRIVE_WORKOUTS_FOLDER_ID"
+)
 CONTEXT_DIR: Path = APP_HOME / "ContextFiles"
 NOTIFICATION_PREFS_PATH: Path = APP_HOME / "notification_prefs.json"
 MODEL_PREFS_PATH: Path = APP_HOME / "model_prefs.json"
@@ -331,6 +342,11 @@ MIN_NUDGE_INTERVAL_S: int = 3 * 60 * 60
 
 SCHEDULED_CHECK_INTERVAL_S: int = 30 * 60
 """How often the scheduled-check loop wakes to evaluate report cadence."""
+
+GOOGLE_DRIVE_POLL_INTERVAL_S: int = _env_int(
+    "ZDROWSKIT_GOOGLE_DRIVE_POLL_INTERVAL_S", 5 * 60
+)
+"""How often a Google Drive daemon checks for new or changed export files."""
 
 COACH_SUPPRESSION_S: int = 3600
 """±1 hour suppression around scheduled reports — no nudges fire inside
