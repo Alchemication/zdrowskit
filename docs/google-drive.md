@@ -99,7 +99,10 @@ instead of filesystem events for health data:
 5. When nothing changed, skip parsing and database work.
 
 The iCloud three-minute filesystem debounce does not apply to Drive. Failed
-polls leave the existing cache and database intact and retry on the next interval.
+polls leave the existing cache and database intact and retry on the next
+interval. A persistent failure (bad folder ID, revoked share) is recorded in
+the event log once per streak, not once per poll; the next successful poll
+re-arms the failure event.
 
 Run the daemon directly on macOS or Linux:
 

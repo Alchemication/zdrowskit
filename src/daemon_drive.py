@@ -16,6 +16,10 @@ class GoogleDrivePollHandler:
 
     def __init__(self, daemon: "ZdrowskitDaemon") -> None:
         self._d = daemon
+        # A persistent failure (bad folder ID, revoked share, expired key)
+        # would otherwise add one failure event per poll interval. Record the
+        # first failure, then stay quiet until a poll succeeds again.
+        self._failure_event_recorded = False
 
     def poll_once(self, *, force_import: bool) -> bool:
         """Poll Drive once, import changes, and trigger a new-data nudge.
@@ -33,20 +37,29 @@ class GoogleDrivePollHandler:
                 result = self._d._runners._run_import(
                     skip_if_drive_unchanged=not force_import,
                     record_no_changes=False,
+                    record_failure=not self._failure_event_recorded,
                 )
                 after = self._d._runners._data_snapshot()
         except Exception as exc:
             logger.exception("Google Drive poll failed: %s", exc)
-            self._d._record_event(
-                "import",
-                "failed",
-                "Google Drive poll failed",
-                {"error": str(exc)},
-            )
+            if not self._failure_event_recorded:
+                self._d._record_event(
+                    "import",
+                    "failed",
+                    "Google Drive poll failed",
+                    {"error": str(exc)},
+                )
+                self._failure_event_recorded = True
             return False
 
         if result is None:
+            # _run_import already recorded the failure event when this is the
+            # first failure of the streak.
+            self._failure_event_recorded = True
             return False
+        if self._failure_event_recorded:
+            logger.info("Google Drive poll recovered")
+            self._failure_event_recorded = False
         if result.drive_files_downloaded == 0:
             logger.debug("Google Drive poll found no changed files")
             return True

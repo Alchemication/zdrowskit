@@ -113,6 +113,7 @@ class TestDrivePolling:
         run_import.assert_called_once_with(
             skip_if_drive_unchanged=True,
             record_no_changes=False,
+            record_failure=True,
         )
         run_nudge.assert_called_once_with("new_data", trigger_context="1 new day")
         assert record_event.call_args.args[:3] == (
@@ -143,6 +144,55 @@ class TestDrivePolling:
         assert success is True
         run_nudge.assert_not_called()
         record_event.assert_not_called()
+
+    def test_repeated_poll_failures_record_one_event(self, tmp_path: Path) -> None:
+        daemon = _make_drive_daemon(tmp_path)
+
+        with (
+            patch("commands.cmd_import", side_effect=SystemExit(1)),
+            patch.object(daemon._runners, "_data_snapshot", return_value={}),
+            patch.object(daemon, "_record_event") as record_event,
+        ):
+            assert daemon._poll_google_drive_once(force_import=True) is False
+            assert daemon._poll_google_drive_once(force_import=True) is False
+            assert daemon._poll_google_drive_once(force_import=True) is False
+
+        failures = [
+            call
+            for call in record_event.call_args_list
+            if call.args[:2] == ("import", "failed")
+        ]
+        assert len(failures) == 1
+
+    def test_poll_success_rearms_failure_event(self, tmp_path: Path) -> None:
+        daemon = _make_drive_daemon(tmp_path)
+        current = ImportResult(
+            source="google-drive",
+            drive_files_downloaded=0,
+            drive_files_skipped=4,
+            parsed_days=0,
+            stored_days=0,
+            import_skipped=True,
+        )
+
+        with (
+            patch(
+                "commands.cmd_import",
+                side_effect=[SystemExit(1), current, SystemExit(1)],
+            ),
+            patch.object(daemon._runners, "_data_snapshot", return_value={}),
+            patch.object(daemon, "_record_event") as record_event,
+        ):
+            assert daemon._poll_google_drive_once(force_import=True) is False
+            assert daemon._poll_google_drive_once(force_import=False) is True
+            assert daemon._poll_google_drive_once(force_import=False) is False
+
+        failures = [
+            call
+            for call in record_event.call_args_list
+            if call.args[:2] == ("import", "failed")
+        ]
+        assert len(failures) == 2
 
     def test_poll_failure_keeps_full_import_for_retry(self, tmp_path: Path) -> None:
         daemon = _make_drive_daemon(tmp_path)

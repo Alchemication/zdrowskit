@@ -386,12 +386,17 @@ class DaemonRunnerHandler:
         *,
         skip_if_drive_unchanged: bool = False,
         record_no_changes: bool = True,
+        record_failure: bool = True,
     ) -> "ImportResult | None":
         """Import the latest health data into the configured database.
 
         Args:
             skip_if_drive_unchanged: Skip parsing when a Drive poll downloads nothing.
             record_no_changes: Whether to add a no-change event to the event log.
+            record_failure: Whether to add a failure event when the import fails.
+                The Drive poll passes False for repeats of an already-recorded
+                failure so a persistent misconfiguration does not spam the
+                event log every poll interval.
 
         Returns:
             Import result, or None when the command failed.
@@ -425,7 +430,10 @@ class DaemonRunnerHandler:
                 result = cmd_import(args)
             except SystemExit:
                 logger.error("Import failed — proceeding with existing DB data")
-                self._d._record_event("import", "failed", "Health data import failed")
+                if record_failure:
+                    self._d._record_event(
+                        "import", "failed", "Health data import failed"
+                    )
                 return None
             if result.import_skipped:
                 return result
