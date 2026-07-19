@@ -3,7 +3,7 @@
 Always use `uv run`. Run any command with `--help` for the full flag list.
 
 ```bash
-uv run python main.py import              # import from Auto Export
+uv run python main.py import              # import from local/iCloud or Google Drive
 uv run python main.py status              # DB row counts + date range
 uv run python main.py report              # current week: summary + daily
 uv run python main.py insights            # personalised weekly report via LLM
@@ -48,3 +48,28 @@ uv run python -m evals.leaderboard render
 ## Data Directory Override
 
 Override the default iCloud data directory with `--data-dir` or the `HEALTH_DATA_DIR` environment variable.
+
+## Google Drive Import
+
+Set `ZDROWSKIT_IMPORT_SOURCE=google-drive` and the three
+`ZDROWSKIT_GOOGLE_DRIVE_*` values documented in [Google Drive import](google-drive.md),
+then use the normal import command:
+
+```bash
+uv run python main.py import
+```
+
+CLI flags override the environment for a one-off or second profile:
+
+```bash
+uv run python main.py import \
+  --source google-drive \
+  --google-drive-service-account PATH \
+  --google-drive-metrics-folder-id ID \
+  --google-drive-workouts-folder-id ID \
+  --data-dir PATH \
+  --db PATH
+```
+
+Google Drive imports first update the local `Metrics/` and `Workouts/` cache,
+then run the same idempotent database import as a local source.

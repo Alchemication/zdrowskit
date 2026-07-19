@@ -6,7 +6,7 @@ user-facing list.
 
 Public groups:
     Paths: AUTOEXPORT_DATA_DIR, CONTEXT_DIR, NOTIFICATION_PREFS_PATH,
-        PROMPTS_DIR, REPORTS_DIR, NUDGES_DIR.
+        GOOGLE_DRIVE_DATA_DIR, PROMPTS_DIR, REPORTS_DIR, NUDGES_DIR.
     Prompt/context limits: MAX_HISTORY_ENTRIES, MAX_LOG_ENTRIES,
         MAX_COACH_FEEDBACK_ENTRIES, MAX_CONVERSATION_MESSAGES,
         MAX_TOOL_ITERATIONS*, MAX_TOKENS*.
@@ -16,7 +16,7 @@ Public groups:
         VERIFICATION_REWRITE_MODEL, MAX_VERIFICATION_REVISIONS.
     Daemon: LOG_FILE, LOCK_FILE, STATE_FILE, debounce windows, nudge limits,
         report cadence, and suppression timing.
-    Helpers: resolve_data_dir.
+    Helpers: resolve_data_dir, resolve_google_drive_data_dir.
 
 Example:
     from config import CONTEXT_DIR, resolve_data_dir
@@ -42,6 +42,8 @@ AUTOEXPORT_DATA_DIR: Path = (
     / "Library/Mobile Documents/iCloud~com~ifunography~HealthExport/Documents"
 )
 """iCloud path where Auto Export app exports land."""
+GOOGLE_DRIVE_DATA_DIR: Path = APP_HOME / "Imports" / "google-drive"
+"""Default local cache for Google Drive Auto Export files."""
 CONTEXT_DIR: Path = APP_HOME / "ContextFiles"
 NOTIFICATION_PREFS_PATH: Path = APP_HOME / "notification_prefs.json"
 MODEL_PREFS_PATH: Path = APP_HOME / "model_prefs.json"
@@ -352,3 +354,23 @@ def resolve_data_dir(arg: str | None) -> Path:
     if env:
         return Path(env).expanduser().resolve()
     return AUTOEXPORT_DATA_DIR
+
+
+def resolve_google_drive_data_dir(arg: str | None) -> Path:
+    """Resolve the local cache used for Google Drive imports.
+
+    Priority: CLI ``--data-dir`` > ``HEALTH_DATA_DIR`` environment variable >
+    ``GOOGLE_DRIVE_DATA_DIR``.
+
+    Args:
+        arg: Value of the ``--data-dir`` CLI argument, or None.
+
+    Returns:
+        Absolute path to the local Google Drive import cache.
+    """
+    if arg:
+        return Path(arg).expanduser().resolve()
+    env = os.environ.get("HEALTH_DATA_DIR")
+    if env:
+        return Path(env).expanduser().resolve()
+    return GOOGLE_DRIVE_DATA_DIR.resolve()

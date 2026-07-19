@@ -85,6 +85,7 @@ Examples:
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -151,6 +152,42 @@ def main() -> None:
         "import", help="Parse export directory and upsert into DB"
     )
     p_import.add_argument("--data-dir", metavar="PATH", help="Path to data folder")
+    p_import.add_argument(
+        "--source",
+        choices=("local", "google-drive"),
+        default=os.environ.get("ZDROWSKIT_IMPORT_SOURCE", "local"),
+        help="Import source (default: local, or ZDROWSKIT_IMPORT_SOURCE)",
+    )
+    p_import.add_argument(
+        "--google-drive-service-account",
+        metavar="PATH",
+        default=os.environ.get("ZDROWSKIT_GOOGLE_DRIVE_SERVICE_ACCOUNT"),
+        help="Service-account JSON path (or ZDROWSKIT_GOOGLE_DRIVE_SERVICE_ACCOUNT)",
+    )
+    p_import.add_argument(
+        "--google-drive-metrics-folder-id",
+        metavar="ID",
+        default=os.environ.get("ZDROWSKIT_GOOGLE_DRIVE_METRICS_FOLDER_ID"),
+        help="Metrics folder ID (or ZDROWSKIT_GOOGLE_DRIVE_METRICS_FOLDER_ID)",
+    )
+    p_import.add_argument(
+        "--google-drive-workouts-folder-id",
+        metavar="ID",
+        default=os.environ.get("ZDROWSKIT_GOOGLE_DRIVE_WORKOUTS_FOLDER_ID"),
+        help="Workouts folder ID (or ZDROWSKIT_GOOGLE_DRIVE_WORKOUTS_FOLDER_ID)",
+    )
+    p_import.add_argument(
+        "--google-drive-force",
+        action="store_true",
+        help="Redownload Drive files even when the local manifest is current",
+    )
+    p_import.add_argument(
+        "--google-drive-timeout",
+        type=float,
+        default=30.0,
+        metavar="SECONDS",
+        help="Google Drive request timeout (default: 30)",
+    )
     _add_db(p_import)
 
     # report

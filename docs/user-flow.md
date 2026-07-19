@@ -6,7 +6,7 @@
 flowchart TD
     user([User])
     apple([Apple Watch + iPhone])
-    export["Auto Export to iCloud Drive"]
+    export["Auto Export to iCloud or Google Drive"]
     setup["Setup + doctor"]
     context[(Context files)]
     db[(Local SQLite DB)]
@@ -65,7 +65,7 @@ flowchart TD
     doctor{"uv run python main.py doctor passes?"}
     fixConfig["Fix paths, credentials, or local setup"]
     apple["Apple Watch + iPhone"]
-    autoExport["Auto Export writes health JSON/XML to iCloud Drive"]
+    autoExport["Auto Export writes health JSON to iCloud or Google Drive"]
     importCmd["uv run python main.py import"]
     parse["Parse metrics, workouts, routes, sleep"]
     migrate["Open DB with migrations"]

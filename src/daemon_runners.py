@@ -386,7 +386,7 @@ class DaemonRunnerHandler:
 
         args = types.SimpleNamespace(
             data_dir=str(self._d.health_dir),
-            source="autoexport",
+            source="local",
             db=str(self._d.db),
         )
         before = self._data_snapshot()

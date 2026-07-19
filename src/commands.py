@@ -35,7 +35,9 @@ from config import (
     APP_HOME,
     CONTEXT_DIR,
     resolve_data_dir,
+    resolve_google_drive_data_dir,
 )
+from google_drive import DriveFetchError, fetch_health_export
 from llm_context import load_context
 from llm_health import build_llm_data
 from report import (
@@ -68,9 +70,50 @@ def cmd_import(args: argparse.Namespace) -> None:
     """Handle the 'import' subcommand: parse export dir and upsert into DB.
 
     Args:
-        args: Parsed CLI arguments with data_dir and db attributes.
+        args: Parsed CLI arguments with source, data_dir, and db attributes.
     """
-    data_dir = resolve_data_dir(args.data_dir)
+    source = getattr(args, "source", "local")
+    if source == "google-drive":
+        data_dir = resolve_google_drive_data_dir(args.data_dir)
+        service_account = getattr(args, "google_drive_service_account", None)
+        metrics_folder_id = getattr(args, "google_drive_metrics_folder_id", None)
+        workouts_folder_id = getattr(args, "google_drive_workouts_folder_id", None)
+        missing = [
+            name
+            for name, value in (
+                ("ZDROWSKIT_GOOGLE_DRIVE_SERVICE_ACCOUNT", service_account),
+                ("ZDROWSKIT_GOOGLE_DRIVE_METRICS_FOLDER_ID", metrics_folder_id),
+                ("ZDROWSKIT_GOOGLE_DRIVE_WORKOUTS_FOLDER_ID", workouts_folder_id),
+            )
+            if not value
+        ]
+        if missing:
+            logger.error(
+                "Google Drive import is missing configuration: %s",
+                ", ".join(missing),
+            )
+            sys.exit(1)
+
+        try:
+            stats = fetch_health_export(
+                metrics_folder_id=metrics_folder_id,
+                workouts_folder_id=workouts_folder_id,
+                data_dir=data_dir,
+                service_account_path=Path(service_account).expanduser().resolve(),
+                force=getattr(args, "google_drive_force", False),
+                timeout=getattr(args, "google_drive_timeout", 30.0),
+            )
+        except (DriveFetchError, OSError, ValueError) as exc:
+            logger.error("Google Drive import failed: %s", exc)
+            sys.exit(1)
+        logger.info(
+            "Google Drive fetch complete: %d downloaded, %d current",
+            stats.downloaded,
+            stats.skipped,
+        )
+    else:
+        data_dir = resolve_data_dir(args.data_dir)
+
     if not data_dir.exists():
         logger.error("data directory not found: %s", data_dir)
         sys.exit(1)

@@ -5,6 +5,7 @@ description = "What Apple Health notifications should be."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "google-auth==2.43.0",
     "kaleido==1.2.0",
     "litellm==1.83.13",
     "numpy==2.4.3",

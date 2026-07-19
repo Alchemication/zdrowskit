@@ -23,7 +23,7 @@ Under the hood: SQLite for storage, [litellm](https://github.com/BerriAI/litellm
 
 Three loops run continuously:
 
-- **Data in** - Auto Export writes Apple Health JSON files to iCloud Drive. zdrowskit imports metrics, workouts, routes, and sleep into SQLite.
+- **Data in** - Auto Export writes Apple Health JSON files to iCloud Drive or Google Drive. zdrowskit imports metrics, workouts, routes, and sleep into SQLite.
 - **Coach out** - scheduled reports, weekly coaching reviews, midweek check-ins, and reactive nudges each use their own prompt, tools, and LLM call.
 - **Two-way chat** - Telegram messages can query your full health history through SQL, render charts, and propose context-file edits with Approve/Reject buttons.
 
@@ -31,7 +31,7 @@ Three loops run continuously:
 
 - Apple Watch + iPhone
 - [Auto Export](https://apps.apple.com/app/myhealth-export-to-icloud/id6737380982) for scheduled Apple Health JSON export
-- Mac with iCloud Drive sync for the always-on daemon
+- A machine that runs Python; macOS with iCloud Drive is currently required only for the always-on daemon
 - Python 3.12+ and [uv](https://github.com/astral-sh/uv)
 - A capable LLM provider API key
 - Telegram bot for notifications and chat
@@ -42,7 +42,7 @@ zdrowskit is personal and Apple-first. See [Limitations](docs/limitations.md) fo
 
 ## Quick Start
 
-Before you start: `import` does nothing until Auto Export has synced Apple Health data to iCloud Drive. If you have not done that yet, set it up first — see [Apple Health data export](docs/apple-health.md).
+Before you start: `import` needs Apple Health JSON from Auto Export, delivered through iCloud Drive or Google Drive. If you have not configured that yet, see [Apple Health data export](docs/apple-health.md).
 
 ```bash
 git clone <repo-url> && cd zdrowskit
@@ -81,6 +81,7 @@ Run any command with `--help` for the full flag list. See [Commands](docs/comman
 |---|---|
 | [Setup](docs/setup.md) | Installation, `.env`, first-run context files, first LLM report |
 | [Apple Health data export](docs/apple-health.md) | Auto Export setup, iCloud paths, historical backfill |
+| [Google Drive import](docs/google-drive.md) | Portable API fetch, service-account setup, multiple profiles |
 | [Commands](docs/commands.md) | CLI commands, useful flags, data directory override |
 | [Daemon](docs/daemon.md) | Always-on trainer mode, launchd install, state, logs, restart rules |
 | [Telegram](docs/telegram.md) | Bot configuration, chat, commands, `/models`, `/notify` |

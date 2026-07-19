@@ -2,20 +2,23 @@
 
 Apple's built-in health export dumps everything into a single massive XML file. On any non-trivial data size, this crashes or overheats the iPhone, so it is not a real solution for this project.
 
-The workaround is a third-party iOS app that reads HealthKit directly and writes structured JSON to iCloud Drive. zdrowskit uses [Auto Export](https://apps.apple.com/app/myhealth-export-to-icloud/id6737380982). It works on iOS 26, while some alternatives do not yet. The Basic tier unlocks Shortcut actions; Premium (a one-time purchase, still cheap) is needed for scheduled Automations.
+The workaround is a third-party iOS app that reads HealthKit directly and writes structured JSON to cloud storage. zdrowskit uses [Auto Export](https://apps.apple.com/app/myhealth-export-to-icloud/id6737380982). It works on iOS 26, while some alternatives do not yet. The Basic tier unlocks Shortcut actions; Premium (a one-time purchase, still cheap) is needed for scheduled Automations.
 
 One universal constraint: iOS requires the phone to be unlocked for any health data export. Automations silently skip when the phone is locked.
 
 ## Auto Export Setup
 
-The Automations feature syncs health data to iCloud Drive on a schedule, with no taps required once configured.
+The Automations feature exports health data to iCloud Drive or Google Drive on a schedule, with no taps required once configured.
 
 Setup in the app:
 
 1. Create two automations: one for **Metrics**, one for **Workouts**.
-2. Set both to: **Date Range = Week**, **Aggregation = Day**, **Destination = iCloud Drive**.
+2. Set both to: **Date Range = Week**, **Aggregation = Day**, and **Export Format = JSON**.
 3. Select all metrics you care about, such as steps, energy, HR, HRV, VO2max, mobility, resting heart rate, and sleep analysis.
 4. Set the schedule. Every 5 minutes is recommended because shorter intervals catch more unlock windows.
+
+For iCloud, use `Metrics` and `Workouts` as the automation folder names. For a
+portable API-based import, follow [Google Drive import](google-drive.md).
 
 The app writes weekly JSON files:
 
@@ -24,7 +27,7 @@ Metrics/HealthAutoExport-YYYY-WW.json
 Workouts/HealthAutoExport-YYYY-WW.json
 ```
 
-Data path:
+Default iCloud data path:
 
 ```text
 ~/Library/Mobile Documents/iCloud~com~ifunography~HealthExport/Documents/
@@ -45,7 +48,7 @@ How to backfill:
 1. Open an existing automation in Auto Export.
 2. Scroll to the bottom and tap **Manual Export**.
 3. Set a custom date range, such as the whole of 2024. The app splits it into weekly files automatically.
-4. Wait for the files to sync via iCloud.
+4. Wait for the files to arrive in the configured iCloud or Google Drive destination.
 5. Run `uv run python main.py import`. The same command handles both current and historical data.
 
 Do this once per automation: Metrics and Workouts. The import is idempotent, so re-running it will not duplicate data.
@@ -60,5 +63,5 @@ Do this once per automation: Metrics and Workouts. The import is idempotent, so 
    uv run python main.py import
    ```
 
-4. Run the daemon. It watches the Auto Export iCloud folder and imports new data automatically.
-5. Stop thinking about exporting until Apple changes something.
+4. For iCloud on macOS, run the daemon to watch and import new files automatically.
+5. For Google Drive, run `import` from a timer until Drive polling is integrated into the daemon.
