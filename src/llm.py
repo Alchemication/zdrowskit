@@ -669,7 +669,7 @@ def call_llm(
         model: litellm model string.
         max_tokens: Maximum tokens in the response.
         temperature: Sampling temperature. Pass ``None`` to omit the parameter
-            entirely for models that reject it (e.g. claude-opus-4-7, which
+            entirely for models that reject it (e.g. claude-opus-4-8, which
             deprecated the field).
         reasoning_effort: Optional reasoning effort hint (model-dependent).
         response_format: Optional OpenAI-compatible response format hint.

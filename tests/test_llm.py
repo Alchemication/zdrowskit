@@ -13,7 +13,6 @@ from pydantic import BaseModel
 
 from config import (
     ANTHROPIC_HAIKU_MODEL,
-    ANTHROPIC_OPUS_4_7_MODEL,
     ANTHROPIC_OPUS_MODEL,
     DEEPSEEK_FLASH_MODEL,
     DEEPSEEK_PRO_MODEL,
@@ -77,7 +76,7 @@ class TestFeatureDefaultModels:
         assert DEFAULT_MODEL == PRIMARY_PRO_MODEL == DEEPSEEK_PRO_MODEL
         assert FALLBACK_MODEL == FALLBACK_PRO_MODEL == ANTHROPIC_OPUS_MODEL
         assert DEFAULT_INSIGHTS_MODEL == DEFAULT_COACH_MODEL == DEFAULT_NUDGE_MODEL
-        assert DEFAULT_INSIGHTS_MODEL == ANTHROPIC_OPUS_4_7_MODEL
+        assert DEFAULT_INSIGHTS_MODEL == ANTHROPIC_OPUS_MODEL
         assert DEFAULT_CHAT_MODEL == PRIMARY_FLASH_MODEL
 
     def test_lightweight_utility_surfaces_default_models(self) -> None:
@@ -1183,7 +1182,7 @@ class TestCallLlm:
 
         call_llm(
             [{"role": "user", "content": "test"}],
-            model=ANTHROPIC_OPUS_4_7_MODEL,
+            model=ANTHROPIC_OPUS_MODEL,
             temperature=None,
         )
 
@@ -1320,7 +1319,7 @@ class TestCallLlm:
 
         result = call_llm(
             [{"role": "user", "content": "test"}],
-            model=ANTHROPIC_OPUS_4_7_MODEL,
+            model=ANTHROPIC_OPUS_MODEL,
             reasoning_effort="high",
             fallback_models=[DEEPSEEK_PRO_MODEL],
         )
@@ -1328,7 +1327,7 @@ class TestCallLlm:
         seen_models = [
             call.kwargs["model"] for call in mock_litellm.completion.call_args_list
         ]
-        assert seen_models == [ANTHROPIC_OPUS_4_7_MODEL, DEEPSEEK_PRO_MODEL]
+        assert seen_models == [ANTHROPIC_OPUS_MODEL, DEEPSEEK_PRO_MODEL]
         # Anthropic attempt: native reasoning_effort, no extra_body.
         anthropic_kwargs = mock_litellm.completion.call_args_list[0].kwargs
         assert "extra_body" not in anthropic_kwargs

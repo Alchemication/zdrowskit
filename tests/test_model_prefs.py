@@ -6,7 +6,7 @@ import json
 
 from config import (
     ANTHROPIC_HAIKU_MODEL,
-    ANTHROPIC_OPUS_4_7_MODEL,
+    ANTHROPIC_OPUS_MODEL,
     FALLBACK_PRO_MODEL,
     PRIMARY_FLASH_MODEL,
     PRIMARY_PRO_MODEL,
@@ -30,7 +30,7 @@ class TestModelPrefs:
         for feature in ("insights", "coach", "nudge"):
             route = resolve_model_route(feature, path=tmp_path / "models.json")
 
-            assert route.primary == ANTHROPIC_OPUS_4_7_MODEL
+            assert route.primary == ANTHROPIC_OPUS_MODEL
             assert route.fallback == PRIMARY_PRO_MODEL
             assert route.call_kwargs()["reasoning_effort"] == "high"
             assert route.call_kwargs()["temperature"] is None
@@ -56,19 +56,19 @@ class TestModelPrefs:
         path = tmp_path / "models.json"
         set_feature_route(
             "nudge",
-            primary=ANTHROPIC_OPUS_4_7_MODEL,
+            primary=ANTHROPIC_OPUS_MODEL,
             fallback=PRIMARY_PRO_MODEL,
             path=path,
         )
 
         route = resolve_model_route("nudge", path=path)
-        assert route.primary == ANTHROPIC_OPUS_4_7_MODEL
+        assert route.primary == ANTHROPIC_OPUS_MODEL
         assert route.fallback == PRIMARY_PRO_MODEL
 
         reset_feature_route("nudge", path=path)
 
         route = resolve_model_route("nudge", path=path)
-        assert route.primary == ANTHROPIC_OPUS_4_7_MODEL
+        assert route.primary == ANTHROPIC_OPUS_MODEL
         assert route.fallback == PRIMARY_PRO_MODEL
 
     def test_profile_route_updates_inherited_fallback(self, tmp_path):
@@ -76,19 +76,19 @@ class TestModelPrefs:
         set_profile_route(
             "flash",
             primary=PRIMARY_FLASH_MODEL,
-            fallback=ANTHROPIC_OPUS_4_7_MODEL,
+            fallback=ANTHROPIC_OPUS_MODEL,
             path=path,
         )
 
         route = resolve_model_route("notify", path=path)
         assert route.primary == PRIMARY_FLASH_MODEL
-        assert route.fallback == ANTHROPIC_OPUS_4_7_MODEL
+        assert route.fallback == ANTHROPIC_OPUS_MODEL
 
     def test_none_fallback_falls_through_to_profile(self, tmp_path):
         path = tmp_path / "models.json"
         set_feature_route(
             "chat",
-            primary=ANTHROPIC_OPUS_4_7_MODEL,
+            primary=ANTHROPIC_OPUS_MODEL,
             fallback=None,
             path=path,
         )
@@ -131,8 +131,8 @@ class TestModelPrefs:
         insights = resolve_model_route("insights", path=path)
         nudge = resolve_model_route("nudge", path=path)
 
-        assert insights.primary == ANTHROPIC_OPUS_4_7_MODEL
-        assert nudge.primary == ANTHROPIC_OPUS_4_7_MODEL
+        assert insights.primary == ANTHROPIC_OPUS_MODEL
+        assert nudge.primary == ANTHROPIC_OPUS_MODEL
         assert nudge.reasoning_effort == "high"
 
     def test_legacy_default_chat_route_migrates_to_new_defaults(self, tmp_path):
@@ -215,7 +215,7 @@ class TestModelPrefs:
         path = tmp_path / "models.json"
         set_feature_route(
             "chat",
-            primary=ANTHROPIC_OPUS_4_7_MODEL,
+            primary=ANTHROPIC_OPUS_MODEL,
             fallback=FALLBACK_PRO_MODEL,
             path=path,
         )
@@ -229,11 +229,11 @@ class TestModelPrefs:
 
     def test_reset_all_restores_every_feature(self, tmp_path):
         path = tmp_path / "models.json"
-        set_feature_route("nudge", primary=ANTHROPIC_OPUS_4_7_MODEL, path=path)
+        set_feature_route("nudge", primary=ANTHROPIC_OPUS_MODEL, path=path)
         set_profile_route(
             "flash",
-            primary=ANTHROPIC_OPUS_4_7_MODEL,
-            fallback=ANTHROPIC_OPUS_4_7_MODEL,
+            primary=ANTHROPIC_OPUS_MODEL,
+            fallback=ANTHROPIC_OPUS_MODEL,
             path=path,
         )
 
@@ -241,17 +241,17 @@ class TestModelPrefs:
 
         nudge = resolve_model_route("nudge", path=path)
         notify = resolve_model_route("notify", path=path)
-        assert nudge.primary == ANTHROPIC_OPUS_4_7_MODEL
-        assert notify.fallback != ANTHROPIC_OPUS_4_7_MODEL
+        assert nudge.primary == ANTHROPIC_OPUS_MODEL
+        assert notify.fallback != ANTHROPIC_OPUS_MODEL
 
     def test_set_chat_feature_returns_to_chat_controls_when_leaving_opus(
         self, tmp_path
     ):
         path = tmp_path / "models.json"
-        # Start with chat on Opus 4.7 (reasoning/temp explicit).
+        # Start with chat on Opus 4.8 (reasoning/temp explicit).
         set_feature_route(
             "chat",
-            primary=ANTHROPIC_OPUS_4_7_MODEL,
+            primary=ANTHROPIC_OPUS_MODEL,
             reasoning_effort=None,
             temperature=None,
             path=path,
@@ -268,7 +268,7 @@ class TestModelPrefs:
         path = tmp_path / "models.json"
         set_feature_route(
             "coach",
-            primary=ANTHROPIC_OPUS_4_7_MODEL,
+            primary=ANTHROPIC_OPUS_MODEL,
             reasoning_effort="medium",
             path=path,
         )
@@ -278,7 +278,7 @@ class TestModelPrefs:
 
     def test_opus_verifier_defaults_to_high_reasoning(self, tmp_path):
         path = tmp_path / "models.json"
-        set_feature_route("verification", primary=ANTHROPIC_OPUS_4_7_MODEL, path=path)
+        set_feature_route("verification", primary=ANTHROPIC_OPUS_MODEL, path=path)
 
         route = resolve_model_route("verification", path=path)
 
@@ -289,7 +289,7 @@ class TestModelPrefs:
         route = resolve_model_route("verification", path=tmp_path / "models.json")
 
         assert route.primary == PRIMARY_PRO_MODEL
-        assert route.fallback == ANTHROPIC_OPUS_4_7_MODEL
+        assert route.fallback == ANTHROPIC_OPUS_MODEL
         assert route.reasoning_effort == "high"
         assert route.temperature is None
 
@@ -311,7 +311,7 @@ class TestModelPrefs:
 
         route = resolve_model_route("verification", path=path)
 
-        assert route.fallback == ANTHROPIC_OPUS_4_7_MODEL
+        assert route.fallback == ANTHROPIC_OPUS_MODEL
         assert route.reasoning_effort == "high"
         assert route.temperature is None
 
@@ -325,13 +325,13 @@ class TestModelPrefs:
 
         assert PRIMARY_PRO_MODEL in models
         assert PRIMARY_FLASH_MODEL in models
-        assert ANTHROPIC_OPUS_4_7_MODEL in models
+        assert ANTHROPIC_OPUS_MODEL in models
 
     def test_model_button_label_includes_tier(self):
-        label = model_button_label(ANTHROPIC_OPUS_4_7_MODEL)
+        label = model_button_label(ANTHROPIC_OPUS_MODEL)
 
-        assert "opus-4-7" in label
-        assert MODEL_TIERS[ANTHROPIC_OPUS_4_7_MODEL] in label
+        assert "opus-4-8" in label
+        assert MODEL_TIERS[ANTHROPIC_OPUS_MODEL] in label
 
 
 class TestDoctor:
@@ -355,7 +355,7 @@ class TestDoctor:
         monkeypatch.setenv("DEEPSEEK_API_KEY", "test")
         set_feature_route(
             "chat",
-            primary=ANTHROPIC_OPUS_4_7_MODEL,
+            primary=ANTHROPIC_OPUS_MODEL,
             reasoning_effort="medium",
             path=path,
         )
@@ -370,7 +370,7 @@ class TestDoctor:
         monkeypatch.setenv("DEEPSEEK_API_KEY", "test")
         set_feature_route(
             "nudge",
-            primary=ANTHROPIC_OPUS_4_7_MODEL,
+            primary=ANTHROPIC_OPUS_MODEL,
             temperature=0.7,
             path=path,
         )

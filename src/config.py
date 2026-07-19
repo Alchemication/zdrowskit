@@ -197,15 +197,9 @@ DEEPSEEK_FLASH_MODEL: str = os.environ.get(
 
 ANTHROPIC_OPUS_MODEL: str = os.environ.get(
     "ZDROWSKIT_ANTHROPIC_OPUS_MODEL",
-    "anthropic/claude-opus-4-6",
+    "anthropic/claude-opus-4-8",
 )
-"""High-capability Anthropic fallback paired with DeepSeek Pro."""
-
-ANTHROPIC_OPUS_4_7_MODEL: str = os.environ.get(
-    "ZDROWSKIT_ANTHROPIC_OPUS_4_7_MODEL",
-    "anthropic/claude-opus-4-7",
-)
-"""Low-latency high-capability Anthropic model used by the chat preset."""
+"""High-capability Anthropic model: premium primary and DeepSeek Pro fallback."""
 
 ANTHROPIC_HAIKU_MODEL: str = os.environ.get(
     "ZDROWSKIT_ANTHROPIC_HAIKU_MODEL",
@@ -245,19 +239,19 @@ FALLBACK_MODEL: str = os.environ.get("ZDROWSKIT_FALLBACK_MODEL", FALLBACK_PRO_MO
 
 DEFAULT_INSIGHTS_MODEL: str = os.environ.get(
     "ZDROWSKIT_INSIGHTS_MODEL",
-    ANTHROPIC_OPUS_4_7_MODEL,
+    ANTHROPIC_OPUS_MODEL,
 )
 """Default model for weekly insights reports."""
 
 DEFAULT_COACH_MODEL: str = os.environ.get(
     "ZDROWSKIT_COACH_MODEL",
-    ANTHROPIC_OPUS_4_7_MODEL,
+    ANTHROPIC_OPUS_MODEL,
 )
 """Default model for coaching review/proposal generation."""
 
 DEFAULT_NUDGE_MODEL: str = os.environ.get(
     "ZDROWSKIT_NUDGE_MODEL",
-    ANTHROPIC_OPUS_4_7_MODEL,
+    ANTHROPIC_OPUS_MODEL,
 )
 """Default model for proactive nudges."""
 

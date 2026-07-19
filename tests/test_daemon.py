@@ -2498,7 +2498,7 @@ class TestModelsFlow:
         assert route.temperature == 0.3
 
     def test_models_reset_all_restores_defaults(self, tmp_path: Path) -> None:
-        from config import ANTHROPIC_OPUS_4_7_MODEL, PRIMARY_FLASH_MODEL
+        from config import ANTHROPIC_OPUS_MODEL, PRIMARY_FLASH_MODEL
         from model_prefs import resolve_model_route, set_feature_route
 
         daemon = _make_daemon(tmp_path)
@@ -2506,7 +2506,7 @@ class TestModelsFlow:
         prefs_path = tmp_path / "model_prefs.json"
 
         with patch("model_prefs.MODEL_PREFS_PATH", prefs_path):
-            set_feature_route("chat", primary=ANTHROPIC_OPUS_4_7_MODEL)
+            set_feature_route("chat", primary=ANTHROPIC_OPUS_MODEL)
             daemon._handle_telegram_callback(
                 {
                     "id": "cb_reset_all",
@@ -2521,14 +2521,14 @@ class TestModelsFlow:
     def test_models_auto_fallback_falls_through_to_profile(
         self, tmp_path: Path
     ) -> None:
-        from config import ANTHROPIC_OPUS_4_7_MODEL, FALLBACK_PRO_MODEL
+        from config import ANTHROPIC_OPUS_MODEL, FALLBACK_PRO_MODEL
         from model_prefs import resolve_model_route, selectable_models
 
         daemon = _make_daemon(tmp_path)
         daemon._chat._poller = MagicMock()
         prefs_path = tmp_path / "model_prefs.json"
         models = selectable_models()
-        primary_idx = models.index(ANTHROPIC_OPUS_4_7_MODEL)
+        primary_idx = models.index(ANTHROPIC_OPUS_MODEL)
 
         with patch("model_prefs.MODEL_PREFS_PATH", prefs_path):
             daemon._handle_telegram_callback(
@@ -2554,14 +2554,15 @@ class TestModelsFlow:
                 }
             )
             route = resolve_model_route("nudge")
+            # Other feature-level defaults remain independent.
+            insights_route = resolve_model_route("insights")
 
         # "Auto" applies the profile fallback (resolved at read time, not stored).
-        assert route.primary == ANTHROPIC_OPUS_4_7_MODEL
+        assert route.primary == ANTHROPIC_OPUS_MODEL
         assert route.fallback == FALLBACK_PRO_MODEL
         assert route.reasoning_effort == "high"
         assert route.temperature is None
-        # Other feature-level defaults remain independent.
-        assert resolve_model_route("insights").primary == ANTHROPIC_OPUS_4_7_MODEL
+        assert insights_route.primary == ANTHROPIC_OPUS_MODEL
 
     def test_models_primary_fallback_accept_flow(self, tmp_path: Path) -> None:
         from config import ANTHROPIC_HAIKU_MODEL, PRIMARY_FLASH_MODEL
