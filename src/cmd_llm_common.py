@@ -44,6 +44,17 @@ def normalize_reasoning_effort(value: str | None) -> str | None:
     return value
 
 
+def telegram_chat_id(args: Any) -> str | None:
+    """Return the resolved profile's Telegram destination, or None.
+
+    Commands run with an explicit ``--db`` have no roster entry and therefore
+    no destination; returning None lets ``notify`` log one actionable error
+    instead of posting an empty ``chat_id`` to the Telegram API.
+    """
+    raw = getattr(args, "telegram_id", None)
+    return str(raw) if raw is not None else None
+
+
 def route_kwargs(
     feature: str,
     explicit_model: str | None = None,

@@ -365,29 +365,27 @@ def _env_has_any_model_key() -> bool:
 
 
 def cmd_setup(args: argparse.Namespace) -> None:
-    """Create first-run files and print the remaining manual setup steps.
+    """Create shared first-run files and print the remaining manual steps.
+
+    Per-person context files, databases, and output directories are created by
+    ``profile add``, not here — this only prepares the shared app home and .env.
 
     Args:
-        args: Parsed CLI arguments with force and skip_env attributes.
+        args: Parsed CLI arguments with a skip_env attribute.
     """
-    force = bool(getattr(args, "force", False))
+    from profiles import PROFILES_DIR
+
     skip_env = bool(getattr(args, "skip_env", False))
 
     print("Setting up zdrowskit")
     APP_HOME.mkdir(parents=True, exist_ok=True)
-    (APP_HOME / "Reports").mkdir(parents=True, exist_ok=True)
-    (APP_HOME / "Nudges").mkdir(parents=True, exist_ok=True)
     print(f"  app home: {APP_HOME}")
 
     examples_dir = REPO_ROOT / "examples" / "context"
     if not examples_dir.exists():
         print(f"  context: missing bundled examples at {examples_dir}")
         sys.exit(1)
-
-    CONTEXT_DIR.mkdir(parents=True, exist_ok=True)
-    for src in sorted(examples_dir.glob("*.md")):
-        status = _copy_file_if_needed(src, CONTEXT_DIR / src.name, force=force)
-        print(f"  {status:7} {CONTEXT_DIR / src.name}")
+    print(f"  context templates: {examples_dir}")
 
     if not skip_env:
         env_example = REPO_ROOT / ".env_example"
@@ -399,9 +397,14 @@ def cmd_setup(args: argparse.Namespace) -> None:
             print(f"  skipped .env: .env_example not found at {env_example}")
 
     print("\nNext steps:")
-    print(f"  1. Edit {CONTEXT_DIR / 'me.md'}")
-    print(f"  2. Edit {CONTEXT_DIR / 'strategy.md'}")
-    print("  3. Add at least one LLM API key to .env")
+    print("  1. Add at least one LLM API key to .env")
+    print(
+        "  2. Create the operator profile: uv run python main.py profile add NAME "
+        "--telegram-id ID --operator"
+    )
+    print(
+        f"  3. Edit me.md and strategy.md in {PROFILES_DIR / 'NAME' / 'ContextFiles'}"
+    )
     print("  4. Set up Auto Export with Google Drive (recommended) or iCloud")
     print("  5. Import health data: uv run python main.py import")
     print("\nCheck readiness any time with: uv run python main.py doctor")

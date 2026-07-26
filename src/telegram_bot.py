@@ -806,18 +806,51 @@ class TelegramPoller:
             thread_name_prefix="tg-handler",
         ) as pool:
             while not stop_event.is_set():
-                updates = self.get_updates(offset)
-                if not updates:
+                try:
+                    offset, had_updates = self._poll_once(offset, on_update, pool)
+                except Exception:
+                    # A malformed update or unexpected error must never kill
+                    # the polling thread — that silently breaks inbound chat
+                    # for every profile with no crash and no log. Log and
+                    # keep polling.
+                    logger.exception("Telegram poll iteration failed; continuing")
                     stop_event.wait(_POLL_ERROR_RETRY_S)
                     continue
-                for update in updates:
-                    update_id = update.get("update_id")
-                    if isinstance(update_id, int):
-                        offset = update_id + 1
-                    pool.submit(self._safe_call, on_update, update)
+                if not had_updates and not stop_event.is_set():
+                    stop_event.wait(_POLL_ERROR_RETRY_S)
         logger.warning(
             "Telegram poll loop exited (stop_event set=%s)", stop_event.is_set()
         )
+
+    def _poll_once(
+        self,
+        offset: int,
+        on_update: callable,
+        pool: ThreadPoolExecutor,
+    ) -> tuple[int, bool]:
+        """Fetch and dispatch one batch of updates.
+
+        Args:
+            offset: Update offset to request.
+            on_update: Router callback receiving one raw update dict.
+            pool: Executor to dispatch the router onto.
+
+        Returns:
+            A tuple of the offset to use on the next call and whether any
+            updates were received in this batch.
+        """
+        updates = self.get_updates(offset)
+        if not updates:
+            return offset, False
+        for update in updates:
+            if not isinstance(update, dict):
+                logger.warning("Skipping non-dict Telegram update: %r", update)
+                continue
+            update_id = update.get("update_id")
+            if isinstance(update_id, int):
+                offset = update_id + 1
+            pool.submit(self._safe_call, on_update, update)
+        return offset, True
 
     @staticmethod
     def _safe_call(fn: callable, *args: object) -> None:

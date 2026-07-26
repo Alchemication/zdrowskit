@@ -19,6 +19,7 @@ from cmd_llm_common import (
     normalize_reasoning_effort,
     route_kwargs,
     save_baselines,
+    telegram_chat_id,
 )
 from config import (
     CONTEXT_DIR,
@@ -514,7 +515,7 @@ def cmd_insights(
             notify_subject,
             charts=chart_results,
             reply_markup=reply_markup,
-            chat_id=str(getattr(args, "telegram_id", "")),
+            chat_id=telegram_chat_id(args),
         )
 
     return CommandResult(

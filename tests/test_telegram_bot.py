@@ -8,6 +8,7 @@ import threading
 import urllib.error
 from unittest.mock import MagicMock, patch
 
+import telegram_bot as telegram_bot_module
 from notify import chunk_text
 from telegram_bot import ConversationBuffer, TelegramPoller, TelegramSender
 
@@ -352,3 +353,71 @@ class TestTelegramPollerPollLoop:
         poller.poll_loop(callback, stop)
 
         callback.assert_called_once_with(updates[0])
+
+    def test_malformed_update_does_not_kill_loop(self) -> None:
+        """A bad update must not stop polling for the whole roster.
+
+        Regression: an uncaught exception in the loop body silently killed the
+        daemon poller thread, breaking inbound chat for every profile with no
+        crash and no log.
+        """
+        poller = TelegramPoller("fake-token")
+        callback = MagicMock()
+        stop = threading.Event()
+        good_update = {
+            "update_id": 5,
+            "message": {
+                "message_id": 11,
+                "from": {"id": 999},
+                "chat": {"id": 999, "type": "private"},
+                "text": "hello",
+            },
+        }
+        calls = 0
+
+        def fake_get_updates(offset, timeout=30):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return ["not-a-dict"]
+            if calls == 2:
+                return [good_update]
+            stop.set()
+            return []
+
+        poller.get_updates = fake_get_updates
+        poller.poll_loop(callback, stop)
+
+        callback.assert_called_once_with(good_update)
+
+    def test_get_updates_exception_does_not_kill_loop(self, monkeypatch) -> None:
+        """An unexpected get_updates failure must not stop polling."""
+        monkeypatch.setattr(telegram_bot_module, "_POLL_ERROR_RETRY_S", 0)
+        poller = TelegramPoller("fake-token")
+        callback = MagicMock()
+        stop = threading.Event()
+        good_update = {
+            "update_id": 7,
+            "message": {
+                "message_id": 12,
+                "from": {"id": 999},
+                "chat": {"id": 999, "type": "private"},
+                "text": "hi",
+            },
+        }
+        calls = 0
+
+        def fake_get_updates(offset, timeout=30):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise RuntimeError("unexpected transport failure")
+            if calls == 2:
+                return [good_update]
+            stop.set()
+            return []
+
+        poller.get_updates = fake_get_updates
+        poller.poll_loop(callback, stop)
+
+        callback.assert_called_once_with(good_update)

@@ -30,7 +30,7 @@ from store import create_llm_trace, log_feedback, log_llm_call, open_db
 
 
 class TestSetupCommand:
-    def test_setup_creates_context_and_env_without_overwriting(
+    def test_setup_creates_env_and_points_at_profile_add(
         self, tmp_path: Path, monkeypatch, capsys
     ) -> None:
         repo = tmp_path / "repo"
@@ -41,24 +41,36 @@ class TestSetupCommand:
         (repo / ".env_example").write_text("DEEPSEEK_API_KEY=\n", encoding="utf-8")
 
         app_home = tmp_path / "home" / "zdrowskit"
-        context_dir = app_home / "ContextFiles"
-        context_dir.mkdir(parents=True)
-        (context_dir / "me.md").write_text("# Existing profile\n", encoding="utf-8")
 
         monkeypatch.setattr(commands_module, "REPO_ROOT", repo)
         monkeypatch.setattr(commands_module, "APP_HOME", app_home)
-        monkeypatch.setattr(commands_module, "CONTEXT_DIR", context_dir)
 
-        cmd_setup(SimpleNamespace(force=False, skip_env=False))
+        cmd_setup(SimpleNamespace(skip_env=False))
 
-        assert (context_dir / "me.md").read_text(encoding="utf-8") == (
-            "# Existing profile\n"
-        )
-        assert (context_dir / "strategy.md").exists()
         assert (repo / ".env").read_text(encoding="utf-8") == "DEEPSEEK_API_KEY=\n"
         output = capsys.readouterr().out
-        assert "exists" in output
         assert "created" in output
+        assert "profile add" in output
+        # Setup must not seed a legacy root-level context dir that nothing reads.
+        assert not (app_home / "ContextFiles").exists()
+
+    def test_setup_leaves_existing_env_untouched(
+        self, tmp_path: Path, monkeypatch, capsys
+    ) -> None:
+        repo = tmp_path / "repo"
+        (repo / "examples" / "context").mkdir(parents=True)
+        (repo / ".env_example").write_text("DEEPSEEK_API_KEY=\n", encoding="utf-8")
+        (repo / ".env").write_text("DEEPSEEK_API_KEY=secret\n", encoding="utf-8")
+
+        monkeypatch.setattr(commands_module, "REPO_ROOT", repo)
+        monkeypatch.setattr(commands_module, "APP_HOME", tmp_path / "home")
+
+        cmd_setup(SimpleNamespace(skip_env=False))
+
+        assert (repo / ".env").read_text(
+            encoding="utf-8"
+        ) == "DEEPSEEK_API_KEY=secret\n"
+        assert "exists" in capsys.readouterr().out
 
     def test_launchd_plist_render_uses_current_user_paths(self, tmp_path: Path) -> None:
         plist = commands_module._render_launchd_plist(

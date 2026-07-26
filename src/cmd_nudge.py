@@ -17,7 +17,12 @@ from charts import (
     render_chart,
     strip_charts,
 )
-from cmd_llm_common import CommandResult, apply_verification, route_kwargs
+from cmd_llm_common import (
+    CommandResult,
+    apply_verification,
+    route_kwargs,
+    telegram_chat_id,
+)
 from config import CONTEXT_DIR, MAX_TOKENS_NUDGE, MAX_TOOL_ITERATIONS_NUDGE, NUDGES_DIR
 from llm import call_llm
 from llm_context import build_messages, load_context, load_prompt_text
@@ -380,13 +385,13 @@ def cmd_nudge(
             send_telegram_photo(
                 chart.image_bytes,
                 caption=chart_figure_caption(index, chart.title),
-                chat_id=str(getattr(args, "telegram_id", "")),
+                chat_id=telegram_chat_id(args),
             )
         telegram_message_id = send_telegram(
             nudge_text,
             subject,
             reply_markup,
-            chat_id=str(getattr(args, "telegram_id", "")),
+            chat_id=telegram_chat_id(args),
         )
 
     return CommandResult(

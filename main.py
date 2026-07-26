@@ -248,11 +248,6 @@ def main() -> None:
     # first-run setup
     p_setup = sub.add_parser("setup", help="Create first-run files and directories")
     p_setup.add_argument(
-        "--force",
-        action="store_true",
-        help="Overwrite bundled context examples in the context directory",
-    )
-    p_setup.add_argument(
         "--skip-env",
         action="store_true",
         help="Do not create .env from .env_example",

@@ -2,7 +2,18 @@
 
 from __future__ import annotations
 
-from notify import md_to_telegram_html, split_report_sections
+from types import SimpleNamespace
+from unittest.mock import patch
+
+import pytest
+
+from cmd_llm_common import telegram_chat_id
+from notify import (
+    md_to_telegram_html,
+    send_telegram,
+    send_telegram_photo,
+    split_report_sections,
+)
 
 
 class TestMdToTelegramHtmlHeaders:
@@ -152,3 +163,49 @@ class TestSplitReportSections:
         assert "Day 1: Run" in sections[0]
         assert "Day 2: Rest" in sections[0]
         assert "Ready to push." in sections[1]
+
+
+class TestTelegramDestinationGuard:
+    """A run without a roster entry must not POST an empty chat_id.
+
+    Regression: `--db PATH` resolves no profile, so `args.telegram_id` is
+    unset. The chat_id guard was dropped during the multi-profile split and
+    `--telegram` started posting `chat_id: ""` to the Telegram API.
+    """
+
+    @pytest.mark.parametrize("chat_id", [None, "", "None"])
+    def test_send_telegram_refuses_missing_destination(
+        self, chat_id, monkeypatch, caplog
+    ) -> None:
+        monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "fake-token")
+        with patch("urllib.request.urlopen") as mock_urlopen:
+            result = send_telegram("report", "W01", chat_id=chat_id)
+
+        assert result is None
+        mock_urlopen.assert_not_called()
+        assert "--profile" in caplog.text
+
+    @pytest.mark.parametrize("chat_id", [None, "", "None"])
+    def test_send_telegram_photo_refuses_missing_destination(
+        self, chat_id, monkeypatch
+    ) -> None:
+        monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "fake-token")
+        with patch("urllib.request.urlopen") as mock_urlopen:
+            assert send_telegram_photo(b"png", chat_id=chat_id) is False
+        mock_urlopen.assert_not_called()
+
+    def test_send_telegram_photo_refuses_even_with_explicit_token(self) -> None:
+        with patch("urllib.request.urlopen") as mock_urlopen:
+            assert (
+                send_telegram_photo(b"png", bot_token="explicit", chat_id=None) is False
+            )
+        mock_urlopen.assert_not_called()
+
+
+class TestTelegramChatId:
+    def test_returns_none_without_a_resolved_profile(self) -> None:
+        assert telegram_chat_id(SimpleNamespace()) is None
+        assert telegram_chat_id(SimpleNamespace(telegram_id=None)) is None
+
+    def test_stringifies_a_numeric_roster_id(self) -> None:
+        assert telegram_chat_id(SimpleNamespace(telegram_id=12345)) == "12345"

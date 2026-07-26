@@ -263,7 +263,7 @@ def send_telegram(
     week_label: str,
     reply_markup: dict | None = None,
     *,
-    chat_id: str,
+    chat_id: str | None,
     bot_token: str | None = None,
 ) -> int | None:
     """Send the report via Telegram Bot API with HTML formatting.
@@ -279,15 +279,16 @@ def send_telegram(
         week_label: Human-readable week label for the message.
         reply_markup: Optional Telegram reply markup (e.g. inline keyboard)
             attached to the **last** chunk only.
+        chat_id: Explicit profile destination; None aborts with a logged error.
+        bot_token: Override bot token (defaults to env var).
 
     Returns:
         The message_id of the last sent chunk, or None on failure.
     """
-    bot_token = bot_token or os.environ.get("TELEGRAM_BOT_TOKEN")
-
-    if not bot_token:
-        logger.error("TELEGRAM_BOT_TOKEN not set. Add it to your .env file.")
+    creds = _get_telegram_creds(chat_id, bot_token)
+    if creds is None:
         return None
+    bot_token, chat_id = creds
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     html_report = md_to_telegram_html(report)
 
@@ -309,15 +310,30 @@ def send_telegram(
     return last_message_id
 
 
+def _resolve_chat_id(chat_id: str | None) -> str | None:
+    """Validate an explicit Telegram destination, or None with a logged error."""
+    if not chat_id or chat_id == "None":
+        logger.error(
+            "No Telegram destination for this run. Pass --profile NAME so the "
+            "roster supplies telegram_id; an explicit --db has no profile to "
+            "send to."
+        )
+        return None
+    return chat_id
+
+
 def _get_telegram_creds(
-    chat_id: str, bot_token: str | None = None
+    chat_id: str | None, bot_token: str | None = None
 ) -> tuple[str, str] | None:
     """Return shared bot token plus the explicit profile destination."""
     bot_token = bot_token or os.environ.get("TELEGRAM_BOT_TOKEN")
     if not bot_token:
         logger.error("TELEGRAM_BOT_TOKEN not set. Add it to your .env file.")
         return None
-    return bot_token, chat_id
+    resolved = _resolve_chat_id(chat_id)
+    if resolved is None:
+        return None
+    return bot_token, resolved
 
 
 def send_telegram_photo(
@@ -325,7 +341,7 @@ def send_telegram_photo(
     caption: str = "",
     *,
     bot_token: str | None = None,
-    chat_id: str,
+    chat_id: str | None,
 ) -> bool:
     """Send a photo via Telegram Bot API ``sendPhoto``.
 
@@ -336,18 +352,17 @@ def send_telegram_photo(
         image_bytes: PNG image data.
         caption: Optional caption text (markdown — will be converted to HTML).
         bot_token: Override bot token (defaults to env var).
-        chat_id: Explicit profile destination.
+        chat_id: Explicit profile destination; None aborts with a logged error.
 
     Returns:
         True if sent successfully, False otherwise.
     """
     import urllib.request
 
-    if bot_token is None:
-        creds = _get_telegram_creds(chat_id)
-        if creds is None:
-            return False
-        bot_token, chat_id = creds
+    creds = _get_telegram_creds(chat_id, bot_token)
+    if creds is None:
+        return False
+    bot_token, chat_id = creds
 
     url = f"https://api.telegram.org/bot{bot_token}/sendPhoto"
     boundary = "----zdrowskitBoundary"
@@ -417,7 +432,7 @@ def send_telegram_report(
     charts: list | None = None,
     reply_markup: dict | None = None,
     *,
-    chat_id: str,
+    chat_id: str | None,
     bot_token: str | None = None,
 ) -> int | None:
     """Send a report with optional chart photos followed by the full text.
@@ -432,6 +447,8 @@ def send_telegram_report(
         charts: Optional list of :class:`~charts.ChartResult` instances.
         reply_markup: Optional Telegram reply markup attached to the last
             text chunk.
+        chat_id: Explicit profile destination; None aborts with a logged error.
+        bot_token: Override bot token (defaults to env var).
 
     Returns:
         The message_id of the last sent text chunk, or None on failure.
