@@ -17,7 +17,7 @@ from context_edit import (
     append_coach_feedback,
     new_feedback_entry,
 )
-from daemon import ZdrowskitDaemon
+from daemon import ProfileRuntime
 from daemon_telegram_chat import _looks_like_internal_tool_markup
 from events import query_events, query_telegram_usage
 from llm import LLMResult
@@ -25,10 +25,15 @@ from notification_prefs import load_notification_prefs
 from store import create_llm_trace, log_llm_call, open_db
 
 
-def _make_daemon(tmp_path: Path) -> ZdrowskitDaemon:
-    daemon_module.STATE_FILE = tmp_path / "state.json"
-    daemon = ZdrowskitDaemon("test-model", tmp_path / "test.db", tmp_path)
+def _make_daemon(tmp_path: Path) -> ProfileRuntime:
+    daemon = ProfileRuntime(
+        "test-model",
+        tmp_path / "test.db",
+        tmp_path,
+        state_path=tmp_path / "state.json",
+    )
     daemon._notification_prefs_path = tmp_path / "notification_prefs.json"
+    daemon.model_prefs_path = tmp_path / "model_prefs.json"
     return daemon
 
 

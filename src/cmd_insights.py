@@ -164,9 +164,9 @@ def _print_explain(
         stderr.print(f"\n[dim]Report saved to:[/dim] [cyan]{report_path}[/cyan]")
 
 
-def _save_report(report: str, week: str) -> Path:
+def _save_report(report: str, week: str, reports_dir: Path = REPORTS_DIR) -> Path:
     """Save the report to a timestamped markdown file."""
-    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    reports_dir.mkdir(parents=True, exist_ok=True)
 
     target_date = date.today()
     if week == "last":
@@ -175,7 +175,7 @@ def _save_report(report: str, week: str) -> Path:
     suffix = "midweek" if week == "current" else "weekly"
     filename = f"{iso_week}-{suffix}.md"
 
-    path = REPORTS_DIR / filename
+    path = reports_dir / filename
     path.write_text(report, encoding="utf-8")
     logger.info("Report saved to %s", path)
     return path
@@ -197,7 +197,8 @@ def cmd_insights(
         A CommandResult with text, llm_call_id, and telegram_message_id.
     """
     try:
-        context = load_context(CONTEXT_DIR)
+        context_dir = Path(getattr(args, "context_dir", CONTEXT_DIR))
+        context = load_context(context_dir)
     except FileNotFoundError as e:
         logger.error("%s", e)
         sys.exit(1)
@@ -212,7 +213,7 @@ def cmd_insights(
     milestones = None
     if not args.no_update_baselines and args.week != "current":
         baselines = compute_baselines(conn)
-        save_baselines(CONTEXT_DIR, baselines)
+        save_baselines(context_dir, baselines)
     milestones = compute_milestones(conn)
 
     week_complete = health_data.get("week_complete", False)
@@ -253,7 +254,11 @@ def cmd_insights(
     reasoning_effort = normalize_reasoning_effort(
         getattr(args, "reasoning_effort", "medium")
     )
-    route = route_kwargs("insights", getattr(args, "model", None))
+    route = route_kwargs(
+        "insights",
+        getattr(args, "model", None),
+        prefs_path=getattr(args, "model_prefs_path", None),
+    )
     model = route["model"]
     fallback_models = route.get("fallback_models")
     if "reasoning_effort" in route:
@@ -445,6 +450,7 @@ def cmd_insights(
             "week_label": week_label,
         },
         trace_id=trace_id,
+        model_prefs_path=getattr(args, "model_prefs_path", None),
     )
     if verified_text is None:
         logger.error("Insights verification failed; refusing to save/send report")
@@ -471,12 +477,17 @@ def cmd_insights(
             r"\s*<memory>.*?</memory>\s*", "", visible_report, flags=re.DOTALL
         ).strip()
 
-    report_path = _save_report(visible_report, args.week)
+    reports_dir = getattr(args, "reports_dir", None)
+    report_path = (
+        _save_report(visible_report, args.week, Path(reports_dir))
+        if reports_dir is not None
+        else _save_report(visible_report, args.week)
+    )
 
     if args.explain:
         _print_explain(
             context,
-            CONTEXT_DIR,
+            context_dir,
             messages,
             result,
             memory,
@@ -488,7 +499,7 @@ def cmd_insights(
     print(visible_report)
 
     if memory and not args.no_update_history:
-        append_history(CONTEXT_DIR, memory, week_label=week_label)
+        append_history(context_dir, memory, week_label=week_label)
     elif not memory:
         logger.info("No <memory> block in response; history.md unchanged")
 
@@ -503,6 +514,7 @@ def cmd_insights(
             notify_subject,
             charts=chart_results,
             reply_markup=reply_markup,
+            chat_id=str(getattr(args, "telegram_id", "")),
         )
 
     return CommandResult(

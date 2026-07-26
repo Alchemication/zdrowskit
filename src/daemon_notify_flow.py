@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING
 from config import MAX_NUDGES_PER_DAY
 
 if TYPE_CHECKING:
-    from daemon import ZdrowskitDaemon
+    from daemon import ProfileRuntime
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +66,7 @@ class NotifyFlowHandler:
     ``_poller``, ``db``, and notification-prefs helpers for I/O.
     """
 
-    def __init__(self, daemon: "ZdrowskitDaemon") -> None:
+    def __init__(self, daemon: "ProfileRuntime") -> None:
         self._daemon = daemon
         self._lock = threading.Lock()
         self._pending_proposals: dict[str, PendingNotifyProposal] = {}
@@ -105,6 +105,9 @@ class NotifyFlowHandler:
                 db=self._daemon.db,
                 prefs=prefs,
                 now=now,
+                context_dir=self._daemon.context_dir,
+                prefs_path=self._daemon._notification_prefs_path,
+                model_prefs_path=self._daemon.model_prefs_path,
             )
         except Exception:
             logger.error("Notify interpretation failed", exc_info=True)
@@ -205,6 +208,9 @@ class NotifyFlowHandler:
                 prefs=prefs,
                 now=now,
                 clarification_answer=text,
+                context_dir=self._daemon.context_dir,
+                prefs_path=self._daemon._notification_prefs_path,
+                model_prefs_path=self._daemon.model_prefs_path,
             )
         except Exception:
             logger.error("Notify clarification failed", exc_info=True)

@@ -63,5 +63,5 @@ Do this once per automation: Metrics and Workouts. The import is idempotent, so 
    uv run python main.py import
    ```
 
-4. Run the daemon. It watches iCloud filesystem events or polls Google Drive,
-   depending on `ZDROWSKIT_IMPORT_SOURCE`.
+4. Run the daemon. It watches the operator's local/iCloud source or polls each
+   profile's Drive folders according to `profiles.toml`.

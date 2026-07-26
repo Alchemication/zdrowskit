@@ -9,11 +9,11 @@ Subcommands:
     telegram-setup  Register bot /commands for Telegram autocomplete and menu.
 
 Examples:
-    uv run python main.py import --data-dir MyHealth/
-        Parse a weekly export and upsert its days into the default database.
+    uv run python main.py import --profile adam --data-dir MyHealth/
+        Parse a weekly export into Adam's isolated database.
 
     uv run python main.py import --data-dir MyHealth/ --db ./local.db
-        Same, but write to a custom database file instead of the default.
+        Same, but write to an existing custom database file.
 
     uv run python main.py report
         Current week: summary + per-day breakdown (auto-detects most recent ISO week).
@@ -67,7 +67,7 @@ Examples:
         Show context files, assembled prompt, and token usage diagnostics on stderr.
 
     uv run python main.py insights --telegram
-        Send the report via Telegram (requires TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID).
+        Send the report via Telegram (requires TELEGRAM_BOT_TOKEN and a profile).
 
     uv run python main.py insights --model openai/gpt-4o
         Use a different litellm model instead of the default.
@@ -102,12 +102,7 @@ from cmd_models import cmd_models
 from cmd_nudge import cmd_nudge
 from cmd_notify import RESET_TARGETS as NOTIFY_RESET_TARGETS
 from cmd_notify import cmd_notify
-from config import (
-    GOOGLE_DRIVE_METRICS_FOLDER_ID,
-    GOOGLE_DRIVE_SERVICE_ACCOUNT,
-    GOOGLE_DRIVE_WORKOUTS_FOLDER_ID,
-    IMPORT_SOURCE,
-)
+from config import GOOGLE_DRIVE_SERVICE_ACCOUNT
 from commands import (
     cmd_context,
     cmd_daemon_install,
@@ -122,7 +117,7 @@ from commands import (
 )
 from log import setup_logging
 from model_prefs import resolve_model_route
-from store import default_db_path
+from profiles import ProfileConfigError, cmd_profile, resolve_cli_profile
 
 
 def main() -> None:
@@ -130,16 +125,15 @@ def main() -> None:
     load_dotenv()
     setup_logging()
 
-    db_default = str(default_db_path())
     parser = argparse.ArgumentParser(
         description="Apple Health data pipeline",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "--db",
+        dest="global_db",
         metavar="PATH",
-        default=db_default,
-        help=f"Path to SQLite database (default: {db_default}, or ZDROWSKIT_DB env var)",
+        help="Explicit SQLite database path (overrides --profile)",
     )
 
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -148,8 +142,12 @@ def main() -> None:
         p.add_argument(
             "--db",
             metavar="PATH",
-            default=db_default,
-            help=f"Path to SQLite database (default: {db_default})",
+            help="Explicit SQLite database path (overrides --profile)",
+        )
+        p.add_argument(
+            "--profile",
+            metavar="NAME",
+            help="Profile name (default: operator profile)",
         )
 
     # import
@@ -160,8 +158,8 @@ def main() -> None:
     p_import.add_argument(
         "--source",
         choices=("local", "google-drive"),
-        default=IMPORT_SOURCE,
-        help="Import source (default: local, or ZDROWSKIT_IMPORT_SOURCE)",
+        default=None,
+        help="Import source (default: selected profile configuration)",
     )
     p_import.add_argument(
         "--google-drive-service-account",
@@ -172,14 +170,14 @@ def main() -> None:
     p_import.add_argument(
         "--google-drive-metrics-folder-id",
         metavar="ID",
-        default=GOOGLE_DRIVE_METRICS_FOLDER_ID,
-        help="Metrics folder ID (or ZDROWSKIT_GOOGLE_DRIVE_METRICS_FOLDER_ID)",
+        default=None,
+        help="Metrics folder ID (default: selected profile configuration)",
     )
     p_import.add_argument(
         "--google-drive-workouts-folder-id",
         metavar="ID",
-        default=GOOGLE_DRIVE_WORKOUTS_FOLDER_ID,
-        help="Workouts folder ID (or ZDROWSKIT_GOOGLE_DRIVE_WORKOUTS_FOLDER_ID)",
+        default=None,
+        help="Workouts folder ID (default: selected profile configuration)",
     )
     p_import.add_argument(
         "--google-drive-force",
@@ -231,14 +229,21 @@ def main() -> None:
     p_db = sub.add_parser("db", help="Database admin: migrations and schema")
     _add_db(p_db)
     db_sub = p_db.add_subparsers(dest="db_cmd", required=True)
-    db_sub.add_parser("status", help="Show migration status for the database")
-    db_sub.add_parser("migrate", help="Apply pending database migrations")
+    p_db_status = db_sub.add_parser(
+        "status", help="Show migration status for the database"
+    )
+    p_db_status.add_argument("--all", action="store_true", help="Check every profile")
+    p_db_migrate = db_sub.add_parser("migrate", help="Apply pending migrations")
+    p_db_migrate.add_argument(
+        "--all", action="store_true", help="Migrate every profile database"
+    )
     db_sub.add_parser("schema", help="Print the live SQLite schema")
 
     # context
-    sub.add_parser(
+    p_context = sub.add_parser(
         "context", help="Show context files used by insights and their status"
     )
+    p_context.add_argument("--profile", metavar="NAME")
 
     # first-run setup
     p_setup = sub.add_parser("setup", help="Create first-run files and directories")
@@ -315,7 +320,7 @@ def main() -> None:
         action="store_true",
         help=(
             "Send report via Telegram "
-            "(requires TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env)"
+            "(requires TELEGRAM_BOT_TOKEN and the selected profile's telegram_id)"
         ),
     )
     _add_db(p_insights)
@@ -449,6 +454,7 @@ def main() -> None:
 
     # notify
     p_notify = sub.add_parser("notify", help="Show or reset notification settings")
+    p_notify.add_argument("--profile", metavar="NAME")
     notify_sub = p_notify.add_subparsers(dest="notify_cmd")
     notify_sub.add_parser("show", help="Show current notification settings")
     p_notify_reset = notify_sub.add_parser(
@@ -475,6 +481,7 @@ def main() -> None:
         "verification_rewrite",
     ]
     p_models = sub.add_parser("models", help="Show or change LLM model routing")
+    p_models.add_argument("--profile", metavar="NAME")
     p_models.add_argument("--json", action="store_true", help="Output JSON")
     models_sub = p_models.add_subparsers(dest="models_cmd")
     p_models_reset = models_sub.add_parser(
@@ -493,7 +500,7 @@ def main() -> None:
         help="Reset every feature and both profiles to built-in defaults",
     )
     p_models_profile = models_sub.add_parser("profile", help="Set a profile route")
-    p_models_profile.add_argument("profile", choices=["pro", "flash"])
+    p_models_profile.add_argument("route_profile", choices=["pro", "flash"])
     p_models_profile.add_argument("--primary", required=True, metavar="MODEL")
     p_models_profile.add_argument("--fallback", required=True, metavar="MODEL")
     p_models_set = models_sub.add_parser("set", help="Set a feature route")
@@ -551,7 +558,82 @@ def main() -> None:
     p_events.add_argument("--json", action="store_true", help="Output JSON")
     _add_db(p_events)
 
+    # profile management
+    p_profile = sub.add_parser("profile", help="Create or adopt isolated profiles")
+    profile_sub = p_profile.add_subparsers(dest="profile_cmd", required=True)
+    p_profile_add = profile_sub.add_parser("add", help="Create a profile")
+    p_profile_add.add_argument("name")
+    p_profile_add.add_argument("--telegram-id", required=True, type=int)
+    p_profile_add.add_argument("--operator", action="store_true")
+    p_profile_add.add_argument(
+        "--source",
+        choices=("local", "google-drive"),
+        default="google-drive",
+    )
+    p_profile_add.add_argument("--google-drive-metrics-folder-id", metavar="ID")
+    p_profile_add.add_argument("--google-drive-workouts-folder-id", metavar="ID")
+    p_profile_adopt = profile_sub.add_parser(
+        "adopt", help="Adopt an existing single-profile installation"
+    )
+    p_profile_adopt.add_argument("name")
+    p_profile_adopt.add_argument("--telegram-id", type=int)
+    p_profile_adopt.add_argument("--dry-run", action="store_true")
+
     args = parser.parse_args()
+
+    profile = None
+    database_commands = {
+        "import",
+        "report",
+        "status",
+        "db",
+        "insights",
+        "nudge",
+        "coach",
+        "llm-log",
+        "events",
+    }
+    profile_path_commands = database_commands | {"context", "notify", "models"}
+    if args.cmd in profile_path_commands:
+        try:
+            explicit_db = getattr(args, "db", None) or args.global_db
+            if args.cmd in database_commands:
+                profile, db_path = resolve_cli_profile(
+                    getattr(args, "profile", None),
+                    db=explicit_db,
+                    require_existing=not (
+                        args.cmd == "db"
+                        and (args.db_cmd == "status" or getattr(args, "all", False))
+                    ),
+                )
+                args.db = str(db_path)
+            else:
+                profile, _ = resolve_cli_profile(
+                    getattr(args, "profile", None),
+                    db=None,
+                )
+        except ProfileConfigError as exc:
+            parser.error(str(exc))
+        if profile is not None:
+            args.profile_config = profile
+            args.context_dir = profile.context
+            args.reports_dir = profile.reports
+            args.nudges_dir = profile.nudges
+            args.notification_prefs_path = profile.notification_prefs
+            args.model_prefs_path = profile.model_prefs
+            args.telegram_id = profile.telegram_id
+            if args.cmd == "import":
+                args.source = args.source or profile.import_source
+                args.google_drive_metrics_folder_id = (
+                    args.google_drive_metrics_folder_id
+                    or profile.drive_metrics_folder_id
+                )
+                args.google_drive_workouts_folder_id = (
+                    args.google_drive_workouts_folder_id
+                    or profile.drive_workouts_folder_id
+                )
+                if not args.data_dir and profile.import_source == "google-drive":
+                    args.data_dir = str(profile.drive_cache)
 
     def _cli_coach(coach_args: argparse.Namespace) -> None:
         """CLI wrapper for cmd_coach.
@@ -588,8 +670,12 @@ def main() -> None:
         "daemon-restart": cmd_daemon_restart,
         "daemon-stop": cmd_daemon_stop,
         "telegram-setup": cmd_telegram_setup,
+        "profile": cmd_profile,
     }
-    dispatch[args.cmd](args)
+    try:
+        dispatch[args.cmd](args)
+    except ProfileConfigError as exc:
+        parser.error(str(exc))
 
 
 if __name__ == "__main__":

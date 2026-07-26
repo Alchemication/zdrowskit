@@ -8,8 +8,9 @@ flowchart TD
     apple([Apple Watch + iPhone])
     export["Auto Export to iCloud or Google Drive"]
     setup["Setup + doctor"]
-    context[(Context files)]
-    db[(Local SQLite DB)]
+    roster[(profiles.toml)]
+    context[(Per-profile context files)]
+    db[(Per-profile SQLite DB)]
     daemon["Background daemon"]
     telegram["Telegram bot"]
     llm["LLM provider"]
@@ -22,6 +23,7 @@ flowchart TD
     approvals["Accept / reject edits and feedback"]
 
     user --> setup
+    setup --> roster
     setup --> context
     apple --> export
     export --> db
@@ -52,6 +54,45 @@ flowchart TD
     controls --> daemon
 ```
 
+## Profile Routing And Isolation
+
+```mermaid
+flowchart TD
+    roster[(profiles.toml)]
+    daemon["One daemon process"]
+    poller["One Telegram poller"]
+    route{"Private sender ID is linked and enabled?"}
+    deny["Deny + notify operator"]
+    adam["Adam runtime"]
+    anna["Anna runtime"]
+    adamDb[(profiles/adam/health.db)]
+    annaDb[(profiles/anna/health.db)]
+    adamContext[(profiles/adam/ContextFiles)]
+    annaContext[(profiles/anna/ContextFiles)]
+    adamDrive["Adam Drive folders/cache"]
+    annaDrive["Anna Drive folders/cache"]
+    adamTelegram["Replies to Adam"]
+    annaTelegram["Replies to Anna"]
+
+    roster --> daemon
+    daemon --> poller
+    poller --> route
+    route -- no --> deny
+    route -- Adam --> adam
+    route -- Anna --> anna
+    adamDrive --> adam
+    annaDrive --> anna
+    adam --> adamDb
+    adam --> adamContext
+    adam --> adamTelegram
+    anna --> annaDb
+    anna --> annaContext
+    anna --> annaTelegram
+```
+
+No profile identity is stored in health rows. The selected database file and
+profile directory are the isolation boundary.
+
 ## Setup And Data Import
 
 ```mermaid
@@ -60,7 +101,9 @@ flowchart TD
     clone["Clone repo + uv sync"]
     setup["uv run python main.py setup"]
     env["Create .env"]
-    context["Create first-run ContextFiles"]
+    addProfile["profile add NAME --operator"]
+    roster["Create profiles.toml"]
+    tree["Create profile DB + ContextFiles"]
     editContext["Fill me.md and strategy.md"]
     doctor{"uv run python main.py doctor passes?"}
     fixConfig["Fix paths, credentials, or local setup"]
@@ -79,8 +122,10 @@ flowchart TD
     user --> clone
     clone --> setup
     setup --> env
-    setup --> context
-    context --> editContext
+    env --> addProfile
+    addProfile --> roster
+    addProfile --> tree
+    tree --> editContext
     env --> doctor
     editContext --> doctor
     doctor -- no --> fixConfig

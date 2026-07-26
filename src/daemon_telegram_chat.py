@@ -24,7 +24,8 @@ from typing import TYPE_CHECKING
 from config import MAX_TOKENS_CHAT
 
 if TYPE_CHECKING:
-    from daemon import ZdrowskitDaemon
+    from daemon import ProfileRuntime
+    from telegram_bot import TelegramSender
 
 logger = logging.getLogger(__name__)
 
@@ -219,7 +220,7 @@ class TelegramChatHandler:
     """Message router, command dispatcher, and LLM chat loop for Telegram.
 
     Owns:
-        ``_poller``          — :class:`TelegramPoller` instance (created lazily).
+        ``_poller``          — profile-bound :class:`TelegramSender`.
         ``_conversation``    — :class:`ConversationBuffer` for multi-turn chat.
         ``_pending_edits``   — :class:`PendingEdits` for context-edit proposals.
 
@@ -230,10 +231,9 @@ class TelegramChatHandler:
         ``_add_flow``, ``_notify_flow``, and various helper methods.
     """
 
-    def __init__(self, daemon: "ZdrowskitDaemon") -> None:
+    def __init__(self, daemon: "ProfileRuntime") -> None:
         self._daemon = daemon
-        # These are initialised lazily in ``start()`` because they depend
-        # on environment variables that may not be set.
+        # These are initialized when the process-wide daemon attaches a sender.
         self._poller = None  # type: ignore[assignment]
         self._conversation = None  # type: ignore[assignment]
         self._pending_edits = None  # type: ignore[assignment]
@@ -248,47 +248,27 @@ class TelegramChatHandler:
             "last_handler_error": None,
         }
 
-    def start(self) -> None:
-        """Start Telegram long-polling in a daemon thread.
+    def start(self, sender: "TelegramSender") -> None:
+        """Attach this profile's sender and initialize chat-owned state."""
+        from telegram_bot import ConversationBuffer
 
-        Does nothing if TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID are not set.
-        """
-        import os
-
-        from telegram_bot import ConversationBuffer, TelegramPoller
-
-        bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
-        chat_id = os.environ.get("TELEGRAM_CHAT_ID")
-        if not bot_token or not chat_id:
-            logger.warning(
-                "TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set — "
-                "Telegram chat listener disabled"
-            )
-            return
-
-        self._poller = TelegramPoller(bot_token, chat_id)
+        self._poller = sender
         self._conversation = ConversationBuffer()
 
         from context_edit import PendingEdits
 
         self._pending_edits = PendingEdits()
 
-        thread = threading.Thread(
-            target=self._poller.poll_loop,
-            args=(
-                self._handle_telegram_message_monitored,
-                self._daemon._stop_event,
-            ),
-            kwargs={"on_callback": self._handle_telegram_callback_monitored},
-            daemon=True,
-            name="telegram-poller",
-        )
-        thread.start()
-        logger.info("Telegram chat listener started")
+        logger.info("Telegram sender attached for profile %s", self._daemon.name)
 
     def telegram_status(self) -> dict[str, object]:
         """Return a compact snapshot of Telegram poller and handler health."""
-        poller_status = self._poller.status() if self._poller is not None else {}
+        process_poller = self._daemon.telegram_poller
+        poller_status = (
+            process_poller.status()
+            if process_poller is not None and hasattr(process_poller, "status")
+            else (self._poller.status() if self._poller is not None else {})
+        )
         if not isinstance(poller_status, dict):
             poller_status = {}
         with self._status_lock:
@@ -684,9 +664,19 @@ class TelegramChatHandler:
         elif cmd in {"/llm_log", "/llm-log"}:
             self._handle_llm_log_command(text, message_id)
         elif cmd == "/codex":
-            self._handle_agent_command(text, message_id, kind="codex")
+            if self._daemon.operator:
+                self._handle_agent_command(text, message_id, kind="codex")
+            else:
+                self._poller.send_reply(
+                    "Operator access required.", reply_to_message_id=message_id
+                )
         elif cmd == "/claude":
-            self._handle_agent_command(text, message_id, kind="claude")
+            if self._daemon.operator:
+                self._handle_agent_command(text, message_id, kind="claude")
+            else:
+                self._poller.send_reply(
+                    "Operator access required.", reply_to_message_id=message_id
+                )
         elif cmd == "/context":
             parts = text.split()
             file_arg = parts[1] if len(parts) > 1 else None
@@ -697,11 +687,11 @@ class TelegramChatHandler:
             self._handle_tutorial_start(message_id)
         elif cmd == "/advanced":
             from commands import ADVANCED_TELEGRAM_BOT_COMMANDS, TELEGRAM_BOT_COMMANDS
-            from config import CONTEXT_DIR, PROMPTS_DIR
+            from config import PROMPTS_DIR
 
             ctx_names = sorted(
                 f.stem
-                for d in (CONTEXT_DIR, PROMPTS_DIR)
+                for d in (self._daemon.context_dir, PROMPTS_DIR)
                 for f in d.glob("*.md")
                 if f.stat().st_size > 0
             )
@@ -1611,12 +1601,12 @@ class TelegramChatHandler:
             message_id: Telegram message ID for reply threading.
             file_arg: Optional file stem to show full content for.
         """
-        from config import CONTEXT_DIR, PROMPTS_DIR
+        from config import PROMPTS_DIR
 
         if file_arg:
             # Show full content of a specific file.
             stem = file_arg.removesuffix(".md")
-            path = CONTEXT_DIR / f"{stem}.md"
+            path = self._daemon.context_dir / f"{stem}.md"
             if not path.exists():
                 path = PROMPTS_DIR / f"{stem}.md"
             if not path.exists():
@@ -1637,7 +1627,7 @@ class TelegramChatHandler:
 
         # No argument — send compact index.
         lines: list[str] = []
-        ctx_files = sorted(CONTEXT_DIR.glob("*.md"))
+        ctx_files = sorted(self._daemon.context_dir.glob("*.md"))
         for f in ctx_files:
             try:
                 content = f.read_text(encoding="utf-8")
@@ -2098,7 +2088,9 @@ class TelegramChatHandler:
         route = (
             {"model": self._daemon.model}
             if self._daemon.model
-            else resolve_model_route("chat").call_kwargs()
+            else resolve_model_route(
+                "chat", path=self._daemon.model_prefs_path
+            ).call_kwargs()
         )
         temperature = route.pop("temperature", 0.7)
         reasoning_effort = route.pop("reasoning_effort", None)

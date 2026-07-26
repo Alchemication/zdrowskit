@@ -42,7 +42,7 @@ from pydantic import BaseModel, Field
 from config import MAX_TOKENS_ADD_CLONE, PROMPTS_DIR
 
 if TYPE_CHECKING:
-    from daemon import ZdrowskitDaemon
+    from daemon import ProfileRuntime
 
 logger = logging.getLogger(__name__)
 
@@ -147,6 +147,7 @@ def find_workout_clone(
     category: str,
     duration_min: float | None = None,
     target_date: str | None = None,
+    model_prefs_path: Path | None = None,
 ) -> dict:
     """Find the best historical workout to clone via LLM.
 
@@ -212,7 +213,7 @@ def find_workout_clone(
     try:
         from model_prefs import resolve_model_route
 
-        route = resolve_model_route("add_clone").call_kwargs()
+        route = resolve_model_route("add_clone", path=model_prefs_path).call_kwargs()
         temperature = route.pop("temperature", 0.2)
         result = call_llm(
             messages,
@@ -304,7 +305,7 @@ class AddFlowHandler:
     isolation. Borrows the daemon's ``db`` path and ``_poller`` for I/O.
     """
 
-    def __init__(self, daemon: "ZdrowskitDaemon") -> None:
+    def __init__(self, daemon: "ProfileRuntime") -> None:
         self._daemon = daemon
         self._lock = threading.Lock()
         self._pending: dict[str, PendingAdd] = {}
@@ -623,6 +624,7 @@ class AddFlowHandler:
                 pending.category or "",
                 duration_min=pending.chosen_duration_min,
                 target_date=pending.date,
+                model_prefs_path=self._daemon.model_prefs_path,
             )
         finally:
             conn.close()

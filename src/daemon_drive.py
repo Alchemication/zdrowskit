@@ -6,7 +6,7 @@ import logging
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from daemon import ZdrowskitDaemon
+    from daemon import ProfileRuntime
 
 logger = logging.getLogger(__name__)
 
@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 class GoogleDrivePollHandler:
     """Poll Drive, import changed exports, and trigger new-data nudges."""
 
-    def __init__(self, daemon: "ZdrowskitDaemon") -> None:
+    def __init__(self, daemon: "ProfileRuntime") -> None:
         self._d = daemon
         # A persistent failure (bad folder ID, revoked share, expired key)
         # would otherwise add one failure event per poll interval. Record the
@@ -78,9 +78,8 @@ class GoogleDrivePollHandler:
 
         trigger_context = self._d._runners._format_data_delta(before, after)
         self._d._state["last_data_snapshot"] = after
-        from daemon import _save_state
 
-        _save_state(self._d._state)
+        self._d._save_state()
         self._d._runners._run_nudge("new_data", trigger_context=trigger_context)
         return True
 

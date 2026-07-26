@@ -8,8 +8,16 @@ Add your bot credentials to `.env`:
 
 ```env
 TELEGRAM_BOT_TOKEN=123456789:ABCdefGHI...
-TELEGRAM_CHAT_ID=123456789
 ```
+
+Link numeric Telegram user IDs in `profiles.toml`; `TELEGRAM_CHAT_ID` is used
+only as legacy input by `profile adopt` when `--telegram-id` is omitted.
+Usernames are never used for authorization.
+
+To find the first operator's ID, message the new bot before starting the daemon
+and inspect `message.from.id` in the official Bot API `getUpdates` response.
+Once the daemon is running, it owns that update stream and reports the numeric
+ID of later unknown senders to the operator.
 
 Register bot commands for Telegram autocomplete and the command menu:
 
@@ -19,7 +27,14 @@ uv run python main.py telegram-setup
 
 ## Interactive Chat
 
-The daemon runs a Telegram long-polling listener alongside the file watcher. Send a message and get a coaching response backed by your full health context.
+The daemon runs one Telegram long-polling listener and routes authorized
+private-chat updates to the matching profile runtime.
+
+Only a private chat where `chat.id` equals the sender's numeric user ID is
+accepted. Unknown, disabled, group-chat, and mismatched identities are denied.
+When possible, the operator receives a notice containing an unknown sender's
+numeric ID so they can deliberately add that person. Callback buttons are
+validated and dispatched through the same profile route.
 
 - Ask analytical questions; the LLM queries your database with SQL and charts the results.
 - Reply to a nudge or report; the bot knows which message you are replying to.
@@ -55,7 +70,7 @@ button payload values are not stored.
 `/status` shows bot state, Telegram delivery/handler health, data coverage,
 recent activity, and notification state.
 
-`/codex` and `/claude` are mirror commands for the two supported coding
+`/codex` and `/claude` are operator-only mirror commands for the two supported coding
 agents — both run the local CLI against the repo with workspace-edit
 permissions. `/codex <prompt>` uses the OpenAI Codex CLI in workspace-write
 sandbox mode; `/claude <prompt>` uses the Anthropic Claude Code CLI in

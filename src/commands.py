@@ -35,11 +35,8 @@ from assembler import assemble
 from config import (
     APP_HOME,
     CONTEXT_DIR,
-    GOOGLE_DRIVE_METRICS_FOLDER_ID,
     GOOGLE_DRIVE_POLL_INTERVAL_S,
     GOOGLE_DRIVE_SERVICE_ACCOUNT,
-    GOOGLE_DRIVE_WORKOUTS_FOLDER_ID,
-    IMPORT_SOURCE,
     resolve_data_dir,
     resolve_google_drive_data_dir,
 )
@@ -296,7 +293,7 @@ def cmd_context(args: argparse.Namespace) -> None:
     console = Console()
 
     # Context directory listing
-    context_dir = CONTEXT_DIR
+    context_dir = Path(getattr(args, "context_dir", CONTEXT_DIR))
     if not context_dir.exists():
         console.print(
             Panel(
@@ -428,15 +425,49 @@ def cmd_doctor(args: argparse.Namespace) -> None:  # noqa: ARG001
     env_path = REPO_ROOT / ".env"
     checks.append((".env file", env_path.exists(), str(env_path), True))
     checks.append(("app home", APP_HOME.exists(), str(APP_HOME), True))
-    checks.append(("context dir", CONTEXT_DIR.exists(), str(CONTEXT_DIR), True))
+    from profiles import PROFILES_FILE, ProfileConfigError, load_profiles
 
-    for name in ("me.md", "strategy.md", "log.md", "history.md"):
-        path = CONTEXT_DIR / name
-        checks.append((f"context {name}", path.exists(), str(path), True))
+    try:
+        profiles = load_profiles()
+    except ProfileConfigError as exc:
+        profiles = {}
+        checks.append(("profile roster", False, str(exc), True))
+    else:
+        checks.append(
+            (
+                "profile roster",
+                True,
+                f"{PROFILES_FILE} ({len(profiles)} profiles)",
+                True,
+            )
+        )
 
-    source_valid = IMPORT_SOURCE in {"local", "google-drive"}
-    checks.append(("import source", source_valid, IMPORT_SOURCE, True))
-    if IMPORT_SOURCE == "google-drive":
+    for profile in profiles.values():
+        checks.append(
+            (
+                f"{profile.name} database",
+                profile.db.is_file(),
+                str(profile.db),
+                profile.enabled,
+            )
+        )
+        for name in ("me.md", "strategy.md", "log.md", "history.md"):
+            path = profile.context / name
+            checks.append(
+                (
+                    f"{profile.name} {name}",
+                    path.exists(),
+                    str(path),
+                    profile.enabled,
+                )
+            )
+
+    drive_profiles = [
+        profile
+        for profile in profiles.values()
+        if profile.enabled and profile.import_source == "google-drive"
+    ]
+    if drive_profiles:
         service_account = (
             Path(GOOGLE_DRIVE_SERVICE_ACCOUNT).expanduser().resolve()
             if GOOGLE_DRIVE_SERVICE_ACCOUNT
@@ -450,22 +481,31 @@ def cmd_doctor(args: argparse.Namespace) -> None:  # noqa: ARG001
                 True,
             )
         )
-        checks.append(
-            (
-                "Drive Metrics folder",
-                bool(GOOGLE_DRIVE_METRICS_FOLDER_ID),
-                "configured" if GOOGLE_DRIVE_METRICS_FOLDER_ID else "missing",
-                True,
+        for profile in drive_profiles:
+            checks.append(
+                (
+                    f"{profile.name} Drive IDs",
+                    bool(
+                        profile.drive_metrics_folder_id
+                        and profile.drive_workouts_folder_id
+                    ),
+                    "configured"
+                    if (
+                        profile.drive_metrics_folder_id
+                        and profile.drive_workouts_folder_id
+                    )
+                    else "missing",
+                    True,
+                )
             )
-        )
-        checks.append(
-            (
-                "Drive Workouts folder",
-                bool(GOOGLE_DRIVE_WORKOUTS_FOLDER_ID),
-                "configured" if GOOGLE_DRIVE_WORKOUTS_FOLDER_ID else "missing",
-                True,
+            checks.append(
+                (
+                    f"{profile.name} Drive cache",
+                    profile.drive_cache.exists(),
+                    f"{profile.drive_cache} (created by first import)",
+                    False,
+                )
             )
-        )
         checks.append(
             (
                 "Drive poll interval",
@@ -474,25 +514,19 @@ def cmd_doctor(args: argparse.Namespace) -> None:  # noqa: ARG001
                 True,
             )
         )
-        data_dir = resolve_google_drive_data_dir(None)
-        checks.append(
-            (
-                "Drive data cache",
-                data_dir.exists(),
-                f"{data_dir} (created by first import)",
-                False,
-            )
-        )
-    else:
+    local_profiles = [
+        profile
+        for profile in profiles.values()
+        if profile.enabled and profile.import_source == "local"
+    ]
+    if local_profiles:
         data_dir = resolve_data_dir(None)
         checks.append(("Auto Export data dir", data_dir.exists(), str(data_dir), True))
     checks.append(
         ("LLM API key", _env_has_any_model_key(), "DEEPSEEK/ANTHROPIC/OPENAI", True)
     )
 
-    telegram_ready = bool(
-        os.environ.get("TELEGRAM_BOT_TOKEN") and os.environ.get("TELEGRAM_CHAT_ID")
-    )
+    telegram_ready = bool(os.environ.get("TELEGRAM_BOT_TOKEN"))
     checks.append(
         ("Telegram config", telegram_ready, "optional but needed for bot", False)
     )
@@ -789,12 +823,11 @@ def cmd_telegram_setup(args: argparse.Namespace) -> None:  # noqa: ARG001
     from telegram_bot import TelegramPoller
 
     bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
-    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
-    if not bot_token or not chat_id:
-        print("Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env first.")
+    if not bot_token:
+        print("Set TELEGRAM_BOT_TOKEN in .env first.")
         sys.exit(1)
 
-    poller = TelegramPoller(bot_token=bot_token, chat_id=chat_id)
+    poller = TelegramPoller(bot_token=bot_token)
     if poller.set_my_commands(TELEGRAM_BOT_COMMANDS):
         print("Telegram bot commands registered:")
         for cmd in TELEGRAM_BOT_COMMANDS:

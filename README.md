@@ -9,7 +9,8 @@ Your watch collects thousands of data points a week. Apple shows you rings. zdro
 - **Reactive nudges** - new data synced or context changed? The coach notices and says something useful, or stays quiet if there is nothing to say
 - **Remembers you week to week** - a freeform journal captures why things happened, and the coach appends its own memory after each report
 - **Ask anything about your data** - "What's my fastest 1km pace?", "How's my HRV trending since January?", "Do I sleep worse after evening runs?" If the data exists, it will find the answer and chart it
-- **Ask a coding agent about the repo** - Telegram can route `/codex` or `/claude` questions to the local Codex / Claude Code CLI in workspace-edit mode while preserving each agent's session
+- **Host a small family roster** - one daemon and bot route each private chat to an isolated database, context directory, preferences, and runtime state
+- **Ask a coding agent about the repo** - the operator can route `/codex` or `/claude` questions to the local Codex / Claude Code CLI in workspace-edit mode
 
 It is a Telegram conversation, not a dashboard: reply to a report, update your goals mid-chat, get a chart on demand.
 
@@ -49,6 +50,7 @@ git clone <repo-url> && cd zdrowskit
 uv sync
 
 uv run python main.py setup
+uv run python main.py profile add me --telegram-id YOUR_NUMERIC_ID --operator --source local
 uv run python main.py doctor
 uv run python main.py import
 uv run python main.py status
@@ -71,6 +73,8 @@ uv run python main.py models              # inspect/change model routing
 uv run python main.py telegram-setup      # register Telegram bot commands
 uv run python main.py daemon-install      # install the launchd daemon
 uv run python main.py daemon-restart      # restart the background daemon
+uv run python main.py profile add anna --telegram-id ID # add an isolated profile
+uv run python main.py db status --all     # check every profile database
 ```
 
 Run any command with `--help` for the full flag list. See [Commands](docs/commands.md) for the complete command reference.
@@ -82,6 +86,7 @@ Run any command with `--help` for the full flag list. See [Commands](docs/comman
 | [Setup](docs/setup.md) | Installation, `.env`, first-run context files, first LLM report |
 | [Apple Health data export](docs/apple-health.md) | Auto Export setup, iCloud paths, historical backfill |
 | [Google Drive import](docs/google-drive.md) | Portable API fetch, service-account setup, multiple profiles |
+| [Family hosting](docs/family-hosting.md) | Profile roster, account linking, adoption, isolation, backup |
 | [Commands](docs/commands.md) | CLI commands, useful flags, data directory override |
 | [Daemon](docs/daemon.md) | Drive polling, iCloud watching, service operation, state and logs |
 | [Telegram](docs/telegram.md) | Bot configuration, chat, commands, `/models`, `/notify` |

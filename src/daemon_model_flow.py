@@ -36,7 +36,7 @@ from model_prefs import (
 )
 
 if TYPE_CHECKING:
-    from daemon import ZdrowskitDaemon
+    from daemon import ProfileRuntime
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +60,7 @@ class PendingModelChange:
 class ModelFlowHandler:
     """State machine for the /models Telegram command."""
 
-    def __init__(self, daemon: "ZdrowskitDaemon") -> None:
+    def __init__(self, daemon: "ProfileRuntime") -> None:
         self._daemon = daemon
         self._lock = threading.Lock()
         self._pending: dict[str, PendingModelChange] = {}
@@ -194,7 +194,7 @@ class ModelFlowHandler:
             self._poller.answer_callback_query(cb_id, "Unknown feature.")
             return
         for feature in features:
-            reset_feature_route(feature)
+            reset_feature_route(feature, path=self._daemon.model_prefs_path)
         self._poller.answer_callback_query(cb_id, "Reset.")
         if msg_id:
             self._safe_edit(
@@ -204,7 +204,7 @@ class ModelFlowHandler:
             )
 
     def _handle_reset_all(self, cb_id: str, msg_id: int | None) -> None:
-        reset_all_routes()
+        reset_all_routes(self._daemon.model_prefs_path)
         self._poller.answer_callback_query(cb_id, "All routes reset.")
         if msg_id:
             self._safe_edit(
@@ -279,7 +279,10 @@ class ModelFlowHandler:
             # they're getting. We persist it as "auto" by popping the key on
             # apply, so future profile changes propagate.
             fallback = None
-            resolved = profile_fallback_for(TELEGRAM_FEATURE_GROUPS[group][0])
+            resolved = profile_fallback_for(
+                TELEGRAM_FEATURE_GROUPS[group][0],
+                path=self._daemon.model_prefs_path,
+            )
             fallback_label = (
                 f"auto ({model_label(resolved)})" if resolved else "auto (none)"
             )
@@ -333,6 +336,7 @@ class ModelFlowHandler:
             pending.features,
             primary=pending.primary,
             fallback=pending.fallback,
+            path=self._daemon.model_prefs_path,
         )
         self._poller.answer_callback_query(cb_id, "Applied.")
         if msg_id:
@@ -344,7 +348,7 @@ class ModelFlowHandler:
             )
 
     def _handle_doctor(self, cb_id: str, msg_id: int | None) -> None:
-        findings = doctor_findings()
+        findings = doctor_findings(path=self._daemon.model_prefs_path)
         self._poller.answer_callback_query(cb_id)
         if not findings:
             text = "✅ Model routing looks OK.\n\n" + self._summary_text()
@@ -391,7 +395,11 @@ class ModelFlowHandler:
             self._poller.answer_callback_query(cb_id, "Invalid value.")
             return
         for feature in TELEGRAM_FEATURE_GROUPS[group]:
-            set_feature_route(feature, reasoning_effort=value)
+            set_feature_route(
+                feature,
+                reasoning_effort=value,
+                path=self._daemon.model_prefs_path,
+            )
         self._poller.answer_callback_query(cb_id, "Set.")
         if msg_id:
             self._safe_edit(
@@ -426,7 +434,11 @@ class ModelFlowHandler:
         else:
             value = float(value_token)
         for feature in TELEGRAM_FEATURE_GROUPS[group]:
-            set_feature_route(feature, temperature=value)
+            set_feature_route(
+                feature,
+                temperature=value,
+                path=self._daemon.model_prefs_path,
+            )
         self._poller.answer_callback_query(cb_id, "Set.")
         if msg_id:
             self._safe_edit(
@@ -441,7 +453,7 @@ class ModelFlowHandler:
 
     def _summary_text(self) -> str:
         lines = ["Model routes:"]
-        for route in routes_summary():
+        for route in routes_summary(path=self._daemon.model_prefs_path):
             if route.feature in {"verification", "verification_rewrite"}:
                 continue
             label = FEATURE_LABELS.get(route.feature, route.feature)
@@ -465,7 +477,7 @@ class ModelFlowHandler:
 
     def _group_panel_text(self, group: str) -> str:
         feature = TELEGRAM_FEATURE_GROUPS[group][0]
-        route = resolve_model_route(feature)
+        route = resolve_model_route(feature, path=self._daemon.model_prefs_path)
         fallback = (
             model_label(route.fallback)
             if route.fallback
@@ -510,7 +522,7 @@ class ModelFlowHandler:
             ]
         ]
         feature = TELEGRAM_FEATURE_GROUPS[group][0]
-        route = resolve_model_route(feature)
+        route = resolve_model_route(feature, path=self._daemon.model_prefs_path)
         if "reasoning_effort" in route.params:
             rows.append(
                 [
@@ -565,7 +577,7 @@ class ModelFlowHandler:
         self, group: str, primary_idx: int
     ) -> list[list[dict[str, str]]]:
         feature = TELEGRAM_FEATURE_GROUPS[group][0]
-        resolved = profile_fallback_for(feature)
+        resolved = profile_fallback_for(feature, path=self._daemon.model_prefs_path)
         auto_label = (
             f"⚡ Auto ({model_label(resolved)})" if resolved else "⚡ Auto (none)"
         )
@@ -600,7 +612,7 @@ class ModelFlowHandler:
 
     def _reasoning_keyboard(self, group: str) -> list[list[dict[str, str]]]:
         feature = TELEGRAM_FEATURE_GROUPS[group][0]
-        route = resolve_model_route(feature)
+        route = resolve_model_route(feature, path=self._daemon.model_prefs_path)
         rows: list[list[dict[str, str]]] = []
         row: list[dict[str, str]] = []
         for value in REASONING_CHOICES:
@@ -623,7 +635,7 @@ class ModelFlowHandler:
 
     def _temperature_keyboard(self, group: str) -> list[list[dict[str, str]]]:
         feature = TELEGRAM_FEATURE_GROUPS[group][0]
-        route = resolve_model_route(feature)
+        route = resolve_model_route(feature, path=self._daemon.model_prefs_path)
         rows: list[list[dict[str, str]]] = []
         row: list[dict[str, str]] = []
         for value in TEMPERATURE_CHOICES:
@@ -652,5 +664,5 @@ class ModelFlowHandler:
         if group == "utilities":
             return "Utilities"
         feature = TELEGRAM_FEATURE_GROUPS[group][0]
-        route = resolve_model_route(feature)
+        route = resolve_model_route(feature, path=self._daemon.model_prefs_path)
         return FEATURE_LABELS.get(route.feature, group.title())

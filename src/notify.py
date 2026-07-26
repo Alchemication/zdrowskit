@@ -10,7 +10,7 @@ Public API:
 
 Example:
     from notify import send_telegram
-    send_telegram(report_text, "Week 2026-W11 Review")
+    send_telegram(report_text, "Week 2026-W11 Review", chat_id="123")
 """
 
 from __future__ import annotations
@@ -262,13 +262,17 @@ def send_telegram(
     report: str,
     week_label: str,
     reply_markup: dict | None = None,
+    *,
+    chat_id: str,
+    bot_token: str | None = None,
 ) -> int | None:
     """Send the report via Telegram Bot API with HTML formatting.
 
     Converts markdown to Telegram-compatible HTML.  Falls back to plain
     text if Telegram rejects the markup.
 
-    Requires TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in environment / .env.
+    Requires ``chat_id`` explicitly. The shared bot token defaults to
+    ``TELEGRAM_BOT_TOKEN``.
 
     Args:
         report: The markdown report text.
@@ -279,16 +283,11 @@ def send_telegram(
     Returns:
         The message_id of the last sent chunk, or None on failure.
     """
-    bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
-    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    bot_token = bot_token or os.environ.get("TELEGRAM_BOT_TOKEN")
 
     if not bot_token:
         logger.error("TELEGRAM_BOT_TOKEN not set. Add it to your .env file.")
         return None
-    if not chat_id:
-        logger.error("TELEGRAM_CHAT_ID not set. Add it to your .env file.")
-        return None
-
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     html_report = md_to_telegram_html(report)
 
@@ -310,15 +309,13 @@ def send_telegram(
     return last_message_id
 
 
-def _get_telegram_creds() -> tuple[str, str] | None:
-    """Return (bot_token, chat_id) or None with logged errors."""
-    bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
-    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+def _get_telegram_creds(
+    chat_id: str, bot_token: str | None = None
+) -> tuple[str, str] | None:
+    """Return shared bot token plus the explicit profile destination."""
+    bot_token = bot_token or os.environ.get("TELEGRAM_BOT_TOKEN")
     if not bot_token:
         logger.error("TELEGRAM_BOT_TOKEN not set. Add it to your .env file.")
-        return None
-    if not chat_id:
-        logger.error("TELEGRAM_CHAT_ID not set. Add it to your .env file.")
         return None
     return bot_token, chat_id
 
@@ -328,7 +325,7 @@ def send_telegram_photo(
     caption: str = "",
     *,
     bot_token: str | None = None,
-    chat_id: str | None = None,
+    chat_id: str,
 ) -> bool:
     """Send a photo via Telegram Bot API ``sendPhoto``.
 
@@ -339,15 +336,15 @@ def send_telegram_photo(
         image_bytes: PNG image data.
         caption: Optional caption text (markdown — will be converted to HTML).
         bot_token: Override bot token (defaults to env var).
-        chat_id: Override chat ID (defaults to env var).
+        chat_id: Explicit profile destination.
 
     Returns:
         True if sent successfully, False otherwise.
     """
     import urllib.request
 
-    if bot_token is None or chat_id is None:
-        creds = _get_telegram_creds()
+    if bot_token is None:
+        creds = _get_telegram_creds(chat_id)
         if creds is None:
             return False
         bot_token, chat_id = creds
@@ -419,6 +416,9 @@ def send_telegram_report(
     week_label: str,
     charts: list | None = None,
     reply_markup: dict | None = None,
+    *,
+    chat_id: str,
+    bot_token: str | None = None,
 ) -> int | None:
     """Send a report with optional chart photos followed by the full text.
 
@@ -436,7 +436,7 @@ def send_telegram_report(
     Returns:
         The message_id of the last sent text chunk, or None on failure.
     """
-    creds = _get_telegram_creds()
+    creds = _get_telegram_creds(chat_id, bot_token)
     if creds is None:
         return None
 

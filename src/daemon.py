@@ -23,6 +23,7 @@ import sqlite3
 import sys
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -30,16 +31,12 @@ from typing import TYPE_CHECKING, Iterator
 
 from config import (
     CONTEXT_DEBOUNCE_S,
-    GOOGLE_DRIVE_METRICS_FOLDER_ID,
     GOOGLE_DRIVE_POLL_INTERVAL_S,
     GOOGLE_DRIVE_SERVICE_ACCOUNT,
-    GOOGLE_DRIVE_WORKOUTS_FOLDER_ID,
     HEALTH_DEBOUNCE_S,
-    IMPORT_SOURCE,
     LOCK_FILE,
     LOG_FILE,
     SCHEDULED_CHECK_INTERVAL_S,
-    STATE_FILE,
     resolve_data_dir,
     resolve_google_drive_data_dir,
 )
@@ -61,6 +58,7 @@ if TYPE_CHECKING:
     from commands import ImportResult
     from context_edit import ContextEdit
     from context_edit import PendingContextEdit
+    from profiles import Profile
 
 logger = logging.getLogger(__name__)
 
@@ -70,28 +68,28 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-def _load_state() -> dict:
+def _load_state(path: Path) -> dict:
     """Load rate-limit state from the JSON state file.
 
     Returns:
         A dict with rate-limit keys, or an empty dict on first run / parse error.
     """
-    if STATE_FILE.exists():
+    if path.exists():
         try:
-            return json.loads(STATE_FILE.read_text(encoding="utf-8"))
+            return json.loads(path.read_text(encoding="utf-8"))
         except Exception as exc:
-            logger.warning("Could not read state file %s: %s", STATE_FILE, exc)
+            logger.warning("Could not read state file %s: %s", path, exc)
     return {}
 
 
-def _save_state(state: dict) -> None:
+def _save_state(state: dict, path: Path) -> None:
     """Persist rate-limit state to the JSON state file.
 
     Args:
         state: The state dict to serialise.
     """
-    STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    STATE_FILE.write_text(json.dumps(state, indent=2), encoding="utf-8")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(state, indent=2), encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -248,7 +246,7 @@ def _capture_last_error() -> Iterator[_LastErrorCapture]:
 # ---------------------------------------------------------------------------
 
 
-class ZdrowskitDaemon:
+class ProfileRuntime:
     """Watches health data and context files, fires LLM notifications.
 
     Attributes:
@@ -268,6 +266,11 @@ class ZdrowskitDaemon:
         google_drive_metrics_folder_id: str | None = None,
         google_drive_workouts_folder_id: str | None = None,
         google_drive_poll_interval_s: int = 5 * 60,
+        *,
+        profile: "Profile | None" = None,
+        sender: object | None = None,
+        telegram_poller: object | None = None,
+        state_path: Path | None = None,
     ) -> None:
         """Initialise the daemon.
 
@@ -316,6 +319,9 @@ class ZdrowskitDaemon:
                     + ", ".join(missing)
                 )
 
+        self.profile = profile
+        self.name = profile.name if profile is not None else "default"
+        self.operator = profile.operator if profile is not None else True
         self.model = model
         self.db = db
         self.context_dir = context_dir
@@ -330,10 +336,30 @@ class ZdrowskitDaemon:
         self.google_drive_workouts_folder_id = google_drive_workouts_folder_id
         self.google_drive_poll_interval_s = google_drive_poll_interval_s
 
-        self._state = _load_state()
-        from config import NOTIFICATION_PREFS_PATH
+        from config import (
+            MODEL_PREFS_PATH,
+            NOTIFICATION_PREFS_PATH,
+            NUDGES_DIR,
+            REPORTS_DIR,
+        )
 
-        self._notification_prefs_path = NOTIFICATION_PREFS_PATH
+        self.state_path = state_path or (
+            profile.state
+            if profile is not None
+            else self.db.parent / "daemon_state.json"
+        )
+        self._state = _load_state(self.state_path)
+        self._notification_prefs_path = (
+            profile.notification_prefs
+            if profile is not None
+            else NOTIFICATION_PREFS_PATH
+        )
+        self.model_prefs_path = (
+            profile.model_prefs if profile is not None else MODEL_PREFS_PATH
+        )
+        self.reports_dir = profile.reports if profile is not None else REPORTS_DIR
+        self.nudges_dir = profile.nudges if profile is not None else NUDGES_DIR
+        self.telegram_poller = telegram_poller
         self._lock = threading.Lock()
         self._import_lock = threading.RLock()
         self._stop_event = threading.Event()
@@ -368,6 +394,9 @@ class ZdrowskitDaemon:
         # daemon's own apply_edit call. Genuine user edits to the same file
         # in a separate editor are not in the set and still trigger nudges.
         self._self_originated_writes: set[Path] = set()
+        self._dispatch_lock = threading.RLock()
+        if sender is not None:
+            self._chat.start(sender)
 
     @property
     def _poller(self):  # type: ignore[no-untyped-def]
@@ -571,11 +600,11 @@ class ZdrowskitDaemon:
             str(prompt_id): feedback_id
             for prompt_id, feedback_id in self._pending_rejection_reasons.items()
         }
-        _save_state(self._state)
+        self._save_state()
 
     def _save_state(self) -> None:
         """Persist daemon state."""
-        _save_state(self._state)
+        _save_state(self._state, self.state_path)
 
     def _drop_feedback_reason_prompts(self, feedback_id: int) -> None:
         """Remove any pending reason prompts tied to a deleted feedback row."""
@@ -618,13 +647,13 @@ class ZdrowskitDaemon:
         queue: list[dict] = self._state.get("quiet_queue", [])
         queue.append({"trigger": trigger, "ts": now.isoformat()})
         self._state["quiet_queue"] = queue[-10:]
-        _save_state(self._state)
+        self._save_state()
 
     def _drop_queued_nudges(self) -> None:
         """Drop any queued nudges without sending them."""
         if self._state.get("quiet_queue"):
             self._state["quiet_queue"] = []
-            _save_state(self._state)
+            self._save_state()
 
     # ------------------------------------------------------------------
     # Scheduling / debounce
@@ -695,7 +724,7 @@ class ZdrowskitDaemon:
             return
         trigger_context = self._runners._format_data_delta(before, after)
         self._state["last_data_snapshot"] = after
-        _save_state(self._state)
+        self._save_state()
         self._runners._run_nudge("new_data", trigger_context=trigger_context)
 
     def _fire_context(self, stem: str) -> None:
@@ -1033,30 +1062,30 @@ class ZdrowskitDaemon:
 
     def _scheduled_check_loop(self) -> None:
         """Background thread: periodic checks for scheduled reports."""
+        while not self._stop_event.wait(SCHEDULED_CHECK_INTERVAL_S):
+            self._scheduled_check_once()
+
+    def _scheduled_check_once(self) -> None:
+        """Run one profile-scoped scheduled report and queue check."""
         from notification_prefs import evaluate_nudge_delivery, scheduled_report_due
 
-        while True:
-            time.sleep(SCHEDULED_CHECK_INTERVAL_S)
-            now = datetime.now().astimezone()
-            prefs = self._load_notification_prefs(now=now)
+        now = datetime.now().astimezone()
+        prefs = self._load_notification_prefs(now=now)
+        if self._state.get("quiet_queue"):
+            nudge_decision = evaluate_nudge_delivery(prefs, now=now)
+            if nudge_decision["status"] == "allowed":
+                self._runners._drain_quiet_queue()
+            elif nudge_decision["status"] == "suppressed":
+                logger.info(
+                    "Dropping queued nudges due to notification prefs: %s",
+                    nudge_decision.get("reason", "unknown"),
+                )
+                self._drop_queued_nudges()
 
-            # Drain or drop queued nudges once the nudge gate changes.
-            if self._state.get("quiet_queue"):
-                nudge_decision = evaluate_nudge_delivery(prefs, now=now)
-                if nudge_decision["status"] == "allowed":
-                    self._runners._drain_quiet_queue()
-                elif nudge_decision["status"] == "suppressed":
-                    logger.info(
-                        "Dropping queued nudges due to notification prefs: %s",
-                        nudge_decision.get("reason", "unknown"),
-                    )
-                    self._drop_queued_nudges()
-
-            if scheduled_report_due(prefs, "weekly_insights", now=now):
-                self._runners._run_weekly_report()
-
-            if scheduled_report_due(prefs, "midweek_report", now=now):
-                self._runners._run_midweek_report()
+        if scheduled_report_due(prefs, "weekly_insights", now=now):
+            self._runners._run_weekly_report()
+        if scheduled_report_due(prefs, "midweek_report", now=now):
+            self._runners._run_midweek_report()
 
     def _poll_google_drive_once(self, *, force_import: bool) -> bool:
         """Delegate one Google Drive poll to the Drive handler.
@@ -1069,92 +1098,240 @@ class ZdrowskitDaemon:
         """
         return self._drive.poll_once(force_import=force_import)
 
-    def _google_drive_poll_loop(self) -> None:
-        """Delegate the recurring Google Drive loop to the Drive handler."""
-        self._drive.run()
 
-    # ------------------------------------------------------------------
-    # Main loop
-    # ------------------------------------------------------------------
+class Daemon:
+    """Process-wide orchestration for isolated profile runtimes."""
+
+    def __init__(
+        self,
+        profiles: dict[str, "Profile"],
+        *,
+        model: str | None = None,
+        google_drive_service_account: Path | None = None,
+        google_drive_poll_interval_s: int = GOOGLE_DRIVE_POLL_INTERVAL_S,
+        local_health_dir: Path | None = None,
+    ) -> None:
+        from profiles import enabled_profiles
+        from telegram_bot import TelegramPoller, TelegramSender
+
+        self.profiles = profiles
+        self.enabled = enabled_profiles(profiles)
+        self._stop_event = threading.Event()
+        self._executor = ThreadPoolExecutor(
+            max_workers=max(4, min(12, len(self.enabled) * 2)),
+            thread_name_prefix="profile-worker",
+        )
+        token = os.environ.get("TELEGRAM_BOT_TOKEN")
+        self._poller = TelegramPoller(token) if token else None
+        self.runtimes: dict[str, ProfileRuntime] = {}
+        for profile in self.enabled.values():
+            if not profile.db.is_file():
+                logger.error(
+                    "Profile %s disabled at runtime: database is missing (%s). "
+                    "Restore it or recreate the profile explicitly.",
+                    profile.name,
+                    profile.db,
+                )
+                continue
+            missing_context = [
+                name
+                for name in ("me.md", "strategy.md")
+                if not (profile.context / name).is_file()
+            ]
+            if missing_context:
+                logger.error(
+                    "Profile %s disabled at runtime: missing context files: %s",
+                    profile.name,
+                    ", ".join(missing_context),
+                )
+                continue
+            sender = TelegramSender(token, str(profile.telegram_id)) if token else None
+            health_dir = (
+                local_health_dir or resolve_data_dir(None)
+                if profile.import_source == "local"
+                else profile.drive_cache
+            )
+            try:
+                self.runtimes[profile.name] = ProfileRuntime(
+                    model=model,
+                    db=profile.db,
+                    context_dir=profile.context,
+                    health_dir=health_dir,
+                    import_source=profile.import_source,
+                    google_drive_service_account=google_drive_service_account,
+                    google_drive_metrics_folder_id=profile.drive_metrics_folder_id,
+                    google_drive_workouts_folder_id=profile.drive_workouts_folder_id,
+                    google_drive_poll_interval_s=google_drive_poll_interval_s,
+                    profile=profile,
+                    sender=sender,
+                    telegram_poller=self._poller,
+                )
+            except ValueError as exc:
+                logger.error("Profile %s disabled at runtime: %s", profile.name, exc)
+        self._operator_sender = next(
+            (
+                runtime._poller
+                for runtime in self.runtimes.values()
+                if runtime.operator and runtime._poller is not None
+            ),
+            None,
+        )
+
+    def _run_profile(
+        self,
+        runtime: ProfileRuntime,
+        fn: callable,
+        *args: object,
+        **kwargs: object,
+    ) -> None:
+        """Serialize one profile's mutable work and isolate failures."""
+        try:
+            with runtime._dispatch_lock:
+                fn(*args, **kwargs)
+        except Exception:
+            logger.exception("Profile %s operation failed", runtime.name)
+
+    def handle_update(self, update: dict) -> None:
+        """Authorize and route one raw Telegram update."""
+        from profiles import resolve_profile
+
+        profile = resolve_profile(update, self.profiles)
+        if profile is None:
+            sender = update.get("message", {}).get("from", {})
+            if not sender:
+                sender = update.get("callback_query", {}).get("from", {})
+            user_id = sender.get("id", "unknown")
+            username = sender.get("username")
+            logger.warning(
+                "Rejected unknown or non-private Telegram update from %s (@%s)",
+                user_id,
+                username or "",
+            )
+            if self._operator_sender is not None:
+                suffix = f" (@{username})" if username else ""
+                self._operator_sender.send_reply(
+                    f"Unknown user {user_id}{suffix} messaged the bot."
+                )
+            return
+
+        runtime = self.runtimes.get(profile.name)
+        if runtime is None:
+            return
+        callback = update.get("callback_query")
+        if isinstance(callback, dict):
+            self._run_profile(
+                runtime,
+                runtime._chat._handle_telegram_callback_monitored,
+                callback,
+            )
+            return
+        message = update.get("message")
+        if isinstance(message, dict) and message.get("text"):
+            self._run_profile(
+                runtime,
+                runtime._chat._handle_telegram_message_monitored,
+                message,
+            )
+
+    def _scheduler_loop(self) -> None:
+        """Submit isolated scheduled and Drive work to the bounded pool."""
+        next_scheduled = 0.0
+        next_drive = {name: 0.0 for name in self.runtimes}
+        drive_initial = set(self.runtimes)
+        while not self._stop_event.wait(1):
+            now = time.monotonic()
+            if now >= next_scheduled:
+                for runtime in self.runtimes.values():
+                    self._executor.submit(
+                        self._run_profile,
+                        runtime,
+                        runtime._scheduled_check_once,
+                    )
+                next_scheduled = now + SCHEDULED_CHECK_INTERVAL_S
+            for name, runtime in self.runtimes.items():
+                if runtime.import_source != "google-drive" or now < next_drive[name]:
+                    continue
+                force = name in drive_initial
+                drive_initial.discard(name)
+                self._executor.submit(
+                    self._run_profile,
+                    runtime,
+                    runtime._poll_google_drive_once,
+                    force_import=force,
+                )
+                next_drive[name] = now + runtime.google_drive_poll_interval_s
 
     def run(self) -> None:
-        """Start the observer and scheduled check thread, then block until interrupted."""
+        """Start shared observers, scheduler, and Telegram poller."""
         from watchdog.observers import Observer
 
-        # Acquire an exclusive file lock to prevent concurrent daemon instances.
-        # The lock is held for the lifetime of the process (released on exit).
         LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
         self._lock_file = LOCK_FILE.open("w")
         try:
             fcntl.flock(self._lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
-            logger.error(
-                "Another daemon instance is already running (lock: %s). Exiting.",
-                LOCK_FILE,
-            )
-            sys.exit(1)
+            logger.error("Another daemon instance is running (lock: %s).", LOCK_FILE)
+            raise SystemExit(1)
         self._lock_file.write(str(os.getpid()))
         self._lock_file.flush()
 
-        if self.import_source == "local" and not self.health_dir.exists():
-            logger.warning(
-                "Local health data dir not found: %s — health triggers disabled",
-                self.health_dir,
-            )
-
-        logger.info("zdrowskit daemon starting")
-        logger.info("Health data dir : %s", self.health_dir)
-        logger.info("Import source   : %s", self.import_source)
-        logger.info("Context dir     : %s", self.context_dir)
-        logger.info("Database        : %s", self.db)
-        logger.info("State file      : %s", STATE_FILE)
-
         observer = Observer()
-
-        if self.import_source == "local" and self.health_dir.exists():
-            observer.schedule(
-                _make_health_handler(self._schedule_health, self._schedule_health),
-                str(self.health_dir),
-                recursive=True,
+        for runtime in self.runtimes.values():
+            logger.info(
+                "Profile %s: db=%s source=%s context=%s",
+                runtime.name,
+                runtime.db,
+                runtime.import_source,
+                runtime.context_dir,
             )
-
-        if self.context_dir.exists():
-            observer.schedule(
-                _make_context_handler(
-                    self._schedule_context, self._self_originated_writes
-                ),
-                str(self.context_dir),
-                recursive=False,
-            )
-        else:
-            logger.warning(
-                "Context dir not found: %s — context triggers disabled",
-                self.context_dir,
-            )
+            if runtime.import_source == "local" and runtime.health_dir.exists():
+                observer.schedule(
+                    _make_health_handler(
+                        lambda runtime=runtime: self._executor.submit(
+                            self._run_profile, runtime, runtime._schedule_health
+                        ),
+                        lambda runtime=runtime: self._executor.submit(
+                            self._run_profile, runtime, runtime._schedule_health
+                        ),
+                    ),
+                    str(runtime.health_dir),
+                    recursive=True,
+                )
+            if runtime.context_dir.exists():
+                observer.schedule(
+                    _make_context_handler(
+                        lambda stem, runtime=runtime: self._executor.submit(
+                            self._run_profile,
+                            runtime,
+                            runtime._schedule_context,
+                            stem,
+                        ),
+                        runtime._self_originated_writes,
+                    ),
+                    str(runtime.context_dir),
+                    recursive=False,
+                )
+            runtime._record_event("daemon", "start", "Profile runtime started")
 
         observer.start()
-
-        scheduled_thread = threading.Thread(
-            target=self._scheduled_check_loop, daemon=True, name="scheduled-checks"
+        scheduler = threading.Thread(
+            target=self._scheduler_loop,
+            daemon=True,
+            name="profile-scheduler",
         )
-        scheduled_thread.start()
-
-        self._chat.start()
-
-        logger.info("Daemon running — press Ctrl+C to stop")
-        self._record_event("daemon", "start", "Daemon started")
-
-        if self.import_source == "google-drive":
-            logger.info(
-                "Google Drive polling every %ds", self.google_drive_poll_interval_s
-            )
-            drive_thread = threading.Thread(
-                target=self._google_drive_poll_loop,
+        scheduler.start()
+        if self._poller is not None:
+            telegram = threading.Thread(
+                target=self._poller.poll_loop,
+                args=(self.handle_update, self._stop_event),
                 daemon=True,
-                name="google-drive-poll",
+                name="telegram-poller",
             )
-            drive_thread.start()
+            telegram.start()
+        else:
+            logger.warning("TELEGRAM_BOT_TOKEN not set — Telegram disabled")
 
+        logger.info("Daemon running with %d enabled profile(s)", len(self.runtimes))
         try:
             while observer.is_alive():
                 observer.join(timeout=1)
@@ -1162,10 +1339,13 @@ class ZdrowskitDaemon:
             logger.info("Shutting down daemon")
         finally:
             self._stop_event.set()
+            for runtime in self.runtimes.values():
+                runtime._stop_event.set()
             observer.stop()
             observer.join()
-            logger.info("Daemon stopped")
-            self._record_event("daemon", "stop", "Daemon stopped")
+            self._executor.shutdown(wait=True, cancel_futures=True)
+            for runtime in self.runtimes.values():
+                runtime._record_event("daemon", "stop", "Profile runtime stopped")
 
 
 # ---------------------------------------------------------------------------
@@ -1211,9 +1391,6 @@ def main() -> None:
     # Add src/ to path so project modules resolve when run directly
     sys.path.insert(0, str(Path(__file__).parent))
 
-    from config import CONTEXT_DIR
-    from store import default_db_path
-
     parser = argparse.ArgumentParser(
         description="zdrowskit health import and notification daemon"
     )
@@ -1223,39 +1400,15 @@ def main() -> None:
         help="Log to stderr in addition to the log file (useful for debugging)",
     )
     parser.add_argument(
-        "--db",
-        metavar="PATH",
-        default=str(default_db_path()),
-        help="Path to SQLite database",
-    )
-    parser.add_argument(
         "--data-dir",
         metavar="PATH",
-        help="Path to Auto Export health data folder",
-    )
-    parser.add_argument(
-        "--source",
-        choices=("local", "google-drive"),
-        default=IMPORT_SOURCE,
-        help="Health import source (default: ZDROWSKIT_IMPORT_SOURCE or local)",
+        help="Operator's local Auto Export folder override",
     )
     parser.add_argument(
         "--google-drive-service-account",
         metavar="PATH",
         default=GOOGLE_DRIVE_SERVICE_ACCOUNT,
         help="Service-account JSON path",
-    )
-    parser.add_argument(
-        "--google-drive-metrics-folder-id",
-        metavar="ID",
-        default=GOOGLE_DRIVE_METRICS_FOLDER_ID,
-        help="Auto Export Metrics folder ID",
-    )
-    parser.add_argument(
-        "--google-drive-workouts-folder-id",
-        metavar="ID",
-        default=GOOGLE_DRIVE_WORKOUTS_FOLDER_ID,
-        help="Auto Export Workouts folder ID",
     )
     parser.add_argument(
         "--google-drive-poll-interval",
@@ -1275,25 +1428,20 @@ def main() -> None:
     _setup_logging(args.foreground)
 
     try:
-        health_dir = (
-            resolve_google_drive_data_dir(args.data_dir)
-            if args.source == "google-drive"
-            else resolve_data_dir(args.data_dir)
-        )
-        daemon = ZdrowskitDaemon(
+        from profiles import load_profiles
+
+        daemon = Daemon(
+            load_profiles(),
             model=args.model,
-            db=Path(args.db),
-            context_dir=CONTEXT_DIR,
-            health_dir=health_dir,
-            import_source=args.source,
             google_drive_service_account=(
                 Path(args.google_drive_service_account).expanduser().resolve()
                 if args.google_drive_service_account
                 else None
             ),
-            google_drive_metrics_folder_id=args.google_drive_metrics_folder_id,
-            google_drive_workouts_folder_id=args.google_drive_workouts_folder_id,
             google_drive_poll_interval_s=args.google_drive_poll_interval,
+            local_health_dir=(
+                resolve_data_dir(args.data_dir) if args.data_dir else None
+            ),
         )
     except ValueError as exc:
         parser.error(str(exc))

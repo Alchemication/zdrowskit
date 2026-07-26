@@ -14,7 +14,6 @@ from store import (
     create_llm_trace,
     connect_db,
     delete_feedback,
-    default_db_path,
     load_date_range,
     load_feedback_entries,
     load_feedback_for_call,
@@ -668,17 +667,3 @@ class TestConnectDb:
             ).fetchall()
         }
         assert tables == set()
-
-
-class TestDefaultDbPath:
-    def test_returns_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.delenv("ZDROWSKIT_DB", raising=False)
-        path = default_db_path()
-        assert path.name == "health.db"
-        assert "zdrowskit" in str(path)
-
-    def test_respects_env_var(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("ZDROWSKIT_DB", "/tmp/custom.db")
-        path = default_db_path()
-        assert path.name == "custom.db"
-        assert str(path).endswith("/tmp/custom.db")

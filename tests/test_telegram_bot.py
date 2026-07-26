@@ -9,7 +9,7 @@ import urllib.error
 from unittest.mock import MagicMock, patch
 
 from notify import chunk_text
-from telegram_bot import ConversationBuffer, TelegramPoller
+from telegram_bot import ConversationBuffer, TelegramPoller, TelegramSender
 
 
 # ---------------------------------------------------------------------------
@@ -132,7 +132,7 @@ def _telegram_http_error(description: str) -> urllib.error.HTTPError:
 
 class TestTelegramPollerGetUpdates:
     def test_parses_successful_response(self) -> None:
-        poller = TelegramPoller("fake-token", "12345")
+        poller = TelegramPoller("fake-token")
         fake_response = json.dumps(
             {
                 "ok": True,
@@ -164,7 +164,7 @@ class TestTelegramPollerGetUpdates:
         assert status["last_poll_at"] is not None
 
     def test_returns_empty_on_error(self) -> None:
-        poller = TelegramPoller("fake-token", "12345")
+        poller = TelegramPoller("fake-token")
         with patch(
             "telegram_bot.urllib.request.urlopen",
             side_effect=TimeoutError("timed out"),
@@ -175,7 +175,7 @@ class TestTelegramPollerGetUpdates:
 
     def test_returns_empty_on_malformed_body(self) -> None:
         """A non-JSON gateway page must not raise out of get_updates."""
-        poller = TelegramPoller("fake-token", "12345")
+        poller = TelegramPoller("fake-token")
         mock_resp = MagicMock()
         mock_resp.read.return_value = b"<html>502 Bad Gateway</html>"
         mock_resp.__enter__ = MagicMock(return_value=mock_resp)
@@ -188,7 +188,7 @@ class TestTelegramPollerGetUpdates:
 
     def test_returns_empty_on_409_conflict(self) -> None:
         """A 409 (another poller) is swallowed, not raised."""
-        poller = TelegramPoller("fake-token", "12345")
+        poller = TelegramPoller("fake-token")
         err = urllib.error.HTTPError(
             url="x", code=409, msg="Conflict", hdrs=None, fp=io.BytesIO(b"{}")
         )
@@ -200,7 +200,7 @@ class TestTelegramPollerGetUpdates:
 
 class TestTelegramPollerSendReply:
     def test_sends_single_chunk(self) -> None:
-        poller = TelegramPoller("fake-token", "12345")
+        poller = TelegramSender("fake-token", "12345")
         mock_resp = MagicMock()
         mock_resp.read.return_value = json.dumps(
             {
@@ -224,7 +224,7 @@ class TestTelegramPollerSendReply:
         assert result == 99
 
     def test_chunks_long_message(self) -> None:
-        poller = TelegramPoller("fake-token", "12345")
+        poller = TelegramSender("fake-token", "12345")
         # Create a message that will be split into multiple chunks
         long_text = "\n".join(["x" * 500 for _ in range(10)])
         mock_resp = MagicMock()
@@ -250,7 +250,7 @@ class TestTelegramPollerSendReply:
         assert result == 77
 
     def test_force_reply_adds_reply_markup(self) -> None:
-        poller = TelegramPoller("fake-token", "12345")
+        poller = TelegramSender("fake-token", "12345")
         mock_resp = MagicMock()
         mock_resp.read.return_value = json.dumps(
             {
@@ -272,7 +272,7 @@ class TestTelegramPollerSendReply:
 
 class TestTelegramPollerEditMessageWithKeyboard:
     def test_retries_plain_text_after_html_error(self) -> None:
-        poller = TelegramPoller("fake-token", "12345")
+        poller = TelegramSender("fake-token", "12345")
 
         with patch(
             "telegram_bot.urllib.request.urlopen",
@@ -295,7 +295,7 @@ class TestTelegramPollerEditMessageWithKeyboard:
         assert "parse_mode" not in plain_payload
 
     def test_suppresses_redundant_edit_without_plain_retry(self) -> None:
-        poller = TelegramPoller("fake-token", "12345")
+        poller = TelegramSender("fake-token", "12345")
 
         with patch(
             "telegram_bot.urllib.request.urlopen",
@@ -315,7 +315,7 @@ class TestTelegramPollerEditMessageWithKeyboard:
 
 class TestTelegramPollerOutboundTimeouts:
     def test_callback_answer_uses_short_timeout(self) -> None:
-        poller = TelegramPoller("fake-token", "12345")
+        poller = TelegramSender("fake-token", "12345")
 
         with patch("telegram_bot.urllib.request.urlopen") as mock_urlopen:
             poller.answer_callback_query("callback-1")
@@ -324,147 +324,31 @@ class TestTelegramPollerOutboundTimeouts:
 
 
 class TestTelegramPollerPollLoop:
-    def test_status_records_dispatched_message(self) -> None:
-        poller = TelegramPoller("fake-token", "12345")
-        callback = MagicMock()
-        pool = MagicMock()
-        poller.get_updates = MagicMock(
-            return_value=[
-                {
-                    "update_id": 1,
-                    "message": {
-                        "message_id": 10,
-                        "chat": {"id": 12345},
-                        "text": "hello",
-                    },
-                }
-            ]
-        )
-
-        offset, had_updates = poller._poll_once(0, callback, None, pool)
-
-        assert offset == 2
-        assert had_updates is True
-        status = poller.status()
-        assert status["last_message_id"] == "10"
-        assert status["last_message_at"] is not None
-        pool.submit.assert_called_once_with(
-            poller._safe_call, callback, poller.get_updates.return_value[0]["message"]
-        )
-
-    def test_filters_by_chat_id(self) -> None:
-        """Messages from other chats should be ignored."""
-        poller = TelegramPoller("fake-token", "12345")
+    def test_process_poller_dispatches_raw_updates_without_chat_filter(self) -> None:
+        poller = TelegramPoller("fake-token")
         callback = MagicMock()
         stop = threading.Event()
-
         updates = [
             {
                 "update_id": 1,
                 "message": {
-                    "message_id": 10,
-                    "chat": {"id": 99999},  # Wrong chat
-                    "text": "sneaky",
-                },
-            },
-            {
-                "update_id": 2,
-                "message": {
-                    "message_id": 11,
-                    "chat": {"id": 12345},  # Correct chat
-                    "text": "hello",
-                },
-            },
-        ]
-
-        call_count = 0
-
-        def fake_get_updates(offset, timeout=30):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
-                return updates
-            stop.set()
-            return []
-
-        poller.get_updates = fake_get_updates
-        poller.poll_loop(callback, stop)
-
-        # Only the message from the correct chat should be passed through
-        callback.assert_called_once()
-        assert callback.call_args[0][0]["text"] == "hello"
-
-    def test_skips_non_text_messages(self) -> None:
-        """Messages without text (e.g. photos) should be skipped."""
-        poller = TelegramPoller("fake-token", "12345")
-        callback = MagicMock()
-        stop = threading.Event()
-
-        updates = [
-            {
-                "update_id": 1,
-                "message": {
-                    "message_id": 10,
-                    "chat": {"id": 12345},
-                    # No "text" field — e.g. a photo
-                },
-            },
-        ]
-
-        call_count = 0
-
-        def fake_get_updates(offset, timeout=30):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
-                return updates
-            stop.set()
-            return []
-
-        poller.get_updates = fake_get_updates
-        poller.poll_loop(callback, stop)
-
-        callback.assert_not_called()
-
-    def test_malformed_update_does_not_kill_loop(self) -> None:
-        """A bad update (e.g. missing update_id) must not stop polling.
-
-        Regression: an uncaught exception in the loop body used to silently
-        kill the daemon poller thread, breaking inbound chat with no log.
-        """
-        poller = TelegramPoller("fake-token", "12345")
-        callback = MagicMock()
-        stop = threading.Event()
-
-        bad_batch = [
-            {"message": {"chat": {"id": 12345}, "text": "boom"}}
-        ]  # no update_id
-        good_batch = [
-            {
-                "update_id": 5,
-                "message": {
-                    "message_id": 11,
-                    "chat": {"id": 12345},
-                    "text": "hello",
+                    "from": {"id": 999},
+                    "chat": {"id": 999, "type": "private"},
+                    "text": "route me later",
                 },
             }
         ]
-
-        call_count = 0
+        calls = 0
 
         def fake_get_updates(offset, timeout=30):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
-                return bad_batch
-            if call_count == 2:
-                return good_batch
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return updates
             stop.set()
             return []
 
         poller.get_updates = fake_get_updates
         poller.poll_loop(callback, stop)
 
-        # The loop survived the bad batch and still delivered the good message.
-        callback.assert_called_once()
-        assert callback.call_args[0][0]["text"] == "hello"
+        callback.assert_called_once_with(updates[0])

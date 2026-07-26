@@ -44,11 +44,16 @@ def normalize_reasoning_effort(value: str | None) -> str | None:
     return value
 
 
-def route_kwargs(feature: str, explicit_model: str | None = None) -> dict:
+def route_kwargs(
+    feature: str,
+    explicit_model: str | None = None,
+    *,
+    prefs_path: Path | None = None,
+) -> dict:
     """Return model-routing kwargs for a feature unless explicitly overridden."""
     if explicit_model:
         return {"model": explicit_model}
-    return resolve_model_route(feature).call_kwargs()
+    return resolve_model_route(feature, path=prefs_path).call_kwargs()
 
 
 def single_model_attempts(route: dict) -> list[dict]:
@@ -108,6 +113,7 @@ def apply_verification(
     metadata: dict[str, Any],
     trace_id: int | None = None,
     strict: bool = False,
+    model_prefs_path: Path | None = None,
 ) -> str | None:
     """Run verifier/rewrite and return the approved text, or None on fail.
 
@@ -117,8 +123,16 @@ def apply_verification(
     """
     if not _verification_enabled(kind):
         return draft
-    verifier_route = resolve_model_route("verification")
-    rewrite_route = resolve_model_route("verification_rewrite")
+    verifier_route = (
+        resolve_model_route("verification", path=model_prefs_path)
+        if model_prefs_path is not None
+        else resolve_model_route("verification")
+    )
+    rewrite_route = (
+        resolve_model_route("verification_rewrite", path=model_prefs_path)
+        if model_prefs_path is not None
+        else resolve_model_route("verification_rewrite")
+    )
 
     result = verify_and_rewrite(
         kind=kind,

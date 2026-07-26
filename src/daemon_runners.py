@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     from cmd_coach import CoachProposal
     from cmd_llm_common import CommandResult
     from commands import ImportResult
-    from daemon import ZdrowskitDaemon
+    from daemon import ProfileRuntime
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +44,7 @@ class DaemonRunnerHandler:
         ``_propose_context_edit``, ``_queue_nudge_trigger``.
     """
 
-    def __init__(self, daemon: "ZdrowskitDaemon") -> None:
+    def __init__(self, daemon: "ProfileRuntime") -> None:
         self._d = daemon
 
     # ------------------------------------------------------------------
@@ -173,7 +173,6 @@ class DaemonRunnerHandler:
             text: The nudge text that was sent.
             trigger: The trigger type that prompted the nudge.
         """
-        from daemon import _save_state
 
         today_str = date.today().isoformat()
         if self._d._state.get("nudge_date") != today_str:
@@ -190,7 +189,7 @@ class DaemonRunnerHandler:
         recent.insert(0, entry)
         self._d._state["recent_nudges"] = recent[:3]  # Keep last 3
 
-        _save_state(self._d._state)
+        self._d._save_state()
 
     def _can_send_report(self, report_type: str) -> bool:
         """Check whether a report of the given type may be sent today.
@@ -218,10 +217,9 @@ class DaemonRunnerHandler:
         Args:
             report_type: "review" for full-week or "progress" for mid-week.
         """
-        from daemon import _save_state
 
         self._d._state[f"last_{report_type}_date"] = date.today().isoformat()
-        _save_state(self._d._state)
+        self._d._save_state()
 
     # ------------------------------------------------------------------
     # Data snapshot helpers
@@ -407,6 +405,11 @@ class DaemonRunnerHandler:
             data_dir=str(self._d.health_dir),
             source=self._d.import_source,
             db=str(self._d.db),
+            context_dir=self._d.context_dir,
+            reports_dir=self._d.reports_dir,
+            nudges_dir=self._d.nudges_dir,
+            model_prefs_path=self._d.model_prefs_path,
+            telegram_id=(self._d.profile.telegram_id if self._d.profile else None),
             google_drive_service_account=(
                 str(self._d.google_drive_service_account)
                 if self._d.google_drive_service_account
@@ -480,7 +483,7 @@ class DaemonRunnerHandler:
         skip_import: bool = False,
     ) -> None:
         """Run a manual review report and send it via Telegram."""
-        from daemon import _capture_last_error, _save_state
+        from daemon import _capture_last_error
 
         if week not in {"current", "last"}:
             raise ValueError(f"Unsupported review week: {week}")
@@ -492,6 +495,11 @@ class DaemonRunnerHandler:
 
         args = types.SimpleNamespace(
             db=str(self._d.db),
+            context_dir=self._d.context_dir,
+            reports_dir=self._d.reports_dir,
+            nudges_dir=self._d.nudges_dir,
+            model_prefs_path=self._d.model_prefs_path,
+            telegram_id=(self._d.profile.telegram_id if self._d.profile else None),
             model=self._d.model,
             telegram=True,
             week=week,
@@ -509,7 +517,7 @@ class DaemonRunnerHandler:
                 self._d._attach_feedback_button(result, "insights")
                 self._d._record_report("review" if week == "last" else "progress")
                 self._d._state["last_report_ts"] = datetime.now().isoformat()
-                _save_state(self._d._state)
+                self._d._save_state()
             except SystemExit:
                 # Snapshot before our own logger.error overwrites the capture.
                 captured = cap.last_message
@@ -523,7 +531,7 @@ class DaemonRunnerHandler:
 
     def _run_weekly_report(self) -> None:
         """Run the full weekly insights report and send via Telegram."""
-        from daemon import _capture_last_error, _save_state
+        from daemon import _capture_last_error
         from notification_prefs import evaluate_report_delivery
 
         now = datetime.now().astimezone()
@@ -531,7 +539,7 @@ class DaemonRunnerHandler:
         decision = evaluate_report_delivery(prefs, "weekly_insights", now=now)
         if decision["status"] != "allowed":
             self._d._state["last_review_skip_date"] = date.today().isoformat()
-            _save_state(self._d._state)
+            self._d._save_state()
             reason = decision.get("reason", "unknown")
             logger.info("Weekly insights suppressed: %s", reason)
             self._d._record_event(
@@ -556,6 +564,11 @@ class DaemonRunnerHandler:
 
         args = types.SimpleNamespace(
             db=str(self._d.db),
+            context_dir=self._d.context_dir,
+            reports_dir=self._d.reports_dir,
+            nudges_dir=self._d.nudges_dir,
+            model_prefs_path=self._d.model_prefs_path,
+            telegram_id=(self._d.profile.telegram_id if self._d.profile else None),
             model=self._d.model,
             telegram=True,
             week="last",
@@ -573,7 +586,7 @@ class DaemonRunnerHandler:
                 self._d._attach_feedback_button(result, "insights")
                 self._d._record_report("review")
                 self._d._state["last_report_ts"] = datetime.now().isoformat()
-                _save_state(self._d._state)
+                self._d._save_state()
                 self._d._record_event(
                     "insights",
                     "fired",
@@ -590,7 +603,7 @@ class DaemonRunnerHandler:
                 # minutes and the report window stays open until midnight,
                 # so without this we'd re-run (and re-notify) every tick.
                 self._d._state["last_review_skip_date"] = date.today().isoformat()
-                _save_state(self._d._state)
+                self._d._save_state()
                 self._d._notify_user_failure(
                     "Weekly review",
                     captured,
@@ -605,7 +618,7 @@ class DaemonRunnerHandler:
 
     def _run_midweek_report(self) -> None:
         """Run a mid-week progress report and send via Telegram."""
-        from daemon import _capture_last_error, _save_state
+        from daemon import _capture_last_error
         from notification_prefs import evaluate_report_delivery
 
         now = datetime.now().astimezone()
@@ -613,7 +626,7 @@ class DaemonRunnerHandler:
         decision = evaluate_report_delivery(prefs, "midweek_report", now=now)
         if decision["status"] != "allowed":
             self._d._state["last_progress_skip_date"] = date.today().isoformat()
-            _save_state(self._d._state)
+            self._d._save_state()
             reason = decision.get("reason", "unknown")
             logger.info("Midweek report suppressed: %s", reason)
             self._d._record_event(
@@ -638,6 +651,11 @@ class DaemonRunnerHandler:
 
         args = types.SimpleNamespace(
             db=str(self._d.db),
+            context_dir=self._d.context_dir,
+            reports_dir=self._d.reports_dir,
+            nudges_dir=self._d.nudges_dir,
+            model_prefs_path=self._d.model_prefs_path,
+            telegram_id=(self._d.profile.telegram_id if self._d.profile else None),
             model=self._d.model,
             telegram=True,
             week="current",
@@ -655,7 +673,7 @@ class DaemonRunnerHandler:
                 self._d._attach_feedback_button(result, "insights")
                 self._d._record_report("progress")
                 self._d._state["last_report_ts"] = datetime.now().isoformat()
-                _save_state(self._d._state)
+                self._d._save_state()
                 self._d._record_event(
                     "insights",
                     "fired",
@@ -669,7 +687,7 @@ class DaemonRunnerHandler:
                 logger.error("Mid-week progress report failed")
                 # See _run_weekly_report — same retry-suppression rationale.
                 self._d._state["last_progress_skip_date"] = date.today().isoformat()
-                _save_state(self._d._state)
+                self._d._save_state()
                 self._d._notify_user_failure(
                     "Mid-week progress",
                     captured,
@@ -767,6 +785,11 @@ class DaemonRunnerHandler:
 
         args = types.SimpleNamespace(
             db=str(self._d.db),
+            context_dir=self._d.context_dir,
+            reports_dir=self._d.reports_dir,
+            nudges_dir=self._d.nudges_dir,
+            model_prefs_path=self._d.model_prefs_path,
+            telegram_id=(self._d.profile.telegram_id if self._d.profile else None),
             model=self._d.model,
             telegram=True,
             trigger=trigger,
@@ -816,7 +839,6 @@ class DaemonRunnerHandler:
 
     def _drain_quiet_queue(self) -> None:
         """Process deferred triggers as a single consolidated nudge."""
-        from daemon import _save_state
 
         queue: list[dict] = self._d._state.get("quiet_queue", [])
         if not queue:
@@ -824,7 +846,7 @@ class DaemonRunnerHandler:
 
         # Clear the queue before sending to avoid re-processing on failure
         self._d._state["quiet_queue"] = []
-        _save_state(self._d._state)
+        self._d._save_state()
 
         # Pick the most "interesting" trigger (user-initiated > system)
         priority = {
@@ -888,7 +910,7 @@ class DaemonRunnerHandler:
                 triggers like the ``/coach`` Telegram command so the user
                 can re-run on demand.
         """
-        from daemon import _capture_last_error, _save_state
+        from daemon import _capture_last_error
 
         last_coach = self._d._state.get("last_coach_date", "")
         today_str = date.today().isoformat()
@@ -903,6 +925,11 @@ class DaemonRunnerHandler:
 
         args = types.SimpleNamespace(
             db=str(self._d.db),
+            context_dir=self._d.context_dir,
+            reports_dir=self._d.reports_dir,
+            nudges_dir=self._d.nudges_dir,
+            model_prefs_path=self._d.model_prefs_path,
+            telegram_id=(self._d.profile.telegram_id if self._d.profile else None),
             model=self._d.model,
             week=week,
             months=3,
@@ -918,7 +945,7 @@ class DaemonRunnerHandler:
                 if cmd_result.text:
                     self._d._state["last_coach_summary"] = cmd_result.text[:500]
                     self._d._state["last_coach_summary_date"] = today_str
-                _save_state(self._d._state)
+                self._d._save_state()
                 if cmd_result.text:
                     self._d._record_event(
                         "coach",

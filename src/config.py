@@ -14,7 +14,7 @@ Public groups:
         FALLBACK_*_MODEL, DEFAULT_*_MODEL, FALLBACK_MODEL.
     Verification: ENABLE_LLM_VERIFICATION, VERIFY_*, VERIFICATION_MODEL,
         VERIFICATION_REWRITE_MODEL, MAX_VERIFICATION_REVISIONS.
-    Daemon: LOG_FILE, LOCK_FILE, STATE_FILE, debounce windows, nudge limits,
+    Daemon: LOG_FILE, LOCK_FILE, debounce windows, nudge limits,
         report cadence, Google Drive polling, and suppression timing.
     Helpers: resolve_data_dir, resolve_google_drive_data_dir.
 
@@ -317,9 +317,6 @@ LOG_FILE: Path = Path.home() / "Library/Logs/zdrowskit.daemon.log"
 
 LOCK_FILE: Path = APP_HOME / ".daemon.lock"
 """Single-instance lock file held by the daemon while running."""
-
-STATE_FILE: Path = APP_HOME / ".daemon_state.json"
-"""Persistent rate-limit and queue state for the daemon."""
 
 HEALTH_DEBOUNCE_S: int = 180
 """Health-data debounce window: wait this long after the last .json modify

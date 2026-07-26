@@ -8,7 +8,9 @@ from types import SimpleNamespace
 import pytest
 
 import commands as commands_module
+import profiles as profiles_module
 from commands import cmd_doctor
+from profiles import Profile
 
 
 class TestDoctorImportSource:
@@ -20,10 +22,11 @@ class TestDoctorImportSource:
     ) -> None:
         repo = tmp_path / "repo"
         app_home = tmp_path / "app"
-        context_dir = app_home / "ContextFiles"
+        profile_root = app_home / "profiles" / "adam"
+        context_dir = profile_root / "ContextFiles"
         repo.mkdir()
-        app_home.mkdir()
-        context_dir.mkdir()
+        context_dir.mkdir(parents=True)
+        (profile_root / "health.db").write_bytes(b"db")
         for name in ("me.md", "strategy.md", "log.md", "history.md"):
             (context_dir / name).write_text("test\n", encoding="utf-8")
         (repo / ".env").write_text("", encoding="utf-8")
@@ -32,32 +35,32 @@ class TestDoctorImportSource:
 
         monkeypatch.setattr(commands_module, "REPO_ROOT", repo)
         monkeypatch.setattr(commands_module, "APP_HOME", app_home)
-        monkeypatch.setattr(commands_module, "CONTEXT_DIR", context_dir)
-        monkeypatch.setattr(commands_module, "IMPORT_SOURCE", "google-drive")
+        profile = Profile(
+            "adam",
+            11,
+            profile_root,
+            operator=True,
+            import_source="google-drive",
+            drive_metrics_folder_id="metrics-folder",
+            drive_workouts_folder_id="workouts-folder",
+        )
+        monkeypatch.setattr(profiles_module, "load_profiles", lambda: {"adam": profile})
+        monkeypatch.setattr(
+            profiles_module, "PROFILES_FILE", app_home / "profiles.toml"
+        )
         monkeypatch.setattr(
             commands_module,
             "GOOGLE_DRIVE_SERVICE_ACCOUNT",
             str(service_account),
         )
-        monkeypatch.setattr(
-            commands_module, "GOOGLE_DRIVE_METRICS_FOLDER_ID", "metrics-folder"
-        )
-        monkeypatch.setattr(
-            commands_module, "GOOGLE_DRIVE_WORKOUTS_FOLDER_ID", "workouts-folder"
-        )
         monkeypatch.setattr(commands_module, "GOOGLE_DRIVE_POLL_INTERVAL_S", 300)
-        monkeypatch.setattr(
-            commands_module,
-            "resolve_google_drive_data_dir",
-            lambda arg: tmp_path / "missing-cache",
-        )
         monkeypatch.setattr(commands_module.shutil, "which", lambda name: "/bin/uv")
         monkeypatch.setenv("DEEPSEEK_API_KEY", "configured")
 
         cmd_doctor(SimpleNamespace())
 
         output = capsys.readouterr().out
-        assert "[ok] import source" in output
+        assert "[ok] profile roster" in output
         assert "[ok] Drive service account" in output
-        assert "[--] Drive data cache" in output
+        assert "[--] adam Drive cache" in output
         assert "All local checks passed" in output

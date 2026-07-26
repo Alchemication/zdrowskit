@@ -13,16 +13,18 @@ Any model provider works through [litellm](https://github.com/BerriAI/litellm), 
 Model routing is managed in:
 
 ```text
-~/Documents/zdrowskit/model_prefs.json
+~/Documents/zdrowskit/profiles/<name>/model_prefs.json
 ```
 
 You can change routing with:
 
 ```bash
 uv run python main.py models
+uv run python main.py models --profile anna
 ```
 
-or through Telegram `/models`.
+or through Telegram `/models`. Telegram always uses the sender's routed
+profile. CLI commands default to the operator profile.
 
 The Telegram panel groups features as Chat / Reports / Coach / Nudges / Utilities and tags every model button with its capability tier: premium / pro / flash / lite. Chat exposes Reasoning and Temperature controls. `reasoning_effort` is the single reasoning knob: Anthropic gets it natively, and on DeepSeek, `high`/`max` translate into thinking mode (`extra_body={"thinking": {"type": "enabled"}}`) while `low`/`medium`/`none` leave thinking off.
 
@@ -66,7 +68,11 @@ Inspect actual spend from your local DB:
 
 ```bash
 uv run python main.py llm-log --stats
+uv run python main.py llm-log --profile anna --stats
 ```
+
+LLM call IDs are local to each profile database. Always select the profile
+before investigating another person's call ID.
 
 ## Environment Overrides
 

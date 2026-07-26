@@ -56,14 +56,14 @@ def _looks_like_nonfinal_nudge(text: str) -> bool:
     return any(re.search(pattern, normalized) for pattern in meta_patterns)
 
 
-def _save_nudge(text: str, trigger: str) -> Path:
+def _save_nudge(text: str, trigger: str, nudges_dir: Path = NUDGES_DIR) -> Path:
     """Save a nudge to a timestamped markdown file."""
-    NUDGES_DIR.mkdir(parents=True, exist_ok=True)
+    nudges_dir.mkdir(parents=True, exist_ok=True)
 
     timestamp = datetime.now().strftime("%Y-%m-%d_%H%M")
     filename = f"nudge_{timestamp}_{trigger}.md"
 
-    path = NUDGES_DIR / filename
+    path = nudges_dir / filename
     path.write_text(text, encoding="utf-8")
     logger.info("Nudge saved to %s", path)
     return path
@@ -90,8 +90,9 @@ def cmd_nudge(
     _trigger = trigger_type or getattr(args, "trigger", "new_data")
 
     try:
+        context_dir = Path(getattr(args, "context_dir", CONTEXT_DIR))
         context = load_context(
-            CONTEXT_DIR, prompt_file="nudge_prompt", max_history=3, max_log=3
+            context_dir, prompt_file="nudge_prompt", max_history=3, max_log=3
         )
     except FileNotFoundError as e:
         logger.error("%s", e)
@@ -127,7 +128,11 @@ def cmd_nudge(
 
     from tools import execute_run_sql, run_sql_tool
 
-    route = route_kwargs("nudge", getattr(args, "model", None))
+    route = route_kwargs(
+        "nudge",
+        getattr(args, "model", None),
+        prefs_path=getattr(args, "model_prefs_path", None),
+    )
     model = route["model"]
     fallback_models = route.get("fallback_models")
     temperature = route.get("temperature", 0.7)
@@ -317,6 +322,7 @@ def cmd_nudge(
             "trigger_type": _trigger,
         },
         trace_id=trace_id,
+        model_prefs_path=getattr(args, "model_prefs_path", None),
     )
     if verified_text is None or verified_text.strip().upper() == "SKIP":
         logger.info("Nudge skipped by verifier (trigger: %s)", _trigger)
@@ -355,7 +361,11 @@ def cmd_nudge(
     )
     nudge_text = f"**{header}**\n\n{nudge_text}"
 
-    _save_nudge(nudge_text, _trigger)
+    _save_nudge(
+        nudge_text,
+        _trigger,
+        Path(getattr(args, "nudges_dir", NUDGES_DIR)),
+    )
     print(nudge_text)
 
     use_telegram = getattr(args, "telegram", False)
@@ -370,8 +380,14 @@ def cmd_nudge(
             send_telegram_photo(
                 chart.image_bytes,
                 caption=chart_figure_caption(index, chart.title),
+                chat_id=str(getattr(args, "telegram_id", "")),
             )
-        telegram_message_id = send_telegram(nudge_text, subject, reply_markup)
+        telegram_message_id = send_telegram(
+            nudge_text,
+            subject,
+            reply_markup,
+            chat_id=str(getattr(args, "telegram_id", "")),
+        )
 
     return CommandResult(
         text=nudge_text,

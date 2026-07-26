@@ -5,9 +5,9 @@ JSON through the Drive API into a local cache, validates the payload type, and
 then runs the normal zdrowskit parser. It works anywhere Python and `uv` run,
 including a Raspberry Pi.
 
-Google Drive is the recommended transport for new installations. The runtime
-default remains `local` so existing iCloud installations do not break; selecting
-Drive explicitly in `.env` enables API polling in both `import` and the daemon.
+Google Drive is the recommended transport for non-operator profiles. Each
+profile selects its source in `profiles.toml`; the service-account credential
+and polling interval remain shared in `.env`.
 
 ## Auto Export Setup
 
@@ -16,11 +16,10 @@ Create separate Google Drive automations for Metrics and Workouts. Use:
 - Export Format: JSON
 - Date Range: Week
 - Aggregation: Day
-- Folder Name: `Adam/Metrics` and `Adam/Workouts`
+- Folder Name: `Metrics` and `Workouts`
 
-Google Drive stores those as two literal folder names directly under
-`Health Auto Export`; `/` does not create a nested directory. For another person,
-use names such as `Anna/Metrics` and `Anna/Workouts`.
+Each person exports into their own Google account and shares their own
+`Health Auto Export` root with the shared service account.
 
 Leave the advanced root and backup folder-ID fields alone. Auto Export manages
 those IDs for its own recovery and migration state.
@@ -33,8 +32,9 @@ In Google Cloud:
 2. Create a service account. It does not need a project IAM role; Google Cloud
    Storage roles are unrelated to Google Drive.
 3. Create a JSON key and keep it outside the repository.
-4. In Google Drive, share the generated `Health Auto Export` root folder with
-   the service-account email as **Viewer**. Do not enable public link access.
+4. Each hosted person shares their `Health Auto Export` root folder with the
+   service-account email as **Viewer**. Uncheck **Notify people**; service
+   accounts have no mailbox. Do not enable public link access.
 
 Sharing the root grants inherited read access to the automation folders. Auto
 Export continues writing as the Google account connected on the iPhone; the
@@ -54,27 +54,32 @@ and mutable names, while an ID remains stable when a folder is renamed or moved.
 
 ## Configuration
 
-Add one profile's Drive source to `.env`:
+Keep only shared Drive infrastructure in `.env`:
 
 ```dotenv
-ZDROWSKIT_IMPORT_SOURCE=google-drive
 ZDROWSKIT_GOOGLE_DRIVE_SERVICE_ACCOUNT=~/Documents/zdrowskit/secrets/service-account.json
-ZDROWSKIT_GOOGLE_DRIVE_METRICS_FOLDER_ID=METRICS_FOLDER_ID
-ZDROWSKIT_GOOGLE_DRIVE_WORKOUTS_FOLDER_ID=WORKOUTS_FOLDER_ID
 ZDROWSKIT_GOOGLE_DRIVE_POLL_INTERVAL_S=300
-HEALTH_DATA_DIR=~/Documents/zdrowskit/Imports/adam
 ```
 
-Then fetch and import in one command:
+Put profile folder IDs in `profiles.toml`:
+
+```toml
+[profiles.anna]
+telegram_id = 222222222
+drive_metrics_folder_id = "METRICS_FOLDER_ID"
+drive_workouts_folder_id = "WORKOUTS_FOLDER_ID"
+```
+
+Then fetch and import:
 
 ```bash
-uv run python main.py import
+uv run python main.py import --profile anna
 ```
 
 The cache is materialized as:
 
 ```text
-~/Documents/zdrowskit/Imports/adam/
+~/Documents/zdrowskit/profiles/anna/Imports/google-drive/
   Metrics/*.json
   Workouts/*.json
   .drive-fetch-manifest.json
@@ -87,8 +92,7 @@ folder does not contain `data.metrics` or the Workouts folder does not contain
 
 ## Daemon Polling
 
-With `ZDROWSKIT_IMPORT_SOURCE=google-drive`, the daemon uses Drive API polling
-instead of filesystem events for health data:
+For each enabled Drive profile, the daemon:
 
 1. Poll immediately at startup and perform a full cache import.
 2. Poll every `ZDROWSKIT_GOOGLE_DRIVE_POLL_INTERVAL_S` seconds; the default is
@@ -133,23 +137,7 @@ explicitly with `uv run python main.py import --source local --data-dir PATH`.
 
 ## Multiple People
 
-One service account can read folders shared by multiple people. Keep each
-person's folder IDs, local cache, and SQLite database separate. Do not import two
-people into one database; the schema is currently single-profile and has no
-user identifier.
-
-The `.env` defaults represent one profile. A second profile can be run with CLI
-overrides and a separate database:
-
-```bash
-uv run python main.py import \
-  --source google-drive \
-  --google-drive-service-account ~/Documents/zdrowskit/secrets/service-account.json \
-  --google-drive-metrics-folder-id ANNA_METRICS_FOLDER_ID \
-  --google-drive-workouts-folder-id ANNA_WORKOUTS_FOLDER_ID \
-  --data-dir ~/Documents/zdrowskit/Imports/anna \
-  --db ~/Documents/zdrowskit/anna.db
-```
-
-The daemon currently owns one profile per process and app-home directory. A
-first-class multi-profile supervisor is separate future work.
+One read-only service account can access roots shared by multiple Google
+accounts. Folder IDs are globally unique, caches and databases are derived from
+the roster profile, and each person can revoke access by unsharing their root.
+See [Family hosting](family-hosting.md).

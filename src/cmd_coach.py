@@ -101,7 +101,8 @@ def cmd_coach(
     from tools import execute_run_sql, run_sql_tool
 
     try:
-        context = load_context(CONTEXT_DIR, prompt_file="coach_prompt")
+        context_dir = Path(getattr(args, "context_dir", CONTEXT_DIR))
+        context = load_context(context_dir, prompt_file="coach_prompt")
     except FileNotFoundError as e:
         logger.error("%s", e)
         sys.exit(1)
@@ -115,7 +116,7 @@ def cmd_coach(
 
     baselines = compute_baselines(conn)
     milestones = compute_milestones(conn)
-    save_baselines(CONTEXT_DIR, baselines)
+    save_baselines(context_dir, baselines)
 
     week_complete = health_data.get("week_complete", False)
     week_label = health_data.get("week_label")
@@ -164,7 +165,11 @@ def cmd_coach(
         metadata={"week": week, "months": getattr(args, "months", 3)},
     )
 
-    route = route_kwargs("coach", getattr(args, "model", None))
+    route = route_kwargs(
+        "coach",
+        getattr(args, "model", None),
+        prefs_path=getattr(args, "model_prefs_path", None),
+    )
     model = route["model"]
     fallback_models = route.get("fallback_models")
     tools = run_sql_tool() + context_update_tool(allowed_files=["strategy"])
@@ -304,7 +309,7 @@ def cmd_coach(
     proposals: list[CoachProposal] = []
     for edit in raw_edits:
         try:
-            preview = build_edit_preview(CONTEXT_DIR, edit, strict=True)
+            preview = build_edit_preview(context_dir, edit, strict=True)
         except EditPreviewError as exc:
             logger.warning(
                 "Dropping invalid coach edit for %s.md (section=%r): %s",
@@ -362,6 +367,7 @@ def cmd_coach(
         },
         trace_id=trace_id,
         strict=True,
+        model_prefs_path=getattr(args, "model_prefs_path", None),
     )
     if verified_text is None or verified_text.strip().upper() == "SKIP":
         logger.info("Coach verification suppressed the review/proposals")

@@ -32,6 +32,21 @@ def _format_bytes(size_bytes: int) -> str:
 
 def cmd_db(args: argparse.Namespace) -> None:
     """Handle the 'db' subcommand family for migration and schema admin."""
+    if getattr(args, "all", False):
+        if args.db_cmd == "schema":
+            raise ValueError("--all is only supported for db status and db migrate.")
+        from profiles import load_profiles
+
+        for profile in load_profiles().values():
+            print(
+                f"\nProfile: {profile.name} ({'enabled' if profile.enabled else 'disabled'})"
+            )
+            child = argparse.Namespace(**vars(args))
+            child.all = False
+            child.db = str(profile.db)
+            cmd_db(child)
+        return
+
     from rich.console import Console
     from rich.panel import Panel
     from rich.syntax import Syntax
@@ -41,6 +56,13 @@ def cmd_db(args: argparse.Namespace) -> None:
     db_path = Path(args.db).expanduser().resolve()
 
     if args.db_cmd == "migrate":
+        if not db_path.exists():
+            from profiles import ProfileConfigError
+
+            raise ProfileConfigError(
+                f"Database file does not exist: {db_path}. Restore it or recreate "
+                "the profile explicitly; migration will not create it."
+            )
         conn = connect_db(db_path, migrate=False)
         changes = apply_migrations(conn)
         if not changes:

@@ -1,6 +1,8 @@
 # Context Files
 
-The `insights`, `coach`, `nudge`, and `chat` commands use markdown files from `~/Documents/zdrowskit/ContextFiles/` to give the LLM real context about you, not just your numbers.
+The `insights`, `coach`, `nudge`, and `chat` commands use markdown files from
+`~/Documents/zdrowskit/profiles/<name>/ContextFiles/`. Every profile has an
+independent copy; `--profile NAME` selects it in the CLI.
 
 | File | Who edits | Purpose |
 |------|-----------|---------|

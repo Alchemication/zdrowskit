@@ -26,29 +26,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from aggregator import collapse_adjacent_run_sessions
-from config import APP_HOME
 from db.migrations import apply_migrations
 from locations import prefetch_locations, resolve_workout_location
 from models import DailySnapshot, WorkoutSnapshot, WorkoutSplit
 
 logger = logging.getLogger(__name__)
-
-_DEFAULT_DB = APP_HOME / "health.db"
-
-
-def default_db_path() -> Path:
-    """Return the default database path.
-
-    Returns:
-        Path to the default app database, or the value of the ZDROWSKIT_DB
-        environment variable if set.
-    """
-    import os
-
-    env = os.environ.get("ZDROWSKIT_DB")
-    if env:
-        return Path(env).expanduser().resolve()
-    return _DEFAULT_DB
 
 
 def connect_db(path: Path, *, migrate: bool = True) -> sqlite3.Connection:

@@ -3,12 +3,12 @@
 The daemon imports health data, watches context files, and decides whether a
 meaningful change should produce a notification.
 
-Health ingestion depends on `ZDROWSKIT_IMPORT_SOURCE`:
+Health ingestion is selected per entry in `profiles.toml`:
 
 | Source | Behavior |
 |---|---|
 | `google-drive` | Poll the Metrics and Workouts folder IDs every five minutes by default; recommended for new installations |
-| `local` | Watch the local Auto Export directory for filesystem changes; retained as the default for compatibility with existing iCloud installations |
+| `local` | Watch the operator's local Auto Export directory; non-operator profiles cannot use it |
 
 ```bash
 # Test in foreground
@@ -23,6 +23,11 @@ The foreground daemon runs on macOS and Linux. `daemon-install`,
 another process supervisor on Linux.
 
 What it watches and when it acts is covered in [Notifications](notifications.md): triggers, suppression rules, and cross-channel awareness.
+
+At startup, one process loads every enabled roster entry, creates one isolated
+runtime per healthy profile, and starts one shared Telegram poller. A missing
+database, required context file, or Drive setting disables only that runtime;
+other profiles continue. Logs include the profile name for profile-owned work.
 
 ## Health Import
 
@@ -46,10 +51,10 @@ The checked-in plist under `launchd/` is a placeholder template. `daemon-install
 
 ## Files
 
-State file:
+Profile state:
 
 ```text
-~/Documents/zdrowskit/.daemon_state.json
+~/Documents/zdrowskit/profiles/<name>/daemon_state.json
 ```
 
 This tracks rate limits, recent nudge history, coach summaries, the deferred nudge queue, and pending Telegram reason prompts for feedback / proposal rejection.
@@ -57,7 +62,7 @@ This tracks rate limits, recent nudge history, coach summaries, the deferred nud
 Notification preferences:
 
 ```text
-~/Documents/zdrowskit/notification_prefs.json
+~/Documents/zdrowskit/profiles/<name>/notification_prefs.json
 ```
 
 Set via Telegram `/notify` — see [Notifications](notifications.md). Delete the file to fall back to built-in defaults.
@@ -87,12 +92,19 @@ Watch live logs:
 tail -f ~/Library/Logs/zdrowskit.daemon.log
 ```
 
+Check every profile database after a deploy or migration:
+
+```bash
+uv run python main.py db status --all
+```
+
 Restart rules:
 
 | Scenario | Command |
 |---|---|
 | Code change in `src/`, such as `daemon.py` or `commands.py` | `uv run python main.py daemon-restart` |
 | Change to `.env`, such as a new API key | `uv run python main.py daemon-restart` |
+| Add, pause, rename, or edit a profile in `profiles.toml` | `uv run python main.py daemon-restart` |
 | PATH or CLI location changes, such as installing Codex or Claude under Homebrew | `uv run python main.py daemon-install` |
 | Stop for testing in foreground | `uv run python main.py daemon-stop` |
 | Change to the `.plist` itself | See below |

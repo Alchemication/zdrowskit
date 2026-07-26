@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from pathlib import Path
 from typing import Any
 
 from model_prefs import (
@@ -23,26 +24,32 @@ from model_prefs import (
 
 def cmd_models(args: argparse.Namespace) -> None:
     """Handle the ``models`` subcommand."""
+    path = Path(args.model_prefs_path)
     action = getattr(args, "models_cmd", None)
     if action is None:
-        _show_status(json_output=args.json)
+        _show_status(json_output=args.json, path=path)
         return
     if action == "reset":
         if getattr(args, "all", False):
-            reset_all_routes()
+            reset_all_routes(path)
             print("Reset all routes to defaults.")
-            _show_status(json_output=False)
+            _show_status(json_output=False, path=path)
             return
         if not getattr(args, "feature", None):
             raise SystemExit("Pass a feature name or --all.")
-        reset_feature_route(args.feature)
+        reset_feature_route(args.feature, path=path)
         print(f"Reset {args.feature}.")
-        _show_feature(args.feature)
+        _show_feature(args.feature, path=path)
         return
     if action == "profile":
-        set_profile_route(args.profile, primary=args.primary, fallback=args.fallback)
-        print(f"Updated {args.profile} profile.")
-        _show_status(json_output=False)
+        set_profile_route(
+            args.route_profile,
+            primary=args.primary,
+            fallback=args.fallback,
+            path=path,
+        )
+        print(f"Updated {args.route_profile} profile.")
+        _show_status(json_output=False, path=path)
         return
     if action == "set":
         set_feature_route(
@@ -51,12 +58,13 @@ def cmd_models(args: argparse.Namespace) -> None:
             fallback=_parse_fallback(args.fallback),
             reasoning_effort=_parse_reasoning(args.reasoning),
             temperature=_parse_temperature(args.temperature),
+            path=path,
         )
         print(f"Updated {args.feature}.")
-        _show_feature(args.feature)
+        _show_feature(args.feature, path=path)
         return
     if action == "doctor":
-        findings = doctor_findings()
+        findings = doctor_findings(path=path)
         if not findings:
             print("Model routing looks OK.")
             return
@@ -67,14 +75,14 @@ def cmd_models(args: argparse.Namespace) -> None:
     raise SystemExit(f"Unknown models command: {action}")
 
 
-def _show_feature(feature: str) -> None:
-    route = resolve_model_route(feature)
+def _show_feature(feature: str, *, path: Path) -> None:
+    route = resolve_model_route(feature, path=path)
     fallback = route.fallback or f"auto ({route.profile} profile)"
     print(f"{FEATURE_LABELS.get(feature, feature)}: {route.primary} -> {fallback}")
 
 
-def _show_status(*, json_output: bool) -> None:
-    routes = routes_summary()
+def _show_status(*, json_output: bool, path: Path) -> None:
+    routes = routes_summary(path=path)
     if json_output:
         payload = [_route_to_dict(route) for route in routes]
         print(json.dumps(payload, indent=2))

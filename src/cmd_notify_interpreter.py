@@ -73,13 +73,16 @@ def interpret_notify_request(
     now: datetime | None = None,
     clarification_answer: str | None = None,
     model: str | None = None,
+    context_dir: Path = CONTEXT_DIR,
+    prefs_path: Path = NOTIFICATION_PREFS_PATH,
+    model_prefs_path: Path | None = None,
 ) -> dict[str, Any]:
     """Interpret a Telegram /notify request into a structured payload."""
     now = now or datetime.now().astimezone()
 
     try:
         context = load_context(
-            CONTEXT_DIR,
+            context_dir,
             prompt_file="notify_prompt",
             max_history=0,
             max_log=0,
@@ -112,7 +115,7 @@ def interpret_notify_request(
     )
 
     conn = open_db(Path(db))
-    route = route_kwargs("notify", model)
+    route = route_kwargs("notify", model, prefs_path=model_prefs_path)
     temperature = route.pop("temperature", 0)
     try:
         result = call_llm(
@@ -126,7 +129,7 @@ def interpret_notify_request(
             metadata={
                 "request_text": request_text,
                 "clarification_answer": clarification_answer,
-                "prefs_path": str(NOTIFICATION_PREFS_PATH),
+                "prefs_path": str(prefs_path),
             },
         )
     finally:

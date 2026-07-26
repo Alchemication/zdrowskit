@@ -1,6 +1,11 @@
 # Multi-Profile Family Hosting
 
-Status: proposed
+Status: implemented
+
+Implementation note: adoption is an explicit `profile adopt NAME` operation
+rather than an automatic daemon-start side effect. The profile name cannot be
+inferred safely, and health data is not copied until the operator has reviewed
+the required dry-run output.
 
 ## Summary
 
@@ -99,9 +104,9 @@ This preserves every call site in `daemon_telegram_chat.py`, which already goes
 through a bot instance. Threading an explicit `chat_id` argument through every
 send call would achieve the same isolation with a far larger diff.
 
-What must change regardless: `notify.py` reads `TELEGRAM_CHAT_ID` from the
-environment inside `send_telegram` and `_get_telegram_creds`. Those ambient
-reads are the real footgun.
+The pre-change footgun was `notify.py` reading `TELEGRAM_CHAT_ID` from the
+environment inside `send_telegram` and `_get_telegram_creds`. The implemented
+send path now receives the routed destination explicitly.
 
 ### Reuse the daemon class as the profile runtime
 
@@ -308,10 +313,8 @@ Properties worth knowing:
   property for hosting family: consent stays with the data owner.
 - One service account can hold an unbounded number of such shares.
 
-Note that `docs/google-drive.md` currently describes putting several people's
-folders inside one Drive (`Adam/Metrics`, `Anna/Metrics`). That only works if
-each person writes into a folder the operator shared to them, which is fiddlier
-than each person sharing their own. Update that document when this lands.
+The companion [Google Drive guide](google-drive.md) uses this sharing model:
+each person shares their own root with the shared service account.
 
 ## Migrations
 
@@ -381,17 +384,19 @@ functions over a plain dict are clearer and just as testable.
 
 ## CLI Profile Resolution
 
-This is load-bearing, not cleanup. `default_db_path()` returns
-`APP_HOME / "health.db"`, and `main.py` bakes it into the `--db` default for
-`import`, `report`, `status`, `db`, `insights`, `nudge`, `coach`, `llm-log`, and
-`events`. Adoption moves that file into `profiles/<name>/health.db`, so the old
-path stops existing.
+This was load-bearing, not cleanup. Before this feature,
+`default_db_path()` returned `APP_HOME / "health.db"`, and `main.py` baked it
+into the `--db` default for `import`, `report`, `status`, `db`, `insights`,
+`nudge`, `coach`, `llm-log`, and `events`. Adoption copies that file into
+`profiles/<name>/health.db`; the profile copy becomes authoritative while the
+old path remains only for rollback.
 
 `connect_db` calls `path.parent.mkdir(parents=True, exist_ok=True)` and then
 connects, which **creates and migrates a fresh empty database** at any missing
-path. So after adoption, every one of those commands would silently open a new
-empty database and report no data — a wrong answer rather than an error — and
-`import` would write real data into an orphaned file.
+path. Keeping the old default would continue reading and writing the stale
+rollback database after adoption. If it were later removed, commands would
+silently create a new empty database. Both failures produce a wrong answer
+rather than an actionable error.
 
 Requirements:
 
@@ -499,10 +504,12 @@ multi-profile debugging.
 ## CLI and Operations
 
 Existing health-data commands gain `--profile NAME` as described in CLI Profile
-Resolution. One new command is needed:
+Resolution. Profile creation supports local or Drive-backed imports:
 
 ```text
-profile add NAME --telegram-id ID [--operator]
+profile add NAME --telegram-id ID [--operator] [--source local|google-drive]
+  [--google-drive-metrics-folder-id ID]
+  [--google-drive-workouts-folder-id ID]
 ```
 
 It appends a section to `profiles.toml`, creates the directory tree, initialises
@@ -519,18 +526,20 @@ Everything else is file manipulation and needs no command:
 
 ## Adoption from the Existing Installation
 
-First multi-profile startup adopts the existing single-profile installation:
+Adoption is an explicit one-time operator action, never a daemon startup side
+effect:
 
-1. Stop the old daemon.
-2. Write `profiles.toml` with one operator profile, taking the Telegram ID from
-   `TELEGRAM_CHAT_ID` and the Drive folder IDs from the existing environment.
-3. Move or safely copy existing state into `profiles/<name>/`.
-4. Validate database, context, and cache paths.
-5. Start the multi-profile daemon.
+1. Preview with `profile adopt NAME --dry-run`.
+2. Stop the old daemon.
+3. Run `profile adopt NAME`, optionally passing `--telegram-id ID`.
+4. Copy legacy state into `profiles/<name>/` and validate database, context,
+   and cache paths.
+5. Write `profiles.toml` last. Legacy sources remain as a rollback copy.
+6. Restart the multi-profile daemon and verify the profile-specific paths.
 
 Adoption must:
 
-- preserve the original until validation succeeds;
+- preserve the original after validation as an explicit rollback copy;
 - refuse to overwrite an existing profile directory;
 - verify the health database opens and migrations apply;
 - verify required context files exist;
@@ -609,11 +618,12 @@ Why these cannot be separated:
 - **Routing needs somewhere to dispatch to**, so runtimes must already be
   roster-instantiated; runtimes need profile-shaped paths, so adoption must
   precede them.
-- **CLI resolution must land with adoption.** The moment `health.db` moves, the
-  old default path silently creates empty databases.
+- **CLI resolution must land with adoption.** The moment the profile copy
+  becomes authoritative, the old default path becomes unsafe.
 
-Adoption (item 2) carries the real blast radius — it relocates live health data.
-Keep it behind a dry-run, and validate before deleting the original.
+Adoption (item 2) carries the real blast radius — it copies live health data
+and changes which paths the application treats as authoritative. Keep it
+behind a dry-run, and validate before deleting the original.
 
 ## Testing Strategy
 

@@ -7,15 +7,13 @@ from unittest.mock import patch
 
 import pytest
 
-import daemon as daemon_module
 from commands import ImportResult
-from daemon import ZdrowskitDaemon
+from daemon import ProfileRuntime
 
 
-def _make_drive_daemon(tmp_path: Path) -> ZdrowskitDaemon:
+def _make_drive_daemon(tmp_path: Path) -> ProfileRuntime:
     """Create a daemon configured for Drive without real credentials."""
-    daemon_module.STATE_FILE = tmp_path / "state.json"
-    daemon = ZdrowskitDaemon(
+    daemon = ProfileRuntime(
         "test-model",
         tmp_path / "health.db",
         tmp_path / "context",
@@ -26,6 +24,7 @@ def _make_drive_daemon(tmp_path: Path) -> ZdrowskitDaemon:
         google_drive_workouts_folder_id="workouts-folder",
         google_drive_poll_interval_s=300,
     )
+    daemon.state_path = tmp_path / "state.json"
     daemon._notification_prefs_path = tmp_path / "notification_prefs.json"
     return daemon
 
@@ -33,7 +32,7 @@ def _make_drive_daemon(tmp_path: Path) -> ZdrowskitDaemon:
 class TestDriveDaemonConfiguration:
     def test_rejects_missing_drive_settings(self, tmp_path: Path) -> None:
         with pytest.raises(ValueError, match="WORKOUTS_FOLDER_ID"):
-            ZdrowskitDaemon(
+            ProfileRuntime(
                 "test-model",
                 tmp_path / "health.db",
                 tmp_path,
@@ -44,7 +43,7 @@ class TestDriveDaemonConfiguration:
 
     def test_rejects_non_positive_poll_interval(self, tmp_path: Path) -> None:
         with pytest.raises(ValueError, match="greater than zero"):
-            ZdrowskitDaemon(
+            ProfileRuntime(
                 "test-model",
                 tmp_path / "health.db",
                 tmp_path,
@@ -206,7 +205,7 @@ class TestDrivePolling:
             patch.object(daemon._stop_event, "is_set", return_value=False),
             patch.object(daemon._stop_event, "wait", side_effect=[False, True]),
         ):
-            daemon._google_drive_poll_loop()
+            daemon._drive.run()
 
         assert [call.kwargs for call in poll.call_args_list] == [
             {"force_import": True},
@@ -227,7 +226,7 @@ class TestDrivePolling:
             patch.object(daemon._stop_event, "is_set", return_value=False),
             patch.object(daemon._stop_event, "wait", side_effect=[False, True]),
         ):
-            daemon._google_drive_poll_loop()
+            daemon._drive.run()
 
         assert [call.kwargs for call in poll.call_args_list] == [
             {"force_import": True},

@@ -17,6 +17,7 @@ CLI equivalents:
 
 ```bash
 uv run python main.py notify
+uv run python main.py notify --profile anna
 uv run python main.py notify reset all
 uv run python main.py notify reset nudges
 ```
@@ -37,7 +38,10 @@ How it works:
 - The bot shows the interpreted change back to you with `Accept` / `Reject`.
 - Nothing is saved until you tap `Accept`.
 - If the request is ambiguous, the bot asks a short clarification question.
-- Preferences live in `~/Documents/zdrowskit/notification_prefs.json`.
+- Preferences live in
+  `~/Documents/zdrowskit/profiles/<name>/notification_prefs.json`.
+- CLI commands default to the operator profile; use `--profile NAME` for
+  another person.
 
 What can be changed:
 
