@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -363,13 +365,117 @@ class TestMultiProfileDaemon:
             }
         )
 
+        for worker in daemon._workers.values():
+            worker.shutdown(wait=True)
+
         anna_handler.assert_called_once()
         adam_handler.assert_called_once()
         assert daemon.runtimes["adam"].db != daemon.runtimes["anna"].db
         assert (
             daemon.runtimes["adam"].context_dir != daemon.runtimes["anna"].context_dir
         )
-        daemon._executor.shutdown(wait=True)
+
+    def test_slow_profile_does_not_block_another_profile(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """One person's slow LLM turn must not delay anyone else's message.
+
+        Regression: chat turns ran inline on the shared Telegram handler pool
+        while holding a per-profile lock, so a backlog for one profile starved
+        every other profile of workers.
+        """
+        roster = tmp_path / "profiles.toml"
+        add_profile("adam", 11, operator=True, import_source="local", path=roster)
+        add_profile(
+            "anna",
+            22,
+            path=roster,
+            metrics_id="annaMetrics123",
+            workouts_id="annaWorkouts123",
+        )
+        monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "fake-token")
+
+        from daemon import Daemon
+
+        daemon = Daemon(
+            load_profiles(roster),
+            google_drive_service_account=tmp_path / "service-account.json",
+        )
+        release_adam = threading.Event()
+        anna_answered = threading.Event()
+
+        daemon.runtimes["adam"]._chat._handle_telegram_message_monitored = (
+            lambda message: release_adam.wait(5)
+        )
+        daemon.runtimes["anna"]._chat._handle_telegram_message_monitored = (
+            lambda message: anna_answered.set()
+        )
+
+        def send(user_id: int, message_id: int) -> None:
+            daemon.handle_update(
+                {
+                    "message": {
+                        "message_id": message_id,
+                        "from": {"id": user_id},
+                        "chat": {"id": user_id, "type": "private"},
+                        "text": "hello",
+                    }
+                }
+            )
+
+        started = time.monotonic()
+        send(11, 1)
+        send(22, 2)
+        dispatch_seconds = time.monotonic() - started
+
+        # Routing must hand off to the profile's worker, never run the turn on
+        # the caller's thread — that is what used to serialize the roster.
+        assert dispatch_seconds < 1
+        # Anna is answered while Adam's turn is still blocked.
+        assert anna_answered.wait(5)
+        assert not release_adam.is_set()
+        release_adam.set()
+        daemon.shutdown_workers()
+
+    def test_chat_backlog_is_shed_per_profile(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        roster = tmp_path / "profiles.toml"
+        add_profile("adam", 11, operator=True, import_source="local", path=roster)
+        monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "fake-token")
+
+        from daemon import Daemon, _MAX_PENDING_CHAT_TURNS
+
+        daemon = Daemon(
+            load_profiles(roster),
+            google_drive_service_account=tmp_path / "service-account.json",
+        )
+        runtime = daemon.runtimes["adam"]
+        release = threading.Event()
+        handled = []
+        runtime._chat._handle_telegram_message_monitored = lambda message: (
+            handled.append(message) or release.wait(5)
+        )
+        sender = MagicMock()
+        runtime._chat._poller = sender
+
+        for message_id in range(_MAX_PENDING_CHAT_TURNS + 2):
+            daemon.handle_update(
+                {
+                    "message": {
+                        "message_id": message_id,
+                        "from": {"id": 11},
+                        "chat": {"id": 11, "type": "private"},
+                        "text": "spam",
+                    }
+                }
+            )
+
+        # Everything past the cap is shed with a reply, not silently dropped.
+        assert sender.send_reply.call_count == 2
+        assert "Still working" in sender.send_reply.call_args[0][0]
+        release.set()
+        daemon.shutdown_workers()
 
     def test_non_operator_cannot_start_coding_agent(self, tmp_path: Path) -> None:
         from daemon import ProfileRuntime

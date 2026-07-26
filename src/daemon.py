@@ -62,6 +62,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_MAX_PENDING_CHAT_TURNS = 3
+"""Chat turns one profile may have queued before further updates are shed."""
+
 
 # ---------------------------------------------------------------------------
 # State management
@@ -394,7 +397,6 @@ class ProfileRuntime:
         # daemon's own apply_edit call. Genuine user edits to the same file
         # in a separate editor are not in the set and still trigger nudges.
         self._self_originated_writes: set[Path] = set()
-        self._dispatch_lock = threading.RLock()
         if sender is not None:
             self._chat.start(sender)
 
@@ -1117,10 +1119,6 @@ class Daemon:
         self.profiles = profiles
         self.enabled = enabled_profiles(profiles)
         self._stop_event = threading.Event()
-        self._executor = ThreadPoolExecutor(
-            max_workers=max(4, min(12, len(self.enabled) * 2)),
-            thread_name_prefix="profile-worker",
-        )
         token = os.environ.get("TELEGRAM_BOT_TOKEN")
         self._poller = TelegramPoller(token) if token else None
         self.runtimes: dict[str, ProfileRuntime] = {}
@@ -1176,6 +1174,18 @@ class Daemon:
             ),
             None,
         )
+        # One worker per profile. A single worker keeps each profile's mutable
+        # work serialized without a lock, and — because no profile's work ever
+        # runs on a thread another profile needs — a slow LLM turn for one
+        # person cannot delay anyone else's messages.
+        self._workers = {
+            name: ThreadPoolExecutor(
+                max_workers=1, thread_name_prefix=f"profile-{name}"
+            )
+            for name in self.runtimes
+        }
+        self._pending_lock = threading.Lock()
+        self._pending_chat_turns = dict.fromkeys(self.runtimes, 0)
 
     def _run_profile(
         self,
@@ -1184,12 +1194,63 @@ class Daemon:
         *args: object,
         **kwargs: object,
     ) -> None:
-        """Serialize one profile's mutable work and isolate failures."""
+        """Run one profile's work, isolating its failures from other profiles."""
         try:
-            with runtime._dispatch_lock:
-                fn(*args, **kwargs)
+            fn(*args, **kwargs)
         except Exception:
             logger.exception("Profile %s operation failed", runtime.name)
+
+    def _submit(
+        self,
+        runtime: ProfileRuntime,
+        fn: callable,
+        *args: object,
+        **kwargs: object,
+    ) -> None:
+        """Queue work on this profile's own worker thread."""
+        worker = self._workers.get(runtime.name)
+        if worker is None:
+            return
+        try:
+            worker.submit(self._run_profile, runtime, fn, *args, **kwargs)
+        except RuntimeError:
+            # Worker already shut down — the daemon is stopping.
+            logger.debug("Dropping work for profile %s during shutdown", runtime.name)
+
+    def _submit_chat_turn(
+        self, runtime: ProfileRuntime, fn: callable, *args: object
+    ) -> None:
+        """Queue one chat turn, shedding load past a small per-profile backlog.
+
+        Without a cap a single person can queue turns faster than the LLM
+        answers them, so their own replies fall further and further behind.
+        """
+        with self._pending_lock:
+            pending = self._pending_chat_turns.get(runtime.name, 0)
+            if pending >= _MAX_PENDING_CHAT_TURNS:
+                logger.warning(
+                    "Profile %s has %d chat turns queued; shedding this update",
+                    runtime.name,
+                    pending,
+                )
+                if runtime._poller is not None:
+                    runtime._poller.send_reply(
+                        "Still working through your previous messages — "
+                        "send this one again once I reply."
+                    )
+                return
+            self._pending_chat_turns[runtime.name] = pending + 1
+        self._submit(runtime, self._run_chat_turn, runtime, fn, *args)
+
+    def _run_chat_turn(
+        self, runtime: ProfileRuntime, fn: callable, *args: object
+    ) -> None:
+        """Run one chat turn and release its backlog slot."""
+        try:
+            fn(*args)
+        finally:
+            with self._pending_lock:
+                self._pending_chat_turns[runtime.name] -= 1
 
     def handle_update(self, update: dict) -> None:
         """Authorize and route one raw Telegram update."""
@@ -1219,7 +1280,7 @@ class Daemon:
             return
         callback = update.get("callback_query")
         if isinstance(callback, dict):
-            self._run_profile(
+            self._submit_chat_turn(
                 runtime,
                 runtime._chat._handle_telegram_callback_monitored,
                 callback,
@@ -1227,14 +1288,14 @@ class Daemon:
             return
         message = update.get("message")
         if isinstance(message, dict) and message.get("text"):
-            self._run_profile(
+            self._submit_chat_turn(
                 runtime,
                 runtime._chat._handle_telegram_message_monitored,
                 message,
             )
 
     def _scheduler_loop(self) -> None:
-        """Submit isolated scheduled and Drive work to the bounded pool."""
+        """Queue scheduled and Drive work on each profile's own worker."""
         next_scheduled = 0.0
         next_drive = {name: 0.0 for name in self.runtimes}
         drive_initial = set(self.runtimes)
@@ -1242,19 +1303,14 @@ class Daemon:
             now = time.monotonic()
             if now >= next_scheduled:
                 for runtime in self.runtimes.values():
-                    self._executor.submit(
-                        self._run_profile,
-                        runtime,
-                        runtime._scheduled_check_once,
-                    )
+                    self._submit(runtime, runtime._scheduled_check_once)
                 next_scheduled = now + SCHEDULED_CHECK_INTERVAL_S
             for name, runtime in self.runtimes.items():
                 if runtime.import_source != "google-drive" or now < next_drive[name]:
                     continue
                 force = name in drive_initial
                 drive_initial.discard(name)
-                self._executor.submit(
-                    self._run_profile,
+                self._submit(
                     runtime,
                     runtime._poll_google_drive_once,
                     force_import=force,
@@ -1287,11 +1343,11 @@ class Daemon:
             if runtime.import_source == "local" and runtime.health_dir.exists():
                 observer.schedule(
                     _make_health_handler(
-                        lambda runtime=runtime: self._executor.submit(
-                            self._run_profile, runtime, runtime._schedule_health
+                        lambda runtime=runtime: self._submit(
+                            runtime, runtime._schedule_health
                         ),
-                        lambda runtime=runtime: self._executor.submit(
-                            self._run_profile, runtime, runtime._schedule_health
+                        lambda runtime=runtime: self._submit(
+                            runtime, runtime._schedule_health
                         ),
                     ),
                     str(runtime.health_dir),
@@ -1300,11 +1356,8 @@ class Daemon:
             if runtime.context_dir.exists():
                 observer.schedule(
                     _make_context_handler(
-                        lambda stem, runtime=runtime: self._executor.submit(
-                            self._run_profile,
-                            runtime,
-                            runtime._schedule_context,
-                            stem,
+                        lambda stem, runtime=runtime: self._submit(
+                            runtime, runtime._schedule_context, stem
                         ),
                         runtime._self_originated_writes,
                     ),
@@ -1343,9 +1396,14 @@ class Daemon:
                 runtime._stop_event.set()
             observer.stop()
             observer.join()
-            self._executor.shutdown(wait=True, cancel_futures=True)
+            self.shutdown_workers()
             for runtime in self.runtimes.values():
                 runtime._record_event("daemon", "stop", "Profile runtime stopped")
+
+    def shutdown_workers(self) -> None:
+        """Drop queued per-profile work and stop each profile's worker."""
+        for worker in self._workers.values():
+            worker.shutdown(wait=False, cancel_futures=True)
 
 
 # ---------------------------------------------------------------------------

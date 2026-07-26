@@ -126,7 +126,7 @@ parallel abstraction and migrate state into it.
 - one shared watchdog `Observer`, with `schedule()` called per profile;
 - the `TelegramPoller` and update dispatch;
 - the scheduled-check loop, iterating profiles;
-- the bounded worker pool.
+- one single-threaded worker per profile.
 
 `ProfileRuntime` (per profile) keeps everything else: health DB path, context
 dir, Drive source, conversation buffer, pending context-edit proposals, `/add`
@@ -191,7 +191,7 @@ simple and removes a class of unusable configuration.
                                  │
 ┌────────────────────────────────▼─────────────────────────────────────┐
 │                              Daemon                                  │
-│   lock file · logging · shared Observer · scheduler · worker pool     │
+│   lock file · logging · shared Observer · scheduler · per-profile workers │
 │                                                                      │
 │   TelegramPoller ──► resolve_profile() ◄── profiles.toml             │
 │                            │                                         │
@@ -492,9 +492,17 @@ One `Daemon`-owned scheduler manages all enabled profiles:
   conversation or proposal state, while allowing different profiles to run
   concurrently.
 
-Use a bounded shared executor plus per-profile locks, not an unbounded thread
-per operation. Failure in one profile must not terminate polling or scheduled
-work for any other; surface degraded status through logs and `status`.
+Give each profile its own single-threaded worker, not an unbounded thread per
+operation and not a shared pool guarded by per-profile locks. A shared pool
+serializes the whole roster as soon as one person's turns saturate it: workers
+block on that profile's lock and everyone else's messages queue behind them.
+One worker per profile serializes each profile's own mutable work without a
+lock and keeps profiles genuinely independent. Cap the queued chat turns per
+profile so a single person cannot outrun their own replies; shed the excess
+with a visible notice.
+
+Failure in one profile must not terminate polling or scheduled work for any
+other; surface degraded status through logs and `status`.
 
 Each person's `daemon status` over Telegram is served by their own runtime and
 therefore already shows their own profile. Every profile-owned log event carries
