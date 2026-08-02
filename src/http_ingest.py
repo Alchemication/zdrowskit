@@ -11,13 +11,11 @@ import os
 import re
 import secrets
 import shutil
-import socket
 import tempfile
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from http import HTTPStatus
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable
 
@@ -79,6 +77,15 @@ class AcceptedUpload:
 def _utc_now() -> str:
     """Return the current UTC timestamp in ISO 8601 form."""
     return datetime.now(timezone.utc).isoformat()
+
+
+def _format_gap(seconds: float) -> str:
+    """Format a duration in the largest unit that stays readable."""
+    if seconds < 90:
+        return f"{seconds:.0f}s"
+    if seconds < 5400:
+        return f"{seconds / 60:.0f}m"
+    return f"{seconds / 3600:.1f}h"
 
 
 def _atomic_write(path: Path, data: bytes, *, mode: int = 0o600) -> None:
@@ -504,8 +511,8 @@ class HttpIngestManager:
         directory = "Metrics" if kind == "metrics" else "Workouts"
         return profile.http_cache / directory / "latest.json"
 
-    def _pair_digest(self, state: dict[str, Any]) -> str | None:
-        """Return a digest when recent Metrics and Workouts uploads form a pair."""
+    def _pair_gap_s(self, state: dict[str, Any]) -> float | None:
+        """Return the arrival gap between the latest Metrics and Workouts uploads."""
         uploads = state["uploads"]
         metrics = uploads.get("metrics")
         workouts = uploads.get("workouts")
@@ -514,13 +521,50 @@ class HttpIngestManager:
         try:
             metrics_time = datetime.fromisoformat(metrics["received_at"])
             workouts_time = datetime.fromisoformat(workouts["received_at"])
-            gap = abs((metrics_time - workouts_time).total_seconds())
-            if gap > self.pair_window_s:
-                return None
-            material = f"{metrics['sha256']}:{workouts['sha256']}".encode("ascii")
         except (KeyError, TypeError, ValueError):
             return None
+        return abs((metrics_time - workouts_time).total_seconds())
+
+    def _pair_digest(self, state: dict[str, Any]) -> str | None:
+        """Return a digest when recent Metrics and Workouts uploads form a pair."""
+        gap = self._pair_gap_s(state)
+        if gap is None or gap > self.pair_window_s:
+            return None
+        uploads = state["uploads"]
+        try:
+            material = (
+                f"{uploads['metrics']['sha256']}:{uploads['workouts']['sha256']}"
+            ).encode("ascii")
+        except (KeyError, TypeError):
+            return None
         return hashlib.sha256(material).hexdigest()
+
+    def _pair_state(
+        self,
+        state: dict[str, Any],
+        *,
+        profile_name: str,
+    ) -> tuple[str, str]:
+        """Return why this profile is or is not about to import a complete pair."""
+        uploads = state["uploads"]
+        missing = [
+            label
+            for kind, label in (("metrics", "Metrics"), ("workouts", "Workouts"))
+            if not isinstance(uploads.get(kind), dict)
+        ]
+        if missing:
+            return "waiting", f"no {' or '.join(missing)} upload has arrived yet"
+        gap = self._pair_gap_s(state)
+        if gap is None:
+            return "waiting", "an upload record is unreadable; re-run both automations"
+        if gap > self.pair_window_s:
+            return "split", (
+                f"Metrics and Workouts arrived {_format_gap(gap)} apart, outside the "
+                f"{_format_gap(self.pair_window_s)} pairing window"
+            )
+        if self._pair_candidate(state, profile_name=profile_name) is not None:
+            return "ready", "both halves staged and queued for import"
+        return "imported", "both halves already imported"
 
     def _upload_markers(self, state: dict[str, Any]) -> dict[str, str] | None:
         """Return request identities for the latest Metrics and Workouts uploads."""
@@ -571,6 +615,8 @@ class HttpIngestManager:
         """Durably replace one latest payload and notify when a pair is ready."""
         profile = self.profiles[profile_name]
         callback_digest: str | None = None
+        pair_state = "ready"
+        pair_detail = ""
         with self._lock:
             state = self._load_state(profile)
             previous = state["uploads"].get(upload.kind)
@@ -591,6 +637,28 @@ class HttpIngestManager:
             _atomic_write_json(self._state_path(profile), state)
             if pair_ready:
                 callback_digest = candidate[0]
+            else:
+                pair_state, pair_detail = self._pair_state(
+                    state, profile_name=profile_name
+                )
+        logger.info(
+            "Accepted %s upload for %s (%d bytes%s)",
+            upload.kind,
+            profile_name,
+            upload.size,
+            ", identical to the previous one" if duplicate else "",
+        )
+        if pair_ready:
+            logger.info("Complete pair staged for %s; queuing import", profile_name)
+        elif pair_state == "split":
+            logger.warning(
+                "%s will not import yet: %s. Give both Auto Export automations the "
+                "same schedule, then re-run them together.",
+                profile_name,
+                pair_detail,
+            )
+        else:
+            logger.info("%s not importing yet: %s", profile_name, pair_detail)
         if callback_digest is not None:
             self.on_pair_ready(profile_name, callback_digest)
         return AcceptedUpload(
@@ -687,6 +755,7 @@ class HttpIngestManager:
             for name, profile in self.profiles.items():
                 state = self._load_state(profile)
                 uploads = state["uploads"]
+                pair_state, pair_detail = self._pair_state(state, profile_name=name)
                 result[name] = {
                     "metrics_received_at": (
                         uploads.get("metrics", {}).get("received_at")
@@ -700,214 +769,7 @@ class HttpIngestManager:
                     ),
                     "last_imported_at": state.get("last_imported_at"),
                     "last_error": state.get("last_error"),
-                    "pair_pending": self._pair_candidate(state, profile_name=name)
-                    is not None,
+                    "pair_state": pair_state,
+                    "pair_detail": pair_detail,
                 }
         return result
-
-
-class _IngestServer(ThreadingHTTPServer):
-    """Threading server carrying receiver dependencies for request handlers."""
-
-    daemon_threads = True
-    allow_reuse_address = True
-
-    def __init__(
-        self,
-        address: tuple[str, int],
-        *,
-        registry: TokenRegistry,
-        manager: HttpIngestManager,
-        max_bytes: int,
-    ) -> None:
-        """Initialize the receiver server."""
-        self.registry = registry
-        self.manager = manager
-        self.max_bytes = max_bytes
-        self._request_slots = threading.BoundedSemaphore(8)
-        super().__init__(address, _IngestHandler)
-
-    def get_request(self) -> tuple[socket.socket, tuple[str, int]]:
-        """Accept a connection with a bounded header/body read timeout."""
-        request, address = super().get_request()
-        request.settimeout(30)
-        return request, address
-
-    def process_request(
-        self,
-        request: socket.socket,
-        client_address: tuple[str, int],
-    ) -> None:
-        """Bound concurrent request threads for this small-family service."""
-        if not self._request_slots.acquire(blocking=False):
-            self.shutdown_request(request)
-            return
-        try:
-            super().process_request(request, client_address)
-        except Exception:
-            self._request_slots.release()
-            raise
-
-    def process_request_thread(
-        self,
-        request: socket.socket,
-        client_address: tuple[str, int],
-    ) -> None:
-        """Release a request slot after the worker thread completes."""
-        try:
-            super().process_request_thread(request, client_address)
-        finally:
-            self._request_slots.release()
-
-
-class _IngestHandler(BaseHTTPRequestHandler):
-    """Minimal authenticated HTTP API for Auto Export."""
-
-    server: _IngestServer
-    protocol_version = "HTTP/1.1"
-
-    def _send_json(self, status: int, payload: dict[str, Any]) -> None:
-        """Send one compact JSON response."""
-        body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("Connection", "close")
-        self.end_headers()
-        self.wfile.write(body)
-        self.close_connection = True
-
-    def do_GET(self) -> None:  # noqa: N802
-        """Serve only the receiver health endpoint."""
-        if self.path != HEALTH_PATH:
-            self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
-            return
-        self._send_json(HTTPStatus.OK, {"status": "ok"})
-
-    def do_POST(self) -> None:  # noqa: N802
-        """Authenticate, validate, and durably stage an Auto Export payload."""
-        if self.path != UPLOAD_PATH:
-            self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
-            return
-        authorization = self.headers.get("Authorization", "")
-        scheme, separator, token = authorization.partition(" ")
-        if separator != " " or scheme.lower() != "bearer":
-            self._send_json(HTTPStatus.UNAUTHORIZED, {"error": "invalid token"})
-            return
-        profile_name = self.server.registry.authenticate(token.strip())
-        profile = self.server.manager.profiles.get(profile_name or "")
-        if profile is None or not profile.enabled or profile.import_source != "http":
-            self._send_json(HTTPStatus.UNAUTHORIZED, {"error": "invalid token"})
-            return
-        content_type = self.headers.get("Content-Type", "").split(";", 1)[0].lower()
-        if content_type != "application/json":
-            self._send_json(
-                HTTPStatus.UNSUPPORTED_MEDIA_TYPE,
-                {"error": "Content-Type must be application/json"},
-            )
-            return
-        raw_length = self.headers.get("Content-Length")
-        try:
-            content_length = int(raw_length or "")
-        except ValueError:
-            content_length = -1
-        if content_length <= 0:
-            self._send_json(
-                HTTPStatus.LENGTH_REQUIRED,
-                {"error": "A positive Content-Length is required"},
-            )
-            return
-        if content_length > self.server.max_bytes:
-            self._send_json(
-                HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
-                {"error": f"Payload exceeds {self.server.max_bytes} bytes"},
-            )
-            return
-        self.connection.settimeout(30)
-        body = self.rfile.read(content_length)
-        if len(body) != content_length:
-            self._send_json(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "Request body ended before Content-Length bytes arrived"},
-            )
-            return
-        headers = {key.lower(): value for key, value in self.headers.items()}
-        try:
-            upload = validate_upload(headers, body)
-            accepted = self.server.manager.accept(profile.name, upload, body)
-        except IngestError as exc:
-            self._send_json(exc.status, {"error": str(exc)})
-            return
-        except (OSError, ValueError):
-            logger.exception("HTTP ingest failed for profile %s", profile.name)
-            self._send_json(
-                HTTPStatus.INTERNAL_SERVER_ERROR,
-                {"error": "Receiver could not store the upload; check daemon logs"},
-            )
-            return
-        self._send_json(
-            HTTPStatus.ACCEPTED,
-            {
-                "accepted": accepted.kind,
-                "duplicate": accepted.duplicate,
-                "pair_ready": accepted.pair_ready,
-            },
-        )
-
-    def log_message(self, format: str, *args: object) -> None:
-        """Route request logs to stderr without including request headers."""
-        logger.info("HTTP ingest: " + format, *args)
-
-
-class HttpIngestServer:
-    """Lifecycle wrapper for the loopback HTTP receiver thread."""
-
-    def __init__(
-        self,
-        host: str,
-        port: int,
-        *,
-        registry: TokenRegistry,
-        manager: HttpIngestManager,
-        max_bytes: int,
-    ) -> None:
-        """Initialize a receiver that is started explicitly with start()."""
-        if host != "127.0.0.1":
-            raise ValueError(
-                "HTTP ingest must bind to 127.0.0.1 behind the HTTPS proxy."
-            )
-        self._server = _IngestServer(
-            (host, port),
-            registry=registry,
-            manager=manager,
-            max_bytes=max_bytes,
-        )
-        self._thread: threading.Thread | None = None
-
-    @property
-    def address(self) -> tuple[str, int]:
-        """Return the actual bound host and port."""
-        host, port = self._server.server_address[:2]
-        return str(host), int(port)
-
-    def start(self) -> None:
-        """Start serving requests on a background thread."""
-        if self._thread is not None:
-            return
-        self._thread = threading.Thread(
-            target=self._server.serve_forever,
-            daemon=True,
-            name="http-ingest",
-        )
-        self._thread.start()
-
-    def stop(self) -> None:
-        """Stop the receiver and close its listening socket."""
-        if self._thread is None:
-            self._server.server_close()
-            return
-        self._server.shutdown()
-        self._server.server_close()
-        self._thread.join(timeout=5)
-        self._thread = None

@@ -37,8 +37,6 @@ from config import (
     CONTEXT_DIR,
     GOOGLE_DRIVE_POLL_INTERVAL_S,
     GOOGLE_DRIVE_SERVICE_ACCOUNT,
-    HTTP_INGEST_HOST,
-    HTTP_INGEST_PORT,
     HTTP_INGEST_TOKEN_FILE,
     resolve_data_dir,
     resolve_google_drive_data_dir,
@@ -582,14 +580,10 @@ def cmd_doctor(args: argparse.Namespace) -> None:  # noqa: ARG001
                     False,
                 )
             )
-        checks.append(
-            (
-                "HTTP receiver",
-                HTTP_INGEST_HOST == "127.0.0.1" and HTTP_INGEST_PORT > 0,
-                f"{HTTP_INGEST_HOST}:{HTTP_INGEST_PORT}",
-                True,
-            )
-        )
+        from cmd_ingest import receiver_health
+
+        receiver_ok, receiver_detail = receiver_health()
+        checks.append(("HTTP receiver", receiver_ok, receiver_detail, True))
     checks.append(
         ("LLM API key", _env_has_any_model_key(), "DEEPSEEK/ANTHROPIC/OPENAI", True)
     )

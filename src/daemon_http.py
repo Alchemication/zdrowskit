@@ -12,11 +12,8 @@ from config import (
     HTTP_INGEST_PORT,
     HTTP_INGEST_TOKEN_FILE,
 )
-from http_ingest import (
-    HttpIngestManager,
-    HttpIngestServer,
-    TokenRegistry,
-)
+from http_ingest import HttpIngestManager, TokenRegistry
+from http_ingest_server import HttpIngestServer
 
 if TYPE_CHECKING:
     from daemon import Daemon, ProfileRuntime

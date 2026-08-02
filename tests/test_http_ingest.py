@@ -5,6 +5,7 @@ from __future__ import annotations
 import http.client
 import json
 import argparse
+import logging
 from pathlib import Path
 from unittest.mock import patch
 
@@ -14,11 +15,11 @@ from commands import cmd_import
 from daemon import ProfileRuntime
 from http_ingest import (
     HttpIngestManager,
-    HttpIngestServer,
     IngestError,
     TokenRegistry,
     validate_upload,
 )
+from http_ingest_server import HttpIngestServer
 from profiles import Profile
 
 
@@ -353,6 +354,60 @@ class TestHttpIngestManager:
         assert metrics_only.pair_ready is False
         persisted = json.loads(state_path.read_text(encoding="utf-8"))
         assert set(persisted["last_import_uploads"]) == {"metrics", "workouts"}
+
+
+class TestPairStatus:
+    def test_reports_which_half_is_still_missing(self, tmp_path: Path) -> None:
+        profile = _profile(tmp_path)
+        manager = HttpIngestManager(
+            {"adam": profile},
+            pair_window_s=600,
+            on_pair_ready=lambda name, digest: None,
+        )
+
+        manager.accept(
+            "adam",
+            validate_upload(_headers("metrics"), _body("metrics")),
+            _body("metrics"),
+        )
+
+        state = manager.status()["adam"]
+        assert state["pair_state"] == "waiting"
+        assert "Workouts" in state["pair_detail"]
+
+    def test_reports_split_when_halves_straddle_the_pair_window(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        profile = _profile(tmp_path)
+        ready: list[tuple[str, str]] = []
+        manager = HttpIngestManager(
+            {"adam": profile},
+            pair_window_s=600,
+            on_pair_ready=lambda name, digest: ready.append((name, digest)),
+        )
+        manager.accept(
+            "adam",
+            validate_upload(_headers("metrics"), _body("metrics")),
+            _body("metrics"),
+        )
+        state_path = profile.http_cache / ".ingest_state.json"
+        stale = json.loads(state_path.read_text(encoding="utf-8"))
+        stale["uploads"]["metrics"]["received_at"] = "2026-08-02T08:00:00+00:00"
+        state_path.write_text(json.dumps(stale), encoding="utf-8")
+
+        with caplog.at_level(logging.WARNING, logger="http_ingest"):
+            accepted = manager.accept(
+                "adam",
+                validate_upload(_headers("workouts"), _body("workouts")),
+                _body("workouts"),
+            )
+
+        assert accepted.pair_ready is False
+        assert ready == []
+        state = manager.status()["adam"]
+        assert state["pair_state"] == "split"
+        assert "pairing window" in state["pair_detail"]
+        assert "will not import yet" in caplog.text
 
 
 class TestHttpImportSafety:

@@ -9,7 +9,7 @@ Your watch collects thousands of data points a week. Apple shows you rings. zdro
 - **Reactive nudges** - new data synced or context changed? The coach notices and says something useful, or stays quiet if there is nothing to say
 - **Remembers you week to week** - a freeform journal captures why things happened, and the coach appends its own memory after each report
 - **Ask anything about your data** - "What's my fastest 1km pace?", "How's my HRV trending since January?", "Do I sleep worse after evening runs?" If the data exists, it will find the answer and chart it
-- **Host a small family roster** - one daemon and bot route each private chat to an isolated database, context directory, preferences, and runtime state
+- **Host a small family roster** - one daemon and bot route each private chat to an isolated database, context directory, preferences, and runtime state, for roughly 1-10 people you personally know
 - **Ask a coding agent about the repo** - the operator can route `/codex` or `/claude` questions to the local Codex / Claude Code CLI in workspace-edit mode
 
 It is a Telegram conversation, not a dashboard: reply to a report, update your goals mid-chat, get a chart on demand.
@@ -37,6 +37,19 @@ Three loops run continuously:
 - Python 3.12+ and [uv](https://github.com/astral-sh/uv)
 - A capable LLM provider API key
 - Telegram bot for notifications and chat
+
+## Scale It Is Built For
+
+zdrowskit is a family-and-friends tool: one machine, one daemon, one bot,
+serving roughly 1-10 people the operator knows personally. That assumption is
+deliberate and shows up everywhere — profiles are added by hand-editing a TOML
+roster and restarting, there is no self-service signup or web admin, and the
+host operator can read every hosted person's database. Trust between operator
+and users replaces the access controls a real multi-tenant service would need.
+
+If you want the mental model in one line: it is a household appliance, not a
+service. Scale it past a handful of people and the missing pieces stop being
+conveniences and start being real problems.
 
 ## Current Caveats
 

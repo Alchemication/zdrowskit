@@ -252,7 +252,23 @@ tailscale funnel status
 
 `ingest status` never prints bearer tokens. It reports receiver reachability,
 the public DNS URL when Tailscale is connected, token presence, arrival times,
-pending-pair state, the last successful import, and the last error.
+the last successful import, and the last error. `doctor` runs the same receiver
+probe, so a stopped daemon fails both.
+
+Each profile also reports one `pairing:` line explaining whether the next import
+can happen:
+
+| `pairing:` | Meaning |
+|---|---|
+| `up to date` | Both halves arrived and imported. Steady state. |
+| `queued for import` | Both halves are staged; the daemon is importing them now. |
+| `waiting for the other half` | Only Metrics or only Workouts has ever arrived, or the other half is missing. Check that both automations exist and use the same URL and token. |
+| `halves arrived too far apart` | Both arrived, but more than ten minutes apart, so they were not paired. Give both automations the same schedule and re-run them together. |
+
+The daemon log records every accepted upload (profile, kind, size), every
+rejection with its reason and HTTP status, and a warning whenever halves land
+outside the pairing window. `tail -f ~/Library/Logs/zdrowskit.daemon.log` while
+triggering an automation is the fastest way to diagnose a family member's phone.
 
 ### Stop or Recreate the Funnel
 
@@ -283,7 +299,8 @@ receiver.
 | `/` returns `404` | Expected. Production exposes `GET /healthz` and authenticated `POST /v1/auto-export`, not a directory listing. |
 | Auto Export gets `401` | Re-enter the exact `Bearer <token>` authorization value or rotate the profile token. |
 | Auto Export gets `422` | Read the returned error; normally Date Range, aggregation, headers, or JSON format differs from the required settings below. |
-| `pair pending: yes` | Only Metrics or Workouts arrived. Check both automations use the same schedule, URL, and token. |
+| `pairing: waiting for the other half` | Only one automation reached the receiver. Check both exist and use the same URL and token. |
+| `pairing: halves arrived too far apart` | Both automations work but run more than ten minutes apart. Put them on the same schedule. |
 | Works until reboot | Enable **Launch Tailscale at login**, confirm the macOS user logged in, then check `tailscale funnel status` and `main.py ingest status`. |
 
 Tailscale documents that public DNS may take up to ten minutes to propagate and

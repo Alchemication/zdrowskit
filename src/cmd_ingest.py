@@ -19,6 +19,13 @@ from config import (
 from http_ingest import HttpIngestManager, TokenRegistry, UPLOAD_PATH
 from profiles import Profile, ProfileConfigError, load_profiles
 
+PAIR_STATE_LABELS = {
+    "ready": "queued for import",
+    "waiting": "waiting for the other half",
+    "split": "halves arrived too far apart",
+    "imported": "up to date",
+}
+
 
 def _ensure_private_gitignore(app_home: Path) -> bool:
     """Ensure the hash-only token registry cannot enter the state repository."""
@@ -168,14 +175,14 @@ def cmd_ingest_token(args: argparse.Namespace) -> None:
     _print_token(profile.name, token, public_url)
 
 
-def _receiver_health() -> tuple[bool, str]:
+def receiver_health() -> tuple[bool, str]:
     """Check the loopback receiver without exposing it beyond the host."""
     url = f"http://{HTTP_INGEST_HOST}:{HTTP_INGEST_PORT}/healthz"
     try:
         with urllib.request.urlopen(url, timeout=2) as response:
             return response.status == 200, f"HTTP {response.status} at {url}"
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        return False, f"offline at {url}: {exc}"
+        return False, f"not answering at {url} ({exc}); is the daemon running?"
 
 
 def cmd_ingest_status(args: argparse.Namespace) -> None:  # noqa: ARG001
@@ -190,7 +197,7 @@ def cmd_ingest_status(args: argparse.Namespace) -> None:  # noqa: ARG001
         pair_window_s=HTTP_INGEST_PAIR_WINDOW_S,
         on_pair_ready=lambda _profile, _digest: None,
     )
-    receiver_ok, receiver_detail = _receiver_health()
+    receiver_ok, receiver_detail = receiver_health()
     dns_name = _tailscale_dns_name()
     print(f"Receiver: {'ready' if receiver_ok else 'not ready'} ({receiver_detail})")
     print(
@@ -206,7 +213,9 @@ def cmd_ingest_status(args: argparse.Namespace) -> None:  # noqa: ARG001
         print(f"  metrics received: {state['metrics_received_at'] or 'never'}")
         print(f"  workouts received: {state['workouts_received_at'] or 'never'}")
         print(f"  last imported: {state['last_imported_at'] or 'never'}")
-        print(f"  pair pending: {'yes' if state['pair_pending'] else 'no'}")
+        print(f"  pairing: {PAIR_STATE_LABELS[state['pair_state']]}")
+        if state["pair_state"] in {"waiting", "split"}:
+            print(f"    {state['pair_detail']}")
         if state["last_error"]:
             print(f"  last error: {state['last_error']['message']}")
 
