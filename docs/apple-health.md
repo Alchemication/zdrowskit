@@ -11,6 +11,90 @@ scheduled Automations.
 
 One universal constraint: iOS requires the phone to be unlocked for any health data export. Automations silently skip when the phone is locked.
 
+## Choosing a Transport
+
+Three transports carry the same Auto Export JSON to the same parser. They differ
+in latency, how many people they can serve, and what happens when something is
+switched off.
+
+| | HTTP (Tailscale) | iCloud / local | Google Drive |
+|---|---|---|---|
+| Profiles | Many | Operator only | Many |
+| Delivery | Push, on export | File watch + 3 min debounce | Poll, up to 5 min |
+| Host requirement | Tailscale-capable | Mac on the same Apple ID | Any macOS or Linux |
+| Survives host downtime | No | Yes | Yes |
+| Historical backfill | No | Yes | Yes |
+| Credentials to manage | Per-profile token | None | Service-account key |
+
+### HTTP via Tailscale Funnel (default)
+
+**Pros**
+
+- Fastest. The phone pushes on export, with no sync layer or poll interval in
+  between.
+- The only transport that serves several people from one endpoint, routed by
+  per-profile bearer token. Rotation is one command and needs no daemon restart.
+- Most reliable in practice: nothing sits between the phone and the host that
+  can silently stall.
+- Payloads are validated at the door, so a misconfigured automation gets an
+  actionable `422` on the phone instead of quietly importing wrong data.
+- Metrics and Workouts import only as a complete pair, so a missing half never
+  erases the other half's fields.
+- Leaves you with a working private HTTPS endpoint on the host, which is
+  reusable for other home projects.
+
+**Cons**
+
+- **An upload is lost if the host is down.** iCloud and Drive queue the file
+  until the daemon catches up; a failed POST has nothing behind it. This is the
+  real cost of push delivery, and the reason to keep the daemon on `KeepAlive`.
+- Depends on Tailscale Funnel, still a Tailscale beta, plus the macOS user being
+  logged in and Tailscale running.
+- Accepts `Date Range = Default` only, so historical backfills need a different
+  transport.
+- Both automations must arrive within ten minutes of each other to pair.
+- The most setup steps of the three.
+
+### iCloud / local files
+
+**Pros**
+
+- Simplest to get working. No tokens, no service account, no network exposure.
+- Files queue on disk, so daemon downtime costs nothing.
+- Handles large historical backfills.
+
+**Cons**
+
+- **Operator profile only.** This is enforced in code, so it cannot host family
+  or friends. Reach for it when zdrowskit serves exactly one person.
+- Requires the daemon host to be a Mac signed into the same Apple ID with iCloud
+  Drive syncing.
+- iCloud sync latency is opaque and unreportable, on top of a three-minute
+  debounce after the file lands.
+- No validation before import.
+
+### Google Drive
+
+**Pros**
+
+- Familiar to most people, and portable: the host does not need to be Apple
+  hardware, so a Linux box or Raspberry Pi works.
+- Serves several people through per-profile folder IDs.
+- Files queue in Drive, so daemon downtime costs nothing.
+- Handles historical backfills.
+
+**Cons**
+
+- Slowest of the three: up to a five-minute poll interval on top of Drive's own
+  sync delay.
+- The least reliable Auto Export path in practice.
+- Needs a Google Cloud service account, its JSON key stored on the host, and
+  per-profile folder sharing.
+- That key is a long-lived credential you have to protect and rotate by hand.
+
+A practical combination: run HTTP for day-to-day delivery, and temporarily
+enable local or Drive import when you need a backfill.
+
 ## Auto Export Setup
 
 The Automations feature exports health data over HTTP, to iCloud Drive, or to

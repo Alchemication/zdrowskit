@@ -59,7 +59,9 @@ zdrowskit is personal and Apple-first. See [Limitations](docs/limitations.md) fo
 
 Follow [HTTP ingest](docs/http-ingest.md) while running this quick start; it
 shows where the generated token and Funnel URL go in Auto Export. Local/iCloud
-and Google Drive remain available.
+and Google Drive remain available — see
+[choosing a transport](docs/apple-health.md#choosing-a-transport) for the
+trade-offs, including the one case where HTTP is the wrong pick.
 
 ```bash
 git clone <repo-url> && cd zdrowskit
@@ -107,7 +109,7 @@ Run any command with `--help` for the full flag list. See [Commands](docs/comman
 | Topic | Details |
 |---|---|
 | [Setup](docs/setup.md) | Installation, `.env`, first-run context files, first LLM report |
-| [Apple Health data export](docs/apple-health.md) | Auto Export setup, iCloud paths, historical backfill |
+| [Apple Health data export](docs/apple-health.md) | Transport pros and cons, Auto Export setup, iCloud paths, historical backfill |
 | [HTTP ingest](docs/http-ingest.md) | Direct Auto Export uploads, Tailscale Funnel, tokens, validation, retention |
 | [Google Drive import](docs/google-drive.md) | Portable API fetch, service-account setup, multiple profiles |
 | [Family hosting](docs/family-hosting.md) | Profile roster, account linking, adoption, isolation, backup |

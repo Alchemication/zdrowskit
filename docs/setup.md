@@ -17,7 +17,9 @@ routing, see [LLM setup](llm.md). To migrate an existing installation, use
 
 Direct HTTP delivery through Tailscale is recommended for new installations.
 The local/iCloud and Google Drive sources remain available, particularly for
-historical backfills. See [Auto Export HTTP ingest](http-ingest.md).
+historical backfills. See [Auto Export HTTP ingest](http-ingest.md), and
+[choosing a transport](apple-health.md#choosing-a-transport) for how the three
+compare on latency, profile count, and behaviour when the host is offline.
 
 Before the repository setup, install/sign in to Tailscale and confirm
 `tailscale status` works in Terminal. The HTTP guide covers the macOS app
