@@ -1,13 +1,15 @@
 # Google Drive Import
 
-Google Drive is the portable Auto Export transport. The import command fetches
+Google Drive is an optional Auto Export transport, retained mainly for existing
+installations and historical backfills. The import command fetches
 JSON through the Drive API into a local cache, validates the payload type, and
 then runs the normal zdrowskit parser. It works anywhere Python and `uv` run,
 including a Raspberry Pi.
 
-Google Drive is the recommended transport for non-operator profiles. Each
-profile selects its source in `profiles.toml`; the service-account credential
-and polling interval remain shared in `.env`.
+New profiles default to direct [HTTP ingest](http-ingest.md), including
+non-operator family/friend profiles. If a profile explicitly selects Drive in
+`profiles.toml`, the service-account credential and polling interval remain
+shared in `.env`.
 
 ## Auto Export Setup
 

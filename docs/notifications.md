@@ -56,6 +56,7 @@ What can be changed:
 
 | Event | Debounce | What it does |
 |-------|----------|-------------|
+| Metrics + Workouts received over HTTP | Wait for the matching pair | One data observation + suggestion for today/tomorrow |
 | Health data fetched from Google Drive | Poll interval (5 min default) | One data observation + suggestion for today/tomorrow |
 | Health data synced via iCloud | 3 min debounce | One data observation + suggestion for today/tomorrow |
 | `log.md` / `strategy.md` / `me.md` edited | 60 sec | Responds to the change: acknowledges, flags tension, or confirms |

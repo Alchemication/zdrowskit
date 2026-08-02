@@ -27,10 +27,11 @@ that one person edits in a text editor.
 - Identify the profile for every inbound Telegram message and callback.
 - Route every outbound message and notification to the correct Telegram chat.
 - Keep one health SQLite database per profile.
-- Keep context files, Drive cache, reports, nudges, preferences, and daemon
+- Keep context files, import cache, reports, nudges, preferences, and daemon
   state isolated per profile.
-- Read each person's own Google Drive folders through one shared service
-  account.
+- Receive each person's Auto Export uploads through one shared HTTPS endpoint,
+  using a unique bearer token to route each upload to its profile.
+- Retain per-profile Google Drive import as an optional transport.
 - Default-deny unknown Telegram identities; the operator links accounts.
 - Preserve the current health schema and LLM SQL tooling.
 - Allow profiles to fail or be paused independently.
@@ -174,21 +175,25 @@ operator adds a section to `profiles.toml` and restarts the daemon.
 
 Authorization always uses stable numeric Telegram IDs, never usernames.
 
-### Drive-only for non-operator profiles
+### HTTP by default for every profile
 
 `import_source: local` watches the operator's iCloud Auto Export directory. No
-other person's phone writes there. Non-operator profiles are Google Drive only;
-the local watchdog path remains operator-only. This keeps the shared `Observer`
-simple and removes a class of unusable configuration.
+other person's phone writes there, so the local watchdog remains operator-only.
+Every profile can instead use the shared HTTP receiver. A unique token identifies
+the profile before its payload enters that profile's cache or database. Google
+Drive remains available when explicitly configured.
 
 ## Architecture
 
 ```text
-                    Adam's Drive        Anna's Drive
-                    (his folders)       (her folders)
-                          └──────┬──────────┘
-                    one read-only service account
-                                 │
+             Auto Export on each iPhone
+                         │
+                Tailscale Funnel
+                 (public HTTPS)
+                         │
+        authenticated loopback HTTP receiver
+             token -> profile resolution
+                         │
 ┌────────────────────────────────▼─────────────────────────────────────┐
 │                              Daemon                                  │
 │   lock file · logging · shared Observer · scheduler · per-profile workers │
@@ -200,7 +205,7 @@ simple and removes a class of unusable configuration.
 │      + TelegramSender(chat)       + TelegramSender(chat)             │
 │      - db path, context dir       - db path, context dir             │
 │      - conversation, pending      - conversation, pending            │
-│      - Drive poll state           - Drive poll state                 │
+│      - ingest/cache state         - ingest/cache state               │
 │      - prefs, schedules           - prefs, schedules                 │
 └──────────────┼────────────────────────────┼──────────────────────────┘
                │                            │
@@ -224,6 +229,10 @@ simple and removes a class of unusable configuration.
         coach_feedback.md
         baselines.md
       Imports/
+        http/
+          Metrics/latest.json
+          Workouts/latest.json
+          .ingest_state.json
         google-drive/
           Metrics/
           Workouts/
@@ -235,9 +244,10 @@ simple and removes a class of unusable configuration.
       daemon_state.json
 ```
 
-Shared secrets stay outside profile directories and outside `profiles.toml`:
-the Telegram bot token, LLM provider API keys, and the Google Drive
-service-account JSON all remain in `.env`.
+Shared secrets stay outside profile directories and outside `profiles.toml`.
+The Telegram bot token and LLM provider API keys remain in `.env`. HTTP token
+hashes live in the ignored `ingest_tokens.json`; a Google Drive service-account
+JSON is needed only when a Drive profile is configured.
 
 ## Profile Configuration File
 
@@ -247,12 +257,10 @@ service-account JSON all remain in `.env`.
 [profiles.adam]
 telegram_id = 111111111
 operator = true
-import_source = "local"          # operator only; everyone else is Drive
+import_source = "http"           # default direct Auto Export delivery
 
 [profiles.anna]
 telegram_id = 222222222
-drive_metrics_folder_id = "1AbC..."
-drive_workouts_folder_id = "1XyZ..."
 
 [profiles.tomek]
 telegram_id = 333333333
@@ -267,8 +275,8 @@ Field notes:
   configuration that would go stale across restarts.
 - `operator` defaults to `false`. Exactly one profile may set it; loading fails
   if zero or more than one does.
-- `import_source` defaults to `google-drive` and may only be `local` for the
-  operator profile.
+- `import_source` defaults to `http`. `local` remains operator-only;
+  `google-drive` remains available with per-profile folder IDs.
 - No timestamps. Filesystem mtime and the file's git history cover it.
 
 Everything runs in the host's system timezone. Per-profile timezones are not
@@ -349,7 +357,7 @@ class Profile:
     root: Path
     operator: bool = False
     enabled: bool = True
-    import_source: str = "google-drive"
+    import_source: str = "http"
     drive_metrics_folder_id: str | None = None
     drive_workouts_folder_id: str | None = None
 
@@ -361,7 +369,7 @@ class Profile:
     def context(self) -> Path:
         return self.root / "ContextFiles"
 
-    # reports, nudges, drive_cache, state, notification_prefs, model_prefs
+    # reports, nudges, http_cache, drive_cache, state, and preference paths
     # follow the same one-line pattern.
 ```
 
@@ -480,11 +488,12 @@ dispatched straight from message text, safe today only because the chat filter
 admits exactly one person. Gating them is therefore not deferrable work: it must
 land in the same increment that admits a second identity.
 
-## Scheduling and Drive Polling
+## Scheduling and Health Ingest
 
 One `Daemon`-owned scheduler manages all enabled profiles:
 
 - keep report cadence, nudge limits, and suppression state per profile;
+- receive authenticated HTTP uploads and pair them per profile;
 - poll Drive independently per profile, with isolated retry/backoff and error
   streaks;
 - prevent one slow Drive or LLM request from blocking other profiles;
@@ -512,10 +521,10 @@ multi-profile debugging.
 ## CLI and Operations
 
 Existing health-data commands gain `--profile NAME` as described in CLI Profile
-Resolution. Profile creation supports local or Drive-backed imports:
+Resolution. Profile creation defaults to HTTP and also supports local or Drive:
 
 ```text
-profile add NAME --telegram-id ID [--operator] [--source local|google-drive]
+profile add NAME --telegram-id ID [--operator] [--source http|local|google-drive]
   [--google-drive-metrics-folder-id ID]
   [--google-drive-workouts-folder-id ID]
 ```
@@ -569,6 +578,8 @@ to receive the correct configuration explicitly.
 - Validate profile names against `^[a-z0-9_-]+$` before using them in paths.
 - Keep provider keys and the service-account JSON out of `profiles.toml` and
   out of profile directories.
+- Keep bearer tokens out of `profiles.toml`, logs, and databases; store only
+  hashes in the ignored token registry.
 - Restrict profile directory filesystem permissions.
 - Do not expose other profiles' names or status to non-operator users.
 - No cross-profile SQL or context access.
@@ -654,6 +665,8 @@ Integration tests:
 - One update stream routes interleaved messages correctly.
 - Simultaneous profile work does not mix conversation buffers.
 - Drive imports use the correct folder IDs, cache, and database.
+- HTTP tokens route uploads to the correct cache and database.
+- Invalid, oversized, or unpaired HTTP payloads never reach the parser.
 - One profile's Drive or LLM failure does not stop the other.
 - Daemon restart restores both profiles' persistent state.
 - `db migrate --all` migrates every profile database.
@@ -683,8 +696,8 @@ The first release is ready when:
 - Adam and Anna use the same bot in separate private chats.
 - One daemon process polls and routes all Telegram updates.
 - Each profile has an independent health database and profile directory.
-- Each profile imports only its own Drive folders, shared from its own Google
-  account.
+- Each HTTP token imports only into its assigned profile; optional Drive
+  profiles import only their configured folders.
 - Chat and `run_sql` operate only on the routed profile's database.
 - Scheduled reports and nudges reach only the correct chat.
 - Conversation, preferences, pending actions, and rate limits stay isolated.
@@ -704,7 +717,9 @@ The first release is ready when:
   equal.
 - **Operator identity** is `operator = true` in the roster.
 - **Drive folder IDs** are operator-collected; each person shares their own
-  Drive root with the service account.
+  Drive root with the service account when using the optional Drive transport.
+- **HTTP identity** is a unique profile bearer token; the public Funnel URL is
+  shared, while tokens are never shared between people.
 - **Preferences stay as per-profile JSON files.** Their loaders already take a
   `path` argument, so this costs nothing.
 - **Provider keys:** one shared set, with no per-profile spend cap in V0.

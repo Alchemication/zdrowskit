@@ -7,7 +7,8 @@ Health ingestion is selected per entry in `profiles.toml`:
 
 | Source | Behavior |
 |---|---|
-| `google-drive` | Poll the Metrics and Workouts folder IDs every five minutes by default; recommended for new installations |
+| `http` | Receive authenticated Auto Export uploads on loopback, pair Metrics + Workouts, then import; default for new profiles |
+| `google-drive` | Poll the Metrics and Workouts folder IDs every five minutes by default |
 | `local` | Watch the operator's local Auto Export directory; non-operator profiles cannot use it |
 
 ```bash
@@ -30,6 +31,12 @@ database, required context file, or Drive setting disables only that runtime;
 other profiles continue. Logs include the profile name for profile-owned work.
 
 ## Health Import
+
+For HTTP, the receiver starts with the daemon and listens on
+`127.0.0.1:8787`. Valid uploads are staged durably and imported only as a
+complete Metrics + Workouts pair. Tailscale Funnel is a separate persistent
+host service that proxies public HTTPS to this loopback listener; the daemon
+does not terminate TLS or expose a LAN socket. See [HTTP ingest](http-ingest.md).
 
 For Google Drive, the daemon polls immediately on startup. This first pass fully
 imports an existing cache even when no Drive checksum changed. Later polls skip

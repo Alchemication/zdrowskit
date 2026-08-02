@@ -6,7 +6,8 @@ user-facing list.
 
 Public groups:
     Paths: AUTOEXPORT_DATA_DIR, CONTEXT_DIR, NOTIFICATION_PREFS_PATH,
-        GOOGLE_DRIVE_DATA_DIR, PROMPTS_DIR, REPORTS_DIR, NUDGES_DIR.
+        GOOGLE_DRIVE_DATA_DIR, HTTP_INGEST_TOKEN_FILE, PROMPTS_DIR, REPORTS_DIR,
+        NUDGES_DIR.
     Prompt/context limits: MAX_HISTORY_ENTRIES, MAX_LOG_ENTRIES,
         MAX_COACH_FEEDBACK_ENTRIES, MAX_CONVERSATION_MESSAGES,
         MAX_TOOL_ITERATIONS*, MAX_TOKENS*.
@@ -45,7 +46,7 @@ AUTOEXPORT_DATA_DIR: Path = (
 GOOGLE_DRIVE_DATA_DIR: Path = APP_HOME / "Imports" / "google-drive"
 """Default local cache for Google Drive Auto Export files."""
 IMPORT_SOURCE: str = os.environ.get("ZDROWSKIT_IMPORT_SOURCE", "local").strip()
-"""Health import transport: ``local`` or ``google-drive``."""
+"""Health import transport: ``http``, ``local``, or ``google-drive``."""
 GOOGLE_DRIVE_SERVICE_ACCOUNT: str | None = os.environ.get(
     "ZDROWSKIT_GOOGLE_DRIVE_SERVICE_ACCOUNT"
 )
@@ -61,6 +62,16 @@ MODEL_PREFS_PATH: Path = APP_HOME / "model_prefs.json"
 PROMPTS_DIR: Path = Path(__file__).resolve().parent / "prompts"
 REPORTS_DIR: Path = APP_HOME / "Reports"
 NUDGES_DIR: Path = APP_HOME / "Nudges"
+HTTP_INGEST_TOKEN_FILE: Path = APP_HOME / "ingest_tokens.json"
+"""Hash-only bearer-token registry for HTTP Auto Export uploads."""
+HTTP_INGEST_HOST = "127.0.0.1"
+"""Loopback interface used by the HTTP receiver behind Tailscale Funnel."""
+HTTP_INGEST_PORT: int = int(os.environ.get("ZDROWSKIT_HTTP_INGEST_PORT", "8787"))
+"""Local TCP port used by the HTTP receiver."""
+HTTP_INGEST_MAX_BYTES: int = 64 * 1024 * 1024
+"""Maximum accepted Auto Export request body size."""
+HTTP_INGEST_PAIR_WINDOW_S: int = 10 * 60
+"""Maximum arrival gap between the Metrics and Workouts halves of an export."""
 
 
 def _env_bool(name: str, default: bool) -> bool:

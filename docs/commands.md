@@ -3,7 +3,7 @@
 Always use `uv run`. Run any command with `--help` for the full flag list.
 
 ```bash
-uv run python main.py import              # import from local/iCloud or Google Drive
+uv run python main.py import              # import a local/iCloud or Drive source
 uv run python main.py status              # DB row counts + date range
 uv run python main.py report              # current week: summary + daily
 uv run python main.py insights            # personalised weekly report via LLM
@@ -22,6 +22,11 @@ uv run python main.py daemon-restart      # restart the background daemon
 uv run python main.py daemon-stop         # stop the background daemon
 uv run python main.py profile add NAME --telegram-id ID # create a profile
 uv run python main.py profile adopt NAME --dry-run       # preview legacy migration
+uv run python main.py profile source NAME http           # change import transport
+uv run python main.py ingest setup        # tokens + Auto Export configuration
+uv run python main.py ingest setup --funnel # same, plus start Funnel when CLI is ready
+uv run python main.py ingest status       # receiver and upload state
+uv run python main.py ingest token NAME --rotate         # replace a lost token
 uv run python src/daemon.py --foreground # run daemon directly on macOS/Linux
 ```
 
@@ -71,11 +76,9 @@ empty database.
 Create a fresh roster/profile:
 
 ```bash
-uv run python main.py profile add adam --telegram-id 111111111 --operator --source local
-uv run python main.py profile add anna \
-  --telegram-id 222222222 \
-  --google-drive-metrics-folder-id METRICS_FOLDER_ID \
-  --google-drive-workouts-folder-id WORKOUTS_FOLDER_ID
+uv run python main.py profile add adam --telegram-id 111111111 --operator
+uv run python main.py profile add anna --telegram-id 222222222
+uv run python main.py ingest setup
 ```
 
 For an existing single-profile install, preview and then run adoption:

@@ -6,7 +6,10 @@
 flowchart TD
     user([User])
     apple([Apple Watch + iPhone])
-    export["Auto Export to iCloud or Google Drive"]
+    export["Auto Export"]
+    funnel["Tailscale Funnel: public HTTPS"]
+    receiver["Authenticated loopback receiver"]
+    cloud["Optional iCloud / Google Drive source"]
     setup["Setup + doctor"]
     roster[(profiles.toml)]
     context[(Per-profile context files)]
@@ -26,11 +29,15 @@ flowchart TD
     setup --> roster
     setup --> context
     apple --> export
-    export --> db
+    export --> funnel
+    funnel --> receiver
+    receiver --> daemon
+    export --> cloud
+    cloud --> daemon
     user --> db
     user --> daemon
-    daemon --> export
     daemon --> context
+    daemon --> db
     daemon --> reports
     daemon --> nudges
     reports --> llm
@@ -69,8 +76,8 @@ flowchart TD
     annaDb[(profiles/anna/health.db)]
     adamContext[(profiles/adam/ContextFiles)]
     annaContext[(profiles/anna/ContextFiles)]
-    adamDrive["Adam Drive folders/cache"]
-    annaDrive["Anna Drive folders/cache"]
+    adamInput["Adam HTTP token/cache or cloud source"]
+    annaInput["Anna HTTP token/cache or cloud source"]
     adamTelegram["Replies to Adam"]
     annaTelegram["Replies to Anna"]
 
@@ -80,8 +87,8 @@ flowchart TD
     route -- no --> deny
     route -- Adam --> adam
     route -- Anna --> anna
-    adamDrive --> adam
-    annaDrive --> anna
+    adamInput --> adam
+    annaInput --> anna
     adam --> adamDb
     adam --> adamContext
     adam --> adamTelegram
@@ -105,11 +112,17 @@ flowchart TD
     roster["Create profiles.toml"]
     tree["Create profile DB + ContextFiles"]
     editContext["Fill me.md and strategy.md"]
+    tailscale["Install + sign in to Tailscale"]
     doctor{"uv run python main.py doctor passes?"}
     fixConfig["Fix paths, credentials, or local setup"]
+    ingestSetup["ingest setup: create profile token"]
+    daemonInstall["daemon-install: start loopback receiver"]
+    localHealth["Check local /healthz"]
+    funnel["Start persistent Tailscale Funnel"]
     apple["Apple Watch + iPhone"]
-    autoExport["Auto Export writes health JSON to iCloud or Google Drive"]
-    importCmd["uv run python main.py import"]
+    autoExport["Auto Export Metrics + Workouts automations"]
+    receiver["Validate, authenticate, and pair uploads"]
+    cloudImport["Optional local / Drive import"]
     parse["Parse metrics, workouts, routes, sleep"]
     migrate["Open DB with migrations"]
     db[(SQLite DB)]
@@ -122,6 +135,7 @@ flowchart TD
     user --> clone
     clone --> setup
     setup --> env
+    user --> tailscale
     env --> addProfile
     addProfile --> roster
     addProfile --> tree
@@ -130,10 +144,17 @@ flowchart TD
     editContext --> doctor
     doctor -- no --> fixConfig
     fixConfig --> doctor
-    doctor -- yes --> importCmd
+    doctor -- yes --> ingestSetup
+    ingestSetup --> daemonInstall
+    daemonInstall --> localHealth
+    tailscale --> funnel
+    localHealth --> funnel
     apple --> autoExport
-    autoExport --> importCmd
-    importCmd --> parse
+    autoExport --> funnel
+    funnel --> receiver
+    receiver --> parse
+    autoExport -. local / Drive alternative .-> cloudImport
+    cloudImport --> parse
     parse --> migrate
     migrate --> db
     db --> status
@@ -153,10 +174,10 @@ flowchart TD
     user([User])
     install["daemon-install or daemon-restart"]
     daemon["launchd daemon"]
-    watcher["Poll Google Drive or watch iCloud + context files"]
+    watcher["Receive HTTP, poll Drive, or watch iCloud + context files"]
     healthEvent{"Health file event?"}
     contextEvent{"me.md / log.md / strategy.md event?"}
-    healthDebounce["Debounce health event"]
+    healthDebounce["Pair HTTP payloads or debounce file event"]
     contextDebounce["Debounce context event"]
     importData["Import latest health data"]
     delta["Describe new rows or changed context"]

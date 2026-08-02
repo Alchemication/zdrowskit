@@ -18,6 +18,7 @@ import logging
 import sqlite3
 import types
 from datetime import date, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from config import (
@@ -382,6 +383,7 @@ class DaemonRunnerHandler:
     def _run_import(
         self,
         *,
+        data_dir: Path | None = None,
         skip_if_drive_unchanged: bool = False,
         record_no_changes: bool = True,
         record_failure: bool = True,
@@ -389,6 +391,7 @@ class DaemonRunnerHandler:
         """Import the latest health data into the configured database.
 
         Args:
+            data_dir: Optional immutable import directory for an HTTP pair.
             skip_if_drive_unchanged: Skip parsing when a Drive poll downloads nothing.
             record_no_changes: Whether to add a no-change event to the event log.
             record_failure: Whether to add a failure event when the import fails.
@@ -399,10 +402,20 @@ class DaemonRunnerHandler:
         Returns:
             Import result, or None when the command failed.
         """
-        from commands import cmd_import
+        from commands import ImportResult, cmd_import
+
+        if self._d.import_source == "http" and data_dir is None:
+            return ImportResult(
+                source="http",
+                drive_files_downloaded=0,
+                drive_files_skipped=0,
+                parsed_days=0,
+                stored_days=0,
+                import_skipped=True,
+            )
 
         args = types.SimpleNamespace(
-            data_dir=str(self._d.health_dir),
+            data_dir=str(data_dir or self._d.health_dir),
             source=self._d.import_source,
             db=str(self._d.db),
             context_dir=self._d.context_dir,
@@ -420,6 +433,9 @@ class DaemonRunnerHandler:
             google_drive_force=False,
             google_drive_timeout=30.0,
             skip_if_drive_unchanged=skip_if_drive_unchanged,
+            http_pair_verified=(
+                self._d.import_source != "http" or data_dir is not None
+            ),
         )
         with self._d._import_lock:
             before = self._data_snapshot()
@@ -427,7 +443,7 @@ class DaemonRunnerHandler:
                 log_import = logger.debug if skip_if_drive_unchanged else logger.info
                 log_import(
                     "Importing health data from %s (%s)",
-                    self._d.health_dir,
+                    data_dir or self._d.health_dir,
                     self._d.import_source,
                 )
                 result = cmd_import(args)

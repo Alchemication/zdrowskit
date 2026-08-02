@@ -51,6 +51,8 @@ class TestSetupCommand:
         output = capsys.readouterr().out
         assert "created" in output
         assert "profile add" in output
+        assert "ingest setup" in output
+        assert "Google Drive (recommended)" not in output
         # Setup must not seed a legacy root-level context dir that nothing reads.
         assert not (app_home / "ContextFiles").exists()
 

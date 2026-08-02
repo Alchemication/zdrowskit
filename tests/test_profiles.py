@@ -17,6 +17,7 @@ from profiles import (
     load_profiles,
     resolve_cli_profile,
     resolve_profile,
+    set_profile_source,
 )
 from store import open_db
 
@@ -45,7 +46,7 @@ class TestLoadProfiles:
         profiles = load_profiles(roster)
 
         assert profiles["adam"].enabled is True
-        assert profiles["anna"].import_source == "google-drive"
+        assert profiles["anna"].import_source == "http"
         assert profiles["anna"].db == tmp_path / "profiles" / "anna" / "health.db"
         assert profiles["adam"].state.name == "daemon_state.json"
 
@@ -180,6 +181,7 @@ class TestProfileOperations:
         assert profile.db.exists()
         assert (profile.context / "me.md").exists()
         assert profile.drive_cache.is_dir()
+        assert profile.http_cache.is_dir()
         assert load_profiles(roster)["adam"].db == profile.db
 
     def test_cli_defaults_to_operator_and_refuses_missing_db(
@@ -206,6 +208,30 @@ class TestProfileOperations:
         assert profile is not None
         assert profile.name == "adam"
         assert resolved == db
+
+    def test_changes_profile_source_without_rewriting_other_fields(
+        self, tmp_path: Path
+    ) -> None:
+        roster = tmp_path / "profiles.toml"
+        _write_roster(
+            roster,
+            """
+            [profiles.adam]
+            telegram_id = 11
+            operator = true
+            import_source = "google-drive"
+            drive_metrics_folder_id = "abcdefghij"
+            drive_workouts_folder_id = "klmnopqrst"
+            """,
+        )
+
+        profile = set_profile_source("adam", "http", path=roster)
+
+        assert profile.import_source == "http"
+        assert profile.drive_metrics_folder_id == "abcdefghij"
+        assert profile.drive_workouts_folder_id == "klmnopqrst"
+        assert 'import_source = "http"' in roster.read_text(encoding="utf-8")
+        assert profile.http_cache.is_dir()
 
     def test_adoption_dry_run_and_copy_preserve_legacy(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

@@ -1,7 +1,7 @@
 """Health import and notification daemon for zdrowskit.
 
-Polls Google Drive or monitors local health data files, watches context .md
-files, and triggers LLM-powered notifications when meaningful changes arrive.
+Receives HTTP uploads, polls Google Drive, or monitors local health data files;
+watches context .md files; and triggers notifications when changes arrive.
 Also runs a Telegram long-polling listener for interactive chat.
 
 Public API:
@@ -282,7 +282,7 @@ class ProfileRuntime:
             db: Path to the SQLite database.
             context_dir: Path to the ContextFiles directory.
             health_dir: Path to the Auto Export data directory.
-            import_source: ``local`` filesystem events or ``google-drive`` polling.
+            import_source: ``http``, ``local`` filesystem, or ``google-drive``.
             google_drive_service_account: Service-account JSON path for Drive.
             google_drive_metrics_folder_id: Auto Export Metrics folder ID.
             google_drive_workouts_folder_id: Auto Export Workouts folder ID.
@@ -291,9 +291,10 @@ class ProfileRuntime:
         Raises:
             ValueError: If the import source or Drive configuration is invalid.
         """
-        if import_source not in {"local", "google-drive"}:
+        if import_source not in {"http", "local", "google-drive"}:
             raise ValueError(
-                f"Unknown import source {import_source!r}; use local or google-drive."
+                f"Unknown import source {import_source!r}; use http, local, or "
+                "google-drive."
             )
         if google_drive_poll_interval_s <= 0:
             raise ValueError("Google Drive poll interval must be greater than zero.")
@@ -328,11 +329,14 @@ class ProfileRuntime:
         self.model = model
         self.db = db
         self.context_dir = context_dir
-        self.health_dir = health_dir or (
-            resolve_google_drive_data_dir(None)
-            if import_source == "google-drive"
-            else resolve_data_dir(None)
-        )
+        if health_dir is not None:
+            self.health_dir = health_dir
+        elif import_source == "google-drive":
+            self.health_dir = resolve_google_drive_data_dir(None)
+        elif import_source == "http" and profile is not None:
+            self.health_dir = profile.http_cache
+        else:
+            self.health_dir = resolve_data_dir(None)
         self.import_source = import_source
         self.google_drive_service_account = google_drive_service_account
         self.google_drive_metrics_folder_id = google_drive_metrics_folder_id
@@ -444,14 +448,16 @@ class ProfileRuntime:
         quiet_queue = self._state.get("quiet_queue", [])
         queue_len = len(quiet_queue) if isinstance(quiet_queue, list) else 0
 
+        if self.import_source == "google-drive":
+            import_status = f"Google Drive (every {self.google_drive_poll_interval_s}s)"
+        elif self.import_source == "http":
+            import_status = "Auto Export HTTP receiver"
+        else:
+            import_status = "local filesystem watcher"
+
         lines = [
             "System status:",
-            (
-                "- Health import: Google Drive "
-                f"(every {self.google_drive_poll_interval_s}s)"
-                if self.import_source == "google-drive"
-                else "- Health import: local filesystem watcher"
-            ),
+            f"- Health import: {import_status}",
             f"- Chat memory: {buffer_len} messages",
             f"- Nudges today: {nudge_count}/{effective['nudges']['max_per_day']}",
             f"- Last nudge: {self._format_status_timestamp(self._state.get('last_nudge_ts'))}",
@@ -1144,11 +1150,12 @@ class Daemon:
                 )
                 continue
             sender = TelegramSender(token, str(profile.telegram_id)) if token else None
-            health_dir = (
-                local_health_dir or resolve_data_dir(None)
-                if profile.import_source == "local"
-                else profile.drive_cache
-            )
+            if profile.import_source == "local":
+                health_dir = local_health_dir or resolve_data_dir(None)
+            elif profile.import_source == "google-drive":
+                health_dir = profile.drive_cache
+            else:
+                health_dir = profile.http_cache
             try:
                 self.runtimes[profile.name] = ProfileRuntime(
                     model=model,
@@ -1186,6 +1193,14 @@ class Daemon:
         }
         self._pending_lock = threading.Lock()
         self._pending_chat_turns = dict.fromkeys(self.runtimes, 0)
+        from daemon_http import DaemonHttpIngestHandler
+
+        http_profiles = {
+            name: self.enabled[name]
+            for name, runtime in self.runtimes.items()
+            if runtime.import_source == "http"
+        }
+        self._http = DaemonHttpIngestHandler(self, http_profiles)
 
     def _run_profile(
         self,
@@ -1331,6 +1346,8 @@ class Daemon:
         self._lock_file.write(str(os.getpid()))
         self._lock_file.flush()
 
+        self._http.start()
+
         observer = Observer()
         for runtime in self.runtimes.values():
             logger.info(
@@ -1392,6 +1409,7 @@ class Daemon:
             logger.info("Shutting down daemon")
         finally:
             self._stop_event.set()
+            self._http.stop()
             for runtime in self.runtimes.values():
                 runtime._stop_event.set()
             observer.stop()

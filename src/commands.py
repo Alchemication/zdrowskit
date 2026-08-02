@@ -37,6 +37,9 @@ from config import (
     CONTEXT_DIR,
     GOOGLE_DRIVE_POLL_INTERVAL_S,
     GOOGLE_DRIVE_SERVICE_ACCOUNT,
+    HTTP_INGEST_HOST,
+    HTTP_INGEST_PORT,
+    HTTP_INGEST_TOKEN_FILE,
     resolve_data_dir,
     resolve_google_drive_data_dir,
 )
@@ -66,7 +69,7 @@ LAUNCHD_PLIST = f"{LAUNCHD_LABEL}.plist"
 
 @dataclass(frozen=True)
 class ImportResult:
-    """Outcome of one local or Google Drive health import."""
+    """Outcome of one health import."""
 
     source: str
     drive_files_downloaded: int
@@ -147,9 +150,24 @@ def cmd_import(args: argparse.Namespace) -> ImportResult:
             )
     elif source == "local":
         data_dir = resolve_data_dir(args.data_dir)
+    elif source == "http":
+        if not getattr(args, "http_pair_verified", False):
+            logger.error(
+                "HTTP imports are receiver-managed so Metrics and Workouts stay "
+                "paired. Run 'ingest status' instead of importing this cache "
+                "directly."
+            )
+            sys.exit(1)
+        if not args.data_dir:
+            logger.error(
+                "HTTP import needs a profile cache directory; pass --profile or "
+                "--data-dir."
+            )
+            sys.exit(1)
+        data_dir = Path(args.data_dir).expanduser().resolve()
     else:
         logger.error(
-            "Unknown import source %r; use 'local' or 'google-drive' "
+            "Unknown import source %r; use 'http', 'local', or 'google-drive' "
             "(check ZDROWSKIT_IMPORT_SOURCE in .env).",
             source,
         )
@@ -405,8 +423,8 @@ def cmd_setup(args: argparse.Namespace) -> None:
     print(
         f"  3. Edit me.md and strategy.md in {PROFILES_DIR / 'NAME' / 'ContextFiles'}"
     )
-    print("  4. Set up Auto Export with Google Drive (recommended) or iCloud")
-    print("  5. Import health data: uv run python main.py import")
+    print("  4. Create the HTTP upload token: uv run python main.py ingest setup")
+    print("  5. Follow docs/http-ingest.md to start the receiver and Funnel")
     print("\nCheck readiness any time with: uv run python main.py doctor")
 
 
@@ -525,6 +543,53 @@ def cmd_doctor(args: argparse.Namespace) -> None:  # noqa: ARG001
     if local_profiles:
         data_dir = resolve_data_dir(None)
         checks.append(("Auto Export data dir", data_dir.exists(), str(data_dir), True))
+    http_profiles = [
+        profile
+        for profile in profiles.values()
+        if profile.enabled and profile.import_source == "http"
+    ]
+    if http_profiles:
+        from http_ingest import TokenRegistry
+
+        try:
+            token_profiles = TokenRegistry(HTTP_INGEST_TOKEN_FILE).active_profiles()
+        except ValueError as exc:
+            token_profiles = set()
+            checks.append(("HTTP token registry", False, str(exc), True))
+        else:
+            checks.append(
+                (
+                    "HTTP token registry",
+                    HTTP_INGEST_TOKEN_FILE.is_file(),
+                    str(HTTP_INGEST_TOKEN_FILE),
+                    True,
+                )
+            )
+        for profile in http_profiles:
+            checks.append(
+                (
+                    f"{profile.name} HTTP token",
+                    profile.name in token_profiles,
+                    "configured" if profile.name in token_profiles else "missing",
+                    True,
+                )
+            )
+            checks.append(
+                (
+                    f"{profile.name} HTTP cache",
+                    profile.http_cache.exists(),
+                    str(profile.http_cache),
+                    False,
+                )
+            )
+        checks.append(
+            (
+                "HTTP receiver",
+                HTTP_INGEST_HOST == "127.0.0.1" and HTTP_INGEST_PORT > 0,
+                f"{HTTP_INGEST_HOST}:{HTTP_INGEST_PORT}",
+                True,
+            )
+        )
     checks.append(
         ("LLM API key", _env_has_any_model_key(), "DEEPSEEK/ANTHROPIC/OPENAI", True)
     )

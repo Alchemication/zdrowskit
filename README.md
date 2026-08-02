@@ -24,7 +24,7 @@ Under the hood: SQLite for storage, [litellm](https://github.com/BerriAI/litellm
 
 Three loops run continuously:
 
-- **Data in** - Auto Export writes Apple Health JSON files to iCloud Drive or Google Drive. zdrowskit imports metrics, workouts, routes, and sleep into SQLite.
+- **Data in** - Auto Export posts Apple Health JSON through HTTPS (or writes to iCloud/Google Drive). zdrowskit imports metrics, workouts, routes, and sleep into SQLite.
 - **Coach out** - scheduled reports, weekly coaching reviews, midweek check-ins, and reactive nudges each use their own prompt, tools, and LLM call.
 - **Two-way chat** - Telegram messages can query your full health history through SQL, render charts, and propose context-file edits with Approve/Reject buttons.
 
@@ -32,7 +32,8 @@ Three loops run continuously:
 
 - Apple Watch + iPhone
 - [Auto Export](https://apps.apple.com/app/myhealth-export-to-icloud/id6737380982) for scheduled Apple Health JSON export
-- A macOS or Linux machine that runs Python; Google Drive is recommended for portable daemon deployments
+- A macOS or Linux machine that runs Python
+- [Tailscale](https://tailscale.com/docs/install/mac) on the host; HTTP + Funnel is the default transport
 - Python 3.12+ and [uv](https://github.com/astral-sh/uv)
 - A capable LLM provider API key
 - Telegram bot for notifications and chat
@@ -43,16 +44,23 @@ zdrowskit is personal and Apple-first. See [Limitations](docs/limitations.md) fo
 
 ## Quick Start
 
-Before you start: `import` needs Apple Health JSON from Auto Export, delivered through iCloud Drive or Google Drive. If you have not configured that yet, see [Apple Health data export](docs/apple-health.md).
+Follow [HTTP ingest](docs/http-ingest.md) while running this quick start; it
+shows where the generated token and Funnel URL go in Auto Export. Local/iCloud
+and Google Drive remain available.
 
 ```bash
 git clone <repo-url> && cd zdrowskit
 uv sync
 
 uv run python main.py setup
-uv run python main.py profile add me --telegram-id YOUR_NUMERIC_ID --operator --source local
+uv run python main.py profile add me --telegram-id YOUR_NUMERIC_ID --operator
+uv run python main.py ingest setup
 uv run python main.py doctor
-uv run python main.py import
+uv run python main.py daemon-install
+curl http://127.0.0.1:8787/healthz
+tailscale funnel --bg --https=443 http://127.0.0.1:8787
+# Send the Metrics + Workouts automations from Auto Export
+uv run python main.py ingest status
 uv run python main.py status
 uv run python main.py insights --week last
 ```
@@ -62,7 +70,8 @@ For the full first-run flow, see [Setup](docs/setup.md).
 ## Common Commands
 
 ```bash
-uv run python main.py import              # import from Auto Export
+uv run python main.py import              # import a local/iCloud or Drive backfill
+uv run python main.py ingest status       # inspect direct HTTP uploads and imports
 uv run python main.py status              # DB row counts + date range
 uv run python main.py report              # current week: summary + daily
 uv run python main.py insights            # personalised weekly report via LLM
@@ -74,6 +83,7 @@ uv run python main.py telegram-setup      # register Telegram bot commands
 uv run python main.py daemon-install      # install the launchd daemon
 uv run python main.py daemon-restart      # restart the background daemon
 uv run python main.py profile add anna --telegram-id ID # add an isolated profile
+uv run python main.py ingest status      # receiver and per-profile upload state
 uv run python main.py db status --all     # check every profile database
 ```
 
@@ -85,10 +95,11 @@ Run any command with `--help` for the full flag list. See [Commands](docs/comman
 |---|---|
 | [Setup](docs/setup.md) | Installation, `.env`, first-run context files, first LLM report |
 | [Apple Health data export](docs/apple-health.md) | Auto Export setup, iCloud paths, historical backfill |
+| [HTTP ingest](docs/http-ingest.md) | Direct Auto Export uploads, Tailscale Funnel, tokens, validation, retention |
 | [Google Drive import](docs/google-drive.md) | Portable API fetch, service-account setup, multiple profiles |
 | [Family hosting](docs/family-hosting.md) | Profile roster, account linking, adoption, isolation, backup |
 | [Commands](docs/commands.md) | CLI commands, useful flags, data directory override |
-| [Daemon](docs/daemon.md) | Drive polling, iCloud watching, service operation, state and logs |
+| [Daemon](docs/daemon.md) | HTTP receiving, Drive polling, iCloud watching, service operation and logs |
 | [Telegram](docs/telegram.md) | Bot configuration, chat, commands, `/models`, `/notify` |
 | [Context files](docs/context-files.md) | `me.md`, `strategy.md`, `log.md`, generated memory files |
 | [Notifications](docs/notifications.md) | Notification types, preferences, triggers, suppression, rate limits |

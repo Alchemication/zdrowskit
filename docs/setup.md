@@ -10,13 +10,19 @@ routing, see [LLM setup](llm.md). To migrate an existing installation, use
 
 - Python 3.12+
 - [uv](https://github.com/astral-sh/uv)
+- [Tailscale](https://tailscale.com/docs/install/mac) on the host, with its CLI integration and launch-at-login enabled
 - Apple Health data exported by [Auto Export](https://apps.apple.com/app/myhealth-export-to-icloud/id6737380982)
 - LLM API keys for the providers you want to use
 - Telegram bot credentials if you want notifications and chat
 
-Google Drive is recommended for new installations because the daemon can poll
-it on macOS or Linux. The local/iCloud source remains available for existing
-macOS setups. See [Google Drive import](google-drive.md).
+Direct HTTP delivery through Tailscale is recommended for new installations.
+The local/iCloud and Google Drive sources remain available, particularly for
+historical backfills. See [Auto Export HTTP ingest](http-ingest.md).
+
+Before the repository setup, install/sign in to Tailscale and confirm
+`tailscale status` works in Terminal. The HTTP guide covers the macOS app
+variants, CLI Integration, first Funnel approval, persistence, and testing from
+another device.
 
 ## First Run
 
@@ -29,13 +35,24 @@ uv sync
 uv run python main.py setup
 
 # Create the operator profile and isolated context/database tree
-uv run python main.py profile add me --telegram-id YOUR_NUMERIC_ID --operator --source local
+uv run python main.py profile add me --telegram-id YOUR_NUMERIC_ID --operator
+
+# Create the upload token and show the iPhone settings; keep this output open
+uv run python main.py ingest setup
 
 # Check paths, credentials, roster, and profile files
 uv run python main.py doctor
 
-# Import your Apple Health data
-uv run python main.py import
+# Install the daemon/receiver
+uv run python main.py daemon-install
+
+# Verify locally, then expose only this loopback service through HTTPS
+curl http://127.0.0.1:8787/healthz
+tailscale funnel --bg --https=443 http://127.0.0.1:8787
+tailscale funnel status
+
+# Configure and send Metrics + Workouts from Auto Export, then verify the pair
+uv run python main.py ingest status
 
 # See what's in the database
 uv run python main.py status
@@ -47,7 +64,7 @@ uv run python main.py db schema
 # Get a weekly report (no LLM)
 uv run python main.py report
 
-# Run Drive polling / iCloud watching in the foreground
+# Run HTTP receiving / Drive polling / iCloud watching in the foreground
 uv run python src/daemon.py --foreground
 ```
 
@@ -57,9 +74,9 @@ Normal CLI usage auto-applies pending SQLite migrations when the database is ope
 Once `profiles.toml` exists, active files live only under
 `profiles/<name>/`; `profile add` creates that profile tree.
 
-The first profile must use `--operator`. Use `--source local` for the host's
-iCloud/Auto Export directory. To use Google Drive instead, omit `--source
-local`, pass both Drive folder-ID options, and configure the shared service
+The first profile must use `--operator`; HTTP is the default source. Use
+`--source local` for the host's iCloud directory. For Google Drive, pass
+`--source google-drive`, both folder IDs, and configure the shared service
 account as described in [Google Drive import](google-drive.md).
 
 The Telegram ID is the stable numeric user ID, not a username. For the first

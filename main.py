@@ -97,6 +97,7 @@ from cmd_db import cmd_db
 from cmd_events import CATEGORIES as EVENT_CATEGORIES, cmd_events
 from cmd_coach import cmd_coach
 from cmd_insights import cmd_insights
+from cmd_ingest import cmd_ingest
 from cmd_llm_log import cmd_llm_log
 from cmd_models import cmd_models
 from cmd_nudge import cmd_nudge
@@ -157,7 +158,7 @@ def main() -> None:
     p_import.add_argument("--data-dir", metavar="PATH", help="Path to data folder")
     p_import.add_argument(
         "--source",
-        choices=("local", "google-drive"),
+        choices=("http", "local", "google-drive"),
         default=None,
         help="Import source (default: selected profile configuration)",
     )
@@ -562,8 +563,8 @@ def main() -> None:
     p_profile_add.add_argument("--operator", action="store_true")
     p_profile_add.add_argument(
         "--source",
-        choices=("local", "google-drive"),
-        default="google-drive",
+        choices=("http", "local", "google-drive"),
+        default="http",
     )
     p_profile_add.add_argument("--google-drive-metrics-folder-id", metavar="ID")
     p_profile_add.add_argument("--google-drive-workouts-folder-id", metavar="ID")
@@ -573,6 +574,31 @@ def main() -> None:
     p_profile_adopt.add_argument("name")
     p_profile_adopt.add_argument("--telegram-id", type=int)
     p_profile_adopt.add_argument("--dry-run", action="store_true")
+    p_profile_source = profile_sub.add_parser(
+        "source", help="Change a profile's health import source"
+    )
+    p_profile_source.add_argument("name")
+    p_profile_source.add_argument("source", choices=("http", "local", "google-drive"))
+
+    # authenticated Auto Export HTTP ingestion
+    p_ingest = sub.add_parser("ingest", help="Configure Auto Export HTTP ingestion")
+    ingest_sub = p_ingest.add_subparsers(dest="ingest_cmd", required=True)
+    p_ingest_setup = ingest_sub.add_parser(
+        "setup", help="Create missing tokens and show Auto Export settings"
+    )
+    p_ingest_setup.add_argument(
+        "--funnel",
+        action="store_true",
+        help="Also start the persistent Tailscale Funnel",
+    )
+    p_ingest_token = ingest_sub.add_parser(
+        "token", help="Issue or rotate one profile upload token"
+    )
+    p_ingest_token.add_argument("name")
+    p_ingest_token.add_argument(
+        "--rotate", action="store_true", help="Revoke existing profile tokens"
+    )
+    ingest_sub.add_parser("status", help="Show receiver and per-profile upload state")
 
     args = parser.parse_args()
 
@@ -627,8 +653,11 @@ def main() -> None:
                     args.google_drive_workouts_folder_id
                     or profile.drive_workouts_folder_id
                 )
-                if not args.data_dir and profile.import_source == "google-drive":
-                    args.data_dir = str(profile.drive_cache)
+                if not args.data_dir:
+                    if profile.import_source == "google-drive":
+                        args.data_dir = str(profile.drive_cache)
+                    elif profile.import_source == "http":
+                        args.data_dir = str(profile.http_cache)
 
     def _cli_coach(coach_args: argparse.Namespace) -> None:
         """CLI wrapper for cmd_coach.
@@ -666,6 +695,7 @@ def main() -> None:
         "daemon-stop": cmd_daemon_stop,
         "telegram-setup": cmd_telegram_setup,
         "profile": cmd_profile,
+        "ingest": cmd_ingest,
     }
     try:
         dispatch[args.cmd](args)

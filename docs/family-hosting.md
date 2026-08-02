@@ -1,7 +1,7 @@
 # Family Hosting
 
 One zdrowskit daemon and one Telegram bot can serve a small operator-managed
-roster. Each person has a separate database, context tree, Drive cache,
+roster. Each person has a separate database, context tree, import cache,
 generated output, preferences, conversation state, and daemon state under:
 
 ```text
@@ -11,7 +11,7 @@ generated output, preferences, conversation state, and daemon state under:
     adam/
       health.db
       ContextFiles/
-      Imports/google-drive/
+      Imports/http/
       Reports/
       Nudges/
       notification_prefs.json
@@ -19,22 +19,25 @@ generated output, preferences, conversation state, and daemon state under:
       daemon_state.json
 ```
 
-Provider keys, the Telegram bot token, and the Google service-account JSON
-remain shared infrastructure in `.env`.
+Provider keys and the Telegram bot token remain shared infrastructure in
+`.env`. HTTP token hashes live in the ignored `ingest_tokens.json` registry.
+Tailscale runs only on the host: family/friend iPhones use the common public
+Funnel URL and do not join the operator's tailnet. See the complete
+[Tailscale and HTTP setup](http-ingest.md).
 
 ## Create a New Operator
 
-For a new local/iCloud installation:
+For the default HTTP installation:
 
 ```bash
 uv run python main.py profile add adam \
   --telegram-id 111111111 \
-  --operator \
-  --source local
+  --operator
+uv run python main.py ingest setup
 ```
 
-Exactly one roster entry must be the operator. Only that profile may use the
-host's local Auto Export directory. The operator alone can use `/codex` and
+Exactly one roster entry must be the operator. Only that profile may optionally
+use the host's local Auto Export directory. The operator alone can use `/codex` and
 `/claude`, because those commands grant repository write access.
 
 ## Adopt an Existing Installation
@@ -60,34 +63,36 @@ adoption is expected; the daemon now uses the copies under
 `profiles/<name>/`. After completing the verification checklist below, archive
 or remove the legacy files manually.
 
-## Add a Drive Profile
+## Add a Family/Friend Profile
 
 ```bash
 uv run python main.py profile add anna \
-  --telegram-id 222222222 \
-  --google-drive-metrics-folder-id ANNA_METRICS_FOLDER_ID \
-  --google-drive-workouts-folder-id ANNA_WORKOUTS_FOLDER_ID
+  --telegram-id 222222222
+uv run python main.py ingest setup
 ```
 
 This creates the database, context templates, generated-output directories,
-Drive cache, and roster entry. The equivalent roster is:
+HTTP cache, and roster entry. `ingest setup` prints Anna's token once. The
+equivalent roster is:
 
 ```toml
 [profiles.adam]
 telegram_id = 111111111
 operator = true
-import_source = "local"
 
 [profiles.anna]
 telegram_id = 222222222
-drive_metrics_folder_id = "ANNA_METRICS_FOLDER_ID"
-drive_workouts_folder_id = "ANNA_WORKOUTS_FOLDER_ID"
 ```
 
 Restart after every roster edit; configuration is intentionally not hot
 reloaded. `profile add` also changes the roster, so restart the already-running
-daemon after adding a person. A Drive profile with missing folder configuration
-is logged as disabled at runtime and does not stop other profiles.
+daemon after adding a person. Give Anna the common Funnel URL and only her
+token; that token selects her isolated profile regardless of request contents.
+Do not invite her to the tailnet solely for zdrowskit and do not reuse Adam's
+token.
+
+Google Drive remains available with `--source google-drive` and both folder-ID
+flags. See [Google Drive import](google-drive.md).
 
 Unknown, disabled, group-chat, and mismatched sender/chat identities are
 default-denied. Authorization uses Telegram's numeric user ID, never username.

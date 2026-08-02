@@ -40,7 +40,7 @@ class Profile:
     root: Path
     operator: bool = False
     enabled: bool = True
-    import_source: str = "google-drive"
+    import_source: str = "http"
     drive_metrics_folder_id: str | None = None
     drive_workouts_folder_id: str | None = None
 
@@ -68,6 +68,11 @@ class Profile:
     def drive_cache(self) -> Path:
         """Return this profile's Google Drive cache directory."""
         return self.root / "Imports" / "google-drive"
+
+    @property
+    def http_cache(self) -> Path:
+        """Return this profile's bounded HTTP ingest directory."""
+        return self.root / "Imports" / "http"
 
     @property
     def state(self) -> Path:
@@ -148,10 +153,11 @@ def load_profiles(path: Path = PROFILES_FILE) -> dict[str, Profile]:
             raise ProfileConfigError(
                 f"profiles.{name}.operator and enabled must be booleans."
             )
-        source = values.get("import_source", "google-drive")
-        if source not in {"local", "google-drive"}:
+        source = values.get("import_source", "http")
+        if source not in {"http", "local", "google-drive"}:
             raise ProfileConfigError(
-                f"profiles.{name}.import_source must be 'local' or 'google-drive'."
+                f"profiles.{name}.import_source must be 'http', 'local', or "
+                "'google-drive'."
             )
         if source == "local" and not operator:
             raise ProfileConfigError(
@@ -246,7 +252,7 @@ def _toml_profile_section(
     lines = [f"[profiles.{name}]", f"telegram_id = {telegram_id}"]
     if operator:
         lines.append("operator = true")
-    if import_source != "google-drive" or operator:
+    if import_source != "http":
         lines.append(f'import_source = "{import_source}"')
     if metrics_id:
         lines.append(f'drive_metrics_folder_id = "{metrics_id}"')
@@ -263,6 +269,7 @@ def _create_profile_tree(profile: Profile) -> None:
     profile.reports.mkdir(mode=0o700)
     profile.nudges.mkdir(mode=0o700)
     profile.drive_cache.mkdir(parents=True, mode=0o700)
+    profile.http_cache.mkdir(parents=True, mode=0o700)
     examples = Path(__file__).resolve().parent.parent / "examples" / "context"
     for filename in CONTEXT_FILENAMES:
         source = examples / filename
@@ -295,7 +302,7 @@ def add_profile(
     *,
     operator: bool = False,
     path: Path = PROFILES_FILE,
-    import_source: str = "google-drive",
+    import_source: str = "http",
     metrics_id: str | None = None,
     workouts_id: str | None = None,
 ) -> Profile:
@@ -307,8 +314,10 @@ def add_profile(
         or telegram_id <= 0
     ):
         raise ProfileConfigError("Telegram ID must be a positive integer.")
-    if import_source not in {"local", "google-drive"}:
-        raise ProfileConfigError("Import source must be 'local' or 'google-drive'.")
+    if import_source not in {"http", "local", "google-drive"}:
+        raise ProfileConfigError(
+            "Import source must be 'http', 'local', or 'google-drive'."
+        )
     if import_source == "local" and not operator:
         raise ProfileConfigError("Local import is operator-only.")
     metrics_id = _optional_folder_id(metrics_id, "drive_metrics_folder_id", name)
@@ -351,6 +360,63 @@ def add_profile(
     return profile
 
 
+def set_profile_source(
+    name: str,
+    import_source: str,
+    *,
+    path: Path = PROFILES_FILE,
+) -> Profile:
+    """Atomically change one profile's import source in the TOML roster."""
+    if import_source not in {"http", "local", "google-drive"}:
+        raise ProfileConfigError(
+            "Import source must be 'http', 'local', or 'google-drive'."
+        )
+    profiles = load_profiles(path)
+    profile = profiles.get(name)
+    if profile is None:
+        raise ProfileConfigError(f"Unknown profile {name!r}.")
+    if import_source == "local" and not profile.operator:
+        raise ProfileConfigError("Local import is operator-only.")
+    text = path.read_text(encoding="utf-8")
+    header = f"[profiles.{name}]"
+    start = text.find(header)
+    if start < 0:
+        raise ProfileConfigError(f"Could not locate {header} in {path}.")
+    next_section = text.find("\n[", start + len(header))
+    end = len(text) if next_section < 0 else next_section + 1
+    section = text[start:end]
+    source_line = re.compile(
+        r'^(?P<indent>[ \t]*)import_source\s*=\s*"[^"]*"[ \t]*$',
+        re.MULTILINE,
+    )
+    replacement = f'import_source = "{import_source}"'
+    match = source_line.search(section)
+    if match:
+        updated_section = source_line.sub(
+            f"{match.group('indent')}{replacement}", section, count=1
+        )
+    else:
+        first_newline = section.find("\n")
+        updated_section = (
+            section[: first_newline + 1]
+            + replacement
+            + "\n"
+            + section[first_newline + 1 :]
+        )
+    updated = text[:start] + updated_section + text[end:]
+    temp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        temp.write_text(updated, encoding="utf-8")
+        os.chmod(temp, path.stat().st_mode & 0o777)
+        load_profiles(temp)
+        os.replace(temp, path)
+    finally:
+        temp.unlink(missing_ok=True)
+    updated_profile = load_profiles(path)[name]
+    updated_profile.http_cache.mkdir(parents=True, exist_ok=True, mode=0o700)
+    return updated_profile
+
+
 def adopt_existing(
     name: str,
     *,
@@ -384,9 +450,9 @@ def adopt_existing(
             )
 
     import_source = os.environ.get("ZDROWSKIT_IMPORT_SOURCE", "local").strip()
-    if import_source not in {"local", "google-drive"}:
+    if import_source not in {"http", "local", "google-drive"}:
         raise ProfileConfigError(
-            "ZDROWSKIT_IMPORT_SOURCE must be 'local' or 'google-drive'."
+            "ZDROWSKIT_IMPORT_SOURCE must be 'http', 'local', or 'google-drive'."
         )
     metrics_id = _optional_folder_id(
         os.environ.get("ZDROWSKIT_GOOGLE_DRIVE_METRICS_FOLDER_ID"),
@@ -440,6 +506,7 @@ def adopt_existing(
         destination_root / "Reports",
         destination_root / "Nudges",
         destination_root / "Imports" / "google-drive",
+        destination_root / "Imports" / "http",
     ):
         directory.mkdir(parents=True, exist_ok=True)
 
@@ -485,6 +552,11 @@ def cmd_profile(args: Any) -> None:
             workouts_id=args.google_drive_workouts_folder_id,
         )
         print(f"Created profile {profile.name}: {profile.root}")
+        return
+    if args.profile_cmd == "source":
+        profile = set_profile_source(args.name, args.source)
+        print(f"Profile {profile.name} now imports from {profile.import_source}.")
+        print("Restart the daemon for this change to take effect.")
         return
     if args.profile_cmd == "adopt":
         telegram_id = args.telegram_id
