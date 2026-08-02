@@ -487,8 +487,18 @@ def parse_workouts(path: Path) -> list[WorkoutSnapshot]:
         A list of WorkoutSnapshot objects ordered chronologically by start_utc.
     """
     with path.open() as f:
-        data = json.load(f)
+        return parse_workouts_payload(json.load(f))
 
+
+def parse_workouts_payload(data: dict) -> list[WorkoutSnapshot]:
+    """Parse an already-decoded workouts payload.
+
+    Args:
+        data: Decoded Auto Export workouts JSON.
+
+    Returns:
+        A list of WorkoutSnapshot objects ordered chronologically by start_utc.
+    """
     snapshots: list[WorkoutSnapshot] = []
 
     for w in data["data"]["workouts"]:

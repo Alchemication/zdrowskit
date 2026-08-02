@@ -86,8 +86,18 @@ def parse_metrics_file(path: Path) -> dict[str, dict[str, float]]:
             }
     """
     with path.open() as f:
-        data = json.load(f)
+        return parse_metrics_payload(json.load(f))
 
+
+def parse_metrics_payload(data: dict) -> dict[str, dict[str, float]]:
+    """Parse an already-decoded Apple Health metrics payload.
+
+    Args:
+        data: Decoded Auto Export metrics JSON.
+
+    Returns:
+        A dict mapping ISO date strings to a flat dict of field name → value.
+    """
     result: dict[str, dict[str, float]] = {}
 
     for metric in data["data"]["metrics"]:

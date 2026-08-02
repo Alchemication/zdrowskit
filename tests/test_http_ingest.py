@@ -305,7 +305,7 @@ class TestHttpIngestManager:
         assert complete_pair.pair_ready is True
         assert len(ready) == 2
 
-    def test_existing_receipt_gains_generation_markers_before_next_cycle(
+    def test_failed_import_stays_visible_until_a_retry_succeeds(
         self, tmp_path: Path
     ) -> None:
         profile = _profile(tmp_path)
@@ -325,35 +325,39 @@ class TestHttpIngestManager:
             validate_upload(_headers("workouts"), _body("workouts")),
             _body("workouts"),
         )
-        first_digest = ready[-1][1]
-        assert manager.begin_import("adam", first_digest) is not None
-        manager.finish_import("adam", first_digest, success=True)
+        digest = ready[-1][1]
+        manager.begin_import("adam", digest)
+        manager.finish_import("adam", digest, success=False, error="disk full")
 
-        state_path = profile.http_cache / ".ingest_state.json"
-        legacy_state = json.loads(state_path.read_text(encoding="utf-8"))
-        legacy_state.pop("last_import_uploads")
-        state_path.write_text(json.dumps(legacy_state), encoding="utf-8")
-        restarted = HttpIngestManager(
-            {"adam": profile},
-            pair_window_s=600,
-            on_pair_ready=lambda name, digest: ready.append((name, digest)),
-        )
-        next_metrics_payload = json.loads(_body("metrics"))
-        next_metrics_payload["data"]["metrics"][0]["data"][0]["qty"] = 2345
-        next_metrics_body = json.dumps(next_metrics_payload).encode()
-
-        metrics_only = restarted.accept(
+        next_body = json.dumps(
+            {
+                "data": {
+                    "metrics": [
+                        {
+                            "name": "step_count",
+                            "units": "count",
+                            "data": [{"date": "2026-08-03 00:00:00 +0000", "qty": 999}],
+                        }
+                    ]
+                }
+            }
+        ).encode()
+        manager.accept(
             "adam",
             validate_upload(
                 _headers("metrics", session_id="3589AA62-C39F-4FF2-8BC7-2D11D5488A7F"),
-                next_metrics_body,
+                next_body,
             ),
-            next_metrics_body,
+            next_body,
         )
 
-        assert metrics_only.pair_ready is False
-        persisted = json.loads(state_path.read_text(encoding="utf-8"))
-        assert set(persisted["last_import_uploads"]) == {"metrics", "workouts"}
+        assert manager.status()["adam"]["last_error"]["message"] == "disk full"
+
+        retry_digest = ready[-1][1]
+        manager.begin_import("adam", retry_digest)
+        manager.finish_import("adam", retry_digest, success=True)
+
+        assert manager.status()["adam"]["last_error"] is None
 
 
 class TestPairStatus:

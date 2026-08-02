@@ -11,7 +11,6 @@ import os
 import re
 import secrets
 import shutil
-import tempfile
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -19,8 +18,8 @@ from http import HTTPStatus
 from pathlib import Path
 from typing import Any, Callable
 
-from parsers.metrics import parse_metrics_file
-from parsers.workouts import parse_workouts
+from parsers.metrics import parse_metrics_payload
+from parsers.workouts import parse_workouts_payload
 from profiles import Profile
 
 logger = logging.getLogger(__name__)
@@ -30,7 +29,7 @@ HEALTH_PATH = "/healthz"
 TOKEN_VERSION = 1
 STATE_VERSION = 1
 MAX_METRICS = 200
-MAX_METRIC_ENTRIES = 10
+MAX_METRIC_ENTRIES = 400
 MAX_WORKOUTS = 500
 MAX_ROUTE_POINTS = 250_000
 MAX_JSON_DEPTH = 16
@@ -292,8 +291,9 @@ def _validate_metrics(items: list[Any]) -> None:
         if len(entries) > MAX_METRIC_ENTRIES:
             raise IngestError(
                 HTTPStatus.UNPROCESSABLE_ENTITY,
-                "Metrics contains too many entries for Date Range Default with "
-                "daily aggregation; check the Auto Export automation settings.",
+                f"metrics[{index}] carries more than {MAX_METRIC_ENTRIES} daily "
+                "entries. Use local or Google Drive import for a backfill this "
+                "large.",
             )
         for entry_index, entry in enumerate(entries):
             if not isinstance(entry, dict):
@@ -371,26 +371,22 @@ def _validate_workouts(items: list[Any]) -> None:
             )
 
 
-def _parser_dry_run(body: bytes, kind: str) -> None:
-    """Run the production parser against a validated payload before accepting it."""
-    temp_name: str | None = None
+def _parser_dry_run(payload: dict[str, Any], kind: str) -> None:
+    """Run the production parser against a validated payload before accepting it.
+
+    Parsing the decoded payload in memory keeps health data out of the shared
+    system temp directory and avoids decoding the request body a second time.
+    """
     try:
-        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as handle:
-            handle.write(body)
-            temp_name = handle.name
-        path = Path(temp_name)
         if kind == "metrics":
-            parse_metrics_file(path)
+            parse_metrics_payload(payload)
         else:
-            parse_workouts(path)
-    except (KeyError, TypeError, ValueError, OSError, json.JSONDecodeError) as exc:
+            parse_workouts_payload(payload)
+    except (KeyError, TypeError, ValueError) as exc:
         raise IngestError(
             HTTPStatus.UNPROCESSABLE_ENTITY,
             f"Payload is not compatible with the zdrowskit {kind} parser: {exc}",
         ) from exc
-    finally:
-        if temp_name is not None:
-            Path(temp_name).unlink(missing_ok=True)
 
 
 def validate_upload(headers: dict[str, str], body: bytes) -> ValidatedUpload:
@@ -452,7 +448,7 @@ def validate_upload(headers: dict[str, str], body: bytes) -> ValidatedUpload:
         _validate_metrics(items)
     else:
         _validate_workouts(items)
-    _parser_dry_run(body, automation_name)
+    _parser_dry_run(payload, automation_name)
     return ValidatedUpload(
         kind=automation_name,
         automation_id=automation_id,
@@ -495,15 +491,6 @@ class HttpIngestManager:
             raise ValueError(f"Invalid HTTP ingest uploads state for {profile.name}.")
         if not isinstance(state.get("receipts"), list):
             state["receipts"] = []
-        last_import_pair = state.get("last_import_pair")
-        if (
-            not isinstance(state.get("last_import_uploads"), dict)
-            and isinstance(last_import_pair, str)
-            and last_import_pair == self._pair_digest(state)
-        ):
-            markers = self._upload_markers(state)
-            if markers is not None:
-                state["last_import_uploads"] = markers
         return state
 
     def _payload_path(self, profile: Profile, kind: str) -> Path:
@@ -633,7 +620,6 @@ class HttpIngestManager:
             }
             candidate = self._pair_candidate(state, profile_name=profile_name)
             pair_ready = candidate is not None
-            state["last_error"] = None
             _atomic_write_json(self._state_path(profile), state)
             if pair_ready:
                 callback_digest = candidate[0]
