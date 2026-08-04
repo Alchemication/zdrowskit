@@ -32,7 +32,10 @@ UNFILLED_CONTEXT = "(not filled in yet — the user has not told you this)"
 
 _HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 
-DEFAULT_SOUL_PROMPT = "default_soul.md"
+CONDUCT_PROMPT = "conduct.md"
+DEFAULT_SOUL_PATH = (
+    Path(__file__).resolve().parent / "templates" / "context" / "soul.md"
+)
 SCHEMA_REFERENCE_PROMPT = "schema_reference.md"
 WEEK_STATUS_FULL_PROMPT = "week_status_full.md"
 WEEK_STATUS_PARTIAL_PROMPT = "week_status_partial.md"
@@ -82,6 +85,23 @@ def _recent_history(content: str, n: int) -> str:
     return "\n\n".join(entries[-n:]) + "\n"
 
 
+def _strip_guidance(content: str) -> str:
+    """Remove HTML-comment authoring guidance from a context file.
+
+    The comments in a seeded template tell a human what to write. They survive
+    once the file is filled in, so without this they ride along in every prompt
+    as instructions addressed to the wrong reader.
+
+    Args:
+        content: Raw context file text.
+
+    Returns:
+        The text with comment blocks removed and blank runs collapsed.
+    """
+    stripped = _HTML_COMMENT_RE.sub("", content)
+    return re.sub(r"\n{3,}", "\n\n", stripped).strip() + "\n"
+
+
 def _is_unfilled(content: str) -> bool:
     """Return whether a context file still holds only template scaffolding.
 
@@ -100,6 +120,30 @@ def _is_unfilled(content: str) -> bool:
     return not any(
         line.strip() and not line.lstrip().startswith("#") for line in body.splitlines()
     )
+
+
+def _load_soul(context_dir: Path) -> str:
+    """Return a profile's coach persona, falling back to the shipped default.
+
+    The persona is per profile because the right voice for someone chasing a
+    5K PR is the wrong voice for someone who has not started yet. What the
+    coach may *do* is not negotiable and lives in ``conduct.md``, so a profile
+    can rewrite its own soul without loosening any output, tool, or honesty
+    rule.
+
+    Args:
+        context_dir: Directory holding this profile's context files.
+
+    Returns:
+        The profile's soul.md when it holds real content, else the default.
+    """
+    path = context_dir / "soul.md"
+    if path.exists():
+        content = path.read_text(encoding="utf-8")
+        if not _is_unfilled(content):
+            return _strip_guidance(content)
+        logger.info("Profile soul is an unfilled template, using default: %s", path)
+    return _strip_guidance(DEFAULT_SOUL_PATH.read_text(encoding="utf-8"))
 
 
 def _feedback_entry_value(entry: str, field: str) -> str | None:
@@ -161,10 +205,10 @@ def load_context(
     """Read prompt templates and user context files.
 
     Prompt templates (insights_prompt.md, nudge_prompt.md, chat_prompt.md,
-    soul.md) are loaded from *prompts_dir* (shipped with the repo in
+    conduct.md) are loaded from *prompts_dir* (shipped with the repo in
     ``src/prompts/``).
-    User context files (me.md, strategy.md, log.md, history.md) are
-    loaded from *context_dir*.
+    User context files (me.md, strategy.md, log.md, history.md) and the
+    profile's own soul.md persona are loaded from *context_dir*.
 
     Args:
         context_dir: Directory containing user context files.
@@ -192,11 +236,8 @@ def load_context(
     # Load prompt template from prompts_dir
     result["prompt"] = load_prompt_text(prompt_file, prompts_dir)
 
-    # Load soul.md from prompts_dir
-    soul_path = prompts_dir / "soul.md"
-    if soul_path.exists():
-        result["soul"] = soul_path.read_text(encoding="utf-8")
-        logger.debug("Loaded prompt: %s", soul_path)
+    result["conduct"] = load_prompt_text(CONDUCT_PROMPT, prompts_dir)
+    result["soul"] = _load_soul(context_dir)
 
     # Load user context files from context_dir
     for name in CONTEXT_FILES:
@@ -207,6 +248,7 @@ def load_context(
                 logger.info("Context file is still an unfilled template: %s", path)
                 result[name] = UNFILLED_CONTEXT
                 continue
+            content = _strip_guidance(content)
             if name == "history":
                 content = _recent_history(content, history_limit)
             elif name == "coach_feedback":
@@ -232,7 +274,9 @@ def build_messages(
 ) -> list[dict[str, str]]:
     """Assemble system and user messages for the LLM call.
 
-    The system message comes from soul.md (or a hardcoded fallback).
+    The system message is the profile's soul (who the coach is) followed by
+    conduct.md (what it may do). Conduct comes second so a persona can never
+    read as permission to ignore it.
     The user message is the selected prompt template rendered with context
     file contents and a prompt-specific health-data markdown section.
 
@@ -248,11 +292,11 @@ def build_messages(
     Returns:
         A list of message dicts ready for litellm.completion().
     """
-    system_content = context.get("soul")
-    if system_content == "(not provided)":
-        system_content = None
-    if system_content is None:
-        system_content = load_prompt_text(DEFAULT_SOUL_PROMPT)
+    soul = context.get("soul")
+    if not soul or soul == "(not provided)":
+        soul = DEFAULT_SOUL_PATH.read_text(encoding="utf-8")
+    conduct = context.get("conduct") or load_prompt_text(CONDUCT_PROMPT)
+    system_content = f"{soul.strip()}\n\n{conduct.strip()}\n"
 
     if today is None:
         today = date.today()
@@ -286,7 +330,7 @@ def build_messages(
     )
     # Forward any extra keys (e.g. recent_nudges) from context into placeholders.
     for key, value in context.items():
-        if key not in placeholders and key not in ("soul", "prompt"):
+        if key not in placeholders and key not in ("soul", "conduct", "prompt"):
             placeholders[key] = value
     user_content = template.format_map(placeholders)
 

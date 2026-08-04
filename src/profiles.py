@@ -18,6 +18,7 @@ DRIVE_FOLDER_ID_RE = re.compile(r"^[A-Za-z0-9_-]{10,}$")
 PROFILES_FILE = APP_HOME / "profiles.toml"
 PROFILES_DIR = APP_HOME / "profiles"
 CONTEXT_FILENAMES = (
+    "soul.md",
     "me.md",
     "strategy.md",
     "log.md",

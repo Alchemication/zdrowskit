@@ -199,6 +199,10 @@ class TestProfileOperations:
         # prescribes a stranger's training plan for a body they do not have.
         for key in ("me", "strategy", "log"):
             assert context[key] == UNFILLED_CONTEXT, key
+        # The persona is the exception: a profile starts with a working
+        # default coach it can then rewrite, not with nothing.
+        assert (profile.context / "soul.md").is_file()
+        assert "coach" in context["soul"]
 
     def test_cli_defaults_to_operator_and_refuses_missing_db(
         self, tmp_path: Path

@@ -1133,12 +1133,10 @@ def _judge_system_prompt() -> str:
 def _build_context(fixture: dict[str, Any]) -> dict[str, str]:
     context = {key: str(value) for key, value in fixture["context"].items()}
     context["prompt"] = (PROMPTS_DIR / "chat_prompt.md").read_text(encoding="utf-8")
-    soul_path = PROMPTS_DIR / "soul.md"
-    context["soul"] = (
-        soul_path.read_text(encoding="utf-8")
-        if soul_path.exists()
-        else llm_context.DEFAULT_SOUL
-    )
+    # Evals pin the default persona so a change to the operator's own soul.md
+    # cannot silently move eval results.
+    context["soul"] = llm_context.DEFAULT_SOUL_PATH.read_text(encoding="utf-8")
+    context["conduct"] = llm_context.load_prompt_text(llm_context.CONDUCT_PROMPT)
     return context
 
 

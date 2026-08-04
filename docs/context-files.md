@@ -6,6 +6,7 @@ independent copy; `--profile NAME` selects it in the CLI.
 
 | File | Who edits | Purpose |
 |------|-----------|---------|
+| `soul.md` | you | The coach's persona: who it is and how it talks to you |
 | `me.md` | you or chat | Your profile: age, body, injuries, what you already do |
 | `strategy.md` | you, chat, or coach | Goals + weekly training schedule + diet + sleep targets, all in one file |
 | `log.md` | you or chat | Freeform weekly journal: why things happened, such as travel, illness, or life |
@@ -14,6 +15,29 @@ independent copy; `--profile NAME` selects it in the CLI.
 | `coach_feedback.md` | auto | Accept/reject history for coach and chat suggestions, including optional rejection reasons |
 
 A worked example of filled-in context is in `examples/context/`.
+
+## Persona vs Conduct
+
+The system message is built from two layers, in this order:
+
+1. **`ContextFiles/soul.md`** — per profile, yours to rewrite. Who the coach
+   is and how it speaks. The right voice for someone chasing a 5K PR is the
+   wrong voice for someone who has not started yet, so this cannot be one
+   shared file.
+2. **`src/prompts/conduct.md`** — in the repo, identical for everyone. What
+   the coach may do: output format, tool-turn protocol, never inventing facts
+   about the user, word limits.
+
+Conduct comes second so a persona can never read as permission to ignore it.
+Rewrite your soul however you like; you cannot loosen a conduct rule by doing
+so, and a fix to one of those rules lands for every profile at once.
+
+Tone belongs in `soul.md`, not in the task prompts. Hard content limits —
+"never discuss calories", "don't mention my weight" — belong in `me.md`,
+which is about you rather than about the coach.
+
+A profile whose `soul.md` is still an unfilled template falls back to the
+shipped default persona in `src/templates/context/soul.md`.
 
 ## Unfilled Context
 

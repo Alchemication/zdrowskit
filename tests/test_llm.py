@@ -41,8 +41,10 @@ from llm import (
     extract_memory,
 )
 from llm_context import (
+    DEFAULT_SOUL_PATH,
     UNFILLED_CONTEXT,
     _is_unfilled,
+    _strip_guidance,
     _recent_history,
     append_history,
     build_messages,
@@ -112,26 +114,67 @@ class TestRecentHistory:
 
 class TestLoadContext:
     def test_loads_all_files(self, tmp_path: Path) -> None:
+        (tmp_path / "conduct.md").write_text("Be exact.")
         (tmp_path / "insights_prompt.md").write_text("Hello {me}")
         (tmp_path / "soul.md").write_text("Be direct.")
         (tmp_path / "me.md").write_text("Runner, 30y")
         ctx = load_context(tmp_path, prompts_dir=tmp_path)
         assert ctx["prompt"] == "Hello {me}"
-        assert ctx["soul"] == "Be direct."
-        assert ctx["me"] == "Runner, 30y"
+        assert ctx["soul"].strip() == "Be direct."
+        assert ctx["me"].strip() == "Runner, 30y"
 
     def test_missing_prompt_raises(self, tmp_path: Path) -> None:
-        (tmp_path / "soul.md").write_text("Be direct.")
+        (tmp_path / "conduct.md").write_text("Be exact.")
         with pytest.raises(FileNotFoundError, match="insights_prompt.md"):
             load_context(tmp_path, prompts_dir=tmp_path)
 
     def test_optional_files_default(self, tmp_path: Path) -> None:
+        (tmp_path / "conduct.md").write_text("Be exact.")
         (tmp_path / "insights_prompt.md").write_text("template")
         ctx = load_context(tmp_path, prompts_dir=tmp_path)
         assert ctx["strategy"] == "(not provided)"
         assert ctx["log"] == "(not provided)"
 
+    def test_profile_soul_overrides_the_shipped_default(self, tmp_path: Path) -> None:
+        (tmp_path / "conduct.md").write_text("Be exact.")
+        (tmp_path / "insights_prompt.md").write_text("template")
+        (tmp_path / "soul.md").write_text("You are warm and patient.\n")
+
+        ctx = load_context(tmp_path, prompts_dir=tmp_path)
+
+        assert ctx["soul"] == "You are warm and patient.\n"
+        assert ctx["conduct"] == "Be exact."
+
+    def test_unfilled_profile_soul_falls_back_to_the_default(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / "conduct.md").write_text("Be exact.")
+        (tmp_path / "insights_prompt.md").write_text("template")
+        (tmp_path / "soul.md").write_text("<!-- guidance only -->\n")
+
+        ctx = load_context(tmp_path, prompts_dir=tmp_path)
+
+        default = DEFAULT_SOUL_PATH.read_text(encoding="utf-8")
+        assert ctx["soul"] == _strip_guidance(default)
+
+    def test_authoring_guidance_never_reaches_the_model(self, tmp_path: Path) -> None:
+        (tmp_path / "conduct.md").write_text("Be exact.")
+        (tmp_path / "insights_prompt.md").write_text("template")
+        (tmp_path / "me.md").write_text(
+            "# Profile\n\n<!-- tell us your age -->\n\n- 42, bad left knee\n"
+        )
+        (tmp_path / "soul.md").write_text("Be warm.\n\n<!-- edit me freely -->\n")
+
+        ctx = load_context(tmp_path, prompts_dir=tmp_path)
+
+        # Comments address the human editing the file, not the model reading it.
+        assert "tell us your age" not in ctx["me"]
+        assert "bad left knee" in ctx["me"]
+        assert "edit me freely" not in ctx["soul"]
+        assert "Be warm." in ctx["soul"]
+
     def test_unfilled_template_is_reported_as_unfilled(self, tmp_path: Path) -> None:
+        (tmp_path / "conduct.md").write_text("Be exact.")
         (tmp_path / "insights_prompt.md").write_text("template")
         (tmp_path / "me.md").write_text(
             "# Profile\n\n<!-- Not filled in yet.\n\n  - age\n  - injuries -->\n"
@@ -144,6 +187,7 @@ class TestLoadContext:
     def test_written_context_is_never_mistaken_for_a_template(
         self, tmp_path: Path
     ) -> None:
+        (tmp_path / "conduct.md").write_text("Be exact.")
         (tmp_path / "insights_prompt.md").write_text("template")
         # A real profile keeps its guidance comment and adds content below it.
         (tmp_path / "me.md").write_text(
@@ -163,6 +207,7 @@ class TestLoadContext:
         assert _is_unfilled(content) is True
 
     def test_history_trimmed(self, tmp_path: Path) -> None:
+        (tmp_path / "conduct.md").write_text("Be exact.")
         (tmp_path / "insights_prompt.md").write_text("template")
         entries = "\n\n".join(f"## 2026-03-{i:02d}\n\nEntry {i}" for i in range(1, 20))
         (tmp_path / "history.md").write_text(entries)
@@ -173,6 +218,7 @@ class TestLoadContext:
         assert "## 2026-03-01" not in ctx["history"]
 
     def test_log_trimmed(self, tmp_path: Path) -> None:
+        (tmp_path / "conduct.md").write_text("Be exact.")
         (tmp_path / "insights_prompt.md").write_text("template")
         entries = "\n\n".join(f"## 2026-03-{i:02d}\n\nLog {i}" for i in range(1, 12))
         (tmp_path / "log.md").write_text(entries)
@@ -183,6 +229,7 @@ class TestLoadContext:
         assert "## 2026-03-06" not in ctx["log"]
 
     def test_max_log_zero_disables_trimming(self, tmp_path: Path) -> None:
+        (tmp_path / "conduct.md").write_text("Be exact.")
         (tmp_path / "insights_prompt.md").write_text("template")
         entries = "\n\n".join(f"## 2026-03-{i:02d}\n\nLog {i}" for i in range(1, 12))
         (tmp_path / "log.md").write_text(entries)
@@ -191,6 +238,7 @@ class TestLoadContext:
         assert "## 2026-03-01" in ctx["log"]
 
     def test_coach_feedback_trimmed(self, tmp_path: Path) -> None:
+        (tmp_path / "conduct.md").write_text("Be exact.")
         (tmp_path / "insights_prompt.md").write_text("template")
         entries = "\n\n".join(
             f"## 2026-03-{i:02d}\n\n"
@@ -207,6 +255,7 @@ class TestLoadContext:
         assert "Feedback ID: cf_3" not in ctx["coach_feedback"]
 
     def test_coach_feedback_filters_prompt_noise(self, tmp_path: Path) -> None:
+        (tmp_path / "conduct.md").write_text("Be exact.")
         (tmp_path / "insights_prompt.md").write_text("template")
         entries = "\n\n".join(
             [
@@ -285,6 +334,7 @@ class TestLoadContext:
         assert "Feedback ID: cf_6" not in ctx["coach_feedback"]
 
     def test_coach_feedback_returns_none_when_only_noise(self, tmp_path: Path) -> None:
+        (tmp_path / "conduct.md").write_text("Be exact.")
         (tmp_path / "insights_prompt.md").write_text("template")
         (tmp_path / "coach_feedback.md").write_text(
             "\n".join(
@@ -304,7 +354,7 @@ class TestLoadContext:
 class TestRepoPrompts:
     def test_support_prompts_live_in_prompts_dir(self) -> None:
         names = [
-            "default_soul.md",
+            "conduct.md",
             "schema_reference.md",
             "week_status_full.md",
             "week_status_partial.md",
@@ -321,18 +371,28 @@ class TestRepoPrompts:
         for name in names:
             assert (PROMPTS_DIR / name).read_text(encoding="utf-8").strip()
 
-    def test_soul_prompt_leaves_formatting_to_task_prompts(self) -> None:
-        soul = (PROMPTS_DIR / "soul.md").read_text(encoding="utf-8")
-        assert "Follow the task-specific instructions exactly" in soul
-        assert "markdown headers" not in soul
+    def test_conduct_prompt_leaves_formatting_to_task_prompts(self) -> None:
+        conduct = (PROMPTS_DIR / "conduct.md").read_text(encoding="utf-8")
+        assert "Follow the task-specific instructions exactly" in conduct
+        assert "markdown headers" not in conduct
 
-    def test_soul_prompt_carries_voice_basics(self) -> None:
-        """Cross-cutting voice rules belong in soul.md so every task inherits them."""
-        soul = (PROMPTS_DIR / "soul.md").read_text(encoding="utf-8")
-        assert "Never open with" in soul
-        assert "Wait" in soul
-        assert "Do not narrate your own reasoning" in soul
-        assert "mm:ss/km" in soul
+    def test_conduct_prompt_carries_cross_cutting_rules(self) -> None:
+        """Rules every task inherits belong in conduct.md, not in a persona."""
+        conduct = (PROMPTS_DIR / "conduct.md").read_text(encoding="utf-8")
+        assert "Never open with" in conduct
+        assert "Wait" in conduct
+        assert "Do not narrate your own reasoning" in conduct
+        assert "mm:ss/km" in conduct
+
+    def test_conduct_holds_the_rules_a_persona_must_not_loosen(self) -> None:
+        """A profile rewrites its soul; it must not be able to rewrite these."""
+        conduct = (PROMPTS_DIR / "conduct.md").read_text(encoding="utf-8")
+        default_soul = DEFAULT_SOUL_PATH.read_text(encoding="utf-8")
+
+        assert "Never invent facts about the user" in conduct
+        assert "Never use markdown tables" in conduct
+        for rule in ("markdown tables", "tool-turn protocol", "invent facts"):
+            assert rule not in default_soul
 
     def test_nudge_prompt_states_event_driven_purpose_and_boundaries(self) -> None:
         prompt = (PROMPTS_DIR / "nudge_prompt.md").read_text(encoding="utf-8")
@@ -420,7 +480,7 @@ class TestRepoPrompts:
         """Chat should require tool-only turns but non-empty final replies."""
         prompt = (PROMPTS_DIR / "chat_prompt.md").read_text(encoding="utf-8")
         normalized = " ".join(prompt.split())
-        soul = (PROMPTS_DIR / "soul.md").read_text(encoding="utf-8")
+        conduct = (PROMPTS_DIR / "conduct.md").read_text(encoding="utf-8")
 
         assert "tool-call turn itself should be tool-only" in normalized
         assert (
@@ -439,7 +499,7 @@ class TestRepoPrompts:
         assert "Correct flow:" in prompt
         assert "Wrong flow:" in prompt
         assert "I'll add that to your log" in prompt
-        assert "Respect the task-specific tool-turn protocol" in soul
+        assert "Respect the task-specific tool-turn protocol" in conduct
 
 
 class TestCharts:
@@ -620,20 +680,31 @@ class TestBuildMessages:
         msgs = build_messages(ctx, health_data_text='{"data": 1}')
         assert len(msgs) == 2
         assert msgs[0]["role"] == "system"
-        assert msgs[0]["content"] == "Be a coach."
+        # System message is persona first, then the conduct rules it cannot loosen.
+        assert msgs[0]["content"].startswith("Be a coach.")
+        assert "Never invent facts about the user" in msgs[0]["content"]
         assert msgs[1]["role"] == "user"
         assert "Adam" in msgs[1]["content"]
         assert "Run more" in msgs[1]["content"]
 
-    def test_soul_not_provided_uses_default(self) -> None:
-        ctx = {"soul": "(not provided)", "prompt": "Hello"}
-        msgs = build_messages(ctx, health_data_text="{}")
-        assert "no-nonsense" in msgs[0]["content"]
+    @pytest.mark.parametrize("ctx", [{"soul": "(not provided)"}, {"soul": ""}, {}])
+    def test_absent_persona_falls_back_to_the_shipped_default(
+        self, ctx: dict[str, str]
+    ) -> None:
+        msgs = build_messages({**ctx, "prompt": "Hello"}, health_data_text="{}")
 
-    def test_missing_soul_uses_default(self) -> None:
-        ctx = {"prompt": "Hello"}
-        msgs = build_messages(ctx, health_data_text="{}")
-        assert "no-nonsense" in msgs[0]["content"]
+        default = DEFAULT_SOUL_PATH.read_text(encoding="utf-8").strip()
+        assert msgs[0]["content"].startswith(default)
+
+    def test_conduct_is_appended_even_when_a_persona_is_supplied(self) -> None:
+        msgs = build_messages(
+            {"soul": "You are terse.", "prompt": "Hello"}, health_data_text="{}"
+        )
+
+        system = msgs[0]["content"]
+        assert system.startswith("You are terse.")
+        assert "Never use markdown tables" in system
+        assert system.index("You are terse.") < system.index("Never use markdown")
 
     def test_unknown_placeholder_defaults(self) -> None:
         ctx = {"prompt": "Data: {health_data}, Unknown: {unknown_key}"}
