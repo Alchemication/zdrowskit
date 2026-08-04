@@ -5,12 +5,15 @@ from __future__ import annotations
 import http.client
 import json
 import argparse
+import gzip
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
+import http_ingest
 from commands import cmd_import
 from daemon import ProfileRuntime
 from http_ingest import (
@@ -358,6 +361,115 @@ class TestHttpIngestManager:
         manager.finish_import("adam", retry_digest, success=True)
 
         assert manager.status()["adam"]["last_error"] is None
+
+
+class TestPayloadArchive:
+    def _manager(self, profile: Profile) -> HttpIngestManager:
+        """Return a manager that stages uploads for one profile."""
+        return HttpIngestManager(
+            {profile.name: profile},
+            pair_window_s=600,
+            on_pair_ready=lambda name, digest: None,
+        )
+
+    def _archived(self, profile: Profile, kind: str) -> list[Path]:
+        """Return every archived payload for one kind, oldest name first."""
+        return sorted((profile.import_archive / kind).rglob("*.json.gz"))
+
+    @pytest.mark.parametrize("kind", ["metrics", "workouts"])
+    def test_archives_raw_payload_gzipped_and_recoverable(
+        self, tmp_path: Path, kind: str
+    ) -> None:
+        profile = _profile(tmp_path)
+        manager = self._manager(profile)
+
+        manager.accept(
+            profile.name, validate_upload(_headers(kind), _body(kind)), _body(kind)
+        )
+
+        archived = self._archived(profile, kind)
+        assert len(archived) == 1
+        assert gzip.decompress(archived[0].read_bytes()) == _body(kind)
+
+    def test_archive_is_one_file_per_kind_named_for_the_day(
+        self, tmp_path: Path
+    ) -> None:
+        profile = _profile(tmp_path)
+        manager = self._manager(profile)
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+        manager.accept(
+            profile.name,
+            validate_upload(_headers("metrics"), _body("metrics")),
+            _body("metrics"),
+        )
+
+        archived = self._archived(profile, "metrics")[0]
+        assert archived.name == f"{today}.json.gz"
+        assert archived.parent == profile.import_archive / "metrics"
+
+    def test_repeated_uploads_collapse_to_the_last_one_of_the_day(
+        self, tmp_path: Path
+    ) -> None:
+        profile = _profile(tmp_path)
+        manager = self._manager(profile)
+        # Auto Export re-sends a rolling window every few minutes and does not
+        # order JSON keys stably, so unchanged content still arrives as fresh
+        # bytes. One snapshot a day is the point; the next day's covers today.
+        earlier = _body("metrics")
+        later = json.dumps(
+            {
+                "data": {
+                    "metrics": [
+                        {
+                            "name": "step_count",
+                            "units": "count",
+                            "data": [
+                                {"date": "2026-08-02 00:00:00 +0000", "qty": 5678}
+                            ],
+                        }
+                    ]
+                }
+            }
+        ).encode("utf-8")
+
+        for body in (earlier, earlier, later):
+            manager.accept(
+                profile.name, validate_upload(_headers("metrics"), body), body
+            )
+
+        archived = self._archived(profile, "metrics")
+        assert len(archived) == 1
+        assert gzip.decompress(archived[0].read_bytes()) == later
+
+    def test_archive_failure_still_accepts_and_imports_the_upload(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        profile = _profile(tmp_path)
+        manager = self._manager(profile)
+
+        real_write = http_ingest._atomic_write
+
+        def fail_only_the_archive(path: Path, data: bytes, **kwargs: object) -> None:
+            """Break archive writes while leaving the ingest path working."""
+            if profile.import_archive in path.parents:
+                raise OSError("archive volume full")
+            real_write(path, data, **kwargs)  # type: ignore[arg-type]
+
+        with caplog.at_level(logging.ERROR):
+            with patch("http_ingest._atomic_write", side_effect=fail_only_the_archive):
+                accepted = manager.accept(
+                    profile.name,
+                    validate_upload(_headers("metrics"), _body("metrics")),
+                    _body("metrics"),
+                )
+
+        assert accepted.kind == "metrics"
+        assert self._archived(profile, "metrics") == []
+        assert (profile.http_cache / "Metrics" / "latest.json").read_bytes() == _body(
+            "metrics"
+        )
+        assert "will not be replayable" in caplog.text
 
 
 class TestPairStatus:

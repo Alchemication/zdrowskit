@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gzip
 import hashlib
 import hmac
 import json
@@ -459,7 +460,7 @@ def validate_upload(headers: dict[str, str], body: bytes) -> ValidatedUpload:
 
 
 class HttpIngestManager:
-    """Persist bounded latest payloads and coordinate complete import pairs."""
+    """Archive raw payloads, persist bounded latest ones, and pair imports."""
 
     def __init__(
         self,
@@ -497,6 +498,51 @@ class HttpIngestManager:
         """Return the bounded latest payload path for a kind."""
         directory = "Metrics" if kind == "metrics" else "Workouts"
         return profile.http_cache / directory / "latest.json"
+
+    def _archive_path(self, profile: Profile, kind: str) -> Path:
+        """Return today's archive path for one payload kind."""
+        day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        return profile.import_archive / kind / f"{day}.json.gz"
+
+    def _archive_payload(
+        self,
+        profile: Profile,
+        upload: ValidatedUpload,
+        body: bytes,
+    ) -> None:
+        """Keep one gzipped raw payload per kind per day, last upload winning.
+
+        The bounded ``latest.json`` cache is overwritten by every upload, so it
+        cannot answer "what did the phone actually send?" after the fact. This
+        daily archive can, which is what makes a later parser fix or a widened
+        metric map replayable without asking someone to re-export from their
+        phone.
+
+        One snapshot a day is enough because Auto Export sends a rolling
+        multi-day window: each date is covered both by its own day's snapshot
+        and by the next day's, which is the more complete of the two once Apple
+        Health has backfilled past midnight. Keeping every upload instead would
+        store roughly twenty near-identical copies a day — and would not even
+        deduplicate, since Auto Export does not serialize JSON keys in a stable
+        order, so unchanged content still hashes differently on every send.
+
+        Archiving never blocks ingestion: a failure here is logged loudly and
+        the payload still imports.
+        """
+        try:
+            _atomic_write(
+                self._archive_path(profile, upload.kind),
+                gzip.compress(body, mtime=0),
+            )
+        except OSError:
+            logger.exception(
+                "Could not archive the %s payload for %s. The upload still "
+                "imports, but this payload will not be replayable later; check "
+                "permissions and free space under %s",
+                upload.kind,
+                profile.name,
+                profile.import_archive,
+            )
 
     def _pair_gap_s(self, state: dict[str, Any]) -> float | None:
         """Return the arrival gap between the latest Metrics and Workouts uploads."""
@@ -599,8 +645,9 @@ class HttpIngestManager:
         upload: ValidatedUpload,
         body: bytes,
     ) -> AcceptedUpload:
-        """Durably replace one latest payload and notify when a pair is ready."""
+        """Archive the raw payload, replace the latest one, and pair if ready."""
         profile = self.profiles[profile_name]
+        self._archive_payload(profile, upload, body)
         callback_digest: str | None = None
         pair_state = "ready"
         pair_detail = ""

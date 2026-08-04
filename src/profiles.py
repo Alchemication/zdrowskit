@@ -75,6 +75,17 @@ class Profile:
         return self.root / "Imports" / "http"
 
     @property
+    def import_archive(self) -> Path:
+        """Return this profile's daily raw-payload archive directory.
+
+        Deliberately outside :attr:`http_cache`, which holds only the bounded
+        latest payload per kind. The archive keeps one snapshot per kind per
+        day so a future parser fix can be replayed without a fresh phone
+        export.
+        """
+        return self.root / "Imports" / "archive"
+
+    @property
     def state(self) -> Path:
         """Return this profile's daemon state path."""
         return self.root / "daemon_state.json"

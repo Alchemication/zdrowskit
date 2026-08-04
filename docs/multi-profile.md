@@ -233,6 +233,9 @@ Drive remains available when explicitly configured.
           Metrics/latest.json
           Workouts/latest.json
           .ingest_state.json
+        archive/
+          metrics/<date>.json.gz
+          workouts/<date>.json.gz
         google-drive/
           Metrics/
           Workouts/

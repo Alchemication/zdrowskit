@@ -229,7 +229,7 @@ arrive within ten minutes. This matters because the existing database import
 replaces complete daily snapshots. A missing half therefore never erases the
 other half's fields.
 
-Per profile, storage is bounded to:
+Per profile, the ingest cache is bounded to:
 
 - `Imports/http/Metrics/latest.json`
 - `Imports/http/Workouts/latest.json`
@@ -239,6 +239,35 @@ Per profile, storage is bounded to:
 An identical completed pair is acknowledged but not re-imported. A crash after
 HTTP `202` leaves the latest pair on disk; daemon startup detects and imports
 it. Parser failures keep the latest pair and a short error record for diagnosis.
+
+## Raw Payload Archive
+
+The bounded cache above is overwritten by every upload, so it cannot answer
+"what did the phone actually send?" after the fact. One gzipped, unmodified
+snapshot per kind per day is therefore kept outside that cache, with the day's
+last upload winning:
+
+```text
+Imports/archive/metrics/2026-08-04.json.gz
+Imports/archive/workouts/2026-08-04.json.gz
+```
+
+The archive is what makes a parser fix or a widened metric map replayable
+without asking someone to re-export from their phone. Archiving never blocks
+ingestion — if the write fails the payload still imports, and the failure is
+logged as an error.
+
+One snapshot a day is enough because Auto Export sends a rolling multi-day
+window: every date is covered both by its own day's snapshot and by the next
+day's, and the next day's is the more complete of the two once Apple Health
+has backfilled past midnight. Keeping every upload instead would store around
+twenty near-identical copies a day — and could not be deduplicated by content
+hash, because Auto Export does not serialize JSON keys in a stable order, so
+unchanged content still arrives as different bytes on every send.
+
+Measured against real traffic this costs a few tens of MB per profile per
+year, dominated by workout GPS routes. There is no pruning; revisit that only
+if the directory ever actually grows enough to matter.
 
 ## Operations
 

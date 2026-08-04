@@ -12,6 +12,7 @@ generated output, preferences, conversation state, and daemon state under:
       health.db
       ContextFiles/
       Imports/http/
+      Imports/archive/
       Reports/
       Nudges/
       notification_prefs.json
