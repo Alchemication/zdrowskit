@@ -281,9 +281,9 @@ def _create_profile_tree(profile: Profile) -> None:
     profile.nudges.mkdir(mode=0o700)
     profile.drive_cache.mkdir(parents=True, mode=0o700)
     profile.http_cache.mkdir(parents=True, mode=0o700)
-    examples = Path(__file__).resolve().parent.parent / "examples" / "context"
+    templates = Path(__file__).resolve().parent / "templates" / "context"
     for filename in CONTEXT_FILENAMES:
-        source = examples / filename
+        source = templates / filename
         destination = profile.context / filename
         if source.exists():
             shutil.copy2(source, destination)

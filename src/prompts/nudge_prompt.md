@@ -115,6 +115,11 @@ reference the strategy only to interpret the current event.
 
 ### Scheduled-session carve-out (system triggers only)
 
+This carve-out applies **only when the Strategy actually contains a weekly
+plan**. If the Strategy section is marked not filled in yet, or has no weekly
+plan in it, there is no session to restate and nothing to prescribe — skip
+straight to the checklist below and judge the trigger on its own merits.
+
 If the **Strategy** section has a session scheduled for today, and no
 nudge already sent today has prescribed it, your nudge MUST restate today's
 session explicitly: session type + distance/duration + intensity/pace target.
@@ -129,7 +134,8 @@ or a schedule conflict), but do not mechanically restate the prescription.
 Mixed recovery signals are an input to *how* to run the session, not a
 reason to omit it. You may drop the prescription only when:
 
-- (a) the Strategy's Weekly Plan has no session today (rest day or off day),
+- (a) the Strategy has no weekly plan at all, or its Weekly Plan has no
+  session today (rest day or off day),
 - (b) an earlier nudge today already prescribed today's session unchanged, or
 - (c) recovery is clearly bad enough to convert the session to rest — and in
   that case state the rest decision explicitly with one sentence of reasoning.

@@ -40,7 +40,14 @@ from llm import (
     call_llm,
     extract_memory,
 )
-from llm_context import _recent_history, append_history, build_messages, load_context
+from llm_context import (
+    UNFILLED_CONTEXT,
+    _is_unfilled,
+    _recent_history,
+    append_history,
+    build_messages,
+    load_context,
+)
 from llm_health import (
     build_llm_data,
     build_review_facts,
@@ -123,6 +130,37 @@ class TestLoadContext:
         ctx = load_context(tmp_path, prompts_dir=tmp_path)
         assert ctx["strategy"] == "(not provided)"
         assert ctx["log"] == "(not provided)"
+
+    def test_unfilled_template_is_reported_as_unfilled(self, tmp_path: Path) -> None:
+        (tmp_path / "insights_prompt.md").write_text("template")
+        (tmp_path / "me.md").write_text(
+            "# Profile\n\n<!-- Not filled in yet.\n\n  - age\n  - injuries -->\n"
+        )
+
+        ctx = load_context(tmp_path, prompts_dir=tmp_path)
+
+        assert ctx["me"] == UNFILLED_CONTEXT
+
+    def test_written_context_is_never_mistaken_for_a_template(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / "insights_prompt.md").write_text("template")
+        # A real profile keeps its guidance comment and adds content below it.
+        (tmp_path / "me.md").write_text(
+            "# Profile\n\n<!-- guidance -->\n\n- 42, two knees, one bad\n"
+        )
+
+        ctx = load_context(tmp_path, prompts_dir=tmp_path)
+
+        assert ctx["me"] != UNFILLED_CONTEXT
+        assert "one bad" in ctx["me"]
+
+    @pytest.mark.parametrize(
+        "content",
+        ["", "# Strategy\n", "# Strategy\n\n## Weekly Plan\n", "<!-- c -->\n"],
+    )
+    def test_scaffolding_only_variants_count_as_unfilled(self, content: str) -> None:
+        assert _is_unfilled(content) is True
 
     def test_history_trimmed(self, tmp_path: Path) -> None:
         (tmp_path / "insights_prompt.md").write_text("template")

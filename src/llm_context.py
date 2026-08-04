@@ -28,6 +28,10 @@ logger = logging.getLogger(__name__)
 
 CONTEXT_FILES = ["me", "strategy", "log", "history", "coach_feedback"]
 
+UNFILLED_CONTEXT = "(not filled in yet — the user has not told you this)"
+
+_HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
+
 DEFAULT_SOUL_PROMPT = "default_soul.md"
 SCHEMA_REFERENCE_PROMPT = "schema_reference.md"
 WEEK_STATUS_FULL_PROMPT = "week_status_full.md"
@@ -76,6 +80,26 @@ def _recent_history(content: str, n: int) -> str:
     if len(entries) <= n:
         return content
     return "\n\n".join(entries[-n:]) + "\n"
+
+
+def _is_unfilled(content: str) -> bool:
+    """Return whether a context file still holds only template scaffolding.
+
+    A freshly created profile ships headings plus HTML-comment guidance and
+    nothing else. Passing that through verbatim reads to an LLM as a real but
+    terse profile, so it has to be distinguishable from content the user
+    actually wrote. Anything outside a heading or a comment counts as written.
+
+    Args:
+        content: Raw context file text.
+
+    Returns:
+        True when nothing but headings and comments remain.
+    """
+    body = _HTML_COMMENT_RE.sub("", content)
+    return not any(
+        line.strip() and not line.lstrip().startswith("#") for line in body.splitlines()
+    )
 
 
 def _feedback_entry_value(entry: str, field: str) -> str | None:
@@ -179,6 +203,10 @@ def load_context(
         path = context_dir / f"{name}.md"
         if path.exists():
             content = path.read_text(encoding="utf-8")
+            if _is_unfilled(content):
+                logger.info("Context file is still an unfilled template: %s", path)
+                result[name] = UNFILLED_CONTEXT
+                continue
             if name == "history":
                 content = _recent_history(content, history_limit)
             elif name == "coach_feedback":

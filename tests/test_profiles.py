@@ -19,6 +19,7 @@ from profiles import (
     resolve_profile,
     set_profile_source,
 )
+from llm_context import UNFILLED_CONTEXT
 from store import open_db
 
 
@@ -183,6 +184,21 @@ class TestProfileOperations:
         assert profile.drive_cache.is_dir()
         assert profile.http_cache.is_dir()
         assert load_profiles(roster)["adam"].db == profile.db
+
+    def test_new_profile_starts_unfilled_rather_than_someone_elses_identity(
+        self, tmp_path: Path
+    ) -> None:
+        from llm_context import load_context
+
+        profile = add_profile(
+            "anna", 22, operator=True, path=tmp_path / "profiles.toml"
+        )
+
+        context = load_context(profile.context, "nudge_prompt")
+        # Seeded context must never describe a person, or the first nudge
+        # prescribes a stranger's training plan for a body they do not have.
+        for key in ("me", "strategy", "log"):
+            assert context[key] == UNFILLED_CONTEXT, key
 
     def test_cli_defaults_to_operator_and_refuses_missing_db(
         self, tmp_path: Path
