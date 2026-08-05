@@ -20,7 +20,11 @@ from datetime import datetime, time
 from pathlib import Path
 from typing import Any
 
-from config import NOTIFICATION_PREFS_PATH
+from config import (
+    DATA_HEALTH_SILENT_AFTER_H,
+    DATA_HEALTH_SPLIT_AFTER_H,
+    NOTIFICATION_PREFS_PATH,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +62,8 @@ RESETTABLE_PATHS = SETTABLE_PATHS | {
 MUTE_TARGETS = {"all", "nudges", "weekly_insights", "midweek_report", "data_health"}
 MIN_NUDGES_PER_DAY = 1
 MAX_REASONABLE_NUDGES_PER_DAY = 6
+MIN_DATA_HEALTH_HOURS = 1
+MAX_DATA_HEALTH_HOURS = 24 * 7
 
 DEFAULT_NOTIFICATION_PREFS: dict[str, Any] = {
     "version": PREFS_VERSION,
@@ -81,12 +87,10 @@ _DEFAULT_EFFECTIVE: dict[str, dict[str, Any]] = {
         "weekday": "thursday",
         "time": "09:00",
     },
-    # Silence has to outlast a night's sleep before it means anything; uploads
-    # that arrive but never pair are a far stronger signal, so they alert sooner.
     "data_health": {
         "enabled": True,
-        "silent_after_h": 24,
-        "split_after_h": 6,
+        "silent_after_h": DATA_HEALTH_SILENT_AFTER_H,
+        "split_after_h": DATA_HEALTH_SPLIT_AFTER_H,
     },
 }
 
@@ -140,7 +144,9 @@ def _normalise_overrides(overrides: object) -> dict[str, dict[str, Any]]:
             elif path.endswith("_after_h") and isinstance(value, int | float):
                 # Below an hour this fires on ordinary sync gaps; beyond a week
                 # a broken phone goes unnoticed long enough to lose the data.
-                if not isinstance(value, bool) and 1 <= value <= 24 * 7:
+                if not isinstance(value, bool) and (
+                    MIN_DATA_HEALTH_HOURS <= value <= MAX_DATA_HEALTH_HOURS
+                ):
                     clean_section[key] = value
         if clean_section:
             clean[section] = clean_section

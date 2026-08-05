@@ -97,7 +97,7 @@ different confidence:
 
 | Condition | Default | Meaning |
 |-----------|---------|---------|
-| `silent` | 24h | Nothing has arrived at all. The threshold has to clear a night's sleep, since a locked phone stops uploading. |
+| `silent` | 16h | Nothing has arrived at all. Long enough to clear a night's sleep — an overnight gap runs about 9–10h — and short enough to fire well inside the ~48h Auto Export window, after which missed days can no longer be recovered by fixing the phone. |
 | `split` | 6h | Uploads *are* arriving but nothing imports. Far stronger signal — the phone is demonstrably reachable. Almost always two Auto Export automations whose schedules have drifted apart. |
 | `error` | 6h | The last import failed and none has succeeded since. |
 

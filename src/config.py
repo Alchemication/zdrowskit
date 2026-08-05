@@ -74,6 +74,19 @@ HTTP_INGEST_PAIR_WINDOW_S: int = 10 * 60
 """Maximum arrival gap between the Metrics and Workouts halves of an export."""
 DATA_HEALTH_REALERT_S: int = 24 * 60 * 60
 """How long before an unresolved ingest problem is reported again."""
+DATA_HEALTH_SILENT_AFTER_H: float = 16
+"""Hours of total ingest silence before the profile is warned.
+
+Long enough to clear a night's sleep — an overnight gap runs about 9-10h — and
+short enough to fire well inside the ~48h Auto Export window, after which the
+missed days can no longer be recovered by simply fixing the phone.
+"""
+DATA_HEALTH_SPLIT_AFTER_H: float = 6
+"""Hours of uploads arriving without importing before the profile is warned.
+
+Far shorter than the silence threshold: uploads still arriving prove the phone
+is reachable, so a stalled import is a real fault rather than a quiet evening.
+"""
 
 
 def _env_bool(name: str, default: bool) -> bool:
