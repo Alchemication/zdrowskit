@@ -336,8 +336,15 @@ Choose the memory shape from the report type:
 - User-visible prescriptions / commitments with a concrete target and trigger
   day. There is no plan table, so if you don't write it here you can't check
   adherence later.
-- Adherence counters and open threads (e.g. "tempo N weeks overdue since
-  W13") so they don't reset.
+- Recurring patterns worth naming (e.g. "tempo has not happened in 3 of the
+  last 4 weeks — office-heavy stretch"), so a repeated shape stays visible
+  across weeks.
+  Record these as observations, never as accruing debt. A session that did not
+  happen is not owed, a counter of missed sessions must not be carried forward
+  as a running total, and a target must never escalate because something was
+  skipped. If the strategy says a short week is complete, it is complete. When
+  a pattern persists, the useful response is to ask whether the plan still
+  fits — not to raise what is demanded of a week that is already full.
 - Predictions to test (e.g. "VO2max should rebound above 45 if next 2
   weeks stay clean") — `## Recent Coaching History` exists so you can
   check whether they held up.
@@ -355,6 +362,6 @@ Example:
 
 <memory>
 - Visible W15 priority: 2.5 km tempo @ 5:10–5:15/km by Wednesday
-- Midweek open thread: tempo not yet done; check by Wed before calling it overdue
+- Pattern: 3 of last 4 weeks compressed to 2 sessions — worth asking whether the current targets still fit
 - HRV dip likely sleep-driven (son disruptions noted); verify rebound before increasing load
 </memory>
