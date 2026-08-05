@@ -34,6 +34,7 @@ Checklist:
 - Future days must not be penalized.
 - Superlatives like "first ever" or "highest of 2026" need evidence.
 - Baselines may be cited only when present in evidence.
+- Numeric physiological thresholds and normal ranges must come from this person's own data in evidence. Flag any invented cutoff, invented normal range, or appeal to "research"/"studies"/"population data" that is not in evidence — the claim reads as authoritative and the user cannot check it.
 - Pace values must use mm:ss/km.
 - Recovery verdict must be consistent with HRV, resting HR, sleep, and shared facts.
 - A useful <memory> block should be present unless the draft is intentionally concise fallback output.

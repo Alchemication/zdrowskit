@@ -23,6 +23,11 @@ Checklist:
 - Proposed edits must target valid strategy.md sections.
 - Proposals must avoid recently rejected patterns from context-edit feedback.
 - Edits must be concrete and bounded, not vague.
+- Numeric physiological thresholds and normal ranges must come from this
+  person's own data in evidence. Flag any invented cutoff, invented normal
+  range, or appeal to "research"/"studies"/"population data" that is not in
+  evidence — a proposal justified by a fabricated norm is worse than no
+  proposal, because the user approves it believing there is a basis.
 - Bundled text must match the actual proposed edits and diffs.
 - If no meaningful change is warranted, the correct output is SKIP/no proposals.
 - No duplicate or conflicting proposals.
