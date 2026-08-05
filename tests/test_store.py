@@ -239,6 +239,78 @@ class TestStoreAndLoad:
         assert load_date_range(in_memory_db) is None
 
 
+class TestHalfImportsDoNotEraseTheOtherHalf:
+    def test_workouts_only_import_keeps_existing_metrics(
+        self, in_memory_db: sqlite3.Connection
+    ) -> None:
+        store_snapshots(
+            in_memory_db,
+            [
+                DailySnapshot(
+                    date="2026-08-04",
+                    steps=9000,
+                    hrv_ms=52.0,
+                    resting_hr=50,
+                    sleep_total_h=7.4,
+                )
+            ],
+        )
+
+        # A Workouts export produces snapshots whose metric fields are all None.
+        # Writing those over the stored row erased HRV, sleep and resting HR —
+        # the reason the two exports had to be paired before anything imported.
+        store_snapshots(
+            in_memory_db,
+            [
+                DailySnapshot(
+                    date="2026-08-04",
+                    workouts=[
+                        WorkoutSnapshot(
+                            type="Outdoor Run",
+                            category="run",
+                            start_utc="2026-08-04T07:00:00Z",
+                            duration_min=30.0,
+                        )
+                    ],
+                )
+            ],
+        )
+
+        row = in_memory_db.execute(
+            "SELECT steps, hrv_ms, resting_hr, sleep_total_h FROM daily "
+            "WHERE date = '2026-08-04'"
+        ).fetchone()
+        assert tuple(row) == (9000, 52.0, 50, 7.4)
+
+    def test_a_later_metrics_export_still_updates_changed_values(
+        self, in_memory_db: sqlite3.Connection
+    ) -> None:
+        store_snapshots(
+            in_memory_db,
+            [DailySnapshot(date="2026-08-04", steps=9000, hrv_ms=52.0, resting_hr=50)],
+        )
+
+        store_snapshots(
+            in_memory_db, [DailySnapshot(date="2026-08-04", steps=12000, hrv_ms=48.0)]
+        )
+
+        row = in_memory_db.execute(
+            "SELECT steps, hrv_ms, resting_hr FROM daily WHERE date = '2026-08-04'"
+        ).fetchone()
+        # Present values win; absent ones leave the stored reading alone.
+        assert tuple(row) == (12000, 48.0, 50)
+
+    def test_metrics_only_import_creates_the_day(
+        self, in_memory_db: sqlite3.Connection
+    ) -> None:
+        store_snapshots(in_memory_db, [DailySnapshot(date="2026-08-04", hrv_ms=44.0)])
+
+        row = in_memory_db.execute(
+            "SELECT hrv_ms FROM daily WHERE date = '2026-08-04'"
+        ).fetchone()
+        assert row["hrv_ms"] == 44.0
+
+
 class TestWorkoutCoverage:
     def _run(self, date: str) -> WorkoutSnapshot:
         """Return a run starting at 07:00 on *date*."""

@@ -248,10 +248,17 @@ Auto Export headers, the JSON envelope, dates, finite numbers, route bounds,
 array limits, and compatibility with the production parser. It returns `422`
 with an actionable message when the automation settings or payload are wrong.
 
-Metrics and Workouts are staged independently, but imported only after both
-arrive within ten minutes. This matters because the existing database import
-replaces complete daily snapshots. A missing half therefore never erases the
-other half's fields.
+Metrics and Workouts are staged independently and imported only after both
+arrive within ten minutes.
+
+Pairing is no longer what protects the data. Each half is now written on its own
+terms: daily metrics are merged column by column, so an absent field leaves the
+stored reading alone, and workouts are only replaced for dates the Workouts
+export actually covered. Either half can therefore land without erasing the
+other. Pairing now only decides *when* an import runs, so a nudge reacts to a
+complete picture rather than half of one — which is also why halves arriving
+outside the window are simply deferred rather than lost: the rolling export
+window resends them.
 
 Per profile, the ingest cache is bounded to:
 

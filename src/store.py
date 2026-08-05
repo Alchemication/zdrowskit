@@ -62,6 +62,68 @@ def open_db(path: Path) -> sqlite3.Connection:
     return connect_db(path, migrate=True)
 
 
+_DAILY_METRIC_COLUMNS = (
+    "steps",
+    "distance_km",
+    "active_energy_kj",
+    "exercise_min",
+    "stand_hours",
+    "flights_climbed",
+    "resting_hr",
+    "hrv_ms",
+    "walking_hr_avg",
+    "hr_day_min",
+    "hr_day_max",
+    "vo2max",
+    "walking_speed_kmh",
+    "walking_step_length_cm",
+    "walking_asymmetry_pct",
+    "walking_double_support_pct",
+    "stair_speed_up_ms",
+    "stair_speed_down_ms",
+    "running_stride_length_m",
+    "running_power_w",
+    "running_speed_kmh",
+    "sleep_total_h",
+    "sleep_in_bed_h",
+    "sleep_efficiency_pct",
+    "sleep_deep_h",
+    "sleep_core_h",
+    "sleep_rem_h",
+    "sleep_awake_h",
+    "recovery_index",
+)
+"""Daily columns fed from a Metrics export, named identically on DailySnapshot."""
+
+_DAILY_UPSERT = """
+    INSERT INTO daily (date, {columns}, imported_at)
+    VALUES (?, {placeholders}, ?)
+    ON CONFLICT(date) DO UPDATE SET
+        {assignments},
+        imported_at = excluded.imported_at
+""".format(
+    columns=", ".join(_DAILY_METRIC_COLUMNS),
+    placeholders=", ".join("?" * len(_DAILY_METRIC_COLUMNS)),
+    assignments=",\n        ".join(
+        f"{column} = COALESCE(excluded.{column}, daily.{column})"
+        for column in _DAILY_METRIC_COLUMNS
+    ),
+)
+"""Merge a day's metrics instead of replacing the row.
+
+An import carrying only workouts produces snapshots whose metric fields are all
+None. A plain ``INSERT OR REPLACE`` wrote those Nones over real values, wiping
+HRV, sleep and resting heart rate for the affected dates — which is why the two
+exports had to be paired before anything could be written. Coalescing each
+column means an absent field leaves the stored value alone, so either export can
+land on its own.
+
+The trade is that a value cannot be nulled back out by a later export. Health
+samples effectively never go from present to absent for a past date, and a stale
+reading is a far smaller harm than erasing a week of recovery data.
+"""
+
+
 def _workout_coverage(
     days: list[tuple[DailySnapshot, list[WorkoutSnapshot]]],
 ) -> set[str]:
@@ -136,64 +198,10 @@ def store_snapshots(conn: sqlite3.Connection, snapshots: list[DailySnapshot]) ->
     for index, (s, workouts) in enumerate(collapsed_by_day, start=1):
         with conn:
             conn.execute(
-                """
-                INSERT OR REPLACE INTO daily (
-                    date, steps, distance_km, active_energy_kj,
-                    exercise_min, stand_hours, flights_climbed,
-                    resting_hr, hrv_ms, walking_hr_avg,
-                    hr_day_min, hr_day_max, vo2max,
-                    walking_speed_kmh, walking_step_length_cm,
-                    walking_asymmetry_pct, walking_double_support_pct,
-                    stair_speed_up_ms, stair_speed_down_ms,
-                    running_stride_length_m, running_power_w, running_speed_kmh,
-                    sleep_total_h, sleep_in_bed_h, sleep_efficiency_pct,
-                    sleep_deep_h, sleep_core_h, sleep_rem_h, sleep_awake_h,
-                    recovery_index, imported_at
-                ) VALUES (
-                    ?, ?, ?, ?,
-                    ?, ?, ?,
-                    ?, ?, ?,
-                    ?, ?, ?,
-                    ?, ?,
-                    ?, ?,
-                    ?, ?,
-                    ?, ?, ?,
-                    ?, ?, ?,
-                    ?, ?, ?, ?,
-                    ?, ?
-                )
-                """,
+                _DAILY_UPSERT,
                 (
                     s.date,
-                    s.steps,
-                    s.distance_km,
-                    s.active_energy_kj,
-                    s.exercise_min,
-                    s.stand_hours,
-                    s.flights_climbed,
-                    s.resting_hr,
-                    s.hrv_ms,
-                    s.walking_hr_avg,
-                    s.hr_day_min,
-                    s.hr_day_max,
-                    s.vo2max,
-                    s.walking_speed_kmh,
-                    s.walking_step_length_cm,
-                    s.walking_asymmetry_pct,
-                    s.walking_double_support_pct,
-                    s.stair_speed_up_ms,
-                    s.stair_speed_down_ms,
-                    s.running_stride_length_m,
-                    s.running_power_w,
-                    s.running_speed_kmh,
-                    s.sleep_total_h,
-                    s.sleep_in_bed_h,
-                    s.sleep_efficiency_pct,
-                    s.sleep_deep_h,
-                    s.sleep_core_h,
-                    s.sleep_rem_h,
-                    s.sleep_awake_h,
-                    s.recovery_index,
+                    *(getattr(s, column) for column in _DAILY_METRIC_COLUMNS),
                     now,
                 ),
             )

@@ -38,8 +38,8 @@ switched off.
   can silently stall.
 - Payloads are validated at the door, so a misconfigured automation gets an
   actionable `422` on the phone instead of quietly importing wrong data.
-- Metrics and Workouts import only as a complete pair, so a missing half never
-  erases the other half's fields.
+- Metrics and Workouts import as a complete pair, so a nudge reacts to a whole
+  day rather than half of one. Neither half can erase the other regardless.
 - Leaves you with a working private HTTPS endpoint on the host, which is
   reusable for other home projects.
 
