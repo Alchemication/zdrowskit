@@ -94,6 +94,39 @@ DATA_HEALTH_SPLIT_AFTER_H: float = 6
 Far shorter than the silence threshold: uploads still arriving prove the phone
 is reachable, so a stalled import is a real fault rather than a quiet evening.
 """
+BASELINE_MIN_SAMPLES: int = 5
+"""Observations required before a rolling window is reported as an average.
+
+Below five readings one unusual day dominates the mean, so the number says more
+about that day than about the person — and it is printed under a "30-day avg"
+heading that claims otherwise. Sporadic metrics like VO2max still clear five
+within a normal month of activity, so the floor suppresses fabricated norms
+rather than legitimately infrequent ones.
+"""
+METRIC_TRUST_WINDOW_DAYS: int = 30
+"""Window used to decide whether a metric is currently knowable.
+
+Matches the shortest rolling baseline, so "established" here means exactly
+"has a 30-day average" — one definition of trust rather than two that can
+disagree with each other in the same prompt.
+"""
+MILESTONE_LIFETIME_MIN_DAYS: int = 180
+"""History required before a recorded best may be called a lifetime record.
+
+Under roughly half a year the best recorded run is mostly a statement about how
+little has been recorded, and presenting it as a lifetime PR invites a report
+to congratulate someone on an achievement that has not happened yet. Half a
+year spans enough of a training cycle that a best within it is a real one.
+"""
+BASELINE_MIN_WINDOW_COVERAGE: float = 0.8
+"""Fraction of a training-volume window that must contain data to divide by it.
+
+Per-week volume divides a total by the window's nominal length, so a profile
+holding three days of data reports a twelve-week average built from three days
+— and a beginner's first week reads as a twelve-week habit of barely training.
+Requiring most of the window to be present makes the average mean what its
+label says.
+"""
 
 
 def _env_bool(name: str, default: bool) -> bool:

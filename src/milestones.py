@@ -5,6 +5,9 @@ from __future__ import annotations
 import sqlite3
 from datetime import date, timedelta
 
+from baselines import days_of_data
+from config import MILESTONE_LIFETIME_MIN_DAYS
+
 
 def _format_pace(value: float | None) -> str | None:
     """Format minutes/km as mm:ss/km."""
@@ -143,8 +146,23 @@ def _longest_rest_gap(conn: sqlite3.Connection) -> tuple[int, str, str] | None:
 
 
 def compute_milestones(conn: sqlite3.Connection) -> str:
-    """Compute lifetime milestones and PR summaries from the database."""
-    lines = ["## Milestones (lifetime and PRs)", ""]
+    """Compute lifetime milestones and PR summaries from the database.
+
+    "Lifetime" and "PR" are claims about a history, so the heading states which
+    history they were drawn from. On a young profile the best recorded run is
+    simply the only recorded run, and calling that a lifetime best invites the
+    report to celebrate an achievement that has not happened yet.
+    """
+    covered = days_of_data(conn)
+    if covered >= MILESTONE_LIFETIME_MIN_DAYS:
+        heading = "## Milestones (lifetime and PRs)"
+    else:
+        heading = (
+            f"## Milestones (bests within {covered} "
+            f"{'day' if covered == 1 else 'days'} of recorded history — these "
+            "are not lifetime records, and must not be described as one)"
+        )
+    lines = [heading, ""]
 
     run_pr_lines: list[str] = []
     for km_count, label in [
@@ -195,9 +213,12 @@ def compute_milestones(conn: sqlite3.Connection) -> str:
         """
     ).fetchone()
     if lifetime_km_row and lifetime_km_row["value"] is not None:
-        consistency_lines.append(
-            f"- Lifetime run volume: **{lifetime_km_row['value']:.1f} km**."
+        scope = (
+            "Lifetime run volume"
+            if covered >= MILESTONE_LIFETIME_MIN_DAYS
+            else f"Run volume across all {covered} recorded days"
         )
+        consistency_lines.append(f"- {scope}: **{lifetime_km_row['value']:.1f} km**.")
 
     training_streak = _longest_weekly_streak(conn, "1 = 1")
     if training_streak is not None:
@@ -218,7 +239,7 @@ def compute_milestones(conn: sqlite3.Connection) -> str:
         lines.extend(consistency_lines)
         lines.append("")
 
-    if lines == ["## Milestones (lifetime and PRs)", ""]:
-        return "## Milestones (lifetime and PRs)\n\n- Not enough data yet."
+    if lines == [heading, ""]:
+        return f"{heading}\n\n- Not enough data yet."
 
     return "\n".join(lines).rstrip()
