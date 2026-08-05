@@ -19,6 +19,12 @@ Schema changes go in new timestamped migration files under `src/db/migrations/`.
 
 Natural-language LLM prompts live in `src/prompts/`; keep tool schemas beside tool code.
 
+Operational tunables — thresholds, intervals, windows, size and count limits —
+live in `src/config.py` as named constants, each with a docstring saying how the
+value was chosen. Never inline them at the point of use, and never bury one in a
+defaults dict. Validation bounds may stay beside the code that enforces them
+(see `MIN_NUDGES_PER_DAY`), but the default itself belongs in `config.py`.
+
 ## Collaboration Style
 
 Challenge my ideas early. If an approach is over-engineered, fragile, or has a simpler alternative — say so directly with reasoning. Flag knowledge gaps, hidden trade-offs, or narrowed thinking. Be pragmatic; save me from wasting time on something that could be done better.
