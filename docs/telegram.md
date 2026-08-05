@@ -65,7 +65,7 @@ the last `N` days (default 30). It records command names and normalized inline
 button actions only; command arguments, message text, callback tokens, and
 button payload values are not stored.
 
-`/tutorial` opens a 9-step guided tour of the system with Next/Back/Exit buttons.
+`/tutorial` opens an 8-step guided tour of the system with Next/Back/Exit buttons.
 
 `/status` shows bot state, Telegram delivery/handler health, data coverage,
 recent activity, and notification state.

@@ -118,6 +118,8 @@ long, paste only the part that answers the question.
 > …"
 > (pasted directly from the `## Weekly Plan` section of strategy.md below)
 
+{data_maturity}
+
 ## About the User
 {me}
 

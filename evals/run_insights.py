@@ -59,6 +59,9 @@ def run_insights_case(
         milestones=fixture.get("milestones"),
         week_complete=week_complete,
         today=today,
+        # Fixtures have no database to describe, so a case that depends on
+        # coverage has to state it rather than have one computed.
+        data_maturity=fixture.get("data_maturity"),
     )
 
     execution = run_tool_loop(

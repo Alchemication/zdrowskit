@@ -9,7 +9,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from baselines import compute_baselines
+from baselines import compute_baselines, unestablished_metrics
+from data_maturity import build_data_maturity
 from cmd_llm_common import (
     CommandResult,
     apply_verification,
@@ -17,7 +18,12 @@ from cmd_llm_common import (
     route_kwargs,
     save_baselines,
 )
-from config import CONTEXT_DIR, MAX_TOKENS_COACH, MAX_TOOL_ITERATIONS_COACH
+from config import (
+    CONTEXT_DIR,
+    MAX_TOKENS_COACH,
+    MAX_TOOL_ITERATIONS_COACH,
+    METRIC_TRUST_WINDOW_DAYS,
+)
 from context_edit import ContextEdit, EditPreviewError, build_edit_preview
 from llm import call_llm
 from llm_context import build_messages, load_context, load_prompt_text
@@ -124,6 +130,7 @@ def cmd_coach(
         {**health_data, "week_label": week_label},
         context,
         week_complete=week_complete,
+        unestablished=unestablished_metrics(conn, METRIC_TRUST_WINDOW_DAYS),
     )
 
     # Inject the live list of strategy.md section headings so the model only
@@ -145,6 +152,7 @@ def cmd_coach(
         health_data,
         prompt_kind="coach",
         week=week,
+        unestablished=unestablished_metrics(conn, METRIC_TRUST_WINDOW_DAYS),
     )
 
     try:
@@ -154,6 +162,7 @@ def cmd_coach(
             baselines=baselines,
             milestones=milestones,
             week_complete=week_complete,
+            data_maturity=build_data_maturity(conn, context),
         )
     except (KeyError, ValueError) as e:
         logger.error("Failed to render coach_prompt.md template: %s", e)

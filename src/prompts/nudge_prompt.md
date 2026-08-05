@@ -47,6 +47,8 @@ explicit coaching touchpoint — distinct from the auto-generated
 
 {last_coach_summary}
 
+{data_maturity}
+
 ## About the User
 
 {me}

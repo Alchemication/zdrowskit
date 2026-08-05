@@ -276,6 +276,7 @@ def build_messages(
     milestones: str | None = None,
     week_complete: bool = True,
     today: date | None = None,
+    data_maturity: str | None = None,
 ) -> list[dict[str, str]]:
     """Assemble system and user messages for the LLM call.
 
@@ -293,6 +294,8 @@ def build_messages(
         week_complete: Whether the reported week has fully elapsed.
         today: Override for the current date (defaults to today).
             Useful for evals with pinned dates.
+        data_maturity: Rendered coverage and metric-trust block, or None when
+            the caller has no database to describe.
 
     Returns:
         A list of message dicts ready for litellm.completion().
@@ -325,6 +328,7 @@ def build_messages(
             "health_data": health_data_text,
             "baselines": baselines or "(not computed)",
             "milestones": milestones or "(not computed)",
+            "data_maturity": data_maturity or "(not computed)",
             "review_facts": context.get("review_facts", "(not provided)"),
             "schema_reference": load_prompt_text(SCHEMA_REFERENCE_PROMPT),
             "today": today.isoformat(),

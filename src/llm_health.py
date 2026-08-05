@@ -195,31 +195,45 @@ def _format_splits(splits: object) -> str | None:
 # ---------------------------------------------------------------------------
 
 
-def _render_day_block(day: dict) -> str:
-    """Render one day card for the prompt."""
+def _render_day_block(day: dict, withheld: frozenset[str] = frozenset()) -> str:
+    """Render one day card for the prompt.
+
+    Args:
+        day: Canonical day dict.
+        withheld: Metric columns with too few readings to show as a per-day
+            series. Their latest values are reported once elsewhere instead.
+
+    Returns:
+        Markdown for one day card.
+    """
+
+    def value_of(column: str) -> object:
+        """Return a day value unless the metric is being withheld."""
+        return None if column in withheld else day.get(column)
+
     lines = [f"#### {_format_day_label(str(day['date']))}"]
 
     activity_parts: list[str] = []
-    steps = _format_metric(day.get("steps"), "steps", decimals=0)
+    steps = _format_metric(value_of("steps"), "steps", decimals=0)
     if steps:
         activity_parts.append(steps)
-    exercise = _format_metric(day.get("exercise_min"), "exercise min", decimals=0)
+    exercise = _format_metric(value_of("exercise_min"), "exercise min", decimals=0)
     if exercise:
         activity_parts.append(exercise)
-    distance = _format_metric(day.get("distance_km"), "km", decimals=1)
+    distance = _format_metric(value_of("distance_km"), "km", decimals=1)
     if distance:
         activity_parts.append(distance)
     if activity_parts:
         lines.append(f"- Activity: {', '.join(activity_parts)}.")
 
     recovery_parts: list[str] = []
-    hrv = _format_metric(day.get("hrv_ms"), "ms", decimals=1)
+    hrv = _format_metric(value_of("hrv_ms"), "ms", decimals=1)
     if hrv:
         recovery_parts.append(f"HRV {hrv}")
-    resting_hr = _format_metric(day.get("resting_hr"), "bpm", decimals=0)
+    resting_hr = _format_metric(value_of("resting_hr"), "bpm", decimals=0)
     if resting_hr:
         recovery_parts.append(f"resting HR {resting_hr}")
-    recovery_index = _format_decimal(day.get("recovery_index"), decimals=2)
+    recovery_index = _format_decimal(value_of("recovery_index"), decimals=2)
     if recovery_index:
         recovery_parts.append(f"recovery index {recovery_index}")
     if recovery_parts:
@@ -230,10 +244,10 @@ def _render_day_block(day: dict) -> str:
     sleep_status = day.get("sleep_status")
     if sleep_status == "tracked":
         sleep_parts: list[str] = []
-        sleep_total = _format_metric(day.get("sleep_total_h"), "h", decimals=1)
+        sleep_total = _format_metric(value_of("sleep_total_h"), "h", decimals=1)
         if sleep_total:
             sleep_parts.append(sleep_total)
-        efficiency = _format_percent(day.get("sleep_efficiency_pct"))
+        efficiency = _format_percent(value_of("sleep_efficiency_pct"))
         if efficiency:
             sleep_parts.append(f"efficiency {efficiency}")
         stage_parts: list[str] = []
@@ -243,7 +257,7 @@ def _render_day_block(day: dict) -> str:
             ("sleep_rem_h", "REM"),
             ("sleep_awake_h", "awake"),
         ):
-            value = _format_metric(day.get(key), "h", decimals=1)
+            value = _format_metric(value_of(key), "h", decimals=1)
             if value:
                 stage_parts.append(f"{label} {value}")
         if stage_parts:
@@ -486,16 +500,93 @@ def format_recent_nudges(
 # ---------------------------------------------------------------------------
 
 
+_WITHHELD_LABELS = {
+    "steps": ("Steps", "", 0),
+    "exercise_min": ("Exercise minutes", "min", 0),
+    "distance_km": ("Distance", "km", 1),
+    "hrv_ms": ("HRV", "ms", 1),
+    "resting_hr": ("Resting HR", "bpm", 0),
+    "recovery_index": ("Recovery index", "", 2),
+    "sleep_total_h": ("Sleep duration", "h", 1),
+    "sleep_efficiency_pct": ("Sleep efficiency", "%", 1),
+    "sleep_deep_h": ("Deep sleep", "h", 1),
+    "sleep_core_h": ("Core sleep", "h", 1),
+    "sleep_rem_h": ("REM sleep", "h", 1),
+    "sleep_awake_h": ("Awake", "h", 1),
+}
+
+
+def _render_withheld_readings(days: list[dict], withheld: frozenset[str]) -> str | None:
+    """Report the latest value of each metric kept out of the day cards.
+
+    The reading itself is useful and stays. What is removed is its position in
+    a dated sequence, because a handful of numbers in date order reads as a
+    direction to any reader — including one that has just been told, correctly,
+    that there are not enough of them to establish one.
+
+    Args:
+        days: Canonical day dicts, oldest first.
+        withheld: Metric columns being kept out of the day cards.
+
+    Returns:
+        A markdown section, or None when nothing was withheld.
+    """
+    entries: list[str] = []
+    for column in _WITHHELD_LABELS:
+        if column not in withheld:
+            continue
+        latest: tuple[str, object] | None = None
+        count = 0
+        for day in days:
+            value = day.get(column)
+            if value is None:
+                continue
+            count += 1
+            latest = (str(day.get("date")), value)
+        if latest is None:
+            continue
+        label, unit, decimals = _WITHHELD_LABELS[column]
+        rendered = _format_metric(latest[1], unit, decimals=decimals)
+        entries.append(f"- {label}: {rendered} on {latest[0]} ({count} recorded).")
+
+    if not entries:
+        return None
+    return (
+        "### Readings Without a Baseline\n\n"
+        "Too few readings exist for these to describe what is normal for this "
+        "person, so they are deliberately not shown per day: a short run of "
+        "values in date order would read as a trend that the data cannot "
+        "support. The most recent value of each is below. Report these as "
+        "single observations. Do not describe a direction, a slope, a decline "
+        "or an improvement in them, and do not base a recommendation on one.\n\n"
+        + "\n".join(entries)
+    )
+
+
 def render_health_data(
     health_data: dict,
     *,
     prompt_kind: str,
     week: str = "current",
     today: date | None = None,
+    unestablished: set[str] | None = None,
 ) -> str:
-    """Render canonical health data into compact markdown for LLM prompts."""
+    """Render canonical health data into compact markdown for LLM prompts.
+
+    Args:
+        health_data: Canonical health-data dict from ``build_llm_data``.
+        prompt_kind: Which prompt the rendering is for.
+        week: Which week the report targets.
+        today: Override for the current date.
+        unestablished: Metric columns with too few readings to show as a
+            per-day series. Omit on a mature profile.
+
+    Returns:
+        Compact markdown for prompt injection.
+    """
     if today is None:
         today = date.today()
+    withheld = frozenset(unestablished or ())
 
     current_week = health_data.get("current_week", {})
     summary = current_week.get("summary") if isinstance(current_week, dict) else None
@@ -516,7 +607,7 @@ def render_health_data(
         if day_blocks:
             sections.append(
                 f"{title}\n\n"
-                + "\n\n".join(_render_day_block(day) for day in day_blocks)
+                + "\n\n".join(_render_day_block(day, withheld) for day in day_blocks)
             )
 
     if prompt_kind == "nudge":
@@ -531,6 +622,11 @@ def render_health_data(
             "last": "### Target Week Days (Mon to Sun)",
         }.get(week, "### Target Week Days")
         render_day_section(title, days)
+
+    if withheld:
+        readings = _render_withheld_readings(days, withheld)
+        if readings:
+            sections.append(readings)
 
     if history:
         history_lines = []
@@ -568,16 +664,50 @@ def _fmt_review_delta(current: float | int | None, previous: float | int | None)
     return f"{delta:+.1f}"
 
 
-def _recovery_verdict(summary: dict, previous_summary: dict | None) -> str:
-    """Derive a compact recovery verdict from weekly summary fields."""
-    recovery = summary.get("avg_recovery_index")
-    sleep_h = summary.get("avg_sleep_total_h")
-    sleep_eff = summary.get("avg_sleep_efficiency_pct")
-    hrv_trend = summary.get("hrv_trend")
-    resting_hr = summary.get("avg_resting_hr")
-    prev_resting_hr = (
-        previous_summary.get("avg_resting_hr") if previous_summary else None
+def _recovery_verdict(
+    summary: dict,
+    previous_summary: dict | None,
+    *,
+    unestablished: frozenset[str] = frozenset(),
+) -> str:
+    """Derive a compact recovery verdict from weekly summary fields.
+
+    The verdict is handed to the model as a fact, so it must not be derived
+    from readings too sparse to support it. A declining HRV trend across three
+    mornings is not a declining HRV trend, and a "back off" built on one lands
+    in the report as an instruction the user is expected to follow.
+
+    Args:
+        summary: Weekly summary dict for the target week.
+        previous_summary: Prior week's summary, when one exists.
+        unestablished: Metric columns without enough readings to generalise
+            from. Inputs drawn from these are ignored.
+
+    Returns:
+        One of "back off", "ready to push", "maintain", or "insufficient data".
+    """
+
+    def established(column: str, value: object) -> object:
+        """Return a summary input unless its metric lacks the readings for it."""
+        return None if column in unestablished else value
+
+    recovery = established("recovery_index", summary.get("avg_recovery_index"))
+    sleep_h = established("sleep_total_h", summary.get("avg_sleep_total_h"))
+    sleep_eff = established(
+        "sleep_efficiency_pct", summary.get("avg_sleep_efficiency_pct")
     )
+    hrv_trend = established("hrv_ms", summary.get("hrv_trend"))
+    resting_hr = established("resting_hr", summary.get("avg_resting_hr"))
+    prev_resting_hr = (
+        established("resting_hr", previous_summary.get("avg_resting_hr"))
+        if previous_summary
+        else None
+    )
+
+    if all(
+        value is None for value in (recovery, sleep_h, sleep_eff, hrv_trend, resting_hr)
+    ):
+        return "insufficient data"
 
     if (
         (recovery is not None and recovery < 0.95)
@@ -608,14 +738,27 @@ def build_review_facts(
     context: dict[str, str] | None = None,
     *,
     week_complete: bool,
+    unestablished: set[str] | None = None,
 ) -> str:
-    """Build a compact shared summary for insights and coach prompts."""
+    """Build a compact shared summary for insights and coach prompts.
+
+    Args:
+        health_data: Canonical health-data dict from ``build_llm_data``.
+        context: Loaded context files, when available.
+        week_complete: Whether the target week has fully elapsed.
+        unestablished: Metric columns with too few readings to generalise
+            from. Omit on a mature profile.
+
+    Returns:
+        Compact markdown of shared review facts.
+    """
     summary = health_data.get("current_week", {}).get("summary") or {}
     history = health_data.get("history", [])
     previous_summary = history[-1].get("summary") if history else None
     week_label = summary.get("week_label") or health_data.get("week_label") or "unknown"
 
-    verdict = _recovery_verdict(summary, previous_summary)
+    withheld = frozenset(unestablished or ())
+    verdict = _recovery_verdict(summary, previous_summary, unestablished=withheld)
     run_count = summary.get("run_count")
     lift_count = summary.get("lift_count")
     total_run_km = summary.get("total_run_km")

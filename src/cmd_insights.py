@@ -10,7 +10,8 @@ import sys
 from datetime import date, timedelta
 from pathlib import Path
 
-from baselines import compute_baselines
+from baselines import compute_baselines, unestablished_metrics
+from data_maturity import build_data_maturity
 from charts import ChartResult, extract_charts, render_chart, strip_charts
 from cmd_llm_common import (
     CommandResult,
@@ -25,6 +26,7 @@ from config import (
     CONTEXT_DIR,
     MAX_TOKENS_INSIGHTS,
     MAX_TOOL_ITERATIONS_INSIGHTS,
+    METRIC_TRUST_WINDOW_DAYS,
     REPORTS_DIR,
 )
 from llm import LLMResult, _reasoning_engaged, call_llm, extract_memory
@@ -223,11 +225,13 @@ def cmd_insights(
         {**health_data, "week_label": week_label},
         context,
         week_complete=week_complete,
+        unestablished=unestablished_metrics(conn, METRIC_TRUST_WINDOW_DAYS),
     )
     health_data_text = render_health_data(
         health_data,
         prompt_kind="report",
         week=args.week,
+        unestablished=unestablished_metrics(conn, METRIC_TRUST_WINDOW_DAYS),
     )
 
     try:
@@ -237,6 +241,7 @@ def cmd_insights(
             baselines=baselines,
             milestones=milestones,
             week_complete=week_complete,
+            data_maturity=build_data_maturity(conn, context),
         )
     except (KeyError, ValueError) as e:
         logger.error("Failed to render insights_prompt.md template: %s", e)

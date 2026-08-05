@@ -73,6 +73,8 @@ Wrong flow:
 - `I'll update the strategy…` followed by `update_context`
 - Empty final text after an `update_context` tool call
 
+{data_maturity}
+
 ## About the User
 {me}
 

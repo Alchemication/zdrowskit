@@ -34,22 +34,28 @@ TUTORIAL_STEPS: list[tuple[str, str, str]] = [
         "📊",
         "Metrics that matter",
         (
-            "A handful of signals do most of the work:\n"
+            "Whatever you do, a handful of signals do most of the work:\n"
+            "- *Sleep* — duration and quality. The one that moves everything "
+            "else.\n"
+            "- *Resting HR* — long-term fitness trend, and it responds to "
+            "walking as readily as to running.\n"
+            "- *Steps and daily movement* — the base everything else sits on.\n"
             "- *HRV* — recovery and stress balance. The first thing to drop "
-            "when you're overdoing it.\n"
-            "- *Resting HR* — long-term aerobic fitness trend.\n"
-            "- *VO2max* — aerobic capacity ceiling. Moves slowly.\n"
-            "- *Sleep stages* — recovery quality, not just duration.\n"
-            "- *Weekly training load* — volume × intensity, the overreach radar."
+            "when you're overdoing it.\n\n"
+            "If you train, *VO2max* and *weekly training load* get added to "
+            "that list. If you don't, they stay quiet — the system works from "
+            "whatever your phone actually records."
         ),
     ),
     (
         "🔔",
         "Nudges — the core",
         (
-            "The killer feature. Every day, after syncing last night's sleep, "
-            "your training history, and your current plan, the system tells you "
-            "to *push*, *stick to the routine*, or *rest*.\n\n"
+            "The killer feature. Every day, after syncing last night's sleep "
+            "and whatever you've been doing, the system tells you whether "
+            "today is a day to *push*, *keep it steady*, or *rest*.\n\n"
+            "Once you've told it what you're working towards, it holds you to "
+            "that too. Until then it just reads what your body is doing.\n\n"
             "> Not based on a ring. Based on you.\n\n"
             "Use /notify to mute, reschedule, or rewrite the rules in plain "
             "English."
@@ -85,9 +91,11 @@ TUTORIAL_STEPS: list[tuple[str, str, str]] = [
             "Just talk to the bot. Questions get answered with real SQL against "
             "your own data, and charts are rendered on demand. Try things like:\n"
             "1. *What was my resting heart rate yesterday?*\n"
-            "2. *Show my weekly running mileage for the last 8 weeks as a chart.*\n"
-            "3. *How does my HRV correlate with sleep duration over the last month?*\n"
-            "4. *Given last week vs the previous, am I overreaching?*"
+            "2. *Which days do I actually move most?*\n"
+            "3. *How does my sleep compare at weekends versus weekdays?*\n"
+            "4. *Show my weekly activity for the last 8 weeks as a chart.*\n\n"
+            "It answers from your data, so the useful questions are whatever "
+            "you actually want to know."
         ),
     ),
     (

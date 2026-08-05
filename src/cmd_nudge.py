@@ -23,7 +23,15 @@ from cmd_llm_common import (
     route_kwargs,
     telegram_chat_id,
 )
-from config import CONTEXT_DIR, MAX_TOKENS_NUDGE, MAX_TOOL_ITERATIONS_NUDGE, NUDGES_DIR
+from baselines import unestablished_metrics
+from config import (
+    CONTEXT_DIR,
+    MAX_TOKENS_NUDGE,
+    MAX_TOOL_ITERATIONS_NUDGE,
+    METRIC_TRUST_WINDOW_DAYS,
+    NUDGES_DIR,
+)
+from data_maturity import build_data_maturity
 from llm import call_llm
 from llm_context import build_messages, load_context, load_prompt_text
 from llm_health import build_llm_data, format_recent_nudges, render_health_data
@@ -105,7 +113,11 @@ def cmd_nudge(
 
     conn = open_db(Path(args.db))
     health_data = build_llm_data(conn, getattr(args, "months", 1))
-    health_data_text = render_health_data(health_data, prompt_kind="nudge")
+    health_data_text = render_health_data(
+        health_data,
+        prompt_kind="nudge",
+        unestablished=unestablished_metrics(conn, METRIC_TRUST_WINDOW_DAYS),
+    )
 
     recent_nudge_entries: list[dict] = getattr(args, "recent_nudges", [])
     context["recent_nudges"] = format_recent_nudges(
@@ -124,7 +136,11 @@ def cmd_nudge(
     else:
         context["last_coach_summary"] = "(no recent coach review)"
 
-    messages = build_messages(context, health_data_text)
+    messages = build_messages(
+        context,
+        health_data_text,
+        data_maturity=build_data_maturity(conn, context),
+    )
     trace_id = create_llm_trace(
         conn,
         "nudge",

@@ -56,6 +56,27 @@ outside a heading or comment counts as filled in.
 
 The journal (`log.md`) is what makes this different from a dashboard. Numbers say what happened. The journal says why. The LLM connects both.
 
+## Data Maturity
+
+Health data reads the same whether it covers eight years or eight days, so
+`insights`, `coach`, `nudge`, and `chat` are all given an explicit
+`## Data Maturity` block stating what is actually knowable: how much history
+exists, how many workouts are recorded, which metrics have enough readings to
+define a personal normal, and whether there is any coaching history at all.
+
+The block states facts only. How to behave on a thin profile is a coaching
+decision and lives in `src/prompts/conduct.md`, which forbids presenting a
+sparse metric as a norm, adherence-checking against a plan that does not
+exist, referring back to conversations that never happened, and using training
+jargon the user has not shown they speak.
+
+Baselines apply the same rule to themselves. A rolling average needs
+`BASELINE_MIN_SAMPLES` readings before it is reported, per-week training
+volume needs `BASELINE_MIN_WINDOW_COVERAGE` of its window present before the
+window is divided, and sections with nothing to say are omitted rather than
+rendered as a grid of dashes. A mature profile is unaffected; a two-day-old
+one no longer gets three days of data printed under a "90-day avg" heading.
+
 `coach_feedback.md` is retained as a full audit log on disk. Prompt context is
 filtered to recent strategy/coach-relevant entries so ordinary chat log appends
 do not pollute future coaching reviews. Approved strategy edits are included as

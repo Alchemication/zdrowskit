@@ -869,6 +869,9 @@ def _run_chat_case(
         health_data_text=health_data_text,
         baselines=fixture.get("baselines"),
         today=today,
+        # Fixtures have no database to describe, so a case that depends on
+        # coverage has to state it rather than have one computed.
+        data_maturity=fixture.get("data_maturity"),
     )
     messages.extend(_fixture_turns(fixture))
 

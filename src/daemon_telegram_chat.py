@@ -2026,8 +2026,9 @@ class TelegramChatHandler:
             A tuple of (final LLMResult, deferred context edits, accumulated
             query rows for chart rendering).
         """
-        from baselines import compute_baselines
-        from config import MAX_TOOL_ITERATIONS
+        from baselines import compute_baselines, unestablished_metrics
+        from config import MAX_TOOL_ITERATIONS, METRIC_TRUST_WINDOW_DAYS
+        from data_maturity import build_data_maturity
         from llm import call_llm
         from llm_context import build_messages, load_context
         from llm_health import (
@@ -2064,8 +2065,13 @@ class TelegramChatHandler:
 
         messages = build_messages(
             ctx,
-            health_data_text=render_health_data(health_data, prompt_kind="chat"),
+            health_data_text=render_health_data(
+                health_data,
+                prompt_kind="chat",
+                unestablished=unestablished_metrics(conn, METRIC_TRUST_WINDOW_DAYS),
+            ),
             baselines=baselines,
+            data_maturity=build_data_maturity(conn, ctx),
         )
 
         # Inject conversation history before the last user message.

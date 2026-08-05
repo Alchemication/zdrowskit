@@ -8,6 +8,8 @@ Purpose: this is a weekly report that interprets what happened, explains what
 matters, and recommends near-term priorities. Use the report to analyze the
 week clearly and help the user understand what happened and what to do next.
 
+{data_maturity}
+
 ## About the User
 {me}
 
@@ -57,6 +59,23 @@ verification, or longer-history analysis beyond this compact view.
 ---
 
 ## Instructions
+
+### Working within the data you actually have
+
+Read the Data Maturity section before drafting. Everything below this line is
+written for a mature profile with a plan and a shared history; where the two
+conflict, Data Maturity wins and the conduct rules above govern how.
+
+- **Do not fill gaps in the profile from the health data.** Runs in the data do
+  not tell you someone is training for a race, and no workouts do not tell you
+  someone is sedentary — they may train in ways a phone never sees.
+- **Say what is not yet knowable once, plainly, and then get on with it.** A
+  short report that is honest about its limits earns more trust than a long
+  one that pads. One sentence in Week at a Glance, not a disclaimer in every
+  section.
+- **A thin week still gets a real report.** Fewer sections, shorter, no chart —
+  but written as though a short honest report were the intended product, which
+  it is. Never apologise for the data, and never pad to reach a familiar shape.
 
 ### Tool-call discipline
 
@@ -114,7 +133,9 @@ with these sections:
 
 1. **Week at a Glance** — 2-3 sentence executive summary of the week.
 2. **Training Review** — did they hit the plan? What deviated and why?
-   List each **training day** in this format (NO markdown tables — they break
+   When there is no plan, this section becomes **Activity Review**: what they
+   did, without measuring it against a target nobody set.
+   List each **active day** in this format (NO markdown tables — they break
    on mobile):
 
    🏃 **Mon 16** — 8.15 km run
@@ -123,6 +144,15 @@ with these sections:
 
    🏋️ **Wed 18** — Push strength (42 min)
      HR 93 · 30.5 kg DB bench (PR)
+
+   🚶 **Thu 19** — 11,400 steps, 8.2 km walking
+     Most of it in two long walks rather than spread through the day.
+
+   The three examples above are formats, not a list of the activities that
+   count. Someone whose whole week is walking, gardening, or a swim has had a
+   week worth reviewing, and the report should read as though that were
+   obviously true. Never describe a week as empty because it contains no runs
+   or lifts, and never treat step counts as a consolation entry.
 
    **Collapsing rules:**
    - Short warm-ups or accessory work (under 10 min) on the same day as a
@@ -182,7 +212,13 @@ above for the Training Review and bulleted lists everywhere else.**
 ### Charts (default 1, maximum 3)
 
 Include exactly one meaningful chart in a normal weekly report unless the
-available data is genuinely too thin or the visual would be misleading. The
+available data is genuinely too thin or the visual would be misleading.
+
+**Omit the chart entirely when the series would be built from metrics Data
+Maturity does not list as established, or from fewer than two complete weeks.**
+Four points joined by a line read as a trend to everyone who sees them,
+including the person who only started on Tuesday. No chart is better than a
+chart that invents a direction. The
 chart should answer the most useful coaching question for this specific week,
 not decorate the report. Prefer a nuanced relationship or comparison over a
 generic metric plot: training load vs recovery, sleep vs training density,
@@ -280,6 +316,13 @@ Memory must not create a hidden plan. Any prescription / commitment stored
 here must already be stated in the visible **This Week's Priorities** or
 **Next Week** section, so the user can see the standard they will be judged
 against later.
+
+Memory must not invent continuity either. On a profile with no coaching
+history there are no open threads, no adherence counters, and no earlier
+predictions to test — writing them anyway fabricates a past that every later
+report will then build on. When there is genuinely nothing durable to carry
+forward, record what you learned about this person and nothing else, or omit
+the block. Two honest bullets beat three invented ones.
 
 Choose the memory shape from the report type:
 
