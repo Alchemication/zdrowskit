@@ -249,7 +249,7 @@ array limits, and compatibility with the production parser. It returns `422`
 with an actionable message when the automation settings or payload are wrong.
 
 Metrics and Workouts are staged independently and imported only after both
-arrive within ten minutes.
+arrive within an hour.
 
 Pairing is no longer what protects the data. Each half is now written on its own
 terms: daily metrics are merged column by column, so an absent field leaves the
@@ -323,7 +323,7 @@ can happen:
 | `up to date` | Both halves arrived and imported. Steady state. |
 | `queued for import` | Both halves are staged; the daemon is importing them now. |
 | `waiting for the other half` | Only Metrics or only Workouts has ever arrived, or the other half is missing. Check that both automations exist and use the same URL and token. |
-| `halves arrived too far apart` | Both arrived, but more than ten minutes apart, so they were not paired. Give both automations the same schedule and re-run them together. |
+| `halves arrived too far apart` | Both arrived, but more than an hour apart, so they were not paired. The next export resends the same window, so this delays an import rather than losing it; give both automations the same schedule. |
 
 The daemon log records every accepted upload (profile, kind, size), every
 rejection with its reason and HTTP status, and a warning whenever halves land
@@ -360,7 +360,7 @@ receiver.
 | Auto Export gets `401` | Re-enter the exact `Bearer <token>` authorization value or rotate the profile token. |
 | Auto Export gets `422` | Read the returned error; normally aggregation, headers, JSON format, or an oversized export. |
 | `pairing: waiting for the other half` | Only one automation reached the receiver. Check both exist and use the same URL and token. |
-| `pairing: halves arrived too far apart` | Both automations work but run more than ten minutes apart. Put them on the same schedule. |
+| `pairing: halves arrived too far apart` | Both automations work but run more than an hour apart. Put them on the same schedule. |
 | Works until reboot | Enable **Launch Tailscale at login**, confirm the macOS user logged in, then check `tailscale funnel status` and `main.py ingest status`. |
 
 Tailscale documents that public DNS may take up to ten minutes to propagate and

@@ -52,7 +52,7 @@ switched off.
   logged in and Tailscale running.
 - Bounded by per-metric and per-workout entry caps, so a large historical
   backfill still needs a different transport.
-- Both automations must arrive within ten minutes of each other to pair.
+- Both automations must arrive within an hour of each other to pair.
 - The most setup steps of the three.
 
 ### iCloud / local files

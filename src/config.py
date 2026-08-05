@@ -70,8 +70,15 @@ HTTP_INGEST_PORT: int = int(os.environ.get("ZDROWSKIT_HTTP_INGEST_PORT", "8787")
 """Local TCP port used by the HTTP receiver."""
 HTTP_INGEST_MAX_BYTES: int = 64 * 1024 * 1024
 """Maximum accepted Auto Export request body size."""
-HTTP_INGEST_PAIR_WINDOW_S: int = 10 * 60
-"""Maximum arrival gap between the Metrics and Workouts halves of an export."""
+HTTP_INGEST_PAIR_WINDOW_S: int = 60 * 60
+"""Maximum arrival gap between the Metrics and Workouts halves of an export.
+
+Pairing no longer protects the data — either half can now land alone without
+erasing the other. It only keeps a nudge from reacting to half a day, so a
+missed pair costs a delayed import rather than lost data. An hour is wide
+enough to absorb a slow multi-megabyte route upload while an hour-old Workouts
+payload still describes today.
+"""
 DATA_HEALTH_REALERT_S: int = 24 * 60 * 60
 """How long before an unresolved ingest problem is reported again."""
 DATA_HEALTH_SILENT_AFTER_H: float = 16
