@@ -62,12 +62,15 @@ again.
 - `nudges`
 - `weekly_insights`
 - `midweek_report`
+- `data_health`
 - `nudges.earliest_time`
 - `nudges.max_per_day`
 - `weekly_insights.weekday`
 - `weekly_insights.time`
 - `midweek_report.weekday`
 - `midweek_report.time`
+- `data_health.silent_after_h`
+- `data_health.split_after_h`
 
 ## Change schema
 Each item in `changes` must be one of:
@@ -80,15 +83,20 @@ Each item in `changes` must be one of:
 - `{{"action":"set","path":"midweek_report.enabled","value":false}}`
 - `{{"action":"set","path":"midweek_report.weekday","value":"thursday"}}`
 - `{{"action":"set","path":"midweek_report.time","value":"09:00"}}`
+- `{{"action":"set","path":"data_health.enabled","value":false}}`
+- `{{"action":"set","path":"data_health.silent_after_h","value":48}}`
+- `{{"action":"set","path":"data_health.split_after_h","value":12}}`
 - `{{"action":"reset","path":"nudges"}}`
 - `{{"action":"reset","path":"weekly_insights"}}`
 - `{{"action":"reset","path":"midweek_report"}}`
+- `{{"action":"reset","path":"data_health"}}`
 - `{{"action":"reset","path":"all"}}`
 - `{{"action":"reset_all"}}`
 - `{{"action":"mute_until","target":"all","expires_at":"2026-04-05T23:59:00+01:00","source_text":"mute all notifications today"}}`
 - `{{"action":"mute_until","target":"nudges","expires_at":"2026-04-05T23:59:00+01:00","source_text":"mute nudges today"}}`
 - `{{"action":"mute_until","target":"weekly_insights","expires_at":"2026-04-08T23:59:00+01:00","source_text":"pause weekly insights this week"}}`
 - `{{"action":"mute_until","target":"midweek_report","expires_at":"2026-04-08T23:59:00+01:00","source_text":"mute midweek report this week"}}`
+- `{{"action":"mute_until","target":"data_health","expires_at":"2026-04-12T23:59:00+01:00","source_text":"mute sync alerts for a week"}}`
 
 `changes` is empty (`[]`) for `intent: "show"` or `status: "needs_clarification"`. `clarification_question` is set only when `status: "needs_clarification"`.
 

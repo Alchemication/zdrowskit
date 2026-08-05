@@ -7,6 +7,7 @@ Each notification type is a distinct LLM call with its own prompt, context, tool
 | **Insights** | Full weekly report | Scheduled, default Monday 10am, or manual `/review` | 1x/week | ~450 words | `run_sql` | `<chart>` by default 1, skip if misleading; `<memory>` always 1, appended to `history.md` |
 | **Coach** | Weekly strategy review, only when proposals exist | After insights, silent on no-change weeks | 1x/week | ~300 words | `run_sql`, `update_context` for `strategy` only | `SKIP` if no changes warranted; bundled message with inline Accept/Reject buttons per edit |
 | **Nudge** | Short reactive next-action nudge | Data sync, file edit | Up to 2/day by default | 80 words | `run_sql` | `SKIP` if nothing changes; optional `<chart>` |
+| **Sync alerts** | Tells you when health data has stopped arriving | Sustained ingest failure, checked on the scheduler tick | At most 1/day per condition | 2 lines | none | Recovery notice when it resolves |
 | **Chat** | Interactive conversation: answer the current message, ask anything, get charts | Your Telegram message | On demand | 150 words | `run_sql` up to 5/turn, `update_context` any file | Optional `<chart>`; at most one `update_context` |
 
 ## Notification Preferences Via Telegram
@@ -28,6 +29,8 @@ Examples:
 - `/notify no nudges before 11am`
 - `/notify send weekly insights on Tuesday at 8`
 - `/notify turn off midweek report`
+- `/notify mute sync alerts for a week`
+- `/notify only warn me about sync after two days`
 - `/notify mute nudges today`
 - `/notify bring weekly insights back to default`
 - `/notify set all as default`
@@ -81,5 +84,32 @@ Each channel sees what the others recently said so the LLM avoids redundancy:
 - **LLM SKIP:** the nudge LLM can respond `SKIP` if there is nothing genuinely new to say.
 - **Coach:** runs at most once per calendar day.
 - **No replay after mute:** skipped nudges/reports are not replayed after a temporary mute expires.
+
+## Sync Alerts
+
+A phone that stops feeding the system is otherwise completely silent: uploads
+just stop, or stop pairing, and the only trace is a line in the daemon log. For
+the operator that is survivable. For a hosted profile it is fatal — their data
+quietly goes stale and they conclude the product is dead.
+
+Three conditions are reported, with different thresholds because they carry
+different confidence:
+
+| Condition | Default | Meaning |
+|-----------|---------|---------|
+| `silent` | 24h | Nothing has arrived at all. The threshold has to clear a night's sleep, since a locked phone stops uploading. |
+| `split` | 6h | Uploads *are* arriving but nothing imports. Far stronger signal — the phone is demonstrably reachable. Almost always two Auto Export automations whose schedules have drifted apart. |
+| `error` | 6h | The last import failed and none has succeeded since. |
+
+A profile that has never uploaded is never alerted: it is mid-setup, not broken.
+
+Each condition is reported once and then not again for 24 hours while it
+persists, and a one-line recovery notice is sent when it clears — an alert you
+cannot tell has resolved is one you learn to ignore.
+
+Alerts go to the affected profile, not to the operator, because the person who
+can fix it is the one holding the phone. They obey the same mute and disable
+machinery as everything else (`data_health`), and when suppressed the condition
+is still written to the daemon log at WARNING.
 
 For bot setup and interactive chat commands, see [Telegram](telegram.md).

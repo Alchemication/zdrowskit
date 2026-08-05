@@ -2888,3 +2888,102 @@ class TestFailureCapture:
         # Do not set daemon._poller — simulate no Telegram configured.
         # Should not raise.
         daemon._notify_user_failure("Manual review", "some error")
+
+
+class TestIngestHealthAlerts:
+    def _runtime(self, tmp_path: Path, health) -> ProfileRuntime:
+        """Return a runtime wired to an HTTP profile reporting *health*."""
+        from profiles import Profile
+
+        runtime = _make_daemon(tmp_path)
+        runtime.profile = Profile(
+            name="anna",
+            telegram_id=22,
+            root=tmp_path / "profiles" / "anna",
+            import_source="http",
+        )
+        runtime._chat._poller = MagicMock()
+        return runtime
+
+    def _health(self, status: str):
+        from http_ingest import IngestHealth
+
+        return IngestHealth(status=status, detail=f"{status} detail")
+
+    def test_alerts_once_then_stays_quiet_until_the_realert_window(
+        self, tmp_path: Path
+    ) -> None:
+        runtime = self._runtime(tmp_path, self._health("split"))
+        prefs = load_notification_prefs(runtime._notification_prefs_path)
+
+        with patch(
+            "http_ingest.assess_ingest_health", return_value=self._health("split")
+        ):
+            runtime._check_ingest_health(prefs)
+            runtime._check_ingest_health(prefs)
+            runtime._check_ingest_health(prefs)
+
+        sent = runtime._poller.send_reply.call_args_list
+        assert len(sent) == 1
+        assert "split detail" in sent[0].args[0]
+        assert runtime._state["data_health_alert"]["status"] == "split"
+
+    def test_a_changed_condition_alerts_again_immediately(self, tmp_path: Path) -> None:
+        runtime = self._runtime(tmp_path, self._health("split"))
+        prefs = load_notification_prefs(runtime._notification_prefs_path)
+
+        with patch(
+            "http_ingest.assess_ingest_health", return_value=self._health("split")
+        ):
+            runtime._check_ingest_health(prefs)
+        with patch(
+            "http_ingest.assess_ingest_health", return_value=self._health("silent")
+        ):
+            runtime._check_ingest_health(prefs)
+
+        assert runtime._poller.send_reply.call_count == 2
+
+    def test_recovery_clears_state_and_says_so_once(self, tmp_path: Path) -> None:
+        runtime = self._runtime(tmp_path, self._health("silent"))
+        prefs = load_notification_prefs(runtime._notification_prefs_path)
+
+        with patch(
+            "http_ingest.assess_ingest_health", return_value=self._health("silent")
+        ):
+            runtime._check_ingest_health(prefs)
+        with patch("http_ingest.assess_ingest_health", return_value=self._health("ok")):
+            runtime._check_ingest_health(prefs)
+            runtime._check_ingest_health(prefs)
+
+        messages = [call.args[0] for call in runtime._poller.send_reply.call_args_list]
+        assert len(messages) == 2
+        assert "working again" in messages[1]
+        assert "data_health_alert" not in runtime._state
+
+    def test_a_healthy_profile_is_never_messaged(self, tmp_path: Path) -> None:
+        runtime = self._runtime(tmp_path, self._health("ok"))
+        prefs = load_notification_prefs(runtime._notification_prefs_path)
+
+        with patch("http_ingest.assess_ingest_health", return_value=self._health("ok")):
+            runtime._check_ingest_health(prefs)
+
+        runtime._poller.send_reply.assert_not_called()
+
+    def test_muting_suppresses_the_message_but_still_logs(
+        self, tmp_path: Path, caplog
+    ) -> None:
+        import logging as _logging
+
+        runtime = self._runtime(tmp_path, self._health("split"))
+        prefs = load_notification_prefs(runtime._notification_prefs_path)
+        prefs["overrides"] = {"data_health": {"enabled": False}}
+
+        with caplog.at_level(_logging.WARNING):
+            with patch(
+                "http_ingest.assess_ingest_health", return_value=self._health("split")
+            ):
+                runtime._check_ingest_health(prefs)
+
+        runtime._poller.send_reply.assert_not_called()
+        # The operator can still find it in the log even when the user muted it.
+        assert "split detail" in caplog.text

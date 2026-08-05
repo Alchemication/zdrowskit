@@ -65,6 +65,20 @@ class ValidatedUpload:
 
 
 @dataclass(frozen=True)
+class IngestHealth:
+    """One profile's ingest condition, ready to report to its owner."""
+
+    status: str
+    detail: str
+    since: str | None = None
+
+    @property
+    def is_alerting(self) -> bool:
+        """Return whether this condition is worth telling someone about."""
+        return self.status != "ok"
+
+
+@dataclass(frozen=True)
 class AcceptedUpload:
     """Result returned after an upload is durably staged."""
 
@@ -459,6 +473,151 @@ def validate_upload(headers: dict[str, str], body: bytes) -> ValidatedUpload:
     )
 
 
+def _parse_iso(value: Any) -> datetime | None:
+    """Parse a stored ISO-8601 timestamp, or return None when unusable."""
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def assess_ingest_health(
+    profile: Profile,
+    *,
+    silent_after_h: float,
+    split_after_h: float,
+    now: datetime | None = None,
+) -> IngestHealth:
+    """Judge whether a profile's phone is still successfully feeding the system.
+
+    Three conditions are worth a message, and they need different thresholds
+    because they carry different confidence:
+
+    ``silent``
+        Nothing has arrived at all. Cause-agnostic — phone off, token revoked,
+        Funnel down, app deleted. The threshold has to clear a normal night's
+        sleep, so it is measured in a day rather than hours.
+    ``split``
+        Uploads *are* arriving but no pair has imported. Much stronger signal,
+        because the phone is demonstrably talking to us, so this is detected
+        far sooner. Almost always two Auto Export automations on schedules
+        that have drifted apart.
+    ``error``
+        The last import failed and none has succeeded since.
+
+    A profile that has never uploaded is reported as ``ok``: it is mid-setup,
+    not broken, and nagging someone who has not finished onboarding is worse
+    than saying nothing.
+
+    Args:
+        profile: Profile whose ingest state should be examined.
+        silent_after_h: Hours of total silence before reporting ``silent``.
+        split_after_h: Hours without a successful import, while uploads keep
+            arriving, before reporting ``split``.
+        now: Override for the current time.
+
+    Returns:
+        The current condition, with a detail line naming the fix.
+    """
+    now = now or datetime.now(timezone.utc)
+    state_path = profile.http_cache / ".ingest_state.json"
+    try:
+        state = _load_json_object(
+            state_path,
+            missing={"version": STATE_VERSION, "uploads": {}, "receipts": []},
+        )
+    except ValueError:
+        return IngestHealth(
+            status="error",
+            detail=(
+                f"The ingest state file for {profile.name} is unreadable "
+                f"({state_path}). Uploads are still being accepted but nothing "
+                "can import until it is repaired."
+            ),
+        )
+
+    uploads = state.get("uploads")
+    uploads = uploads if isinstance(uploads, dict) else {}
+    arrivals = {
+        kind: _parse_iso(entry.get("received_at"))
+        for kind, entry in uploads.items()
+        if isinstance(entry, dict)
+    }
+    arrivals = {kind: seen for kind, seen in arrivals.items() if seen is not None}
+    if not arrivals:
+        return IngestHealth(status="ok", detail="No upload has ever arrived.")
+
+    last_upload = max(arrivals.values())
+    silent_for = (now - last_upload).total_seconds() / 3600
+    if silent_for >= silent_after_h:
+        return IngestHealth(
+            status="silent",
+            detail=(
+                f"No health data has arrived for {_format_gap(silent_for * 3600)}. "
+                "Check that Auto Export is still running on the phone and that "
+                "its automations are enabled."
+            ),
+            since=last_upload.isoformat(),
+        )
+
+    last_import = _parse_iso(state.get("last_imported_at"))
+    if last_import is not None:
+        stalled_for = (now - last_import).total_seconds() / 3600
+    else:
+        # Nothing has ever imported, so the condition has run since the first
+        # upload ever seen — not since the most recent one.
+        first_seen = [
+            seen
+            for entry in uploads.values()
+            if isinstance(entry, dict)
+            and (seen := _parse_iso(entry.get("first_seen_at"))) is not None
+        ]
+        started = min(first_seen) if first_seen else min(arrivals.values())
+        stalled_for = (now - started).total_seconds() / 3600
+    if stalled_for < split_after_h:
+        return IngestHealth(status="ok", detail="Imports are current.")
+
+    last_error = state.get("last_error")
+    if isinstance(last_error, dict):
+        failed_at = _parse_iso(last_error.get("failed_at"))
+        if failed_at is not None and (last_import is None or failed_at > last_import):
+            return IngestHealth(
+                status="error",
+                detail=(
+                    "The last import failed and none has succeeded since: "
+                    f"{last_error.get('message', 'check the daemon logs')}"
+                ),
+                since=failed_at.isoformat(),
+            )
+
+    if len(arrivals) < 2:
+        missing = "Workouts" if "metrics" in arrivals else "Metrics"
+        return IngestHealth(
+            status="split",
+            detail=(
+                f"{missing} uploads have never arrived, so nothing can import. "
+                f"Check that the {missing} automation exists in Auto Export and "
+                "points at the same URL and token as the other one."
+            ),
+            since=min(arrivals.values()).isoformat(),
+        )
+
+    gap = abs((arrivals["metrics"] - arrivals["workouts"]).total_seconds())
+    return IngestHealth(
+        status="split",
+        detail=(
+            f"Data has been arriving for {_format_gap(stalled_for * 3600)} but "
+            f"nothing has imported: Metrics and Workouts are {_format_gap(gap)} "
+            "apart and only import together. Set both Auto Export automations "
+            "to the same schedule so they run at the same time."
+        ),
+        since=last_import.isoformat() if last_import else None,
+    )
+
+
 class HttpIngestManager:
     """Archive raw payloads, persist bounded latest ones, and pair imports."""
 
@@ -658,9 +817,19 @@ class HttpIngestManager:
                 isinstance(previous, dict) and previous.get("sha256") == upload.sha256
             )
             _atomic_write(self._payload_path(profile, upload.kind), body)
+            received_at = _utc_now()
+            # Only the latest upload per kind is kept, so without this a profile
+            # that configured just one automation would look freshly active
+            # forever and never trip the health check.
+            first_seen_at = (
+                previous.get("first_seen_at")
+                if isinstance(previous, dict) and previous.get("first_seen_at")
+                else received_at
+            )
             state["uploads"][upload.kind] = {
                 "sha256": upload.sha256,
-                "received_at": _utc_now(),
+                "received_at": received_at,
+                "first_seen_at": first_seen_at,
                 "automation_id": upload.automation_id,
                 "session_id": upload.session_id,
                 "bytes": upload.size,

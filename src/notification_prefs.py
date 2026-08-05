@@ -44,14 +44,18 @@ SETTABLE_PATHS = {
     "midweek_report.enabled",
     "midweek_report.weekday",
     "midweek_report.time",
+    "data_health.enabled",
+    "data_health.silent_after_h",
+    "data_health.split_after_h",
 }
 RESETTABLE_PATHS = SETTABLE_PATHS | {
     "nudges",
     "weekly_insights",
     "midweek_report",
+    "data_health",
     "all",
 }
-MUTE_TARGETS = {"all", "nudges", "weekly_insights", "midweek_report"}
+MUTE_TARGETS = {"all", "nudges", "weekly_insights", "midweek_report", "data_health"}
 MIN_NUDGES_PER_DAY = 1
 MAX_REASONABLE_NUDGES_PER_DAY = 6
 
@@ -76,6 +80,13 @@ _DEFAULT_EFFECTIVE: dict[str, dict[str, Any]] = {
         "enabled": True,
         "weekday": "thursday",
         "time": "09:00",
+    },
+    # Silence has to outlast a night's sleep before it means anything; uploads
+    # that arrive but never pair are a far stronger signal, so they alert sooner.
+    "data_health": {
+        "enabled": True,
+        "silent_after_h": 24,
+        "split_after_h": 6,
     },
 }
 
@@ -126,6 +137,11 @@ def _normalise_overrides(overrides: object) -> dict[str, dict[str, Any]]:
                     clean_section[key] = value
             elif path.endswith(".weekday") and value in DAY_NAMES:
                 clean_section[key] = value
+            elif path.endswith("_after_h") and isinstance(value, int | float):
+                # Below an hour this fires on ordinary sync gaps; beyond a week
+                # a broken phone goes unnoticed long enough to lose the data.
+                if not isinstance(value, bool) and 1 <= value <= 24 * 7:
+                    clean_section[key] = value
         if clean_section:
             clean[section] = clean_section
     return clean
@@ -306,6 +322,36 @@ def evaluate_report_delivery(
     return {"status": "allowed", "reason": "enabled"}
 
 
+def evaluate_data_health_delivery(
+    prefs: dict[str, Any],
+    *,
+    now: datetime | None = None,
+) -> dict[str, str]:
+    """Decide whether an ingest-health alert may send now.
+
+    Args:
+        prefs: Raw notification preferences.
+        now: Override for the current time.
+
+    Returns:
+        A decision dict with ``status`` and ``reason``, matching the other
+        delivery evaluators.
+    """
+    now = now or datetime.now().astimezone()
+    effective = effective_notification_prefs(prefs)
+    mutes = active_temporary_mutes(prefs, now=now)
+    muted = _target_is_muted("data_health", mutes)
+    if muted:
+        return {
+            "status": "suppressed",
+            "reason": "temporary_mute",
+            "until": muted["expires_at"],
+        }
+    if not effective["data_health"]["enabled"]:
+        return {"status": "suppressed", "reason": "disabled"}
+    return {"status": "allowed", "reason": "enabled"}
+
+
 def scheduled_report_due(
     prefs: dict[str, Any],
     report_type: str,
@@ -462,6 +508,7 @@ def _mute_label(target: str) -> str:
         "nudges": "Nudges",
         "weekly_insights": "Weekly insights",
         "midweek_report": "Midweek report",
+        "data_health": "Sync alerts",
     }
     return labels.get(target, target)
 
@@ -494,6 +541,12 @@ def format_notification_summary(
             f"{'on' if effective['midweek_report']['enabled'] else 'off'}"
             f" ({effective['midweek_report']['weekday'].title()} "
             f"{effective['midweek_report']['time']})"
+        ),
+        (
+            "- Sync alerts: "
+            f"{'on' if effective['data_health']['enabled'] else 'off'}"
+            f" (silence {effective['data_health']['silent_after_h']}h, "
+            f"not importing {effective['data_health']['split_after_h']}h)"
         ),
     ]
     if mutes:

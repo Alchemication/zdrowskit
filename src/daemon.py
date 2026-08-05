@@ -25,12 +25,13 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Iterator
 
 from config import (
     CONTEXT_DEBOUNCE_S,
+    DATA_HEALTH_REALERT_S,
     GOOGLE_DRIVE_POLL_INTERVAL_S,
     GOOGLE_DRIVE_SERVICE_ACCOUNT,
     HEALTH_DEBOUNCE_S,
@@ -93,6 +94,25 @@ def _save_state(state: dict, path: Path) -> None:
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+
+
+def _older_than(timestamp: str, seconds: float) -> bool:
+    """Return whether a stored ISO timestamp is further back than *seconds*.
+
+    An unparseable timestamp counts as old so a corrupted state file cannot
+    silence an alert forever.
+
+    Args:
+        timestamp: ISO-8601 timestamp previously written to state.
+        seconds: Age threshold.
+    """
+    try:
+        parsed = datetime.fromisoformat(timestamp)
+    except (TypeError, ValueError):
+        return True
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) - parsed > timedelta(seconds=seconds)
 
 
 # ---------------------------------------------------------------------------
@@ -1094,6 +1114,80 @@ class ProfileRuntime:
             self._runners._run_weekly_report()
         if scheduled_report_due(prefs, "midweek_report", now=now):
             self._runners._run_midweek_report()
+
+        self._check_ingest_health(prefs)
+
+    def _check_ingest_health(self, prefs: dict) -> None:
+        """Report a sustained ingest failure once, and its recovery once.
+
+        A broken phone is otherwise completely silent: uploads simply stop, or
+        stop pairing, and the only trace is a daemon log nobody reads. That is
+        survivable for the operator and fatal for a hosted profile, whose owner
+        would conclude the product is dead.
+
+        Args:
+            prefs: Raw notification preferences for this profile.
+        """
+        from http_ingest import assess_ingest_health
+        from notification_prefs import (
+            effective_notification_prefs,
+            evaluate_data_health_delivery,
+        )
+
+        if self.profile is None or self.profile.import_source != "http":
+            return
+
+        settings = effective_notification_prefs(prefs)["data_health"]
+        try:
+            health = assess_ingest_health(
+                self.profile,
+                silent_after_h=settings["silent_after_h"],
+                split_after_h=settings["split_after_h"],
+            )
+        except OSError:
+            logger.exception("Could not assess ingest health for %s", self.profile.name)
+            return
+
+        alerted = self._state.get("data_health_alert")
+        if not health.is_alerting:
+            if alerted:
+                self._state.pop("data_health_alert", None)
+                self._save_state()
+                if evaluate_data_health_delivery(prefs)["status"] == "allowed":
+                    self._poller.send_reply(
+                        "✅ **Sync is working again** — health data is importing "
+                        "normally."
+                    )
+            return
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        if isinstance(alerted, dict) and alerted.get("status") == health.status:
+            last_sent = alerted.get("sent_at")
+            if last_sent and not _older_than(last_sent, DATA_HEALTH_REALERT_S):
+                return
+
+        # Record before sending: a delivery failure must not cause a retry storm
+        # on the next tick, and the log still carries the detail either way.
+        self._state["data_health_alert"] = {"status": health.status, "sent_at": now_iso}
+        self._save_state()
+        logger.warning(
+            "Ingest health for %s is %s: %s",
+            self.profile.name,
+            health.status,
+            health.detail,
+        )
+
+        decision = evaluate_data_health_delivery(prefs)
+        if decision["status"] != "allowed":
+            logger.info(
+                "Ingest health alert suppressed by prefs: %s",
+                decision.get("reason", "unknown"),
+            )
+            return
+        self._poller.send_reply(
+            f"⚠️ **Health data isn't syncing**\n\n{health.detail}\n\n"
+            "Say _mute sync alerts for a week_ to silence this."
+        )
 
     def _poll_google_drive_once(self, *, force_import: bool) -> bool:
         """Delegate one Google Drive poll to the Drive handler.

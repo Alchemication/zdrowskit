@@ -7,7 +7,7 @@ import json
 import argparse
 import gzip
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -18,6 +18,7 @@ from commands import cmd_import
 from daemon import ProfileRuntime
 from http_ingest import (
     HttpIngestManager,
+    assess_ingest_health,
     IngestError,
     TokenRegistry,
     validate_upload,
@@ -470,6 +471,163 @@ class TestPayloadArchive:
             "metrics"
         )
         assert "will not be replayable" in caplog.text
+
+
+class TestIngestHealth:
+    def _state(self, profile: Profile, payload: dict) -> None:
+        """Write an ingest state file for the profile."""
+        path = profile.http_cache / ".ingest_state.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"version": 1, **payload}), encoding="utf-8")
+
+    def _at(self, hours_ago: float) -> str:
+        """Return an ISO timestamp *hours_ago* in the past."""
+        return (datetime.now(timezone.utc) - timedelta(hours=hours_ago)).isoformat()
+
+    def test_a_profile_that_never_uploaded_is_not_nagged(self, tmp_path: Path) -> None:
+        profile = _profile(tmp_path)
+        self._state(profile, {"uploads": {}, "receipts": []})
+
+        health = assess_ingest_health(profile, silent_after_h=24, split_after_h=6)
+
+        # Mid-setup, not broken.
+        assert health.is_alerting is False
+
+    def test_recent_import_is_healthy(self, tmp_path: Path) -> None:
+        profile = _profile(tmp_path)
+        self._state(
+            profile,
+            {
+                "uploads": {
+                    "metrics": {"received_at": self._at(0.2)},
+                    "workouts": {"received_at": self._at(0.2)},
+                },
+                "last_imported_at": self._at(0.2),
+            },
+        )
+
+        assert (
+            assess_ingest_health(
+                profile, silent_after_h=24, split_after_h=6
+            ).is_alerting
+            is False
+        )
+
+    def test_overnight_silence_is_not_an_alert(self, tmp_path: Path) -> None:
+        profile = _profile(tmp_path)
+        self._state(
+            profile,
+            {
+                "uploads": {
+                    "metrics": {"received_at": self._at(9)},
+                    "workouts": {"received_at": self._at(9)},
+                },
+                "last_imported_at": self._at(9),
+            },
+        )
+
+        # A locked phone overnight must never look like a broken one.
+        assert (
+            assess_ingest_health(profile, silent_after_h=24, split_after_h=6).status
+            == "silent"
+        ) is False
+
+    def test_total_silence_past_the_threshold_alerts(self, tmp_path: Path) -> None:
+        profile = _profile(tmp_path)
+        self._state(
+            profile,
+            {
+                "uploads": {
+                    "metrics": {"received_at": self._at(30)},
+                    "workouts": {"received_at": self._at(30)},
+                },
+                "last_imported_at": self._at(30),
+            },
+        )
+
+        health = assess_ingest_health(profile, silent_after_h=24, split_after_h=6)
+
+        assert health.status == "silent"
+        assert "Auto Export" in health.detail
+
+    def test_uploads_that_never_pair_are_reported_with_the_fix(
+        self, tmp_path: Path
+    ) -> None:
+        profile = _profile(tmp_path)
+        self._state(
+            profile,
+            {
+                "uploads": {
+                    "metrics": {"received_at": self._at(0.1)},
+                    "workouts": {"received_at": self._at(0.7)},
+                },
+                "last_imported_at": self._at(9),
+            },
+        )
+
+        health = assess_ingest_health(profile, silent_after_h=24, split_after_h=6)
+
+        assert health.status == "split"
+        assert "same schedule" in health.detail
+
+    def test_one_half_never_configured_is_reported_as_split(
+        self, tmp_path: Path
+    ) -> None:
+        profile = _profile(tmp_path)
+        # Metrics keeps uploading every few minutes; Workouts was never set up.
+        # Only the latest upload is stored, so the age of the problem comes from
+        # first_seen_at, not received_at.
+        self._state(
+            profile,
+            {
+                "uploads": {
+                    "metrics": {
+                        "received_at": self._at(0.1),
+                        "first_seen_at": self._at(30),
+                    }
+                }
+            },
+        )
+
+        health = assess_ingest_health(profile, silent_after_h=24, split_after_h=6)
+
+        assert health.status == "split"
+        assert "Workouts" in health.detail
+
+    def test_failed_import_outranks_the_generic_split_message(
+        self, tmp_path: Path
+    ) -> None:
+        profile = _profile(tmp_path)
+        self._state(
+            profile,
+            {
+                "uploads": {
+                    "metrics": {"received_at": self._at(0.1)},
+                    "workouts": {"received_at": self._at(0.1)},
+                },
+                "last_imported_at": self._at(9),
+                "last_error": {
+                    "failed_at": self._at(1),
+                    "message": "parser rejected the payload",
+                },
+            },
+        )
+
+        health = assess_ingest_health(profile, silent_after_h=24, split_after_h=6)
+
+        assert health.status == "error"
+        assert "parser rejected the payload" in health.detail
+
+    def test_unreadable_state_reports_rather_than_raising(self, tmp_path: Path) -> None:
+        profile = _profile(tmp_path)
+        path = profile.http_cache / ".ingest_state.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{ not json", encoding="utf-8")
+
+        health = assess_ingest_health(profile, silent_after_h=24, split_after_h=6)
+
+        assert health.status == "error"
+        assert str(path) in health.detail
 
 
 class TestPairStatus:

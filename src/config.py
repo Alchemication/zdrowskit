@@ -72,6 +72,8 @@ HTTP_INGEST_MAX_BYTES: int = 64 * 1024 * 1024
 """Maximum accepted Auto Export request body size."""
 HTTP_INGEST_PAIR_WINDOW_S: int = 10 * 60
 """Maximum arrival gap between the Metrics and Workouts halves of an export."""
+DATA_HEALTH_REALERT_S: int = 24 * 60 * 60
+"""How long before an unresolved ingest problem is reported again."""
 
 
 def _env_bool(name: str, default: bool) -> bool:
