@@ -422,10 +422,16 @@ def validate_upload(headers: dict[str, str], body: bytes) -> ValidatedUpload:
             HTTPStatus.UNPROCESSABLE_ENTITY,
             f"{automation_name.title()} automation aggregation must be {label}.",
         )
-    if headers.get("automation-period", "").strip().lower() != "default":
+    # Any Date Range is accepted. A wider Metrics window makes an outage
+    # recoverable instead of permanently lost, and the real protection against
+    # an oversized export is the per-metric and per-workout entry caps below,
+    # which reject with an actionable message. Pinning this to "Default" only
+    # blocked a setting worth using.
+    period = headers.get("automation-period", "").strip()
+    if not period:
         raise IngestError(
             HTTPStatus.UNPROCESSABLE_ENTITY,
-            "Auto Export Date Range must be Default.",
+            "automation-period must be supplied by Auto Export.",
         )
     automation_id = headers.get("automation-id", "").strip()
     session_id = headers.get("session-id", "").strip()
@@ -464,6 +470,7 @@ def validate_upload(headers: dict[str, str], body: bytes) -> ValidatedUpload:
     else:
         _validate_workouts(items)
     _parser_dry_run(payload, automation_name)
+    logger.debug("Validated %s upload over Date Range %r", automation_name, period)
     return ValidatedUpload(
         kind=automation_name,
         automation_id=automation_id,

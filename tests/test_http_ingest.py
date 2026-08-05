@@ -122,11 +122,22 @@ class TestValidateUpload:
         with pytest.raises(IngestError, match="must be Days"):
             validate_upload(headers, _body("metrics"))
 
-    def test_rejects_non_default_period(self) -> None:
+    @pytest.mark.parametrize(
+        "period", ["Default", "Last 7 Days", "Last 30 Days", "Previous 7 Days"]
+    )
+    def test_accepts_any_date_range(self, period: str) -> None:
+        # A wider Metrics window turns an outage into something recoverable;
+        # oversized exports are caught by the entry caps, not by this header.
         headers = _headers("workouts")
-        headers["automation-period"] = "Previous 7 Days"
+        headers["automation-period"] = period
 
-        with pytest.raises(IngestError, match="Date Range must be Default"):
+        assert validate_upload(headers, _body("workouts")).kind == "workouts"
+
+    def test_rejects_a_missing_period_header(self) -> None:
+        headers = _headers("workouts")
+        headers["automation-period"] = "  "
+
+        with pytest.raises(IngestError, match="automation-period"):
             validate_upload(headers, _body("workouts"))
 
     def test_rejects_mixed_or_mislabeled_payload(self) -> None:

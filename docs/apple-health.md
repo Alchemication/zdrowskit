@@ -50,8 +50,8 @@ switched off.
   real cost of push delivery, and the reason to keep the daemon on `KeepAlive`.
 - Depends on Tailscale Funnel, still a Tailscale beta, plus the macOS user being
   logged in and Tailscale running.
-- Accepts `Date Range = Default` only, so historical backfills need a different
-  transport.
+- Bounded by per-metric and per-workout entry caps, so a large historical
+  backfill still needs a different transport.
 - Both automations must arrive within ten minutes of each other to pair.
 - The most setup steps of the three.
 
@@ -103,8 +103,9 @@ Google Drive on a schedule, with no taps required once configured.
 Setup in the app:
 
 1. Create two automations: one for **Metrics**, one for **Workouts**.
-2. For HTTP, use **Date Range = Default**, JSON v2, Metrics aggregation
-   **Days**, and Workouts aggregation **Minutes**.
+2. For HTTP, use JSON v2, Metrics aggregation **Days**, and Workouts
+   aggregation **Minutes**. Set Metrics to **Last 7 Days** and leave
+   Workouts on **Default** — see [choosing date ranges](http-ingest.md#choosing-date-ranges).
 3. Select all metrics you care about, such as steps, energy, HR, HRV, VO2max, mobility, resting heart rate, and sleep analysis.
 4. Set the schedule. Every 5 minutes is recommended because shorter intervals catch more unlock windows.
 

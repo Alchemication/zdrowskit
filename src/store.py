@@ -62,14 +62,43 @@ def open_db(path: Path) -> sqlite3.Connection:
     return connect_db(path, migrate=True)
 
 
+def _workout_coverage(
+    days: list[tuple[DailySnapshot, list[WorkoutSnapshot]]],
+) -> set[str]:
+    """Return the dates this import is entitled to replace workouts for.
+
+    A snapshot exists for every date in *either* payload, so a day carrying no
+    workouts is ambiguous: it may be a genuine rest day inside the Workouts
+    export window, or a day that only the Metrics export reached. Deleting on
+    the second reading destroys history — with Metrics on a 7-day window and
+    Workouts on the default 2-day one, every import would wipe the five days in
+    between.
+
+    The Workouts payload does not state its own window, so it is inferred from
+    the span of dates it actually carries. Rest days inside that span are
+    covered and reconcile correctly; days beyond it are left alone.
+
+    Args:
+        days: Snapshots paired with their collapsed workouts.
+
+    Returns:
+        Dates safe to delete existing workout rows for.
+    """
+    dated = sorted(snapshot.date for snapshot, workouts in days if workouts)
+    if not dated:
+        return set()
+    first, last = dated[0], dated[-1]
+    return {snapshot.date for snapshot, _ in days if first <= snapshot.date <= last}
+
+
 def store_snapshots(conn: sqlite3.Connection, snapshots: list[DailySnapshot]) -> int:
     """Upsert DailySnapshots and their workouts into the database.
 
     Each day is replaced atomically inside its own transaction: the daily row
-    is upserted, existing workout rows for that date are deleted, then the
-    current workouts are inserted. Reverse-geocoding for new coordinates runs
-    in a prefetch pass before the per-day writes start so the SQLite writer
-    is not held open across long network round-trips.
+    is upserted, then workouts are re-inserted for the dates this import
+    actually covers (see :func:`_workout_coverage`). Reverse-geocoding for new
+    coordinates runs in a prefetch pass before the per-day writes start so the
+    SQLite writer is not held open across long network round-trips.
 
     Args:
         conn: Open database connection returned by open_db().
@@ -100,6 +129,8 @@ def store_snapshots(conn: sqlite3.Connection, snapshots: list[DailySnapshot]) ->
     # Resolve locations outside the per-day write txn so network sleeps
     # don't hold the SQLite writer and so cached results survive Ctrl-C.
     prefetch_locations(conn, route_coords, seen_at=now)
+
+    replaceable = _workout_coverage(collapsed_by_day)
 
     stored_workouts = 0
     for index, (s, workouts) in enumerate(collapsed_by_day, start=1):
@@ -166,8 +197,10 @@ def store_snapshots(conn: sqlite3.Connection, snapshots: list[DailySnapshot]) ->
                     now,
                 ),
             )
-            # Clear stale workout rows before re-inserting the current set.
-            conn.execute("DELETE FROM workout WHERE date = ?", (s.date,))
+            # Clear stale workout rows before re-inserting the current set, but
+            # only where this import actually saw the Workouts export.
+            if s.date in replaceable:
+                conn.execute("DELETE FROM workout WHERE date = ?", (s.date,))
             for w in workouts:
                 location_id = resolve_workout_location(
                     conn,

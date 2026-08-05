@@ -197,7 +197,6 @@ Shared settings:
 - Method: `POST`
 - Content type: `application/json`
 - Authorization: `Bearer <profile-token>`
-- Date Range: `Default`
 - JSON format: version 2
 - Batch export: off
 
@@ -206,12 +205,37 @@ Metrics:
 - Automation name: `Metrics`
 - Summarized data: on
 - Aggregation: `Days`
+- Date Range: `Last 7 Days`
 
 Workouts:
 
 - Automation name: `Workouts`
 - Aggregation: `Minutes`
 - Include routes and metadata
+- Date Range: `Default`
+
+## Choosing Date Ranges
+
+Auto Export resends whatever window you choose on every run, so the window is
+how long a sync outage stays recoverable. Anything older than it is lost from
+the automatic path and would need a manual file export.
+
+The two halves deserve different windows because they cost wildly different
+amounts and fail differently:
+
+| | 2 days | 7 days | why |
+|---|---|---|---|
+| Metrics | ~12 KB | ~40 KB | Sleep, HRV, resting HR and steps. Their absence is *invisible* — it silently distorts baselines rather than announcing itself. Cheap enough to widen freely; even `Last 30 Days` is only ~170 KB. |
+| Workouts | ~1.2 MB | ~3 MB | GPS routes are about two thirds of the payload. At roughly 18 uploads a day a wide window costs tens of MB daily off the phone, and triples the archive. A missing workout is *loud* — you know you ran — so it gets noticed and can be re-exported. |
+
+Widening Metrics alone is safe: an import only replaces workouts for the dates
+its Workouts export actually covered, so the extra Metrics days never touch
+workout history. Before that rule existed, this combination deleted every
+workout in the gap on every import.
+
+The entry caps (`MAX_METRIC_ENTRIES`, `MAX_WORKOUTS`) reject a genuinely
+oversized export with an actionable message, so an over-wide window fails
+closed rather than silently.
 
 Auto Export supplies `automation-name`, `automation-id`, `automation-period`,
 `automation-aggregation`, and `session-id` headers automatically. Do not add a
@@ -327,7 +351,7 @@ receiver.
 | Local `/healthz` works, public URL does not | Run `tailscale funnel status`; port 443 must be a Funnel proxy to `http://127.0.0.1:8787`, not a private Tailscale Serve mapping. |
 | `/` returns `404` | Expected. Production exposes `GET /healthz` and authenticated `POST /v1/auto-export`, not a directory listing. |
 | Auto Export gets `401` | Re-enter the exact `Bearer <token>` authorization value or rotate the profile token. |
-| Auto Export gets `422` | Read the returned error; normally Date Range, aggregation, headers, or JSON format differs from the required settings below. |
+| Auto Export gets `422` | Read the returned error; normally aggregation, headers, JSON format, or an oversized export. |
 | `pairing: waiting for the other half` | Only one automation reached the receiver. Check both exist and use the same URL and token. |
 | `pairing: halves arrived too far apart` | Both automations work but run more than ten minutes apart. Put them on the same schedule. |
 | Works until reboot | Enable **Launch Tailscale at login**, confirm the macOS user logged in, then check `tailscale funnel status` and `main.py ingest status`. |
@@ -337,6 +361,6 @@ that the most recent `serve`/`funnel` command owns a given public port. It also
 warns against repeatedly provisioning certificates because certificate rate
 limits can cause long delays.
 
-The production receiver currently accepts `Date Range = Default`. Keep local or
-Google Drive import available for large historical backfills; they remain
-idempotent and can be disabled again after the backfill.
+The receiver accepts any Date Range; the entry caps are what bound an export.
+Keep local or Google Drive import available for large historical backfills;
+they remain idempotent and can be disabled again after the backfill.

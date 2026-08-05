@@ -239,6 +239,98 @@ class TestStoreAndLoad:
         assert load_date_range(in_memory_db) is None
 
 
+class TestWorkoutCoverage:
+    def _run(self, date: str) -> WorkoutSnapshot:
+        """Return a run starting at 07:00 on *date*."""
+        return WorkoutSnapshot(
+            type="Outdoor Run",
+            category="run",
+            start_utc=f"{date}T07:00:00Z",
+            duration_min=30.0,
+        )
+
+    def _count(self, conn: sqlite3.Connection, date: str) -> int:
+        """Return stored workouts on *date*."""
+        return conn.execute(
+            "SELECT COUNT(*) FROM workout WHERE date = ?", (date,)
+        ).fetchone()[0]
+
+    def test_a_wider_metrics_window_never_deletes_older_workouts(
+        self, in_memory_db: sqlite3.Connection
+    ) -> None:
+        store_snapshots(
+            in_memory_db,
+            [
+                DailySnapshot(
+                    date="2026-07-30", steps=9000, workouts=[self._run("2026-07-30")]
+                )
+            ],
+        )
+
+        # Metrics on a 7-day window, Workouts still on the default 2-day one:
+        # the older days arrive carrying no workouts at all. Treating that as
+        # "no workouts happened" would erase real training history on every
+        # single import.
+        store_snapshots(
+            in_memory_db,
+            [
+                DailySnapshot(date=f"2026-08-0{d}", steps=7000, workouts=[])
+                for d in range(1, 6)
+            ]
+            + [DailySnapshot(date="2026-07-30", steps=9000, workouts=[])],
+        )
+
+        assert self._count(in_memory_db, "2026-07-30") == 1
+
+    def test_a_rest_day_inside_the_workout_span_still_reconciles(
+        self, in_memory_db: sqlite3.Connection
+    ) -> None:
+        store_snapshots(
+            in_memory_db,
+            [
+                DailySnapshot(
+                    date="2026-08-02", steps=9000, workouts=[self._run("2026-08-02")]
+                )
+            ],
+        )
+
+        # A later export spans 01-03 and shows nothing on the 2nd, so the user
+        # deleted it in Apple Health and the stored row must go.
+        store_snapshots(
+            in_memory_db,
+            [
+                DailySnapshot(
+                    date="2026-08-01", steps=8000, workouts=[self._run("2026-08-01")]
+                ),
+                DailySnapshot(date="2026-08-02", steps=9000, workouts=[]),
+                DailySnapshot(
+                    date="2026-08-03", steps=8500, workouts=[self._run("2026-08-03")]
+                ),
+            ],
+        )
+
+        assert self._count(in_memory_db, "2026-08-02") == 0
+        assert self._count(in_memory_db, "2026-08-01") == 1
+
+    def test_metrics_only_import_leaves_every_workout_alone(
+        self, in_memory_db: sqlite3.Connection
+    ) -> None:
+        store_snapshots(
+            in_memory_db,
+            [
+                DailySnapshot(
+                    date="2026-08-02", steps=9000, workouts=[self._run("2026-08-02")]
+                )
+            ],
+        )
+
+        store_snapshots(
+            in_memory_db, [DailySnapshot(date="2026-08-02", steps=9500, workouts=[])]
+        )
+
+        assert self._count(in_memory_db, "2026-08-02") == 1
+
+
 class TestUpsertReplacesWorkouts:
     def test_reimport_does_not_duplicate_workouts(
         self, in_memory_db: sqlite3.Connection
