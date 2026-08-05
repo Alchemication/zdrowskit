@@ -532,6 +532,29 @@ class TestIngestHealth:
             == "silent"
         ) is False
 
+    @pytest.mark.parametrize("hours_quiet", [7, 12, 23])
+    def test_quiet_after_a_clean_import_is_never_blamed_on_pairing(
+        self, tmp_path: Path, hours_quiet: int
+    ) -> None:
+        profile = _profile(tmp_path)
+        self._state(
+            profile,
+            {
+                "uploads": {
+                    "metrics": {"received_at": self._at(hours_quiet)},
+                    "workouts": {"received_at": self._at(hours_quiet)},
+                },
+                "last_imported_at": self._at(hours_quiet - 0.01),
+            },
+        )
+
+        health = assess_ingest_health(profile, silent_after_h=24, split_after_h=6)
+
+        # Everything that arrived did import. Telling someone to realign two
+        # automations that fired simultaneously sends them chasing a non-bug;
+        # sustained quiet is the silence threshold's job, not pairing's.
+        assert health.is_alerting is False
+
     def test_total_silence_past_the_threshold_alerts(self, tmp_path: Path) -> None:
         profile = _profile(tmp_path)
         self._state(

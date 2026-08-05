@@ -564,6 +564,12 @@ def assess_ingest_health(
         )
 
     last_import = _parse_iso(state.get("last_imported_at"))
+    if last_import is not None and last_upload <= last_import:
+        # Everything that arrived has imported. The phone has simply gone quiet,
+        # which is only meaningful once it outlasts the silence threshold — so
+        # leave it to that check rather than blaming the pairing window.
+        return IngestHealth(status="ok", detail="Everything received has imported.")
+
     if last_import is not None:
         stalled_for = (now - last_import).total_seconds() / 3600
     else:
