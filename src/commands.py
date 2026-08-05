@@ -397,11 +397,11 @@ def cmd_setup(args: argparse.Namespace) -> None:
     APP_HOME.mkdir(parents=True, exist_ok=True)
     print(f"  app home: {APP_HOME}")
 
-    examples_dir = REPO_ROOT / "examples" / "context"
-    if not examples_dir.exists():
-        print(f"  context: missing bundled examples at {examples_dir}")
+    templates_dir = REPO_ROOT / "src" / "templates" / "context"
+    if not templates_dir.exists():
+        print(f"  context: missing bundled templates at {templates_dir}")
         sys.exit(1)
-    print(f"  context templates: {examples_dir}")
+    print(f"  context templates: {templates_dir}")
 
     if not skip_env:
         env_example = REPO_ROOT / ".env_example"

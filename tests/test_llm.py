@@ -44,10 +44,10 @@ from llm_context import (
     DEFAULT_SOUL_PATH,
     UNFILLED_CONTEXT,
     _is_unfilled,
-    _strip_guidance,
     _recent_history,
     append_history,
     build_messages,
+    load_default_soul,
     load_context,
 )
 from llm_health import (
@@ -154,8 +154,7 @@ class TestLoadContext:
 
         ctx = load_context(tmp_path, prompts_dir=tmp_path)
 
-        default = DEFAULT_SOUL_PATH.read_text(encoding="utf-8")
-        assert ctx["soul"] == _strip_guidance(default)
+        assert ctx["soul"] == load_default_soul()
 
     def test_authoring_guidance_never_reaches_the_model(self, tmp_path: Path) -> None:
         (tmp_path / "conduct.md").write_text("Be exact.")
@@ -693,8 +692,9 @@ class TestBuildMessages:
     ) -> None:
         msgs = build_messages({**ctx, "prompt": "Hello"}, health_data_text="{}")
 
-        default = DEFAULT_SOUL_PATH.read_text(encoding="utf-8").strip()
+        default = load_default_soul().strip()
         assert msgs[0]["content"].startswith(default)
+        assert "<!--" not in msgs[0]["content"]
 
     def test_conduct_is_appended_even_when_a_persona_is_supplied(self) -> None:
         msgs = build_messages(

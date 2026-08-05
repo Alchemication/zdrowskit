@@ -93,7 +93,7 @@ def _build_context(fixture: dict[str, Any]) -> dict[str, str]:
     context["prompt"] = (PROMPTS_DIR / "insights_prompt.md").read_text(encoding="utf-8")
     # Evals pin the default persona so a change to the operator's own soul.md
     # cannot silently move eval results.
-    context["soul"] = llm_context.DEFAULT_SOUL_PATH.read_text(encoding="utf-8")
+    context["soul"] = llm_context.load_default_soul()
     context["conduct"] = llm_context.load_prompt_text(llm_context.CONDUCT_PROMPT)
     if "review_facts" in fixture:
         context["review_facts"] = str(fixture["review_facts"])

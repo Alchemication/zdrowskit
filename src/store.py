@@ -136,9 +136,11 @@ def _workout_coverage(
     Workouts on the default 2-day one, every import would wipe the five days in
     between.
 
-    The Workouts payload does not state its own window, so it is inferred from
-    the span of dates it actually carries. Rest days inside that span are
-    covered and reconcile correctly; days beyond it are left alone.
+    The Workouts payload does not state its own window, so this uses the span
+    between its first and last workout. Rest days represented by Metrics inside
+    that span reconcile correctly. An empty Workouts payload, and rest days at
+    either edge of its window, cannot be distinguished from Metrics-only dates;
+    they are deliberately left alone rather than risking deletion of history.
 
     Args:
         days: Snapshots paired with their collapsed workouts.

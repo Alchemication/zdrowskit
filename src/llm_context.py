@@ -102,6 +102,11 @@ def _strip_guidance(content: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", stripped).strip() + "\n"
 
 
+def load_default_soul() -> str:
+    """Return the shipped default persona without authoring guidance."""
+    return _strip_guidance(DEFAULT_SOUL_PATH.read_text(encoding="utf-8"))
+
+
 def _is_unfilled(content: str) -> bool:
     """Return whether a context file still holds only template scaffolding.
 
@@ -143,7 +148,7 @@ def _load_soul(context_dir: Path) -> str:
         if not _is_unfilled(content):
             return _strip_guidance(content)
         logger.info("Profile soul is an unfilled template, using default: %s", path)
-    return _strip_guidance(DEFAULT_SOUL_PATH.read_text(encoding="utf-8"))
+    return load_default_soul()
 
 
 def _feedback_entry_value(entry: str, field: str) -> str | None:
@@ -294,7 +299,7 @@ def build_messages(
     """
     soul = context.get("soul")
     if not soul or soul == "(not provided)":
-        soul = DEFAULT_SOUL_PATH.read_text(encoding="utf-8")
+        soul = load_default_soul()
     conduct = context.get("conduct") or load_prompt_text(CONDUCT_PROMPT)
     system_content = f"{soul.strip()}\n\n{conduct.strip()}\n"
 

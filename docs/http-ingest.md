@@ -228,10 +228,10 @@ amounts and fail differently:
 | Metrics | ~12 KB | ~40 KB | Sleep, HRV, resting HR and steps. Their absence is *invisible* — it silently distorts baselines rather than announcing itself. Cheap enough to widen freely; even `Last 30 Days` is only ~170 KB. |
 | Workouts | ~1.2 MB | ~3 MB | GPS routes are about two thirds of the payload. At roughly 18 uploads a day a wide window costs tens of MB daily off the phone, and triples the archive. A missing workout is *loud* — you know you ran — so it gets noticed and can be re-exported. |
 
-Widening Metrics alone is safe: an import only replaces workouts for the dates
-its Workouts export actually covered, so the extra Metrics days never touch
-workout history. Before that rule existed, this combination deleted every
-workout in the gap on every import.
+Widening Metrics alone is safe: workout replacement is limited to dates between
+the first and last workout in the paired Workouts payload, so the extra Metrics
+days never touch older workout history. Before that rule existed, this
+combination deleted every workout in the gap on every import.
 
 The entry caps (`MAX_METRIC_ENTRIES`, `MAX_WORKOUTS`) reject a genuinely
 oversized export with an actionable message, so an over-wide window fails
@@ -251,10 +251,11 @@ with an actionable message when the automation settings or payload are wrong.
 Metrics and Workouts are staged independently and imported only after both
 arrive within an hour.
 
-Pairing is no longer what protects the data. Each half is now written on its own
-terms: daily metrics are merged column by column, so an absent field leaves the
-stored reading alone, and workouts are only replaced for dates the Workouts
-export actually covered. Either half can therefore land without erasing the
+Pairing is no longer what protects the data. Daily metrics are merged column by
+column, so an absent field leaves the stored reading alone. Workout replacement
+uses the conservative first-to-last-workout span described above; an empty
+Workouts payload or a rest day at either edge cannot prove coverage, so existing
+rows there are retained. Either half can therefore land without erasing the
 other. Pairing now only decides *when* an import runs, so a nudge reacts to a
 complete picture rather than half of one — which is also why halves arriving
 outside the window are simply deferred rather than lost: the rolling export

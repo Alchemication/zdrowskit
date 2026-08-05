@@ -34,10 +34,12 @@ class TestSetupCommand:
         self, tmp_path: Path, monkeypatch, capsys
     ) -> None:
         repo = tmp_path / "repo"
-        examples = repo / "examples" / "context"
-        examples.mkdir(parents=True)
-        (examples / "me.md").write_text("# Example profile\n", encoding="utf-8")
-        (examples / "strategy.md").write_text("# Example strategy\n", encoding="utf-8")
+        templates = repo / "src" / "templates" / "context"
+        templates.mkdir(parents=True)
+        (templates / "me.md").write_text("# Profile template\n", encoding="utf-8")
+        (templates / "strategy.md").write_text(
+            "# Strategy template\n", encoding="utf-8"
+        )
         (repo / ".env_example").write_text("DEEPSEEK_API_KEY=\n", encoding="utf-8")
 
         app_home = tmp_path / "home" / "zdrowskit"
@@ -52,6 +54,7 @@ class TestSetupCommand:
         assert "created" in output
         assert "profile add" in output
         assert "ingest setup" in output
+        assert str(templates) in output
         assert "Google Drive (recommended)" not in output
         # Setup must not seed a legacy root-level context dir that nothing reads.
         assert not (app_home / "ContextFiles").exists()
@@ -60,7 +63,7 @@ class TestSetupCommand:
         self, tmp_path: Path, monkeypatch, capsys
     ) -> None:
         repo = tmp_path / "repo"
-        (repo / "examples" / "context").mkdir(parents=True)
+        (repo / "src" / "templates" / "context").mkdir(parents=True)
         (repo / ".env_example").write_text("DEEPSEEK_API_KEY=\n", encoding="utf-8")
         (repo / ".env").write_text("DEEPSEEK_API_KEY=secret\n", encoding="utf-8")
 
