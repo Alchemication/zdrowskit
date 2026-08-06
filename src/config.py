@@ -240,6 +240,17 @@ LOCATION_USER_AGENT: str = os.environ.get(
 )
 """User-Agent sent to public reverse-geocoding services."""
 
+EVAL_EXECUTION_ATTEMPTS: int = _env_int("ZDROWSKIT_EVAL_EXECUTION_ATTEMPTS", 3)
+"""Attempts an eval makes to obtain a model response before recording an error.
+
+Providers intermittently return a truncated or malformed structured payload,
+which is a transport fault rather than a judgement the case is measuring.
+Counting one as a failed case understates a model in exactly the comparison
+evals exist to inform, so execution is retried while assertions are not. Three
+attempts clears observed one-off malformed emissions without masking a model
+that cannot produce valid output at all.
+"""
+
 MAX_TOKENS_VERIFICATION: int = _env_int("ZDROWSKIT_MAX_TOKENS_VERIFICATION", 16384)
 """Output token budget for evidence-bound verifier passes.
 

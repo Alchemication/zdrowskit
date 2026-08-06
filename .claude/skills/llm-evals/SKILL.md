@@ -37,7 +37,7 @@ For all of these, the LLM call log replaces the feedback queue as the seed:
 Provenance for silent-failure cases:
 
 - `source_llm_call_id`: the call that produced the silent output.
-- `source_feedback_id`: omit — there is no feedback row.
+- `source_feedback_id`: `null` — state it explicitly rather than omitting it, so a reader can tell "there is no feedback row" from "provenance was never filled in". Never use `0`: it names a feedback row that was never written.
 - `derived_from.hypothesis`: state the reviewer judgment plainly, e.g. "verifier suppressed a reasonable post-run nudge because it read tempo phrasing as a contradiction" or "insights memory dropped the recurring evening-headache pattern that should carry across weeks."
 - `case_kind` is still `real_regression` — the trace is real; only the seed differs.
 

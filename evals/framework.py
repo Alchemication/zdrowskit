@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import math
 import os
 import re
@@ -31,9 +32,11 @@ import llm  # noqa: E402
 import llm_context  # noqa: E402
 import llm_health  # noqa: E402
 from charts import strip_charts  # noqa: E402
-from config import PROMPTS_DIR  # noqa: E402
+from config import EVAL_EXECUTION_ATTEMPTS, PROMPTS_DIR  # noqa: E402
 from context_edit import context_edit_from_tool_call  # noqa: E402
 from tools import all_chat_tools  # noqa: E402
+
+logger = logging.getLogger(__name__)
 
 CASES_DIR = Path(__file__).resolve().parent / "cases"
 DEFAULT_MODEL = llm.DEFAULT_MODEL
@@ -73,7 +76,7 @@ class EvalCase:
     id: str
     feature: str
     case_kind: str
-    source_feedback_id: int
+    source_feedback_id: int | None
     source_llm_call_id: int
     derived_from: dict[str, Any]
     intent: str
@@ -126,12 +129,13 @@ class EvalResult:
     feature: str
     case_kind: str
     model: str
-    source_feedback_id: int
+    source_feedback_id: int | None
     source_llm_call_id: int
     route: dict[str, Any] = field(default_factory=dict)
     assertions: list[AssertionResult] = field(default_factory=list)
     execution: EvalExecution | None = None
     error: str | None = None
+    execution_attempts: int = 1
 
     @property
     def passed(self) -> bool:
@@ -139,6 +143,16 @@ class EvalResult:
         return self.error is None and all(
             assertion.passed for assertion in self.assertions
         )
+
+    @property
+    def errored(self) -> bool:
+        """Whether no verdict was reached because execution never succeeded.
+
+        Distinct from a failed case: the model was never successfully asked, so
+        the outcome says nothing about its quality and must not be scored as
+        though it did.
+        """
+        return self.error is not None
 
     @property
     def failures(self) -> list[AssertionResult]:
@@ -288,64 +302,109 @@ def run_case(
         source_feedback_id=case.source_feedback_id,
         source_llm_call_id=case.source_llm_call_id,
     )
-    try:
-        if case.feature == "chat":
-            result.route = _eval_route(
-                feature=case.feature,
-                primary=model,
-                fallback_models=[],
-                reasoning_effort=reasoning_effort,
-                temperature=temperature,
-                source="eval_cli",
-            )
-            execution = _run_chat_case(
+    for attempt in range(EVAL_EXECUTION_ATTEMPTS):
+        try:
+            _execute_case(
                 case,
+                result,
                 model=model,
                 max_tool_iterations=max_tool_iterations,
                 reasoning_effort=reasoning_effort,
                 temperature=temperature,
                 cache=cache,
-                refresh_cache=refresh_cache,
+                # A retry must not be served the response that just failed.
+                refresh_cache=refresh_cache or attempt > 0,
             )
-        elif case.feature == "verification_judge":
-            from evals.run_verify import run_verification_judge_case
-
-            execution, result.model, result.route = run_verification_judge_case(
-                case,
-                model=model,
-                reasoning_effort=reasoning_effort,
-                temperature=temperature,
-                cache=cache,
-                refresh_cache=refresh_cache,
-            )
-        elif case.feature == "insights":
-            from evals.run_insights import run_insights_case
-
-            execution, result.model, result.route = run_insights_case(
-                case,
-                model=model,
-                max_tool_iterations=max_tool_iterations,
-                reasoning_effort=reasoning_effort,
-                temperature=temperature,
-                cache=cache,
-                refresh_cache=refresh_cache,
-            )
-        else:
-            raise ValueError(f"Unsupported eval feature: {case.feature}")
-        result.execution = execution
-        result.assertions = run_assertions(case.assertions, execution)
-        if all(assertion.passed for assertion in result.assertions):
-            result.assertions.extend(
-                run_judge_assertions(
-                    case,
-                    execution,
-                    cache=cache,
-                    refresh_cache=refresh_cache,
+            result.error = None
+            break
+        except Exception as exc:
+            result.error = f"{type(exc).__name__}: {exc}"
+            result.execution_attempts = attempt + 1
+            if attempt + 1 < EVAL_EXECUTION_ATTEMPTS:
+                logger.warning(
+                    "Eval case %s execution failed (attempt %d/%d), retrying: %s",
+                    case.id,
+                    attempt + 1,
+                    EVAL_EXECUTION_ATTEMPTS,
+                    result.error,
                 )
+    if result.error is not None:
+        return result
+
+    result.assertions = run_assertions(case.assertions, execution=result.execution)
+    if all(assertion.passed for assertion in result.assertions):
+        result.assertions.extend(
+            run_judge_assertions(
+                case,
+                result.execution,
+                cache=cache,
+                refresh_cache=refresh_cache,
             )
-    except Exception as exc:
-        result.error = f"{type(exc).__name__}: {exc}"
+        )
     return result
+
+
+def _execute_case(
+    case: EvalCase,
+    result: EvalResult,
+    *,
+    model: str,
+    max_tool_iterations: int,
+    reasoning_effort: str | None,
+    temperature: float | None,
+    cache: EvalCache | None,
+    refresh_cache: bool,
+) -> None:
+    """Obtain one model response for a case, populating route and execution.
+
+    Separated from assertion evaluation so a transient provider fault can be
+    retried without re-running deterministic assertions, and so an assertion
+    bug cannot be mistaken for one.
+    """
+    if case.feature == "chat":
+        result.route = _eval_route(
+            feature=case.feature,
+            primary=model,
+            fallback_models=[],
+            reasoning_effort=reasoning_effort,
+            temperature=temperature,
+            source="eval_cli",
+        )
+        execution = _run_chat_case(
+            case,
+            model=model,
+            max_tool_iterations=max_tool_iterations,
+            reasoning_effort=reasoning_effort,
+            temperature=temperature,
+            cache=cache,
+            refresh_cache=refresh_cache,
+        )
+    elif case.feature == "verification_judge":
+        from evals.run_verify import run_verification_judge_case
+
+        execution, result.model, result.route = run_verification_judge_case(
+            case,
+            model=model,
+            reasoning_effort=reasoning_effort,
+            temperature=temperature,
+            cache=cache,
+            refresh_cache=refresh_cache,
+        )
+    elif case.feature == "insights":
+        from evals.run_insights import run_insights_case
+
+        execution, result.model, result.route = run_insights_case(
+            case,
+            model=model,
+            max_tool_iterations=max_tool_iterations,
+            reasoning_effort=reasoning_effort,
+            temperature=temperature,
+            cache=cache,
+            refresh_cache=refresh_cache,
+        )
+    else:
+        raise ValueError(f"Unsupported eval feature: {case.feature}")
+    result.execution = execution
 
 
 def _eval_route(
@@ -539,7 +598,11 @@ def print_results(results: list[EvalResult]) -> None:
             result.feature,
             result.case_kind,
             result.model.split("/")[-1],
-            f"fb#{result.source_feedback_id}/call#{result.source_llm_call_id}",
+            (
+                f"fb#{result.source_feedback_id}/call#{result.source_llm_call_id}"
+                if result.source_feedback_id is not None
+                else f"call#{result.source_llm_call_id}"
+            ),
             _format_latency(execution),
             _format_cost(execution),
             "[green]PASS[/green]" if result.passed else "[red]FAIL[/red]",
@@ -661,20 +724,47 @@ def _format_summary_metrics(results: list[EvalResult]) -> str:
     return "LLM summary: " + " | ".join(parts)
 
 
+def _score_counts(results: list[EvalResult]) -> tuple[int, int, int, float]:
+    """Return (passed, failed, errored, accuracy) with errors excluded.
+
+    Accuracy is computed only over cases that actually reached a verdict. A
+    case whose execution never succeeded says nothing about the model, and
+    folding it into the denominator makes a provider hiccup look like a
+    quality difference in exactly the comparison evals exist to inform.
+    """
+    errored = sum(1 for result in results if result.errored)
+    scored = [result for result in results if not result.errored]
+    passed = sum(1 for result in scored if result.passed)
+    failed = len(scored) - passed
+    accuracy = (passed / len(scored) * 100.0) if scored else 0.0
+    return passed, failed, errored, accuracy
+
+
 def _format_pass_fail_summary(results: list[EvalResult]) -> str:
     """Build a compact pass/fail summary for the result footer."""
-    passed = sum(1 for result in results if result.passed)
-    failed = len(results) - passed
-    accuracy = (passed / len(results) * 100.0) if results else 0.0
-    return f"Accuracy: {accuracy:.1f}% | Passed: {passed} | Failed: {failed}"
+    passed, failed, errored, accuracy = _score_counts(results)
+    summary = f"Accuracy: {accuracy:.1f}% | Passed: {passed} | Failed: {failed}"
+    if errored:
+        summary += f" | Errored: {errored}"
+    return summary
 
 
 def _format_failed_case_summary(results: list[EvalResult]) -> str | None:
     """Build a compact failed-case list for the result footer."""
-    failed_case_ids = [result.case_id for result in results if not result.passed]
+    failed_case_ids = [
+        result.case_id for result in results if not result.passed and not result.errored
+    ]
     if not failed_case_ids:
         return None
     return "Failed cases: " + ", ".join(failed_case_ids)
+
+
+def _format_errored_case_summary(results: list[EvalResult]) -> str | None:
+    """Build a compact errored-case list for the result footer."""
+    errored_case_ids = [result.case_id for result in results if result.errored]
+    if not errored_case_ids:
+        return None
+    return "Errored cases: " + ", ".join(errored_case_ids)
 
 
 def _summary_rows(
@@ -683,17 +773,20 @@ def _summary_rows(
     text_cls: type | None = None,
 ) -> list[tuple[str, Any]]:
     """Build rich-summary rows for the eval footer."""
-    passed = sum(1 for result in results if result.passed)
-    failed = len(results) - passed
-    accuracy = (passed / len(results) * 100.0) if results else 0.0
+    passed, failed, errored, accuracy = _score_counts(results)
     rows: list[tuple[str, Any]] = [
         ("Accuracy", _render_accuracy_value(accuracy, text_cls=text_cls)),
         ("Passed", str(passed)),
         ("Failed", str(failed)),
     ]
+    if errored:
+        rows.append(("Errored", str(errored)))
     failed_summary = _format_failed_case_summary(results)
     if failed_summary is not None:
         rows.append(("Failed Cases", failed_summary.removeprefix("Failed cases: ")))
+    errored_summary = _format_errored_case_summary(results)
+    if errored_summary is not None:
+        rows.append(("Errored Cases", errored_summary.removeprefix("Errored cases: ")))
     if len(results) <= 1:
         return rows
 
@@ -764,11 +857,15 @@ def _percentile_nearest_rank(values: list[float], percentile: float) -> float:
 
 
 def _case_from_dict(raw: dict[str, Any], path: Path) -> EvalCase:
+    # source_feedback_id is deliberately absent from this set. Silent-failure
+    # cases — a suppressed report, a stripped memory block, a skipped tool call
+    # — are seeded from the call log because no thumbs-down can ever exist for
+    # them, and requiring the field forced a 0 sentinel that claims a feedback
+    # row that was never written.
     required = {
         "id",
         "feature",
         "case_kind",
-        "source_feedback_id",
         "source_llm_call_id",
         "derived_from",
         "intent",
@@ -811,7 +908,11 @@ def _case_from_dict(raw: dict[str, Any], path: Path) -> EvalCase:
         id=str(raw["id"]),
         feature=str(raw["feature"]),
         case_kind=str(raw["case_kind"]),
-        source_feedback_id=int(raw["source_feedback_id"]),
+        source_feedback_id=(
+            int(raw["source_feedback_id"])
+            if raw.get("source_feedback_id") is not None
+            else None
+        ),
         source_llm_call_id=int(raw["source_llm_call_id"]),
         derived_from=dict(raw["derived_from"]),
         intent=str(raw["intent"]),

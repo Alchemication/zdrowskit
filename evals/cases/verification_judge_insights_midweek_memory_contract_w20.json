@@ -2,7 +2,7 @@
   "id": "verification_judge_insights_midweek_memory_contract_w20",
   "feature": "verification_judge",
   "case_kind": "synthetic_negative",
-  "source_feedback_id": 0,
+  "source_feedback_id": null,
   "source_llm_call_id": 808,
   "derived_from": {
     "feedback_id": null,
