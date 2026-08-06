@@ -2,7 +2,7 @@
   "id": "insights_midweek_memory_current_week_w20",
   "feature": "insights",
   "case_kind": "synthetic_negative",
-  "source_feedback_id": 0,
+  "source_feedback_id": null,
   "source_llm_call_id": 808,
   "derived_from": {
     "feedback_id": null,

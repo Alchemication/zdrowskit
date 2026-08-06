@@ -99,8 +99,8 @@ ZDROWSKIT_MAX_TOKENS_CHAT=4096
 ZDROWSKIT_MAX_TOKENS_NUDGE=4096
 ZDROWSKIT_MAX_TOKENS_NOTIFY=512
 ZDROWSKIT_MAX_TOKENS_ADD_CLONE=512
-ZDROWSKIT_MAX_TOKENS_VERIFICATION=8192
-ZDROWSKIT_MAX_TOKENS_VERIFICATION_REWRITE=4096
+ZDROWSKIT_MAX_TOKENS_VERIFICATION=16384
+ZDROWSKIT_MAX_TOKENS_VERIFICATION_REWRITE=16384
 ```
 
 ## API Keys
@@ -122,13 +122,19 @@ Chat remains unverified because it is interactive and latency-sensitive.
 
 The default verifier uses `deepseek/deepseek-v4-pro` with `reasoning_effort=high` (engages DeepSeek thinking) and falls back to Opus 4.8 with the same effort sent natively, no temperature. Bounded rewrites stay on Flash by default, also with `reasoning_effort=high` and no temperature — DeepSeek translates `high` into thinking mode via `extra_body` while Anthropic uses it natively, so the same per-feature setting works across both providers.
 
+A rewrite reproduces the entire draft and applies corrections to it, so its
+token budget is derived as twice the largest writer budget rather than set on
+its own. When it was a fixed 4096 against an 8192 writer, full-length reports
+could not fit before corrections: the rewriter exhausted its budget, returned
+nothing, and a fixable `revise` verdict became a suppressed report.
+
 ```env
 # Optional overrides:
 ZDROWSKIT_ENABLE_LLM_VERIFICATION=0
 ZDROWSKIT_VERIFICATION_MODEL=deepseek/deepseek-v4-pro
 ZDROWSKIT_VERIFICATION_REWRITE_MODEL=deepseek/deepseek-v4-flash
-ZDROWSKIT_MAX_TOKENS_VERIFICATION=8192
-ZDROWSKIT_MAX_TOKENS_VERIFICATION_REWRITE=4096
+ZDROWSKIT_MAX_TOKENS_VERIFICATION=16384
+ZDROWSKIT_MAX_TOKENS_VERIFICATION_REWRITE=16384
 ZDROWSKIT_MAX_VERIFICATION_REVISIONS=1
 ZDROWSKIT_VERIFY_INSIGHTS=1
 ZDROWSKIT_VERIFY_COACH=1

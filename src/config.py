@@ -240,14 +240,42 @@ LOCATION_USER_AGENT: str = os.environ.get(
 )
 """User-Agent sent to public reverse-geocoding services."""
 
-MAX_TOKENS_VERIFICATION: int = _env_int("ZDROWSKIT_MAX_TOKENS_VERIFICATION", 8192)
-"""Output token budget for evidence-bound verifier passes."""
+EVAL_EXECUTION_ATTEMPTS: int = _env_int("ZDROWSKIT_EVAL_EXECUTION_ATTEMPTS", 3)
+"""Attempts an eval makes to obtain a model response before recording an error.
+
+Providers intermittently return a truncated or malformed structured payload,
+which is a transport fault rather than a judgement the case is measuring.
+Counting one as a failed case understates a model in exactly the comparison
+evals exist to inform, so execution is retried while assertions are not. Three
+attempts clears observed one-off malformed emissions without masking a model
+that cannot produce valid output at all.
+"""
+
+MAX_TOKENS_VERIFICATION: int = _env_int("ZDROWSKIT_MAX_TOKENS_VERIFICATION", 16384)
+"""Output token budget for evidence-bound verifier passes.
+
+A verifier emits one structured issue per finding, with quote, problem,
+correction, and evidence, on top of its own reasoning tokens. Audits of a
+full-length report were reaching the previous 8192 ceiling exactly and
+returning nothing, which reads downstream as a verifier failure rather than as
+a truncated one. Doubling it puts the observed worst case at half the budget.
+"""
 
 MAX_TOKENS_VERIFICATION_REWRITE: int = _env_int(
     "ZDROWSKIT_MAX_TOKENS_VERIFICATION_REWRITE",
-    4096,
+    2 * max(MAX_TOKENS_INSIGHTS, MAX_TOKENS_COACH),
 )
-"""Output token budget for bounded verification rewrites."""
+"""Output token budget for bounded verification rewrites.
+
+A rewrite reproduces the whole draft and applies corrections to it, so its job
+is strictly larger than the writer's and it needs room for reasoning on top.
+The previous fixed 4096 was half the writer's ceiling: a full-length report
+could not fit even before corrections, so the rewriter burned the budget and
+returned empty, and a fixable "revise" became a suppressed report.
+
+Derived from the writer budgets rather than set independently so raising a
+report ceiling cannot silently strand the rewriter below it again.
+"""
 
 DEEPSEEK_PRO_MODEL: str = os.environ.get(
     "ZDROWSKIT_DEEPSEEK_PRO_MODEL",

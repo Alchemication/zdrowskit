@@ -179,7 +179,9 @@ class TestCaseLoading:
 
         assert case.feature == "verification_judge"
         assert case.case_kind == "synthetic_negative"
-        assert case.source_feedback_id == 0
+        # Silent-failure case: no thumbs-down can exist for a memory block
+        # the user never sees, so there is no feedback row to point at.
+        assert case.source_feedback_id is None
         assert case.source_llm_call_id == 808
         assert case.derived_from["trace_id"] == 551
         assert case.fixture["kind"] == "insights"
@@ -196,7 +198,9 @@ class TestCaseLoading:
 
         assert case.feature == "insights"
         assert case.case_kind == "synthetic_negative"
-        assert case.source_feedback_id == 0
+        # Silent-failure case: no thumbs-down can exist for a memory block
+        # the user never sees, so there is no feedback row to point at.
+        assert case.source_feedback_id is None
         assert case.source_llm_call_id == 808
         assert case.derived_from["trace_id"] == 551
         assert case.derived_from["latest_completed_insights_call_id"] == 852
