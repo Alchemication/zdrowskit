@@ -240,14 +240,31 @@ LOCATION_USER_AGENT: str = os.environ.get(
 )
 """User-Agent sent to public reverse-geocoding services."""
 
-MAX_TOKENS_VERIFICATION: int = _env_int("ZDROWSKIT_MAX_TOKENS_VERIFICATION", 8192)
-"""Output token budget for evidence-bound verifier passes."""
+MAX_TOKENS_VERIFICATION: int = _env_int("ZDROWSKIT_MAX_TOKENS_VERIFICATION", 16384)
+"""Output token budget for evidence-bound verifier passes.
+
+A verifier emits one structured issue per finding, with quote, problem,
+correction, and evidence, on top of its own reasoning tokens. Audits of a
+full-length report were reaching the previous 8192 ceiling exactly and
+returning nothing, which reads downstream as a verifier failure rather than as
+a truncated one. Doubling it puts the observed worst case at half the budget.
+"""
 
 MAX_TOKENS_VERIFICATION_REWRITE: int = _env_int(
     "ZDROWSKIT_MAX_TOKENS_VERIFICATION_REWRITE",
-    4096,
+    2 * max(MAX_TOKENS_INSIGHTS, MAX_TOKENS_COACH),
 )
-"""Output token budget for bounded verification rewrites."""
+"""Output token budget for bounded verification rewrites.
+
+A rewrite reproduces the whole draft and applies corrections to it, so its job
+is strictly larger than the writer's and it needs room for reasoning on top.
+The previous fixed 4096 was half the writer's ceiling: a full-length report
+could not fit even before corrections, so the rewriter burned the budget and
+returned empty, and a fixable "revise" became a suppressed report.
+
+Derived from the writer budgets rather than set independently so raising a
+report ceiling cannot silently strand the rewriter below it again.
+"""
 
 DEEPSEEK_PRO_MODEL: str = os.environ.get(
     "ZDROWSKIT_DEEPSEEK_PRO_MODEL",
