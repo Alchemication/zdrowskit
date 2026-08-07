@@ -23,7 +23,6 @@ from rich.progress import (
 
 from evals import leaderboard
 from evals.framework import (
-    DEFAULT_MODEL,
     EVAL_TEMPERATURE,
     EvalCache,
     EvalCase,
@@ -64,7 +63,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run feedback-derived evals.")
     parser.add_argument("cases", nargs="*", help="Case IDs to run. Default: all.")
     parser.add_argument("--feature", help="Run only cases for this feature.")
-    parser.add_argument("--model", default=DEFAULT_MODEL, help="litellm model string.")
+    parser.add_argument(
+        "--model",
+        default=None,
+        help=(
+            "litellm model string. Default: whatever each case's feature "
+            "routes to in production, so a green suite means the models you "
+            "actually ship are green."
+        ),
+    )
     parser.add_argument(
         "--details",
         action="store_true",
@@ -78,27 +85,42 @@ def main() -> None:
     )
     parser.add_argument(
         "--reasoning-effort",
-        choices=["none", "low", "medium", "high"],
-        default="none",
-        help="Reasoning effort hint passed to the LLM for eval calls.",
+        choices=["production", "none", "low", "medium", "high"],
+        default="production",
+        help="Reasoning effort for eval calls. Default: the production route's.",
     )
     parser.add_argument(
         "--no-temperature",
         action="store_true",
         help=(
             "Omit the temperature parameter from LLM calls. Required for "
-            "models that reject it (e.g. claude-opus-4-7)."
+            "models that reject it (e.g. claude-opus-5)."
         ),
     )
     parser.add_argument(
-        "--no-cache",
+        "--cache",
         action="store_true",
-        help="Disable the local SQLite cache for eval LLM responses.",
+        help=(
+            "Reuse cached eval LLM responses. Off by default: a cached "
+            "response is one frozen sample, which hides the run-to-run "
+            "variation these evals exist to measure. Use it while iterating "
+            "on assertions, never to judge a model."
+        ),
     )
     parser.add_argument(
         "--refresh-cache",
         action="store_true",
-        help="Ignore cached eval responses and overwrite them with fresh ones.",
+        help="With --cache, ignore cached responses and overwrite them.",
+    )
+    parser.add_argument(
+        "--repeat",
+        type=int,
+        default=1,
+        help=(
+            "Run each case N times and report a per-case pass rate. Model "
+            "output varies between identical runs, so a single run is one "
+            "sample, not a verdict. Always uncached."
+        ),
     )
     parser.add_argument(
         "--record",
@@ -111,8 +133,15 @@ def main() -> None:
         help="Allow recording even if the same run fingerprint already exists.",
     )
     args = parser.parse_args()
-    if args.no_cache and args.refresh_cache:
-        parser.error("--refresh-cache cannot be used with --no-cache")
+    if args.refresh_cache and not args.cache:
+        parser.error("--refresh-cache requires --cache")
+    if args.repeat < 1:
+        parser.error("--repeat must be at least 1")
+    if args.repeat > 1 and args.cache:
+        parser.error(
+            "--repeat cannot be used with --cache: repeated runs would replay "
+            "one cached response and report it as stability."
+        )
     if args.record_duplicate and not args.record:
         parser.error("--record-duplicate requires --record")
 
@@ -128,7 +157,7 @@ def main() -> None:
 
     reasoning_effort = _normalize_reasoning_effort(args.reasoning_effort)
     temperature = None if args.no_temperature else EVAL_TEMPERATURE
-    cache = None if args.no_cache else EvalCache()
+    cache = EvalCache() if args.cache else None
     results = _run_selected_cases(
         selected,
         model=args.model,
@@ -137,6 +166,7 @@ def main() -> None:
         temperature=temperature,
         cache=cache,
         refresh_cache=args.refresh_cache,
+        repeat=args.repeat,
     )
     print_results(results)
     if args.details:
@@ -168,14 +198,15 @@ def main() -> None:
 def _run_selected_cases(
     cases: Iterable[EvalCase],
     *,
-    model: str,
+    model: str | None,
     max_tool_iterations: int,
     reasoning_effort: str | None = None,
     temperature: float | None = EVAL_TEMPERATURE,
     cache: EvalCache | None = None,
     refresh_cache: bool = False,
+    repeat: int = 1,
 ):
-    selected = list(cases)
+    selected = [case for case in cases for _ in range(max(repeat, 1))]
     if len(selected) <= 1:
         return [
             run_case(
@@ -217,7 +248,12 @@ def _run_selected_cases(
 
 
 def _normalize_reasoning_effort(value: str) -> str | None:
-    """Normalize CLI reasoning effort to the llm.call_llm convention."""
+    """Normalize CLI reasoning effort to the llm.call_llm convention.
+
+    None means reasoning off. The "production" sentinel passes through so
+    run_case can inherit the route's own effort — distinct from "none", which
+    explicitly disables reasoning for a feature production may run with it on.
+    """
     return None if value == "none" else value
 
 

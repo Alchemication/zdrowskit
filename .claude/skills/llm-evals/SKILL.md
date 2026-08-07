@@ -76,6 +76,36 @@ Template:
 
 For prompt/tool behavior changes, run the relevant mocked tests plus the specific eval cases that represent the affected feedback cluster.
 
+## Run-to-run variability
+
+A single run is one sample, not a verdict. Identical inputs produce different
+output between runs, and for graded outputs the variation is not only wording:
+the verifier returns a *subset* of the issues it finds, so a draft with four
+defects can be flagged for two of them on one run and a different two on the
+next. A case asserting on one specific defect then passes or fails on a coin
+flip while looking entirely deterministic.
+
+- **Use `--repeat N` whenever a result will inform a decision** — adding a
+  case, judging a prompt change, comparing models. The summary reports a
+  per-case pass rate and marks anything strictly between 0 and N as `FLAKY`.
+  A case at 2/3 has told you almost nothing yet.
+- **Caching is off by default, and `--repeat` refuses to run with it.** A
+  cached response is one frozen sample replayed, so a cached suite reports
+  perfect stability however variable the model actually is. `--cache` exists
+  for iterating on assertions against a fixed response; never use it to judge
+  a model.
+- **A consistent 0/N is a healthy result**, not a broken case: it documents a
+  real gap. Flakiness is the dangerous state, because one run reports it as a
+  clean pass or a clean failure with equal confidence.
+
+When a case is flaky, suspect the fixture before the model. A fixture carrying
+several independent defects measures which one the model chose to report.
+Reduce it to a single defect — while keeping the artifact structurally
+complete, since a verifier rejects an incomplete draft on structure alone and
+never reaches its claims. Only once the fixture isolates one behavior is
+residual flakiness a finding about the model. Never loosen an assertion merely
+to turn a case green.
+
 ## Running evals
 
 Use `evals.run` for one selected run:
@@ -84,6 +114,7 @@ Use `evals.run` for one selected run:
 uv run python -m evals.run
 uv run python -m evals.run --feature chat --record
 uv run python -m evals.run chat_log_life_disruption --details
+uv run python -m evals.run --feature verification_judge --repeat 3
 ```
 
 Use `evals.matrix` for model or route comparisons:

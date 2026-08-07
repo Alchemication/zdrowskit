@@ -1110,7 +1110,9 @@ class TestCallLlm:
             reasoning_effort="high",
         )
         kwargs = mock_litellm.completion.call_args[1]
-        assert kwargs["reasoning_effort"] == "high"
+        # ANTHROPIC_OPUS_MODEL is Opus 5, which takes effort via output_config.
+        assert kwargs["output_config"] == {"effort": "high"}
+        assert kwargs["thinking"] == {"type": "adaptive"}
 
     @patch("llm.litellm")
     def test_reasoning_effort_omitted_by_default(self, mock_litellm: MagicMock) -> None:
@@ -1206,7 +1208,7 @@ class TestCallLlm:
 
         kwargs = mock_litellm.completion.call_args[1]
         assert "extra_body" not in kwargs
-        assert kwargs["reasoning_effort"] == "high"
+        assert kwargs["output_config"] == {"effort": "high"}
 
     @patch("llm.litellm")
     def test_reasoning_effort_forces_temperature_to_one(
@@ -1225,7 +1227,7 @@ class TestCallLlm:
         )
         kwargs = mock_litellm.completion.call_args[1]
         assert kwargs["temperature"] == 1.0
-        assert kwargs["reasoning_effort"] == "medium"
+        assert kwargs["output_config"] == {"effort": "medium"}
 
     @patch("llm.litellm")
     def test_temperature_preserved_without_reasoning(
@@ -1399,7 +1401,7 @@ class TestCallLlm:
         # Anthropic attempt: native reasoning_effort, no extra_body.
         anthropic_kwargs = mock_litellm.completion.call_args_list[0].kwargs
         assert "extra_body" not in anthropic_kwargs
-        assert anthropic_kwargs["reasoning_effort"] == "high"
+        assert anthropic_kwargs["output_config"] == {"effort": "high"}
         # DeepSeek fallback attempt: effort translated into extra_body.
         deepseek_kwargs = mock_litellm.completion.call_args_list[1].kwargs
         assert deepseek_kwargs["extra_body"] == {"thinking": {"type": "enabled"}}
@@ -1558,6 +1560,56 @@ class TestCallWithRetry:
         assert kwargs["temperature"] == 0.7
         assert "reasoning_effort" not in kwargs
 
+    def test_opus5_attempt_uses_adaptive_thinking_and_output_config(self) -> None:
+        """Opus 5 rejects reasoning_effort; it takes adaptive thinking + effort."""
+        kwargs = _completion_kwargs_for_model(
+            {
+                "model": "anthropic/claude-opus-5",
+                "messages": [],
+                "max_tokens": 10,
+                "reasoning_effort": "high",
+            },
+            "anthropic/claude-opus-5",
+        )
+
+        assert "reasoning_effort" not in kwargs
+        assert kwargs["thinking"] == {"type": "adaptive"}
+        assert kwargs["output_config"] == {"effort": "high"}
+        # Must be top-level: this litellm version forwards extra_body to
+        # Anthropic verbatim and the API rejects the unknown field.
+        assert "extra_body" not in kwargs
+
+    def test_opus4_attempt_keeps_native_reasoning_effort(self) -> None:
+        """The older Opus still takes reasoning_effort and remains the fallback."""
+        kwargs = _completion_kwargs_for_model(
+            {
+                "model": "anthropic/claude-opus-4-8",
+                "messages": [],
+                "max_tokens": 10,
+                "reasoning_effort": "high",
+            },
+            "anthropic/claude-opus-4-8",
+        )
+
+        assert kwargs["reasoning_effort"] == "high"
+        assert "thinking" not in kwargs
+        assert "output_config" not in kwargs
+
+    def test_opus5_attempt_forces_temperature_to_one(self) -> None:
+        """Opus 5 accepts temperature only at 1.0 when thinking is engaged."""
+        kwargs = _completion_kwargs_for_model(
+            {
+                "model": "anthropic/claude-opus-5",
+                "messages": [],
+                "max_tokens": 10,
+                "temperature": 0.0,
+                "reasoning_effort": "high",
+            },
+            "anthropic/claude-opus-5",
+        )
+
+        assert kwargs["temperature"] == 1.0
+
     def test_deepseek_attempt_keeps_response_format(self) -> None:
         response_format = {"type": "json_object"}
 
@@ -1707,7 +1759,9 @@ class TestCallWithRetry:
 
         assert "extra_body" not in kwargs
 
-    def test_anthropic_attempt_keeps_reasoning_effort_and_temperature_one(self) -> None:
+    def test_anthropic_attempt_translates_effort_and_forces_temperature_one(
+        self,
+    ) -> None:
         kwargs = _completion_kwargs_for_model(
             {
                 "model": DEFAULT_MODEL,
@@ -1720,8 +1774,10 @@ class TestCallWithRetry:
         )
 
         assert kwargs["model"] == ANTHROPIC_OPUS_MODEL
+        # Opus 5 accepts temperature only at 1.0 once thinking is engaged.
         assert kwargs["temperature"] == 1.0
-        assert kwargs["reasoning_effort"] == "medium"
+        assert kwargs["output_config"] == {"effort": "medium"}
+        assert kwargs["thinking"] == {"type": "adaptive"}
 
 
 class TestAppendHistory:

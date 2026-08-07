@@ -39,7 +39,7 @@ def compute_run_fingerprint(
     *,
     git_sha: str,
     case_set_id: str,
-    requested_model: str,
+    requested_model: str | None,
     reasoning_effort: str | None,
     max_tool_iterations: int,
     route_set_id: str,
@@ -68,7 +68,7 @@ def build_run_record(
     *,
     results: list[EvalResult],
     case_ids: list[str],
-    requested_model: str,
+    requested_model: str | None,
     reasoning_effort: str | None,
     max_tool_iterations: int,
     feature_filter: str | None,
@@ -166,7 +166,7 @@ def render_leaderboard_markdown(runs: list[dict[str, Any]]) -> str:
                 "| "
                 + " | ".join(
                     [
-                        row["requested_model"].split("/")[-1],
+                        _format_requested_model(row["requested_model"]),
                         _display_reasoning_effort(row.get("reasoning_effort")),
                         _format_percent(float(summary["accuracy"])),
                         str(summary["passed"]),
@@ -897,11 +897,22 @@ def write_leaderboard_html(
     return content
 
 
+def _format_requested_model(requested_model: str | None) -> str:
+    """Render the requested model, or note that production routes were used.
+
+    A run without an explicit --model asks each feature's own production
+    route, so there is no single model to name.
+    """
+    if not requested_model:
+        return "production routes"
+    return requested_model.split("/")[-1]
+
+
 def record_run(
     *,
     results: list[EvalResult],
     case_ids: list[str],
-    requested_model: str,
+    requested_model: str | None,
     reasoning_effort: str | None,
     max_tool_iterations: int,
     feature_filter: str | None,

@@ -48,7 +48,7 @@ uv run python -m evals.run --feature insights           # insights writer cases
 uv run python -m evals.run --details                    # debug failed cases
 uv run python -m evals.run --record                     # persist a run to evals/leaderboard/runs.jsonl
 uv run python -m evals.matrix --feature chat --models deepseek/deepseek-v4-flash,deepseek/deepseek-v4-pro --reasoning-efforts high --record
-uv run python -m evals.matrix --feature insights --models anthropic/claude-opus-4-8,deepseek/deepseek-v4-pro --reasoning-efforts high --record
+uv run python -m evals.matrix --feature insights --models anthropic/claude-opus-5,deepseek/deepseek-v4-pro --reasoning-efforts high --record
 uv run python -m evals.matrix --production --record     # current configured smoke suite
 uv run python -m evals.leaderboard render               # rebuild evals/leaderboard.md from raw history
 uv run python -m evals.leaderboard render-html          # rebuild evals/leaderboard.html with filters and sortable views
@@ -56,7 +56,7 @@ uv run python -m evals.leaderboard render-html          # rebuild evals/leaderbo
 
 These evals call the configured real model and may use network/API quota.
 
-Some models reject a `temperature` parameter (for example `claude-opus-4-8`). For those, pass `--no-temperature` to omit it from the request.
+Some models reject a `temperature` parameter (for example `claude-opus-5`). For those, pass `--no-temperature` to omit it from the request.
 
 ## Supported features
 
