@@ -61,6 +61,7 @@ with thinking enabled must not be silently evaluated without it.
 # a configuration nobody ships.
 EVAL_FEATURE_TO_PRODUCTION_FEATURE = {
     "chat": "chat",
+    "nudge": "nudge",
     "insights": "insights",
     "verification_judge": "verification",
 }
@@ -84,7 +85,28 @@ def production_route(feature: str) -> dict[str, Any]:
     mapped = EVAL_FEATURE_TO_PRODUCTION_FEATURE.get(feature)
     if mapped is None:
         raise ValueError(f"No production route mapped for eval feature: {feature}")
-    return resolve_model_route(mapped).call_kwargs()
+    return resolve_model_route(mapped, path=_operator_prefs_path()).call_kwargs()
+
+
+def _operator_prefs_path() -> Path | None:
+    """Return the operator profile's model_prefs path, or None if unavailable.
+
+    Routing is per profile, so the bare config default points at a file that
+    does not exist in a profile install. resolve_model_route then falls back to
+    shipped defaults, and the harness reports "production" while measuring a
+    configuration the operator may have tuned away from months ago.
+    """
+    try:
+        from profiles import load_profiles, operator_profile
+
+        return operator_profile(load_profiles()).model_prefs
+    except Exception:  # noqa: BLE001 - any roster problem means "use defaults"
+        logger.warning(
+            "Could not resolve the operator profile; eval routes fall back to "
+            "shipped defaults rather than your configured models.",
+            exc_info=True,
+        )
+        return None
 
 
 class JudgeAssertionResult(BaseModel):
@@ -449,6 +471,18 @@ def _execute_case(
         execution, result.model, result.route = run_verification_judge_case(
             case,
             model=model,
+            reasoning_effort=reasoning_effort,
+            temperature=temperature,
+            cache=cache,
+            refresh_cache=refresh_cache,
+        )
+    elif case.feature == "nudge":
+        from evals.run_nudge import run_nudge_case
+
+        execution, result.model, result.route = run_nudge_case(
+            case,
+            model=model,
+            max_tool_iterations=max_tool_iterations,
             reasoning_effort=reasoning_effort,
             temperature=temperature,
             cache=cache,
@@ -1001,14 +1035,14 @@ def _case_from_dict(raw: dict[str, Any], path: Path) -> EvalCase:
                 f"{path} {feature} fixture must include draft, evidence, "
                 "and source_messages"
             )
-    elif feature == "insights":
+    elif feature in ("insights", "nudge"):
         has_health_context = "health_data" in fixture or "health_data_text" in fixture
         if (
             not all(key in fixture for key in ("today", "context"))
             or not has_health_context
         ):
             raise ValueError(
-                f"{path} insights fixture must include today, context, and "
+                f"{path} {feature} fixture must include today, context, and "
                 "health_data or health_data_text"
             )
     else:
