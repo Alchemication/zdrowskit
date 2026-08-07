@@ -112,7 +112,7 @@ CLI health commands accept `--profile NAME` and default to the operator:
 
 ```bash
 uv run python main.py status --profile anna
-uv run python main.py insights --profile anna --week last
+uv run python main.py insights --profile anna
 uv run python main.py llm-log --profile anna --id 42
 ```
 

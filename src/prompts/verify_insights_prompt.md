@@ -14,7 +14,6 @@ Memory handling:
 - If the visible report is sound and only `<memory>` is wrong, verdict "revise" with a correction to rewrite or drop the bad memory item.
 - If the same false claim appears in visible text and `<memory>`, judge the visible text normally: "revise" when the correction is localized and clear; "fail" only when the error makes the report unreliable.
 - Memory must not create hidden commitments. Any prescription or commitment in `<memory>` must also appear in the visible report priorities.
-- For mid-week progress checks (`evidence.week_complete` is false), memory should carry current-week open actions, remaining targets, and watch points. Flag next-week planning as premature unless the visible report explicitly said it.
 - Flag DB-derivable rollups in memory: weekly counts, run distance, average HRV/RHR, sleep duration, VO2max readings, or other stats already present in evidence. These waste the memory slots and can stale future prompts.
 - Causal attributions in memory must be supported by user notes or visible evidence. If the draft states an inference as settled fact, revise it to qualified language or drop it.
 
@@ -28,10 +27,10 @@ For each issue:
 
 Checklist:
 - Every listed training day must match actual workouts in evidence.
-- Rest days are only days with no workouts; future/current partial days are in progress, not failures.
+- Rest days are only days with no workouts.
 - Lift labels must be supported. Do not allow "Strength A+B" unless explicit.
 - Plan totals must be correct: runs, lifts, km, and remaining sessions.
-- Future days must not be penalized.
+- Days after the reported week appear under "Since That Week Ended". They belong to the current week: flag any draft that counts them in the reported week's totals, and flag any recommendation the user has already carried out there.
 - Superlatives like "first ever" or "highest of 2026" need evidence.
 - Baselines may be cited only when present in evidence.
 - Numeric physiological thresholds and normal ranges must come from this person's own data in evidence. Flag any invented cutoff, invented normal range, or appeal to "research"/"studies"/"population data" that is not in evidence — the claim reads as authoritative and the user cannot check it.
@@ -39,6 +38,8 @@ Checklist:
 - Recovery verdict must be consistent with HRV, resting HR, sleep, and shared facts.
 - A useful <memory> block should be present unless the draft is intentionally concise fallback output.
 - No markdown tables.
-- The report should be concise rather than bloated.
+- The visible report body must fit in 1024 characters. Flag a draft that exceeds it — length is the contract, not a preference.
+- The report must not restate what the Health app already shows: day-by-day session listings, metric enumerations, or the plan read back. Flag those as bloat.
+- Recommendations belong at week level. Flag a specific day prescription; that is the nudge's job and it has fresher data.
 
 Do not rewrite. Do not grade style unless it affects factuality, usefulness, or the stated contract.

@@ -1,7 +1,7 @@
 """LLM runner methods and rate-limiting logic for the zdrowskit daemon.
 
 Owns:
-    - Report runners: weekly insights, mid-week progress, manual ``/review``
+    - Report runners: weekly insights, manual ``/review``
     - Nudge runner, deferred-queue drain
     - Coaching review runner and bundled-proposal delivery
     - Rate limiting: nudge caps, report once-per-day guards, report-proximity
@@ -196,7 +196,7 @@ class DaemonRunnerHandler:
         """Check whether a report of the given type may be sent today.
 
         Args:
-            report_type: "review" for full-week or "progress" for mid-week.
+            report_type: Report state key, currently only "review".
 
         Returns:
             True if report may be sent; False if already sent today.
@@ -216,7 +216,7 @@ class DaemonRunnerHandler:
         """Update state after a report is sent.
 
         Args:
-            report_type: "review" for full-week or "progress" for mid-week.
+            report_type: Report state key, currently only "review".
         """
 
         self._d._state[f"last_{report_type}_date"] = date.today().isoformat()
@@ -495,14 +495,10 @@ class DaemonRunnerHandler:
     def _run_review(
         self,
         *,
-        week: str = "last",
         skip_import: bool = False,
     ) -> None:
         """Run a manual review report and send it via Telegram."""
         from daemon import _capture_last_error
-
-        if week not in {"current", "last"}:
-            raise ValueError(f"Unsupported review week: {week}")
 
         if not skip_import:
             self._d._run_import()
@@ -518,7 +514,6 @@ class DaemonRunnerHandler:
             telegram_id=(self._d.profile.telegram_id if self._d.profile else None),
             model=self._d.model,
             telegram=True,
-            week=week,
             months=3,
             no_update_baselines=False,
             no_update_history=False,
@@ -528,19 +523,19 @@ class DaemonRunnerHandler:
         )
         with _capture_last_error() as cap:
             try:
-                logger.info("Running manual review report (%s)", week)
+                logger.info("Running manual review report")
                 result = cmd_insights(args)
                 self._d._attach_feedback_button(result, "insights")
-                self._d._record_report("review" if week == "last" else "progress")
+                self._d._record_report("review")
                 self._d._state["last_report_ts"] = datetime.now().isoformat()
                 self._d._save_state()
             except SystemExit:
                 # Snapshot before our own logger.error overwrites the capture.
                 captured = cap.last_message
                 suppression = cap.last_suppression
-                logger.error("Manual review report failed (%s)", week)
+                logger.error("Manual review report failed")
                 self._d._notify_user_failure(
-                    f"Manual review ({week})",
+                    "Manual review",
                     captured,
                     detail=suppression,
                 )
@@ -587,7 +582,6 @@ class DaemonRunnerHandler:
             telegram_id=(self._d.profile.telegram_id if self._d.profile else None),
             model=self._d.model,
             telegram=True,
-            week="last",
             months=3,
             no_update_baselines=False,
             no_update_history=False,

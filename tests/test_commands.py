@@ -874,7 +874,7 @@ class TestCmdInsights:
 
         saved_reports: list[str] = []
 
-        def fake_save_report(report: str, week: str) -> Path:
+        def fake_save_report(report: str) -> Path:
             saved_reports.append(report)
             return Path("/tmp/r.md")
 

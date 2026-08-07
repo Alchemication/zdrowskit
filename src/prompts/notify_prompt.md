@@ -20,7 +20,7 @@ Your job is to convert the user's request into a structured response.
   `source_text`. Do not paraphrase it.
 - `enable` and `disable` are expressed as `set` actions on the `.enabled`
   path: `enable nudges` → `{{"action":"set","path":"nudges.enabled","value":true}}`,
-  `disable midweek report` → `{{"action":"set","path":"midweek_report.enabled","value":false}}`.
+  `disable weekly insights` → `{{"action":"set","path":"weekly_insights.enabled","value":false}}`.
 - For `intent = "show"` (the user is asking what their settings are), return
   `changes: []`. The caller will render the current settings; you do not
   need to repeat them.
@@ -48,7 +48,7 @@ again.
 
 ## Supported capabilities
 - show current notification settings
-- set a custom time/day for weekly insights or the midweek report
+- set a custom time/day for the weekly insights report
 - set the earliest time nudges may send
 - set the maximum nudges per day
 - enable a target
@@ -61,14 +61,11 @@ again.
 - `all`
 - `nudges`
 - `weekly_insights`
-- `midweek_report`
 - `data_health`
 - `nudges.earliest_time`
 - `nudges.max_per_day`
 - `weekly_insights.weekday`
 - `weekly_insights.time`
-- `midweek_report.weekday`
-- `midweek_report.time`
 - `data_health.silent_after_h`
 - `data_health.split_after_h`
 
@@ -80,22 +77,17 @@ Each item in `changes` must be one of:
 - `{{"action":"set","path":"weekly_insights.enabled","value":true}}`
 - `{{"action":"set","path":"weekly_insights.weekday","value":"tuesday"}}`
 - `{{"action":"set","path":"weekly_insights.time","value":"08:00"}}`
-- `{{"action":"set","path":"midweek_report.enabled","value":false}}`
-- `{{"action":"set","path":"midweek_report.weekday","value":"thursday"}}`
-- `{{"action":"set","path":"midweek_report.time","value":"09:00"}}`
 - `{{"action":"set","path":"data_health.enabled","value":false}}`
 - `{{"action":"set","path":"data_health.silent_after_h","value":48}}`
 - `{{"action":"set","path":"data_health.split_after_h","value":12}}`
 - `{{"action":"reset","path":"nudges"}}`
 - `{{"action":"reset","path":"weekly_insights"}}`
-- `{{"action":"reset","path":"midweek_report"}}`
 - `{{"action":"reset","path":"data_health"}}`
 - `{{"action":"reset","path":"all"}}`
 - `{{"action":"reset_all"}}`
 - `{{"action":"mute_until","target":"all","expires_at":"2026-04-05T23:59:00+01:00","source_text":"mute all notifications today"}}`
 - `{{"action":"mute_until","target":"nudges","expires_at":"2026-04-05T23:59:00+01:00","source_text":"mute nudges today"}}`
 - `{{"action":"mute_until","target":"weekly_insights","expires_at":"2026-04-08T23:59:00+01:00","source_text":"pause weekly insights this week"}}`
-- `{{"action":"mute_until","target":"midweek_report","expires_at":"2026-04-08T23:59:00+01:00","source_text":"mute midweek report this week"}}`
 - `{{"action":"mute_until","target":"data_health","expires_at":"2026-04-12T23:59:00+01:00","source_text":"mute sync alerts for a week"}}`
 
 `changes` is empty (`[]`) for `intent: "show"` or `status: "needs_clarification"`. `clarification_question` is set only when `status: "needs_clarification"`.
@@ -128,7 +120,7 @@ Response:
 **Example 5 — needs clarification:**
 Request: `make it later`
 Response:
-{{"status":"needs_clarification","intent":"set","changes":[],"summary":"","clarification_question":"Which notification do you want to push later — weekly insights, the midweek report, or the earliest nudge time?","reason":"'it' is ambiguous; multiple time-bearing targets exist"}}
+{{"status":"needs_clarification","intent":"set","changes":[],"summary":"","clarification_question":"Which notification do you want to push later — the weekly insights report or the earliest nudge time?","reason":"'it' is ambiguous; multiple time-bearing targets exist"}}
 
 **Example 6 — unsupported:**
 Request: `send me a nudge whenever my HRV drops below 40`

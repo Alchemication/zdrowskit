@@ -1,1 +1,1 @@
-Your previous report hit the output token limit. Produce the final report again from the data above in under 450 words. Include all required report sections and end with a short <memory> block. Do not include charts or extra analysis.
+Your previous report hit the output token limit. Produce the final report again from the data above, within the 1024-character budget: three short paragraphs — what the week was, what is interesting in it, and one week-level priority. End with a short <memory> block. Do not include charts or extra analysis.

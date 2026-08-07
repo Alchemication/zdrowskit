@@ -235,7 +235,7 @@ flowchart TD
 flowchart TD
     trigger{"What triggered it?"}
     weeklySchedule["Scheduled weekly report"]
-    reviewCmd["Telegram /review current|last"]
+    reviewCmd["Telegram /review"]
     coachCmd["Telegram /coach current|last"]
     importData["Import latest data first"]
     prefs{"Report prefs allow send?"}

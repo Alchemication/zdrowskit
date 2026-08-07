@@ -69,10 +69,20 @@ class TestVerifierPromptContract:
         normalized = " ".join(prompt.split())
 
         assert "Memory must not create hidden commitments" in normalized
-        assert "evidence.week_complete" in normalized
-        assert "Flag next-week planning as premature" in normalized
         assert "Flag DB-derivable rollups in memory" in normalized
         assert "Causal attributions in memory must be supported" in normalized
+
+    def test_insights_verifier_enforces_the_short_report_contract(self) -> None:
+        """Length and scope are the report's contract now, so the verifier has
+        to be able to fail a draft that meets every factual check and is still
+        the wall of text nobody reads."""
+        prompt = _prompt_text("verify_insights_prompt.md")
+        normalized = " ".join(prompt.split())
+
+        assert "must fit in 1024 characters" in normalized
+        assert "must not restate what the Health app already shows" in normalized
+        assert "Recommendations belong at week level" in normalized
+        assert "Since That Week Ended" in normalized
 
 
 class TestDeterministicVerificationIssues:

@@ -636,6 +636,13 @@ def render_health_data(
             "last": "### Target Week Days (Mon to Sun)",
         }.get(week, "### Target Week Days")
         render_day_section(title, days)
+        since_days = health_data.get("since_days")
+        if isinstance(since_days, list):
+            render_day_section(
+                "### Since That Week Ended (this week to date, not part of the "
+                "reported week)",
+                [day for day in since_days if isinstance(day, dict)],
+            )
 
     if withheld:
         readings = _render_withheld_readings(days, withheld)
@@ -898,46 +905,13 @@ def build_llm_data(
     iso = ws.isocalendar()
     week_label = f"{iso.year}-W{iso.week:02d}"
 
-    all_days = [to_dict(s) for s in current_snaps]
-
-    # --- Sleep shift ---
-    for i in range(len(all_days) - 1, 0, -1):
-        prev_day, cur_day = all_days[i - 1], all_days[i]
-        for k in _SLEEP_KEYS:
-            cur_day[k] = prev_day.get(k)
-            prev_day.pop(k, None)
-    # Drop the extra pre-week day.
-    if all_days and all_days[0].get("date", "") < week_start:
-        all_days = all_days[1:]
-    days = all_days
+    days = _shift_sleep_forward([to_dict(s) for s in current_snaps], week_start)
 
     # --- Classify sleep status per day and compute compliance ---
     today_iso = today.isoformat()
-    yesterday_iso = (today - timedelta(days=1)).isoformat()
-    before_sync_cutoff = datetime.now().hour < SLEEP_SYNC_CUTOFF_HOUR
-
-    sleep_tracked = 0
-    sleep_total_eligible = 0
-    not_tracked_dates: list[str] = []
-
-    for day in days:
-        if not isinstance(day, dict):
-            continue
-        day_date = day.get("date")
-        has_sleep = any(day.get(k) is not None for k in _SLEEP_KEYS)
-
-        if has_sleep:
-            day["sleep_status"] = "tracked"
-            sleep_tracked += 1
-            sleep_total_eligible += 1
-        elif day_date == today_iso:
-            day["sleep_status"] = "pending"
-        elif day_date == yesterday_iso and before_sync_cutoff:
-            day["sleep_status"] = "pending"
-        else:
-            day["sleep_status"] = "not_tracked"
-            sleep_total_eligible += 1
-            not_tracked_dates.append(day_date or "")
+    sleep_tracked, sleep_total_eligible, not_tracked_dates = _classify_sleep_status(
+        days, today
+    )
 
     # --- Build the today snapshot ---
     today_snapshot = _build_today_snapshot(days, today_iso)
@@ -959,9 +933,110 @@ def build_llm_data(
             "days": days,
         },
         "history": [{"summary": to_dict(summarise(w))} for w in history_weeks],
+        "since_days": _build_since_days(conn, week_end, today),
         "week_complete": today > date.fromisoformat(week_end),
         "week_label": week_label,
     }
+
+
+def _shift_sleep_forward(days: list[dict], boundary: str) -> list[dict]:
+    """Move each night's sleep onto the morning it belongs to.
+
+    Apple records a night's sleep against the day it started, but the user
+    experiences it as the morning they woke up. Callers fetch one extra day
+    before the window so the first in-window morning has a night to inherit;
+    that extra day is dropped afterwards.
+
+    Args:
+        days: Day dicts in ascending date order, oldest first.
+        boundary: First date that belongs to the window, ISO format. Days
+            before it are dropped once their sleep has been shifted forward.
+
+    Returns:
+        The in-window days, sleep shifted.
+    """
+    for i in range(len(days) - 1, 0, -1):
+        prev_day, cur_day = days[i - 1], days[i]
+        for k in _SLEEP_KEYS:
+            cur_day[k] = prev_day.get(k)
+            prev_day.pop(k, None)
+    if days and days[0].get("date", "") < boundary:
+        days = days[1:]
+    return days
+
+
+def _classify_sleep_status(days: list[dict], today: date) -> tuple[int, int, list[str]]:
+    """Tag each day with a sleep status and count tracking compliance.
+
+    A night can be missing because the user did not wear the watch or because
+    the export has not caught up yet. Only the first is a compliance miss, so
+    today — and yesterday before the morning sync window closes — is "pending"
+    rather than "not tracked" and does not count against the total.
+
+    Args:
+        days: Day dicts, mutated in place with a ``sleep_status`` key.
+        today: The current date.
+
+    Returns:
+        Tuple of (nights tracked, nights eligible, dates not tracked).
+    """
+    today_iso = today.isoformat()
+    yesterday_iso = (today - timedelta(days=1)).isoformat()
+    before_sync_cutoff = datetime.now().hour < SLEEP_SYNC_CUTOFF_HOUR
+
+    tracked = 0
+    eligible = 0
+    not_tracked_dates: list[str] = []
+
+    for day in days:
+        if not isinstance(day, dict):
+            continue
+        day_date = day.get("date")
+        has_sleep = any(day.get(k) is not None for k in _SLEEP_KEYS)
+
+        if has_sleep:
+            day["sleep_status"] = "tracked"
+            tracked += 1
+            eligible += 1
+        elif day_date == today_iso or (
+            day_date == yesterday_iso and before_sync_cutoff
+        ):
+            day["sleep_status"] = "pending"
+        else:
+            day["sleep_status"] = "not_tracked"
+            eligible += 1
+            not_tracked_dates.append(day_date or "")
+
+    return tracked, eligible, not_tracked_dates
+
+
+def _build_since_days(
+    conn: sqlite3.Connection, week_end: str, today: date
+) -> list[dict]:
+    """Build day cards for everything after the reported week, up to today.
+
+    The weekly report runs on Monday morning but can be triggered by hand at
+    any point in the following week. Without this the model is blind to the
+    days between: it would talk about the finished week as if no time had
+    passed, and recommend a session the user already did.
+
+    Args:
+        conn: Open SQLite database connection.
+        week_end: Last date of the reported week, ISO format.
+        today: The current date.
+
+    Returns:
+        Day dicts from the day after ``week_end`` through today, sleep
+        shifted. Empty when the reported week is the current one.
+    """
+    first = date.fromisoformat(week_end) + timedelta(days=1)
+    if first > today:
+        return []
+    # Fetch week_end too, so the first morning has a night to inherit.
+    snaps = load_snapshots(conn, start=week_end, end=today.isoformat())
+    days = _shift_sleep_forward([to_dict(s) for s in snaps], first.isoformat())
+    _classify_sleep_status(days, today)
+    return days
 
 
 def _build_today_snapshot(days: list[dict], today_iso: str) -> dict | None:

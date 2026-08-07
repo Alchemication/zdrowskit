@@ -1455,42 +1455,22 @@ class TestTelegramCommands:
             reply_to_message_id=42,
         )
         args = cmd_insights.call_args.args[0]
-        assert args.week == "last"
+        assert not hasattr(args, "week")
         assert args.telegram is True
 
-    def test_review_accepts_current_week_argument(self, tmp_path: Path) -> None:
-        daemon = _make_daemon(tmp_path)
-        daemon._chat._poller = MagicMock()
-
-        with (
-            patch.object(daemon, "_run_import"),
-            patch(
-                "cmd_insights.cmd_insights",
-                return_value=CommandResult(text="report"),
-            ) as cmd_insights,
-            patch.object(daemon, "_attach_feedback_button"),
-            patch.object(daemon, "_record_report"),
-        ):
-            daemon._handle_command("/review current", 24)
-
-        daemon._poller.send_reply.assert_called_once_with(
-            "Running review for this week so far .",
-            reply_to_message_id=24,
-        )
-        args = cmd_insights.call_args.args[0]
-        assert args.week == "current"
-
-    def test_review_rejects_invalid_argument(self, tmp_path: Path) -> None:
+    def test_review_rejects_any_argument(self, tmp_path: Path) -> None:
+        """`/review current` used to produce a mid-week report. That report is
+        gone, so the old invocation must say so rather than quietly return a
+        different week than the user asked for."""
         daemon = _make_daemon(tmp_path)
         daemon._chat._poller = MagicMock()
 
         with patch.object(daemon, "_run_review") as run_review:
-            daemon._handle_command("/review tomorrow", 11)
+            daemon._handle_command("/review current", 11)
 
-        daemon._poller.send_reply.assert_called_once_with(
-            "Use /review or /review current or /review last.",
-            reply_to_message_id=11,
-        )
+        reply = daemon._poller.send_reply.call_args.args[0]
+        assert "takes no arguments" in reply
+        assert "always covers last week" in reply
         run_review.assert_not_called()
 
     def test_status_includes_system_and_data_summary(self, tmp_path: Path) -> None:

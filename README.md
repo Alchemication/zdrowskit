@@ -77,7 +77,7 @@ tailscale funnel --bg --https=443 http://127.0.0.1:8787
 # Send the Metrics + Workouts automations from Auto Export
 uv run python main.py ingest status
 uv run python main.py status
-uv run python main.py insights --week last
+uv run python main.py insights
 ```
 
 For the full first-run flow, see [Setup](docs/setup.md).

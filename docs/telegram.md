@@ -56,7 +56,7 @@ Telegram commands include:
 ```
 
 `/advanced` shows less-used commands that remain typeable but are hidden from
-the Telegram menu: `/notify`, `/review [current|last]`, `/coach [current|last]`,
+the Telegram menu: `/notify`, `/review`, `/coach [current|last]`,
 `/models`, `/context [name]`, `/events [N] [category]`,
 `/llm_log [N|id ID|trace ID]`, and `/tutorial`.
 

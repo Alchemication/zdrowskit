@@ -33,7 +33,7 @@ uv run python src/daemon.py --foreground # run daemon directly on macOS/Linux
 Useful examples:
 
 ```bash
-uv run python main.py insights --week last --telegram
+uv run python main.py insights --telegram
 uv run python main.py nudge --trigger log_update
 uv run python main.py llm-log --id 42 --feedback
 uv run python main.py llm-log --trace 7

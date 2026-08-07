@@ -4,7 +4,7 @@ Each notification type is a distinct LLM call with its own prompt, context, tool
 
 | Channel | Purpose | Trigger | Frequency | Length | Tools | Special output |
 |---------|---------|---------|-----------|--------|-------|----------------|
-| **Insights** | Full weekly report | Scheduled, default Monday 10am, or manual `/review` | 1x/week | ~450 words | `run_sql` | `<chart>` by default 1, skip if misleading; `<memory>` always 1, appended to `history.md` |
+| **Insights** | Full weekly report | Scheduled, default Monday 10am, or manual `/review` | 1x/week | ≤ 1024 chars | `run_sql` | `<chart>` by default 1, skip if misleading; `<memory>` always 1, appended to `history.md` |
 | **Coach** | Weekly strategy review, only when proposals exist | After insights, silent on no-change weeks | 1x/week | ~300 words | `run_sql`, `update_context` for `strategy` only | `SKIP` if no changes warranted; bundled message with inline Accept/Reject buttons per edit |
 | **Nudge** | Short reactive next-action nudge | Data sync, file edit | Up to 2/day by default | 80 words | `run_sql` | `SKIP` if nothing changes; optional `<chart>` |
 | **Sync alerts** | Tells you when health data has stopped arriving | Sustained ingest failure, checked on the scheduler tick | At most 1/day per condition | 2 lines | none | Recovery notice when it resolves |
@@ -62,7 +62,6 @@ What can be changed:
 | Health data synced via iCloud | 3 min debounce | One data observation + suggestion for today/tomorrow |
 | `log.md` / `strategy.md` / `me.md` edited | 60 sec | Responds to the change: acknowledges, flags tension, or confirms |
 | Monday 8-9 AM | scheduled | Full weekly report, then coaching review |
-| Thursday 9-10 AM | scheduled | Mid-week progress report |
 
 ## Cross-Message Awareness
 

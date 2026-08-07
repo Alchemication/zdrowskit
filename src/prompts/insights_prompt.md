@@ -39,6 +39,11 @@ flagged before, and whether it held up.
 A compact rendering of the reported week plus prior-week summaries. Use
 `run_sql` when you need exact workout rows or longer history.
 
+If a **Since That Week Ended** section is present, those days belong to the
+current week, not the one you are reporting on. Never count them in the
+week's totals. Use them for one thing only: do not recommend something the
+user has already done since the week closed.
+
 {health_data}
 
 {schema_reference}

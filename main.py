@@ -60,9 +60,6 @@ Examples:
     uv run python main.py insights --no-update-baselines
         Generate report without auto-computed baselines from DB.
 
-    uv run python main.py insights --week last
-        Report on the previous ISO week (Monday morning flow after Sunday export).
-
     uv run python main.py insights --explain
         Show context files, assembled prompt, and token usage diagnostics on stderr.
 
@@ -274,18 +271,6 @@ def main() -> None:
         default=None,
         metavar="MODEL",
         help=f"litellm model string (default: {resolve_model_route('insights').primary})",
-    )
-    p_insights.add_argument(
-        "--week",
-        choices=["current", "last"],
-        default="current",
-        help=(
-            "Which week to report on. "
-            "'current' (default): this ISO week so far — use for mid-week "
-            "progress checks. "
-            "'last': the previous ISO week — use on Monday morning after "
-            "exporting Sunday's data to get a full weekly review."
-        ),
     )
     p_insights.add_argument(
         "--no-update-baselines",

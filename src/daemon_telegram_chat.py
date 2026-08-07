@@ -590,19 +590,18 @@ class TelegramChatHandler:
                 "Conversation cleared.", reply_to_message_id=message_id
             )
         elif cmd == "/review":
-            parts = text.split()
-            week = "last"
-            if len(parts) > 1:
-                raw_week = parts[1].lower()
-                if raw_week not in {"current", "last"}:
-                    self._poller.send_reply(
-                        "Use /review or /review current or /review last.",
-                        reply_to_message_id=message_id,
-                    )
-                    return
-                week = raw_week
-            label = "this week so far" if week == "current" else "last week"
-            status_prefix = f"Running review for {label} "
+            # The week argument is gone, but somebody who used to type
+            # "/review current" should be told the mid-week report no longer
+            # exists rather than silently handed last week's.
+            if len(text.split()) > 1:
+                self._poller.send_reply(
+                    "/review takes no arguments — it always covers last week. "
+                    "The mid-week report was removed; ask me in chat for "
+                    "this week so far.",
+                    reply_to_message_id=message_id,
+                )
+                return
+            status_prefix = "Running review for last week "
             status_id = self._poller.send_reply(
                 f"{status_prefix}.", reply_to_message_id=message_id
             )
@@ -610,12 +609,12 @@ class TelegramChatHandler:
                 status_id, prefix=status_prefix
             )
             try:
-                self._daemon._run_review(week=week, skip_import=False)
+                self._daemon._run_review(skip_import=False)
             finally:
                 self._stop_placeholder_animation(stop_anim, anim_thread)
                 if status_id is not None:
                     self._poller.edit_message(
-                        status_id, f"\u2713 Review for {label} done."
+                        status_id, "\u2713 Review for last week done."
                     )
         elif cmd == "/coach":
             parts = text.split()

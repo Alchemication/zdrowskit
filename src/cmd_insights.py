@@ -1,4 +1,4 @@
-"""LLM-powered weekly and midweek report command."""
+"""LLM-powered weekly report command."""
 
 from __future__ import annotations
 
@@ -38,6 +38,12 @@ from notify import send_telegram_report
 from store import create_llm_trace, open_db
 
 logger = logging.getLogger(__name__)
+
+# The report always covers the ISO week that has finished. It used to be
+# selectable, so the same command could produce a mid-week progress check, but
+# that report was dropped: it duplicated the nudge on fresher data and its
+# partial-week caveats were most of what made the weekly one long.
+REPORT_WEEK = "last"
 
 
 def _print_explain(
@@ -167,16 +173,13 @@ def _print_explain(
         stderr.print(f"\n[dim]Report saved to:[/dim] [cyan]{report_path}[/cyan]")
 
 
-def _save_report(report: str, week: str, reports_dir: Path = REPORTS_DIR) -> Path:
-    """Save the report to a timestamped markdown file."""
+def _save_report(report: str, reports_dir: Path = REPORTS_DIR) -> Path:
+    """Save the report to a markdown file named for the week it covers."""
     reports_dir.mkdir(parents=True, exist_ok=True)
 
-    target_date = date.today()
-    if week == "last":
-        target_date = target_date - timedelta(days=7)
+    target_date = date.today() - timedelta(days=7)
     iso_week = f"{target_date.isocalendar().year}-W{target_date.isocalendar().week:02d}"
-    suffix = "midweek" if week == "current" else "weekly"
-    filename = f"{iso_week}-{suffix}.md"
+    filename = f"{iso_week}-weekly.md"
 
     path = reports_dir / filename
     path.write_text(report, encoding="utf-8")
@@ -207,14 +210,14 @@ def cmd_insights(
         sys.exit(1)
 
     conn = open_db(Path(args.db))
-    health_data = build_llm_data(conn, args.months, week=args.week)
+    health_data = build_llm_data(conn, args.months, week=REPORT_WEEK)
     if health_data["current_week"]["summary"] is None:
         logger.error("Database is empty. Run 'import' first.")
         sys.exit(1)
 
     baselines = None
     milestones = None
-    if not args.no_update_baselines and args.week != "current":
+    if not args.no_update_baselines:
         baselines = compute_baselines(conn)
         save_baselines(context_dir, baselines)
     milestones = compute_milestones(conn)
@@ -230,7 +233,7 @@ def cmd_insights(
     health_data_text = render_health_data(
         health_data,
         prompt_kind="report",
-        week=args.week,
+        week=REPORT_WEEK,
         unestablished=unestablished_metrics(conn, METRIC_TRUST_WINDOW_DAYS),
     )
 
@@ -250,7 +253,7 @@ def cmd_insights(
     trace_id = create_llm_trace(
         conn,
         "insights",
-        metadata={"week": args.week, "months": args.months},
+        metadata={"week": REPORT_WEEK, "months": args.months},
     )
 
     from tools import execute_run_sql, run_sql_tool
@@ -286,7 +289,7 @@ def cmd_insights(
                 request_type="insights",
                 trace_id=trace_id,
                 metadata={
-                    "week": args.week,
+                    "week": REPORT_WEEK,
                     "months": args.months,
                     "iteration": iteration,
                     "reasoning_effort": reasoning_effort,
@@ -367,7 +370,7 @@ def cmd_insights(
                     request_type="insights",
                     trace_id=trace_id,
                     metadata={
-                        "week": args.week,
+                        "week": REPORT_WEEK,
                         "months": args.months,
                         "iteration": label,
                         "reasoning_effort": effort,
@@ -414,7 +417,7 @@ def cmd_insights(
                 request_type="insights",
                 trace_id=trace_id,
                 metadata={
-                    "week": args.week,
+                    "week": REPORT_WEEK,
                     "months": args.months,
                     "iteration": "truncation_retry",
                     "reasoning_effort": None,
@@ -451,7 +454,7 @@ def cmd_insights(
         conn=conn,
         metadata={
             "source_llm_call_id": result.llm_call_id,
-            "week": args.week,
+            "week": REPORT_WEEK,
             "months": args.months,
             "week_label": week_label,
         },
@@ -485,9 +488,9 @@ def cmd_insights(
 
     reports_dir = getattr(args, "reports_dir", None)
     report_path = (
-        _save_report(visible_report, args.week, Path(reports_dir))
+        _save_report(visible_report, Path(reports_dir))
         if reports_dir is not None
-        else _save_report(visible_report, args.week)
+        else _save_report(visible_report)
     )
 
     if args.explain:
@@ -510,8 +513,7 @@ def cmd_insights(
         logger.info("No <memory> block in response; history.md unchanged")
 
     # Push notifications
-    report_type = "Review" if args.week == "last" else "Progress"
-    notify_subject = f"Week {week_label} {report_type}" if week_label else "Report"
+    notify_subject = f"Week {week_label} Review" if week_label else "Report"
 
     telegram_message_id: int | None = None
     if args.telegram:

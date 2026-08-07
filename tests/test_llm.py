@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from dataclasses import replace
 from datetime import date, datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -57,7 +58,7 @@ from llm_health import (
     format_recent_nudges,
     render_health_data,
 )
-from models import DailySnapshot
+from models import DailySnapshot, WorkoutSnapshot
 from store import insert_manual_sleep, store_snapshots
 
 
@@ -938,6 +939,38 @@ class TestPromptRenderers:
         assert "#### Monday 6 Apr" in rendered
         assert "#### Tuesday 7 Apr" in rendered
         assert "#### Wednesday 8 Apr" in rendered
+
+    def test_render_health_data_separates_days_since_the_week_closed(self) -> None:
+        """The heading has to say these days are not part of the reported week,
+        or the model folds them into the week's totals."""
+        data = self._health_data()
+        data["since_days"] = [
+            {"date": "2026-04-13", "steps": 8200, "sleep_status": "tracked"}
+        ]
+
+        rendered = render_health_data(
+            data,
+            prompt_kind="report",
+            week="last",
+            today=date(2026, 4, 14),
+        )
+
+        assert "### Since That Week Ended" in rendered
+        assert "not part of the reported week" in rendered
+        assert "#### Monday 13 Apr" in rendered
+        assert rendered.index("### Target Week Days") < rendered.index(
+            "### Since That Week Ended"
+        )
+
+    def test_render_health_data_omits_since_section_when_empty(self) -> None:
+        rendered = render_health_data(
+            {**self._health_data(), "since_days": []},
+            prompt_kind="report",
+            week="last",
+            today=date(2026, 4, 8),
+        )
+
+        assert "Since That Week Ended" not in rendered
 
     def test_render_health_data_inlines_current_week_run_splits(self) -> None:
         data = self._health_data()
@@ -1910,6 +1943,65 @@ class TestBuildLlmData:
         result = build_llm_data(in_memory_db, months=3, week="last")
         assert "current_week" in result
         assert "history" in result
+
+    @patch("llm_health.datetime")
+    @patch("llm_health.date")
+    def test_last_week_mode_carries_days_since_the_week_closed(
+        self,
+        mock_date: MagicMock,
+        mock_datetime: MagicMock,
+        in_memory_db: sqlite3.Connection,
+        sample_snapshots: list[DailySnapshot],
+        sample_workout_run: WorkoutSnapshot,
+    ) -> None:
+        """The weekly report can be triggered by hand days after the week
+        closed. Without these days it would recommend a session the user has
+        already done."""
+        mock_date.today.return_value = date(2026, 3, 18)
+        mock_date.fromisoformat = date.fromisoformat
+        mock_datetime.now.return_value = datetime(2026, 3, 18, 15, 0)
+        store_snapshots(
+            in_memory_db,
+            [
+                *sample_snapshots,
+                DailySnapshot(
+                    date="2026-03-17",
+                    steps=11000,
+                    hrv_ms=61.0,
+                    resting_hr=51,
+                    workouts=[
+                        replace(sample_workout_run, start_utc="2026-03-17T07:00:00Z")
+                    ],
+                ),
+            ],
+        )
+
+        result = build_llm_data(in_memory_db, months=3, week="last")
+
+        # The reported week is untouched: Mon 9th to Sun 15th.
+        reported = [d["date"] for d in result["current_week"]["days"]]
+        assert reported[0] == "2026-03-09"
+        assert reported[-1] == "2026-03-15"
+
+        since = {d["date"]: d for d in result["since_days"]}
+        assert "2026-03-15" not in since  # boundary day is not double-counted
+        assert since["2026-03-17"]["workouts"]
+
+    @patch("llm_health.date")
+    def test_current_week_mode_has_no_days_since(
+        self,
+        mock_date: MagicMock,
+        in_memory_db: sqlite3.Connection,
+        sample_snapshots: list[DailySnapshot],
+    ) -> None:
+        """Nothing follows a week that has not finished."""
+        mock_date.today.return_value = date(2026, 3, 11)
+        mock_date.fromisoformat = date.fromisoformat
+        store_snapshots(in_memory_db, sample_snapshots)
+
+        result = build_llm_data(in_memory_db, months=3, week="current")
+
+        assert result["since_days"] == []
 
     @patch("llm_health.date")
     def test_structure_has_expected_fields(
