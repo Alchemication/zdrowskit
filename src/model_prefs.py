@@ -28,6 +28,7 @@ from config import (
     DEFAULT_CHAT_MODEL,
     DEFAULT_COACH_MODEL,
     DEFAULT_INSIGHTS_MODEL,
+    DEFAULT_MEMORY_MODEL,
     DEFAULT_NOTIFY_MODEL,
     DEFAULT_NUDGE_MODEL,
     FALLBACK_FLASH_MODEL,
@@ -51,6 +52,7 @@ PRO_FEATURES: tuple[str, ...] = (
 FLASH_FEATURES: tuple[str, ...] = (
     "notify",
     "add_clone",
+    "memory",
     "verification_rewrite",
 )
 FEATURES: tuple[str, ...] = PRO_FEATURES + FLASH_FEATURES
@@ -73,6 +75,7 @@ FEATURE_LABELS: dict[str, str] = {
     "chat": "Chat",
     "notify": "Notify parser",
     "add_clone": "Add workout",
+    "memory": "Weekly memory",
     "verification": "Verifier",
     "verification_rewrite": "Verifier rewrite",
 }
@@ -82,7 +85,7 @@ TELEGRAM_FEATURE_GROUPS: dict[str, tuple[str, ...]] = {
     "reports": ("insights",),
     "coach": ("coach",),
     "nudges": ("nudge",),
-    "utilities": ("notify", "add_clone"),
+    "utilities": ("notify", "add_clone", "memory"),
 }
 
 # Capability tier shown next to each model in Telegram buttons. Helps users
@@ -152,6 +155,11 @@ def default_model_prefs() -> dict[str, Any]:
                 "temperature": None,
             },
             "notify": {"profile": "flash", "primary": DEFAULT_NOTIFY_MODEL},
+            "memory": {
+                "profile": "flash",
+                "primary": DEFAULT_MEMORY_MODEL,
+                "temperature": None,
+            },
             "add_clone": {
                 "profile": "flash",
                 "primary": DEFAULT_ADD_CLONE_MODEL,

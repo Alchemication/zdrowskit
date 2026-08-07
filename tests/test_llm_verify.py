@@ -64,13 +64,16 @@ class TestParseVerificationResult:
 
 
 class TestVerifierPromptContract:
-    def test_insights_verifier_checks_hidden_memory_contract(self) -> None:
+    def test_insights_verifier_rejects_a_memory_block_in_the_report(self) -> None:
+        """Memory is a separate call now. A block emitted here is stripped
+        before anyone sees it, so it is wasted output the writer should stop
+        producing — and the memory rules do not belong in this prompt."""
         prompt = _prompt_text("verify_insights_prompt.md")
         normalized = " ".join(prompt.split())
 
-        assert "Memory must not create hidden commitments" in normalized
-        assert "Flag DB-derivable rollups in memory" in normalized
-        assert "Causal attributions in memory must be supported" in normalized
+        assert "must not contain a `<memory>` block" in normalized
+        assert "Memory must not create hidden commitments" not in normalized
+        assert "Flag DB-derivable rollups in memory" not in normalized
 
     def test_insights_verifier_enforces_the_short_report_contract(self) -> None:
         """Length and scope are the report's contract now, so the verifier has

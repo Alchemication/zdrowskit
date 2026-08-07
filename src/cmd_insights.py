@@ -29,10 +29,11 @@ from config import (
     METRIC_TRUST_WINDOW_DAYS,
     REPORTS_DIR,
 )
-from llm import LLMResult, _reasoning_engaged, call_llm, extract_memory
+from llm import LLMResult, _reasoning_engaged, call_llm
 from llm_context import append_history, build_messages, load_context, load_prompt_text
 from llm_health import build_llm_data, build_review_facts, render_health_data
 from llm_verify import extract_tool_evidence, slim_source_messages
+from memory_writer import write_memory
 from milestones import compute_milestones
 from notify import send_telegram_report
 from store import create_llm_trace, open_db
@@ -478,13 +479,25 @@ def cmd_insights(
         else:
             logger.warning("Chart '%s' failed to render, skipping", block.title)
 
-    # Strip chart and memory blocks from the visible text.
+    # Strip chart blocks from the visible text. A `<memory>` block is no longer
+    # asked for here, but strip one anyway: the report writer occasionally
+    # emits the block it used to own, and it must never reach the user.
     visible_report = strip_charts(result.text)
-    memory = extract_memory(visible_report)
-    if memory:
-        visible_report = re.sub(
-            r"\s*<memory>.*?</memory>\s*", "", visible_report, flags=re.DOTALL
-        ).strip()
+    visible_report = re.sub(
+        r"\s*<memory>.*?</memory>\s*", "", visible_report, flags=re.DOTALL
+    ).strip()
+
+    memory = write_memory(
+        report=visible_report,
+        week_label=week_label,
+        review_facts=context.get("review_facts"),
+        log=context.get("log"),
+        history=context.get("history"),
+        conn=conn,
+        trace_id=trace_id,
+        model_prefs_path=getattr(args, "model_prefs_path", None),
+        metadata={"source_llm_call_id": result.llm_call_id, "week_label": week_label},
+    )
 
     reports_dir = getattr(args, "reports_dir", None)
     report_path = (
@@ -510,7 +523,7 @@ def cmd_insights(
     if memory and not args.no_update_history:
         append_history(context_dir, memory, week_label=week_label)
     elif not memory:
-        logger.info("No <memory> block in response; history.md unchanged")
+        logger.info("No memory entries this week; history.md unchanged")
 
     # Push notifications
     notify_subject = f"Week {week_label} Review" if week_label else "Report"

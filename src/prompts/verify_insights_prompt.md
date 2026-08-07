@@ -7,15 +7,7 @@ Sources of truth, in order:
 
 Do not invent facts that are not present in any of the above. If the draft cites something you cannot find, flag it as unsupported.
 
-Use verdict "revise" for localized factual errors, fixable unsupported claims, contract violations, or any issue confined to the `<memory>` block. Use "fail" only for unsafe advice, empty/truncated output, broad hallucination, multiple serious contradictions, or a visible factual error that cannot be fixed with a bounded rewrite.
-
-Memory handling:
-- A false `<memory>` block is serious because it can contaminate future prompts, but it is usually a rewrite problem, not a reason to suppress the visible report.
-- If the visible report is sound and only `<memory>` is wrong, verdict "revise" with a correction to rewrite or drop the bad memory item.
-- If the same false claim appears in visible text and `<memory>`, judge the visible text normally: "revise" when the correction is localized and clear; "fail" only when the error makes the report unreliable.
-- Memory must not create hidden commitments. Any prescription or commitment in `<memory>` must also appear in the visible report priorities.
-- Flag DB-derivable rollups in memory: weekly counts, run distance, average HRV/RHR, sleep duration, VO2max readings, or other stats already present in evidence. These waste the memory slots and can stale future prompts.
-- Causal attributions in memory must be supported by user notes or visible evidence. If the draft states an inference as settled fact, revise it to qualified language or drop it.
+Use verdict "revise" for localized factual errors, fixable unsupported claims, or contract violations. Use "fail" only for unsafe advice, empty/truncated output, broad hallucination, multiple serious contradictions, or a visible factual error that cannot be fixed with a bounded rewrite.
 
 Set `confidence` to "high" when evidence and tool_calls fully cover the claims, "medium" when partial, "low" when you cannot tell — a low-confidence pass is logged.
 
@@ -36,7 +28,7 @@ Checklist:
 - Numeric physiological thresholds and normal ranges must come from this person's own data in evidence. Flag any invented cutoff, invented normal range, or appeal to "research"/"studies"/"population data" that is not in evidence — the claim reads as authoritative and the user cannot check it.
 - Pace values must use mm:ss/km.
 - Recovery verdict must be consistent with HRV, resting HR, sleep, and shared facts.
-- A useful <memory> block should be present unless the draft is intentionally concise fallback output.
+- The draft must not contain a `<memory>` block. Memory is a separate call now; a block here is stripped unseen, so it is wasted output rather than a leak.
 - No markdown tables.
 - The visible report body must fit in 1024 characters. Flag a draft that exceeds it — length is the contract, not a preference.
 - The report must not restate what the Health app already shows: day-by-day session listings, metric enumerations, or the plan read back. Flag those as bloat.

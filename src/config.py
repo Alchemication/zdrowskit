@@ -219,6 +219,14 @@ MAX_TOKENS_NOTIFY: int = _env_int("ZDROWSKIT_MAX_TOKENS_NOTIFY", 512)
 MAX_TOKENS_ADD_CLONE: int = _env_int("ZDROWSKIT_MAX_TOKENS_ADD_CLONE", 512)
 """Output token budget for /add historical workout clone selection."""
 
+MAX_TOKENS_MEMORY: int = _env_int("ZDROWSKIT_MAX_TOKENS_MEMORY", 1024)
+"""Output token budget for the weekly memory extraction call.
+
+Two bullets cost 60-100 tokens on the routed model, so this is roughly ten
+times the observed need. That margin is deliberate: an exhausted budget returns
+no block, which is indistinguishable downstream from a week genuinely worth
+carrying nothing."""
+
 LOCATION_GEOCODER: str = os.environ.get("ZDROWSKIT_LOCATION_GEOCODER", "nominatim")
 """Reverse geocoder for workout localities. Use ``off`` to disable."""
 
@@ -353,7 +361,7 @@ OPENAI_LUNA_MODEL: str = os.environ.get(
     "ZDROWSKIT_OPENAI_LUNA_MODEL",
     "openai/gpt-5.6-luna",
 )
-"""Budget-tier OpenAI model used for interactive chat."""
+"""Budget-tier OpenAI model used for interactive chat and weekly memory."""
 
 DEFAULT_CHAT_MODEL: str = os.environ.get(
     "ZDROWSKIT_CHAT_MODEL",
@@ -382,6 +390,27 @@ DEFAULT_ADD_CLONE_MODEL: str = os.environ.get(
     PRIMARY_FLASH_MODEL,
 )
 """Default model for /add workout clone selection."""
+
+DEFAULT_MEMORY_MODEL: str = os.environ.get(
+    "ZDROWSKIT_MEMORY_MODEL",
+    OPENAI_LUNA_MODEL,
+)
+"""Default model for weekly memory extraction.
+
+Memory used to be a section of the report, written by the same premium model
+under the same breath as the analysis. Extracting two bullets from a finished
+1024-character report is a much smaller job, and it is the one the writer did
+worst — the block is invisible to the user, so nobody caught a bad line until
+it had been replayed into prompts for weeks.
+
+Luna rather than the usual Flash primary, and with reasoning off. DeepSeek
+Flash cannot terminate on this prompt: it emits a reasoning trace whether or
+not thinking is requested, and across eight samples it exhausted the whole
+budget and returned empty text at 1024, at 4096, and once even at 8192. Luna
+returned a clean block in 6 of 6 at 1024 in roughly 200 tokens, with or without
+effort, and its bullets stay qualitative where Haiku's kept quoting figures the
+database already holds. The task is selecting two lines against a stated rule
+list — extended thinking was never what made it work."""
 
 ENABLE_LLM_VERIFICATION: bool = _env_bool("ZDROWSKIT_ENABLE_LLM_VERIFICATION", True)
 """Global feature flag for post-generation LLM verification.

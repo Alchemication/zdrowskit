@@ -1,0 +1,47 @@
+{
+  "id": "memory_stores_no_db_rollups_w31",
+  "feature": "memory",
+  "case_kind": "real_regression",
+  "source_feedback_id": null,
+  "source_llm_call_id": 1639,
+  "derived_from": {
+    "llm_call_id": 1639,
+    "hypothesis": "Memory blocks are routinely spent on figures the database already holds: 'W32 tempo executed clean: 2k block at 5:02/5:09', 'HRV dysregulation now 4 consecutive weeks (51 ms swing W31)', 'Elevated easy-run HR (166 bpm at 5:30/km)'. Every one of those is a query away, and the next report queries it anyway — so the slots that should carry an open thread carry a worse copy of the data instead. Worse, they go stale: a stored figure keeps being replayed after the week it described has passed, and a later prompt cannot tell it apart from a live reading. Calls 1612, 1529, 1511, 1452, 1418, 1373 and 1224 all show the same pattern."
+  },
+  "intent": "Memory holds what the database cannot recompute. Weekly counts, distances, averages, HRV and sleep figures are recomputed from the database on every later run, so storing them wastes the two slots and leaves stale numbers in the prompt.",
+  "fixture": {
+    "week_label": "2026-W31",
+    "report": "W31: 3 runs, 2 lifts, 14.7 km — and the tempo drought ended. Saturday's 6 km carried 2 km at 5:13/km, the first clean tempo since W21.\n\nThe interesting part is what it cost. HRV swung from 24.7 ms on Wednesday to 75.9 on Thursday — a 51 ms gap inside 24 hours, and the fourth straight week with swings that size. The weekly average, 50.7 ms, sits right on your 30-day baseline and hides the whole thing.\n\nThis week, consolidate rather than extend: repeat the tempo you just did rather than lengthening it, and let the easy runs stay easy.",
+    "review_facts": "Week: 2026-W31 (2026-07-27 – 2026-08-02). Complete.\n- Runs: 3 (14.7 km). Lifts: 2.\n- Avg HRV 50.7 ms (30d baseline 50.4). Avg resting HR 51 bpm (baseline 52).\n- Sleep: 7/7 nights tracked, 7.4 h avg.\n- Tempo: 2.0 km at 5:13/km on Sat 1 Aug, inside the 5:05–5:15 window.\n- Prior week 2026-W30: 3 runs, 12.1 km, 1 lift.",
+    "log": "## 2026-07-29\n\n- Ran on a wrecked HRV read (24.7). Felt fine at the time, legs were there.\n- Eliot up twice again.\n\n## 2026-08-01\n\n- Tempo done. 5.9h sleep the night before so I expected worse.\n- Knee quiet all week.",
+    "history": "## 2026-W30\n\n- W30 easy-run HR gate cleared: 125 bpm at 5:51/km, down from ~160 bpm the prior two weeks\n- Tempo still gated on two consecutive days above 50 ms HRV"
+  },
+  "assertions": [
+    {
+      "type": "memory_present",
+      "name": "returns_a_memory_block"
+    },
+    {
+      "type": "memory_bullet_max",
+      "name": "at_most_two_bullets",
+      "max": 2
+    },
+    {
+      "type": "memory_absent",
+      "name": "does_not_store_the_weeks_rollups",
+      "patterns": [
+        "re:14[.,]7",
+        "re:50[.,]7",
+        "re:7[.,]4\\s*h",
+        "re:\\b3\\s+runs\\b"
+      ]
+    }
+  ],
+  "judge_assertions": [
+    {
+      "name": "carries_only_what_the_database_cannot_recompute",
+      "statement": "The memory block does not restate figures the database already holds: weekly run or lift counts, total distance, average HRV or resting heart rate, or sleep duration. Every one of those is queried directly by the next report. Referring to an event qualitatively — that the tempo drought ended, that HRV swung hard mid-week — is fine; quoting the week's totals or averages as stored values is not."
+    }
+  ],
+  "notes": "Second memory case. Guards the opposite failure from memory_no_hidden_prescription_w31: that one is about inventing what was never said, this one about storing what never needed saying. Both fixtures share a report so a model cannot pass one by producing output the other rejects.\n"
+}

@@ -63,6 +63,7 @@ EVAL_FEATURE_TO_PRODUCTION_FEATURE = {
     "chat": "chat",
     "nudge": "nudge",
     "insights": "insights",
+    "memory": "memory",
     "verification_judge": "verification",
 }
 
@@ -374,6 +375,11 @@ def run_case(
         model = str(route["model"])
         if inherit_effort:
             reasoning_effort = route.get("reasoning_effort")
+            # Temperature travels with the route or the run is not production.
+            # A route that pins temperature off does so because the model
+            # misbehaves with it, and sending the harness default instead
+            # measures a configuration the daemon never uses.
+            temperature = route.get("temperature")
     result = EvalResult(
         case_id=case.id,
         feature=case.feature,
@@ -483,6 +489,17 @@ def _execute_case(
             case,
             model=model,
             max_tool_iterations=max_tool_iterations,
+            reasoning_effort=reasoning_effort,
+            temperature=temperature,
+            cache=cache,
+            refresh_cache=refresh_cache,
+        )
+    elif case.feature == "memory":
+        from evals.run_memory import run_memory_case
+
+        execution, result.model, result.route = run_memory_case(
+            case,
+            model=model,
             reasoning_effort=reasoning_effort,
             temperature=temperature,
             cache=cache,
@@ -1035,6 +1052,9 @@ def _case_from_dict(raw: dict[str, Any], path: Path) -> EvalCase:
                 f"{path} {feature} fixture must include draft, evidence, "
                 "and source_messages"
             )
+    elif feature == "memory":
+        if "report" not in fixture:
+            raise ValueError(f"{path} memory fixture must include report")
     elif feature in ("insights", "nudge"):
         has_health_context = "health_data" in fixture or "health_data_text" in fixture
         if (
@@ -1614,6 +1634,8 @@ def _evaluate_assertion(
         return _assert_memory_contains(name, assertion, execution)
     if atype == "memory_absent":
         return _assert_memory_absent(name, assertion, execution)
+    if atype == "memory_bullet_max":
+        return _assert_memory_bullet_max(name, assertion, execution)
     if atype == "word_count_max":
         return _assert_word_count_max(name, assertion, execution)
     if atype == "forbidden_opening":
@@ -1795,6 +1817,37 @@ def _assert_memory_absent(
         name=name,
         passed=not present,
         detail="" if not present else f"Present in memory: {present}",
+    )
+
+
+def _assert_memory_bullet_max(
+    name: str,
+    assertion: dict[str, Any],
+    execution: EvalExecution,
+) -> AssertionResult:
+    """Cap the number of bullets carried forward.
+
+    The limit is the point of the memory block, not a formatting preference:
+    every line is replayed into later prompts for weeks, and the historical
+    failure was five bullets of prescriptions the user had never seen.
+    """
+    memory = _memory_block(execution.text)
+    if memory is None:
+        return AssertionResult(
+            name=name, passed=False, detail="No <memory> block found."
+        )
+    limit = int(assertion.get("max", 2))
+    bullets = [
+        line
+        for line in memory.splitlines()
+        if line.lstrip().startswith(("-", "*", "•"))
+    ]
+    return AssertionResult(
+        name=name,
+        passed=len(bullets) <= limit,
+        detail=(
+            "" if len(bullets) <= limit else f"{len(bullets)} bullets, limit {limit}"
+        ),
     )
 
 

@@ -1,0 +1,46 @@
+{
+  "id": "memory_no_hidden_prescription_w31",
+  "feature": "memory",
+  "case_kind": "real_regression",
+  "source_feedback_id": null,
+  "source_llm_call_id": 1612,
+  "derived_from": {
+    "llm_call_id": 1612,
+    "hypothesis": "The W31 report's memory block invented a standard the user never saw: 'W32 prescription: 2.0-2.5 km @ 5:05-5:15/km by Thursday, open >= 5:20/km, HRV >= 45 on the day'. Nothing in that shape appeared in the visible report. The block is stripped before sending, so the user is measured against paces, deadlines and HRV gates they were never told about, and every later prompt reads them back as settled policy. The same shape recurs in calls 1639 ('Friday strength session gated on HRV >= 45 morning read'), 1529, 1511, 1452, 1418, 1338, 1302, 1259 and 1173 — nine of the last twelve memory blocks carry at least one prescription with no visible counterpart. It survived because a hidden line has no reader who can catch it."
+  },
+  "intent": "Memory may record a commitment the report made visible. It may not create one. If a pace target, a day assignment, or a metric gate is not in the report above, it does not go in the block.",
+  "fixture": {
+    "week_label": "2026-W31",
+    "report": "W31: 3 runs, 2 lifts, 14.7 km — and the tempo drought ended. Saturday's 6 km carried 2 km at 5:13/km, the first clean tempo since W21.\n\nThe interesting part is what it cost. HRV swung from 24.7 ms on Wednesday to 75.9 on Thursday — a 51 ms gap inside 24 hours, and the fourth straight week with swings that size. The weekly average, 50.7 ms, sits right on your 30-day baseline and hides the whole thing.\n\nThis week, consolidate rather than extend: repeat the tempo you just did rather than lengthening it, and let the easy runs stay easy.",
+    "review_facts": "Week: 2026-W31 (2026-07-27 – 2026-08-02). Complete.\n- Runs: 3 (14.7 km). Lifts: 2.\n- Avg HRV 50.7 ms (30d baseline 50.4). Avg resting HR 51 bpm (baseline 52).\n- Sleep: 7/7 nights tracked, 7.4 h avg.\n- Tempo: 2.0 km at 5:13/km on Sat 1 Aug, inside the 5:05–5:15 window.\n- Prior week 2026-W30: 3 runs, 12.1 km, 1 lift.",
+    "log": "## 2026-07-29\n\n- Ran on a wrecked HRV read (24.7). Felt fine at the time, legs were there.\n- Eliot up twice again.\n\n## 2026-08-01\n\n- Tempo done. 5.9h sleep the night before so I expected worse.\n- Knee quiet all week.",
+    "history": "## 2026-W30\n\n- W30 easy-run HR gate cleared: 125 bpm at 5:51/km, down from ~160 bpm the prior two weeks\n- Tempo still gated on two consecutive days above 50 ms HRV"
+  },
+  "assertions": [
+    {
+      "type": "memory_present",
+      "name": "returns_a_memory_block"
+    },
+    {
+      "type": "memory_bullet_max",
+      "name": "at_most_two_bullets",
+      "max": 2
+    },
+    {
+      "type": "memory_absent",
+      "name": "does_not_invent_a_pace_or_hrv_gate",
+      "patterns": [
+        "re:5:0\\d\\s*[-–]\\s*5:1\\d",
+        "re:(?i)hrv\\s*(>=|≥|above|at least)\\s*\\d",
+        "re:(?i)by\\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)"
+      ]
+    }
+  ],
+  "judge_assertions": [
+    {
+      "name": "every_commitment_traces_to_the_visible_report",
+      "statement": "Every prescription, target, deadline or conditional gate in the memory block also appears in the report text supplied above. The report says only to consolidate the tempo rather than extend it, and to keep the easy runs easy. A block that adds a specific pace range, a distance target, a named day, or an HRV threshold as a condition for training violates this, because the user never saw that standard. Recording that the report asked for consolidation is fine."
+    }
+  ],
+  "notes": "First memory case. Seeded from llm_call 1612, back when memory was written by the report model as part of the report. The fixture's report is rewritten into the current short format, since that is what the standalone memory call now receives; the defect being guarded is unchanged.\n"
+}

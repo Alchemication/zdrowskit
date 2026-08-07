@@ -32,7 +32,9 @@ A `Reset all` button on the main panel and `uv run python main.py models reset -
 
 Insights, coach, and nudges default to `anthropic/claude-opus-5` with `reasoning_effort=high`, temperature omitted, and `deepseek/deepseek-v4-pro` fallback. Chat defaults to `openai/gpt-5.6-luna` with `reasoning_effort=high`, temperature omitted, and `anthropic/claude-haiku-4-5` fallback.
 
-Lightweight utility surfaces, including `/notify` interpretation and `/add` workout clone selection, default to `deepseek/deepseek-v4-flash` with `anthropic/claude-haiku-4-5` fallback. `/add` and verifier rewrites use `reasoning_effort=high` with temperature omitted; `/notify` stays plain Flash. On the DeepSeek primary, `high` engages thinking via translated `extra_body`; on the Anthropic fallback, the same effort is sent natively.
+Lightweight utility surfaces, including `/notify` interpretation, `/add` workout clone selection, and weekly memory extraction, default to `deepseek/deepseek-v4-flash` with `anthropic/claude-haiku-4-5` fallback. `/add`, weekly memory, and verifier rewrites use `reasoning_effort=high` with temperature omitted; `/notify` stays plain Flash.
+
+Weekly memory is a call of its own rather than a `<memory>` section of the report. Splitting it shortened the insights prompt, made the block scorable as an eval feature on its own, and moved it off the premium model — deciding which two lines to carry forward from a finished 1024-character report is a much smaller job than writing the report. Its token budget is 4096 despite emitting two bullets: DeepSeek Flash spends most of it reasoning, and at 1024 it returned empty text, which is indistinguishable from a week worth carrying nothing. On the DeepSeek primary, `high` engages thinking via translated `extra_body`; on the Anthropic fallback, the same effort is sent natively.
 
 Logged LLM calls record the effective model, and fallback calls include `requested_model` and `fallback_used` in params/metadata.
 
@@ -49,6 +51,7 @@ Current default routes:
 | Nudges | `anthropic/claude-opus-5` | up to 2/day |
 | Verification | `deepseek/deepseek-v4-pro` | reports, coach, nudges; Opus 5 fallback |
 | Verification rewrites | `deepseek/deepseek-v4-flash` | only when verifier asks |
+| Weekly memory | `deepseek/deepseek-v4-flash` | 1/week, after the report is sent |
 | Chat | `openai/gpt-5.6-luna` | on demand |
 
 Using recent logged token sizes from this app, the always-on daemon lands around:
@@ -91,6 +94,7 @@ ZDROWSKIT_NUDGE_MODEL=anthropic/claude-opus-5
 ZDROWSKIT_CHAT_MODEL=openai/gpt-5.6-luna
 ZDROWSKIT_NOTIFY_MODEL=deepseek/deepseek-v4-flash
 ZDROWSKIT_ADD_CLONE_MODEL=deepseek/deepseek-v4-flash
+ZDROWSKIT_MEMORY_MODEL=deepseek/deepseek-v4-flash
 
 ZDROWSKIT_MAX_TOKENS_DEFAULT=4096
 ZDROWSKIT_MAX_TOKENS_INSIGHTS=8192
@@ -99,6 +103,7 @@ ZDROWSKIT_MAX_TOKENS_CHAT=4096
 ZDROWSKIT_MAX_TOKENS_NUDGE=4096
 ZDROWSKIT_MAX_TOKENS_NOTIFY=512
 ZDROWSKIT_MAX_TOKENS_ADD_CLONE=512
+ZDROWSKIT_MAX_TOKENS_MEMORY=4096
 ZDROWSKIT_MAX_TOKENS_VERIFICATION=16384
 ZDROWSKIT_MAX_TOKENS_VERIFICATION_REWRITE=16384
 ```

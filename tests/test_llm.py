@@ -365,6 +365,7 @@ class TestRepoPrompts:
             "nudge_nonfinal_retry.md",
             "nudge_empty_retry.md",
             "insights_truncation_retry.md",
+            "memory_prompt.md",
             "verify_rewrite_prompt.md",
             "tool_budget_synthesize.md",
             "tool_budget_nudge.md",
@@ -654,22 +655,27 @@ class TestCharts:
         assert "at most one priority, pitched at the week, not the day" in normalized
         assert "daily prescription is the nudge's job" in normalized
 
-    def test_weekly_report_memory_contract_bounds_what_is_stored(self) -> None:
-        """Memory is replayed into every later prompt, so a wrong line there is
-        repeated for weeks. Two rules matter: no hidden plan, no stored figures
-        the database already holds."""
+    def test_weekly_report_prompt_does_not_write_memory(self) -> None:
+        """Memory moved to its own call. The report prompt must say so, or the
+        writer keeps emitting a block that is stripped unseen."""
         prompt = (PROMPTS_DIR / "insights_prompt.md").read_text(encoding="utf-8")
+        normalized = " ".join(prompt.split())
+
+        assert "Do not write a `<memory>` block" in normalized
+        assert "a separate call decides what carries forward" in normalized
+
+    def test_memory_prompt_bounds_what_is_stored(self) -> None:
+        """Memory is replayed into every later prompt and the user never sees
+        it, so a wrong line is both quiet and long-lived."""
+        prompt = (PROMPTS_DIR / "memory_prompt.md").read_text(encoding="utf-8")
         normalized = " ".join(prompt.split())
 
         assert "at most two bullets" in normalized
         assert "Store only what the database cannot recompute" in normalized
-        assert "Never store weekly counts, distances, averages or sleep figures" in (
-            normalized
-        )
-        assert "Never store a prescription that is not in the visible report" in (
-            normalized
-        )
-        assert "no coaching history there are no open threads" in normalized
+        assert "Weekly counts, distances, averages, sleep or HRV figures" in normalized
+        assert "A prescription that is not in the report above" in normalized
+        assert "An inference stated as settled fact" in normalized
+        assert "return an empty block" in normalized
 
     def test_weekly_report_prompt_requires_run_sql_before_writing(self) -> None:
         """The health-data section is a summary; the exact rows are what stop

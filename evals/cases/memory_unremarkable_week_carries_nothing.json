@@ -1,0 +1,46 @@
+{
+  "id": "memory_unremarkable_week_carries_nothing",
+  "feature": "memory",
+  "case_kind": "synthetic_negative",
+  "source_feedback_id": null,
+  "source_llm_call_id": 1612,
+  "derived_from": {
+    "llm_call_id": 1612,
+    "hypothesis": "Every one of the last twelve memory blocks was full. None was empty and none had a single bullet, across weeks that included illness, travel and write-offs. A block that is always full is not selecting — it is padding to the limit, and padding is how a plausible-sounding line with nothing behind it gets replayed for a month. The control is a week where the honest answer is nothing: an unremarkable week, no open thread, and a report that made no commitment."
+  },
+  "intent": "Fewer bullets is better than padded ones. On a week that closed nothing and opened nothing, the correct memory block is empty.",
+  "fixture": {
+    "week_label": "2026-W24",
+    "report": "W24: 3 runs, 2 lifts, 15.2 km — the target week, hit exactly, for the third time running.\n\nNothing stands out, and that is worth saying plainly. Recovery held near your baseline all week, sleep was steady, and no session drifted off its intended effort. There is no comparison here that tells you something the week itself didn't.\n\nKeep it where it is this week.",
+    "review_facts": "Week: 2026-W24 (2026-06-08 – 2026-06-14). Complete.\n- Runs: 3 (15.2 km). Lifts: 2.\n- Avg HRV 51.2 ms (30d baseline 50.9). Avg resting HR 52 bpm (baseline 52).\n- Sleep: 6/7 nights tracked, 7.3 h avg.\n- Prior week 2026-W23: 3 runs, 14.8 km, 2 lifts.",
+    "log": "## 2026-06-11\n\n- Ordinary week. Nothing to report.",
+    "history": "## 2026-W23\n\n- Steady block, third week at target. Nothing outstanding to carry."
+  },
+  "assertions": [
+    {
+      "type": "memory_present",
+      "name": "returns_a_memory_block"
+    },
+    {
+      "type": "memory_bullet_max",
+      "name": "at_most_one_bullet",
+      "max": 1
+    },
+    {
+      "type": "memory_absent",
+      "name": "does_not_invent_a_thread_or_a_target",
+      "patterns": [
+        "re:(?i)hrv\\s*(>=|≥|above|at least)\\s*\\d",
+        "re:15[.,]2",
+        "re:(?i)\\bwatch\\b.*\\bif\\b"
+      ]
+    }
+  ],
+  "judge_assertions": [
+    {
+      "name": "does_not_manufacture_continuity",
+      "statement": "The week carried nothing forward: the report made no commitment, flagged no concern, and the notes record nothing. The memory block is empty or holds at most one genuinely durable observation drawn from the report. A block that invents an open thread, a watch point, a target for next week, or a causal story the report did not tell violates this."
+    }
+  ],
+  "notes": "Control case. The two real_regression memory cases both punish over-reach in what is stored; this one punishes storing anything at all when there is nothing to store, so a model cannot pass the suite by learning to write less about more.\n"
+}

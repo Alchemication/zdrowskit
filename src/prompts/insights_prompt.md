@@ -156,22 +156,8 @@ fig.update_layout(template="{chart_theme}", xaxis_title="", yaxis_title="km",
     margin=dict(l=50, r=50, t=40, b=40))
 </chart>
 
-### Memory block
+### End of the report
 
-After the report, add a `<memory>` block with at most two bullets. It is
-stripped before sending, so it costs the user nothing — but it is replayed
-into every later prompt, so a wrong line there is repeated for weeks.
-
-Store only what the database cannot recompute: a commitment you made visible
-in the report, an open thread, a causal attribution the user's notes support.
-
-Never store weekly counts, distances, averages or sleep figures — the next
-report gets those from the database directly. Never store a prescription that
-is not in the visible report; the user cannot see the standard otherwise. On a
-profile with no coaching history there are no open threads to carry, so write
-what you learned about this person or omit the block.
-
-<memory>
-- Visible priority: tempo this week, deferred twice now
-- HRV dip tracks the short-sleep nights, not the training load
-</memory>
+The report body and one chart are the whole output. Do not write a `<memory>`
+block — a separate call decides what carries forward, from the report you
+write here.
