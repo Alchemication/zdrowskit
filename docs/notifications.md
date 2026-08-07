@@ -28,7 +28,6 @@ Examples:
 - `/notify`
 - `/notify no nudges before 11am`
 - `/notify send weekly insights on Tuesday at 8`
-- `/notify turn off midweek report`
 - `/notify mute sync alerts for a week`
 - `/notify only warn me about sync after two days`
 - `/notify mute nudges today`
@@ -51,7 +50,6 @@ What can be changed:
 - nudges on/off
 - nudge earliest send time
 - weekly insights on/off, weekday, and time
-- midweek report on/off, weekday, and time
 - temporary mutes for all notifications or one notification type
 - reset one setting or everything back to built-in defaults
 

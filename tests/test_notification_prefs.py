@@ -51,7 +51,6 @@ class TestNotificationPrefs:
         assert effective["nudges"]["earliest_time"] == "11:00"
         assert effective["nudges"]["max_per_day"] == 4
         assert effective["weekly_insights"]["weekday"] == "tuesday"
-        assert effective["midweek_report"]["weekday"] == "thursday"
 
     def test_expired_temporary_mutes_are_pruned(self, tmp_path: Path) -> None:
         path = tmp_path / "notification_prefs.json"

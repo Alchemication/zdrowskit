@@ -45,9 +45,6 @@ SETTABLE_PATHS = {
     "weekly_insights.enabled",
     "weekly_insights.weekday",
     "weekly_insights.time",
-    "midweek_report.enabled",
-    "midweek_report.weekday",
-    "midweek_report.time",
     "data_health.enabled",
     "data_health.silent_after_h",
     "data_health.split_after_h",
@@ -55,11 +52,10 @@ SETTABLE_PATHS = {
 RESETTABLE_PATHS = SETTABLE_PATHS | {
     "nudges",
     "weekly_insights",
-    "midweek_report",
     "data_health",
     "all",
 }
-MUTE_TARGETS = {"all", "nudges", "weekly_insights", "midweek_report", "data_health"}
+MUTE_TARGETS = {"all", "nudges", "weekly_insights", "data_health"}
 MIN_NUDGES_PER_DAY = 1
 MAX_REASONABLE_NUDGES_PER_DAY = 6
 MIN_DATA_HEALTH_HOURS = 1
@@ -81,11 +77,6 @@ _DEFAULT_EFFECTIVE: dict[str, dict[str, Any]] = {
         "enabled": True,
         "weekday": "monday",
         "time": "10:00",
-    },
-    "midweek_report": {
-        "enabled": True,
-        "weekday": "thursday",
-        "time": "09:00",
     },
     "data_health": {
         "enabled": True,
@@ -311,7 +302,7 @@ def evaluate_report_delivery(
     now: datetime | None = None,
 ) -> dict[str, str]:
     """Decide whether a scheduled report may send now."""
-    if report_type not in {"weekly_insights", "midweek_report"}:
+    if report_type != "weekly_insights":
         raise ValueError(f"Unsupported report type: {report_type}")
     now = now or datetime.now().astimezone()
     effective = effective_notification_prefs(prefs)
@@ -365,7 +356,7 @@ def scheduled_report_due(
     now: datetime | None = None,
 ) -> bool:
     """Return True when the configured weekday/time has passed today."""
-    if report_type not in {"weekly_insights", "midweek_report"}:
+    if report_type != "weekly_insights":
         raise ValueError(f"Unsupported report type: {report_type}")
     now = now or datetime.now().astimezone()
     effective = effective_notification_prefs(prefs)
@@ -513,7 +504,6 @@ def _mute_label(target: str) -> str:
         "all": "All notifications",
         "nudges": "Nudges",
         "weekly_insights": "Weekly insights",
-        "midweek_report": "Midweek report",
         "data_health": "Sync alerts",
     }
     return labels.get(target, target)
@@ -543,12 +533,6 @@ def format_notification_summary(
             f"{effective['weekly_insights']['time']})"
         ),
         (
-            "- Midweek report: "
-            f"{'on' if effective['midweek_report']['enabled'] else 'off'}"
-            f" ({effective['midweek_report']['weekday'].title()} "
-            f"{effective['midweek_report']['time']})"
-        ),
-        (
             "- Sync alerts: "
             f"{'on' if effective['data_health']['enabled'] else 'off'}"
             f" (silence {effective['data_health']['silent_after_h']}h, "
@@ -570,7 +554,6 @@ def format_notification_summary(
                 "Examples:",
                 "- /notify no nudges before 11am",
                 "- /notify send weekly insights on Tuesday at 8",
-                "- /notify turn off midweek report",
                 "- /notify mute nudges today",
                 "- /notify mute all notifications until tomorrow 11am",
                 "- /notify bring weekly insights back to default",
@@ -635,21 +618,6 @@ def format_proposed_changes(
                 f"{after['weekly_insights']['weekday'].title()} "
                 f"{after['weekly_insights']['time']} "
                 f"({'on' if after['weekly_insights']['enabled'] else 'off'})"
-            ),
-        )
-    )
-    lines.append(
-        _section_line(
-            "Midweek report",
-            (
-                f"{before['midweek_report']['weekday'].title()} "
-                f"{before['midweek_report']['time']} "
-                f"({'on' if before['midweek_report']['enabled'] else 'off'})"
-            ),
-            (
-                f"{after['midweek_report']['weekday'].title()} "
-                f"{after['midweek_report']['time']} "
-                f"({'on' if after['midweek_report']['enabled'] else 'off'})"
             ),
         )
     )

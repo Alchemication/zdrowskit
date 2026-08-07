@@ -25,7 +25,7 @@ Under the hood: SQLite for storage, [litellm](https://github.com/BerriAI/litellm
 Three loops run continuously:
 
 - **Data in** - Auto Export posts Apple Health JSON through HTTPS (or writes to iCloud/Google Drive). zdrowskit imports metrics, workouts, routes, and sleep into SQLite.
-- **Coach out** - scheduled reports, weekly coaching reviews, midweek check-ins, and reactive nudges each use their own prompt, tools, and LLM call.
+- **Coach out** - a scheduled weekly report, coaching reviews, and reactive nudges each use their own prompt, tools, and LLM call.
 - **Two-way chat** - Telegram messages can query your full health history through SQL, render charts, and propose context-file edits with Approve/Reject buttons.
 
 ## Requirements

@@ -60,7 +60,7 @@ class DaemonRunnerHandler:
         prefs = self._d._load_notification_prefs(now=now)
         effective = effective_notification_prefs(prefs)
 
-        for report_type in ("weekly_insights", "midweek_report"):
+        for report_type in ("weekly_insights",):
             report = effective[report_type]
             if now.strftime("%A").lower() != report["weekday"]:
                 continue
@@ -631,94 +631,6 @@ class DaemonRunnerHandler:
                     "Weekly review report failed",
                     {"kind": "weekly", "error": (captured or "")[:500]},
                 )
-
-    def _run_midweek_report(self) -> None:
-        """Run a mid-week progress report and send via Telegram."""
-        from daemon import _capture_last_error
-        from notification_prefs import evaluate_report_delivery
-
-        now = datetime.now().astimezone()
-        prefs = self._d._load_notification_prefs(now=now)
-        decision = evaluate_report_delivery(prefs, "midweek_report", now=now)
-        if decision["status"] != "allowed":
-            self._d._state["last_progress_skip_date"] = date.today().isoformat()
-            self._d._save_state()
-            reason = decision.get("reason", "unknown")
-            logger.info("Midweek report suppressed: %s", reason)
-            self._d._record_event(
-                "insights",
-                "prefs_suppressed",
-                f"Midweek report suppressed: {reason}",
-                {"reason": reason, "kind": "midweek"},
-            )
-            return
-        if not self._can_send_report("progress"):
-            self._d._record_event(
-                "insights",
-                "already_ran",
-                "Midweek report skipped: already ran/skipped today",
-                {"kind": "midweek"},
-            )
-            return
-
-        self._d._run_import()
-
-        from cmd_insights import cmd_insights
-
-        args = types.SimpleNamespace(
-            db=str(self._d.db),
-            context_dir=self._d.context_dir,
-            reports_dir=self._d.reports_dir,
-            nudges_dir=self._d.nudges_dir,
-            model_prefs_path=self._d.model_prefs_path,
-            telegram_id=(self._d.profile.telegram_id if self._d.profile else None),
-            model=self._d.model,
-            telegram=True,
-            week="current",
-            months=3,
-            no_update_baselines=False,
-            no_update_history=False,
-            explain=False,
-            data_dir=None,
-            reasoning_effort="medium",
-        )
-        with _capture_last_error() as cap:
-            try:
-                logger.info("Running mid-week progress report")
-                result = cmd_insights(args)
-                self._d._attach_feedback_button(result, "insights")
-                self._d._record_report("progress")
-                self._d._state["last_report_ts"] = datetime.now().isoformat()
-                self._d._save_state()
-                self._d._record_event(
-                    "insights",
-                    "fired",
-                    "Mid-week progress report sent",
-                    {"kind": "midweek"},
-                    llm_call_id=result.llm_call_id,
-                )
-            except SystemExit:
-                captured = cap.last_message
-                suppression = cap.last_suppression
-                logger.error("Mid-week progress report failed")
-                # See _run_weekly_report — same retry-suppression rationale.
-                self._d._state["last_progress_skip_date"] = date.today().isoformat()
-                self._d._save_state()
-                self._d._notify_user_failure(
-                    "Mid-week progress",
-                    captured,
-                    detail=suppression,
-                )
-                self._d._record_event(
-                    "insights",
-                    "failed",
-                    "Mid-week progress report failed",
-                    {"kind": "midweek", "error": (captured or "")[:500]},
-                )
-
-    # ------------------------------------------------------------------
-    # Nudge runner
-    # ------------------------------------------------------------------
 
     def _run_nudge(
         self,

@@ -44,7 +44,7 @@ Current default routes:
 
 | Feature | Primary | Normal cadence |
 |---|---|---:|
-| Weekly + midweek reports | `anthropic/claude-opus-5` | 2/week |
+| Weekly report | `anthropic/claude-opus-5` | 1/week |
 | Coach review | `anthropic/claude-opus-5` | 1/week |
 | Nudges | `anthropic/claude-opus-5` | up to 2/day |
 | Verification | `deepseek/deepseek-v4-pro` | reports, coach, nudges; Opus 5 fallback |
@@ -55,7 +55,7 @@ Using recent logged token sizes from this app, the always-on daemon lands around
 
 | Workload | Projected cost |
 |---|---:|
-| Reports, including DeepSeek verification | ~$0.20/week |
+| Report, including DeepSeek verification | ~$0.10/week |
 | Coach review | ~$0.10/week |
 | Nudges at the 2/day cap, including DeepSeek verification | ~$0.75/week |
 | **Daemon total at default caps** | **~$1.05/week** |

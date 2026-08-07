@@ -494,12 +494,6 @@ class ProfileRuntime:
                 f"({effective['weekly_insights']['weekday'].title()} "
                 f"{effective['weekly_insights']['time']})"
             ),
-            (
-                "- Midweek report: "
-                f"{'on' if effective['midweek_report']['enabled'] else 'off'} "
-                f"({effective['midweek_report']['weekday'].title()} "
-                f"{effective['midweek_report']['time']})"
-            ),
         ]
 
         telegram = self._chat.telegram_status()
@@ -1112,8 +1106,6 @@ class ProfileRuntime:
 
         if scheduled_report_due(prefs, "weekly_insights", now=now):
             self._runners._run_weekly_report()
-        if scheduled_report_due(prefs, "midweek_report", now=now):
-            self._runners._run_midweek_report()
 
         self._check_ingest_health(prefs)
 

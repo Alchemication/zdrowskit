@@ -235,7 +235,6 @@ flowchart TD
 flowchart TD
     trigger{"What triggered it?"}
     weeklySchedule["Scheduled weekly report"]
-    midweekSchedule["Scheduled midweek report"]
     reviewCmd["Telegram /review current|last"]
     coachCmd["Telegram /coach current|last"]
     importData["Import latest data first"]
@@ -261,11 +260,9 @@ flowchart TD
     eventLog[(Events + LLM traces)]
 
     trigger --> weeklySchedule
-    trigger --> midweekSchedule
     trigger --> reviewCmd
     trigger --> coachCmd
     weeklySchedule --> prefs
-    midweekSchedule --> prefs
     reviewCmd --> importData
     prefs -- no --> eventLog
     prefs -- yes --> already
