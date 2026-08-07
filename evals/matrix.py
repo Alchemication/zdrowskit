@@ -2,7 +2,7 @@
 
 Usage:
     uv run python -m evals.matrix --feature chat --models deepseek/deepseek-v4-flash,deepseek/deepseek-v4-pro --reasoning-efforts high
-    uv run python -m evals.matrix --feature insights --models anthropic/claude-opus-4-7,deepseek/deepseek-v4-pro --reasoning-efforts high
+    uv run python -m evals.matrix --feature insights --models anthropic/claude-opus-5,deepseek/deepseek-v4-pro --reasoning-efforts high
     uv run python -m evals.matrix --production --record
 """
 
@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 from evals import leaderboard
 from evals.framework import (
-    DEFAULT_MODEL,
+    PRODUCTION_EFFORT,
     EVAL_TEMPERATURE,
     EvalCache,
     EvalCase,
@@ -33,7 +33,8 @@ class MatrixRun:
 
     label: str
     cases: list[EvalCase]
-    model: str
+    model: str | None
+    """Model override, or None to use each case's own production route."""
     reasoning_effort: str | None
     temperature: float | None
 
@@ -77,14 +78,27 @@ def main() -> None:
         help="Omit temperature from LLM calls.",
     )
     parser.add_argument(
-        "--no-cache",
+        "--cache",
         action="store_true",
-        help="Disable the local SQLite cache for eval LLM responses.",
+        help=(
+            "Reuse cached eval LLM responses. Off by default: comparing "
+            "models from frozen samples measures the cache, not the models."
+        ),
     )
     parser.add_argument(
         "--refresh-cache",
         action="store_true",
-        help="Ignore cached eval responses and overwrite them with fresh ones.",
+        help="With --cache, ignore cached responses and overwrite them.",
+    )
+    parser.add_argument(
+        "--repeat",
+        type=int,
+        default=1,
+        help=(
+            "Run each case N times per cell and report a per-case pass rate. "
+            "Strongly recommended for model comparisons: output varies "
+            "between identical runs, so one sample per cell is noise."
+        ),
     )
     parser.add_argument(
         "--record",
@@ -97,8 +111,15 @@ def main() -> None:
         help="Allow recording even if the same run fingerprint already exists.",
     )
     args = parser.parse_args()
-    if args.no_cache and args.refresh_cache:
-        parser.error("--refresh-cache cannot be used with --no-cache")
+    if args.refresh_cache and not args.cache:
+        parser.error("--refresh-cache requires --cache")
+    if args.repeat < 1:
+        parser.error("--repeat must be at least 1")
+    if args.repeat > 1 and args.cache:
+        parser.error(
+            "--repeat cannot be used with --cache: repeated runs would replay "
+            "one cached response and report it as stability."
+        )
     if args.record_duplicate and not args.record:
         parser.error("--record-duplicate requires --record")
 
@@ -117,7 +138,7 @@ def main() -> None:
         print(str(exc), file=sys.stderr)
         sys.exit(2)
 
-    cache = None if args.no_cache else EvalCache()
+    cache = EvalCache() if args.cache else None
     failures = 0
     for matrix_run in runs:
         print(f"\n== {matrix_run.label} ==")
@@ -128,6 +149,7 @@ def main() -> None:
             reasoning_effort=matrix_run.reasoning_effort,
             temperature=matrix_run.temperature,
             cache=cache,
+            repeat=args.repeat,
             refresh_cache=args.refresh_cache,
         )
         print_results(results)
@@ -164,8 +186,11 @@ def build_matrix_runs(
             MatrixRun(
                 label=f"production · {len(selected)} cases",
                 cases=selected,
-                model=DEFAULT_MODEL,
-                reasoning_effort=None,
+                # None resolves each case against model_prefs, so this cell
+                # asks exactly what the daemon asks. Naming one model here
+                # made the smoke suite green for a config nobody ships.
+                model=None,
+                reasoning_effort=PRODUCTION_EFFORT,
                 temperature=temperature,
             )
         ]

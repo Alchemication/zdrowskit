@@ -330,7 +330,7 @@ class TestModelPrefs:
     def test_model_button_label_includes_tier(self):
         label = model_button_label(ANTHROPIC_OPUS_MODEL)
 
-        assert "opus-4-8" in label
+        assert "opus-5" in label
         assert MODEL_TIERS[ANTHROPIC_OPUS_MODEL] in label
 
 

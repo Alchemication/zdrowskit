@@ -40,12 +40,51 @@ logger = logging.getLogger(__name__)
 
 CASES_DIR = Path(__file__).resolve().parent / "cases"
 DEFAULT_MODEL = llm.DEFAULT_MODEL
+
 DEFAULT_CACHE_PATH = Path(__file__).resolve().parent / ".cache.sqlite"
 EVAL_CACHE_SCHEMA_VERSION = 5
 EVAL_TEMPERATURE = 0.0
 DEFAULT_JUDGE_MODEL = "anthropic/claude-sonnet-4-6"
 EVAL_JUDGE_MAX_TOKENS = 800
 EVAL_JUDGE_TEMPERATURE = 0.0
+PRODUCTION_EFFORT = "production"
+"""Sentinel asking a case to inherit its route's reasoning effort.
+
+Distinct from None, which means reasoning off: a feature production runs
+with thinking enabled must not be silently evaluated without it.
+"""
+
+
+# Which model_prefs feature backs each eval feature. Evals exist to check the
+# production path, so by default they must ask the model production would ask —
+# running chat cases on the pro tier while chat actually routes to flash tests
+# a configuration nobody ships.
+EVAL_FEATURE_TO_PRODUCTION_FEATURE = {
+    "chat": "chat",
+    "insights": "insights",
+    "verification_judge": "verification",
+}
+
+
+def production_route(feature: str) -> dict[str, Any]:
+    """Return the live model_prefs route backing one eval feature.
+
+    Args:
+        feature: Eval feature name.
+
+    Returns:
+        ``call_llm`` kwargs — model, and reasoning effort or temperature when
+        the profile pins them.
+
+    Raises:
+        ValueError: If the eval feature has no production counterpart.
+    """
+    from model_prefs import resolve_model_route
+
+    mapped = EVAL_FEATURE_TO_PRODUCTION_FEATURE.get(feature)
+    if mapped is None:
+        raise ValueError(f"No production route mapped for eval feature: {feature}")
+    return resolve_model_route(mapped).call_kwargs()
 
 
 class JudgeAssertionResult(BaseModel):
@@ -282,7 +321,7 @@ def load_cases(cases_dir: Path = CASES_DIR) -> list[EvalCase]:
 def run_case(
     case: EvalCase,
     *,
-    model: str = DEFAULT_MODEL,
+    model: str | None = None,
     max_tool_iterations: int = 5,
     reasoning_effort: str | None = None,
     temperature: float | None = EVAL_TEMPERATURE,
@@ -291,9 +330,28 @@ def run_case(
 ) -> EvalResult:
     """Run one eval case and evaluate its deterministic assertions.
 
-    Pass ``temperature=None`` for models that reject the parameter entirely
-    (e.g. claude-opus-4-7).
+    Args:
+        case: The case to run.
+        model: Model override. ``None`` uses the route this case's feature
+            resolves to in production, which is the point of the exercise —
+            an eval passing on a model the daemon never calls proves nothing.
+        max_tool_iterations: Tool loop ceiling.
+        reasoning_effort: Effort override. ``None`` takes production's.
+        temperature: Pass ``None`` for models that reject the parameter.
+        cache: Optional response cache.
+        refresh_cache: Ignore and overwrite cached responses.
+
+    Returns:
+        The completed result, including any runner error.
     """
+    inherit_effort = reasoning_effort == PRODUCTION_EFFORT
+    if inherit_effort:
+        reasoning_effort = None
+    if model is None:
+        route = production_route(case.feature)
+        model = str(route["model"])
+        if inherit_effort:
+            reasoning_effort = route.get("reasoning_effort")
     result = EvalResult(
         case_id=case.id,
         feature=case.feature,
@@ -331,16 +389,22 @@ def run_case(
     if result.error is not None:
         return result
 
-    result.assertions = run_assertions(case.assertions, execution=result.execution)
-    if all(assertion.passed for assertion in result.assertions):
-        result.assertions.extend(
-            run_judge_assertions(
-                case,
-                result.execution,
-                cache=cache,
-                refresh_cache=refresh_cache,
+    # Assertions are deterministic, so they are evaluated once rather than
+    # retried — but a malformed assertion must still be recorded rather than
+    # aborting the whole run partway through a suite.
+    try:
+        result.assertions = run_assertions(case.assertions, execution=result.execution)
+        if all(assertion.passed for assertion in result.assertions):
+            result.assertions.extend(
+                run_judge_assertions(
+                    case,
+                    result.execution,
+                    cache=cache,
+                    refresh_cache=refresh_cache,
+                )
             )
-        )
+    except Exception as exc:
+        result.error = f"{type(exc).__name__}: {exc}"
     return result
 
 
@@ -759,6 +823,37 @@ def _format_failed_case_summary(results: list[EvalResult]) -> str | None:
     return "Failed cases: " + ", ".join(failed_case_ids)
 
 
+def stability_rows(results: list[EvalResult]) -> list[tuple[str, int, int, bool]]:
+    """Return (case_id, passes, runs, flaky) for cases run more than once.
+
+    A case that passes on some runs and fails on others is the most dangerous
+    result an eval can produce, because a single run reports it as a clean
+    pass or a clean failure with equal confidence. Surfacing the rate is the
+    only way a model comparison built on these cases means anything.
+
+    Args:
+        results: All results from a run, possibly several per case.
+
+    Returns:
+        One tuple per repeated case, in first-seen order.
+    """
+    order: list[str] = []
+    tally: dict[str, list[int]] = {}
+    for result in results:
+        if result.case_id not in tally:
+            order.append(result.case_id)
+            tally[result.case_id] = [0, 0]
+        tally[result.case_id][1] += 1
+        if result.passed:
+            tally[result.case_id][0] += 1
+    rows: list[tuple[str, int, int, bool]] = []
+    for case_id in order:
+        passes, runs = tally[case_id]
+        if runs > 1:
+            rows.append((case_id, passes, runs, 0 < passes < runs))
+    return rows
+
+
 def _format_errored_case_summary(results: list[EvalResult]) -> str | None:
     """Build a compact errored-case list for the result footer."""
     errored_case_ids = [result.case_id for result in results if result.errored]
@@ -787,6 +882,20 @@ def _summary_rows(
     errored_summary = _format_errored_case_summary(results)
     if errored_summary is not None:
         rows.append(("Errored Cases", errored_summary.removeprefix("Errored cases: ")))
+    stability = stability_rows(results)
+    if stability:
+        rows.append(
+            (
+                "Stability",
+                " | ".join(
+                    f"{case_id} {passes}/{runs}{' FLAKY' if flaky else ''}"
+                    for case_id, passes, runs, flaky in stability
+                ),
+            )
+        )
+        flaky_ids = [case_id for case_id, _p, _r, flaky in stability if flaky]
+        if flaky_ids:
+            rows.append(("Flaky Cases", ", ".join(flaky_ids)))
     if len(results) <= 1:
         return rows
 
@@ -1203,6 +1312,15 @@ def _call_judge_for_eval(
                     "intent": case.intent,
                     "conversation_turns": case.fixture.get("turns", []),
                     "candidate_response": execution.text,
+                    # Much of what these prompts produce is written through
+                    # tools rather than said: a log entry, a strategy edit, a
+                    # SQL query. Without these the judge sees only the chat
+                    # reply and reports a log-format assertion as "no log
+                    # entry at all" while the entry sits in the tool call.
+                    "candidate_tool_calls": [
+                        {"name": call.name, "arguments": call.arguments}
+                        for call in execution.tool_calls
+                    ],
                     "assertions": case.judge_assertions,
                 },
                 indent=2,
@@ -1668,16 +1786,38 @@ def _memory_block(text: str) -> str | None:
     return match.group(1).strip() if match else None
 
 
+_MATCHER_KEYS = frozenset(
+    {"equals", "contains", "not_contains", "regex", "not_regex", "case_sensitive"}
+)
+
+
 def _value_matches(actual: Any, expected: Any) -> bool:
     if isinstance(expected, dict):
+        # An unrecognised key used to be ignored, so a typo or an invented
+        # matcher made the assertion vacuously true — a test that reports
+        # success while checking nothing is worse than no test at all.
+        unknown = sorted(set(expected) - _MATCHER_KEYS)
+        if unknown:
+            raise ValueError(
+                f"Unknown matcher key(s) {unknown}; supported: {sorted(_MATCHER_KEYS)}"
+            )
         text = str(actual or "")
+        flags = 0 if expected.get("case_sensitive") else re.IGNORECASE
         if "equals" in expected and actual != expected["equals"]:
             return False
         contains = expected.get("contains", [])
         if contains and any(str(item).lower() not in text.lower() for item in contains):
             return False
+        not_contains = expected.get("not_contains", [])
+        if not_contains and any(
+            str(item).lower() in text.lower() for item in not_contains
+        ):
+            return False
         regex = expected.get("regex")
-        if regex and re.search(str(regex), text, re.IGNORECASE) is None:
+        if regex and re.search(str(regex), text, flags) is None:
+            return False
+        not_regex = expected.get("not_regex")
+        if not_regex and re.search(str(not_regex), text, flags) is not None:
             return False
         return True
     if isinstance(expected, str) and expected.startswith("re:"):

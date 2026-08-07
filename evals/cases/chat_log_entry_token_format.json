@@ -1,0 +1,124 @@
+{
+  "id": "chat_log_entry_token_format",
+  "feature": "chat",
+  "case_kind": "synthetic_positive",
+  "source_feedback_id": 10,
+  "source_llm_call_id": 288,
+  "derived_from": {
+    "feedback_id": 10,
+    "llm_call_id": 288,
+    "hypothesis": "The existing log cases assert that an append is proposed, that it carries the pinned date, and that it captures the substance — but nothing asserts the shape of the entry itself. The log-entry style contract in chat_prompt.md is specific: one bullet, one line, at most 160 characters, bracketed lowercase tokens of one to three words, an optional prose tail after an em dash, user-given numbers verbatim, and no recap of metrics the database already holds. That format is what makes log.md cheap to replay into every later prompt; a model that writes a paragraph, capitalises tokens, or restates HRV and sleep numbers degrades every downstream call while still looking like it did the right thing. This case guards the format so a model swap cannot quietly lose it. The scenario deliberately avoids proper nouns: the lowercase-token rule has never been ruled on for names, and a case should not be where an undecided question gets settled by accident.",
+    "convention_examples": [
+      "- 2026-08-04 [run cut short] [walk run hybrid] — stopped at 3k feeling wrecked, then mixed walk/run with friend on bike",
+      "- 2026-08-01 [tempo drought broken] [sleep debt] — middle 2k @ 5:13/km inside 6k run; first clean tempo since W21"
+    ]
+  },
+  "intent": "A log append must follow the log-entry style contract and, above all, stand on its own: log.md is replayed into later prompts without the conversation that produced it, so an entry that only makes sense alongside today's message is worthless the moment it is read back.",
+  "fixture": {
+    "today": "2026-04-09",
+    "context": {
+      "me": "# Profile\n\n- Adam, 42M.\n- Has a young child and trains around family/work constraints.\n",
+      "strategy": "# Strategy\n\n## Weekly Plan\n\n- Mon: easy run.\n- Wed: tempo or quality run if recovery is good.\n- Thu: Strength A if the day allows.\n- Fri: Strength B or easy run depending on the week.\n",
+      "log": "# Log\n\n- 2026-04-07 [rest day] [tempo deferred] — light walk only, run planned Wednesday\n- 2026-04-08 [run tempo] — short morning session\n",
+      "history": "# History\n\n- W14 was disrupted by poor recovery; keep advice practical and context-aware.\n",
+      "coach_feedback": "(not provided)",
+      "recent_nudges": "(none yet)",
+      "last_coach_summary": "(no recent coach review)"
+    },
+    "health_data": {},
+    "turns": [
+      {
+        "role": "user",
+        "content": "Add to my log: got back from the work trip at 1am, slept about 4 hours, skipped the strength session and just walked 3km instead. Travelling again next Tuesday."
+      }
+    ]
+  },
+  "assertions": [
+    {
+      "type": "tool_called",
+      "name": "proposes_log_append",
+      "tool": "update_context",
+      "count": 1
+    },
+    {
+      "type": "tool_arg_matches",
+      "name": "log_append_is_one_dated_bullet",
+      "tool": "update_context",
+      "matches": {
+        "file": "log",
+        "action": "append",
+        "content": {
+          "regex": "(?s)\\A\\s*-\\s+2026-04-09\\b[^\\n]*\\s*\\Z"
+        }
+      }
+    },
+    {
+      "type": "tool_arg_matches",
+      "name": "log_append_carries_lowercase_bracketed_tokens",
+      "tool": "update_context",
+      "matches": {
+        "file": "log",
+        "action": "append",
+        "content": {
+          "regex": "\\[[a-z0-9][a-z0-9 :/.\\-]*\\]"
+        }
+      }
+    },
+    {
+      "type": "tool_arg_matches",
+      "name": "log_append_has_no_capitalised_token",
+      "tool": "update_context",
+      "matches": {
+        "file": "log",
+        "action": "append",
+        "content": {
+          "not_regex": "\\[[^\\]]*[A-Z][^\\]]*\\]",
+          "case_sensitive": true
+        }
+      }
+    },
+    {
+      "type": "tool_arg_matches",
+      "name": "log_append_keeps_user_given_numbers",
+      "tool": "update_context",
+      "matches": {
+        "file": "log",
+        "action": "append",
+        "content": {
+          "regex": "(?i)(4\\s*h|4 hours|3\\s*km|3k)"
+        }
+      }
+    },
+    {
+      "type": "tool_arg_matches",
+      "name": "log_append_does_not_recap_db_metrics",
+      "tool": "update_context",
+      "matches": {
+        "file": "log",
+        "action": "append",
+        "content": {
+          "not_regex": "(?i)\\b(hrv|resting hr|rhr|vo2max|efficiency|bpm|recovery index)\\b"
+        }
+      }
+    },
+    {
+      "type": "tool_arg_matches",
+      "name": "log_append_within_length_budget",
+      "tool": "update_context",
+      "matches": {
+        "file": "log",
+        "action": "append",
+        "content": {
+          "regex": "(?s)\\A\\s*[^\\n]{1,160}\\s*\\Z"
+        }
+      }
+    }
+  ],
+  "judge_assertions": [
+    {
+      "name": "entry_stands_alone_without_the_conversation",
+      "statement": "Reading only the proposed log entry line, with no access to the conversation that produced it, a coach could tell what happened that day and why it mattered. The bracketed tokens name concepts carrying their own context — 'sleep short travel' rather than a bare 'tired' or 'poor', which would be meaningless on replay — and any prose tail after the em dash adds nuance the tokens cannot hold rather than restating them."
+    }
+  ],
+  "notes": "Guards the log-entry style contract in chat_prompt.md, which the three existing log cases leave untested — they assert that an append happens, is dated, and captures the substance, but not its shape. Convention examples in derived_from are real entries from the operator's log.md. Deliberately covers the cheap-model path: log formatting is a compact, well-specified task that a flash-tier model handles well, so this case is what would catch a regression if that routing changes.\n"
+}

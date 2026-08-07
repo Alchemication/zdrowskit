@@ -170,6 +170,20 @@ def _is_budget_model(model: str) -> bool:
 # thinking off. Anthropic models receive reasoning_effort natively.
 _DEEPSEEK_THINKING_ENABLED: dict[str, Any] = {"thinking": {"type": "enabled"}}
 
+# Opus 5 replaced the reasoning transport its predecessors accept. Sending
+# reasoning_effort there is rejected with "thinking.type.enabled is not
+# supported for this model", and because that arrives as a BadRequest the
+# fallback chain answers from another provider instead — the config still says
+# Opus 5 while nothing runs on it. Adaptive thinking plus an explicit effort is
+# the supported shape, and it must be sent as top-level kwargs: this litellm
+# version forwards extra_body to Anthropic verbatim and the API rejects it.
+_OPUS5_THINKING_ADAPTIVE: dict[str, Any] = {"type": "adaptive"}
+
+
+def _uses_output_config_effort(model: str) -> bool:
+    """Return True for Anthropic models taking effort via ``output_config``."""
+    return _is_anthropic_model(model) and "opus-5" in model.lower()
+
 
 def _reasoning_engaged(model: str, reasoning_effort: str | None) -> bool:
     """Return True when *reasoning_effort* actually engages reasoning on *model*.
@@ -300,10 +314,11 @@ def _fallback_chain(model: str, fallback_models: list[str] | None = None) -> lis
 def _completion_kwargs_for_model(kwargs: dict, model: str) -> dict:
     """Return LiteLLM kwargs adjusted for a specific attempted model.
 
-    Per-attempt translation: Anthropic receives ``reasoning_effort`` natively;
-    DeepSeek translates ``reasoning_effort`` of ``high`` or ``max`` into
-    ``extra_body={"thinking": {"type": "enabled"}}`` unless the caller passed
-    an explicit ``extra_body`` (which always wins).
+    Per-attempt translation: Anthropic receives ``reasoning_effort`` natively,
+    except Opus 5 which takes ``thinking={"type": "adaptive"}`` plus
+    ``output_config={"effort": ...}``; DeepSeek translates ``reasoning_effort``
+    of ``high`` or ``max`` into ``extra_body={"thinking": {"type": "enabled"}}``
+    unless the caller passed an explicit ``extra_body`` (which always wins).
     """
     adjusted = {k: v for k, v in kwargs.items() if k != "model"}
     requested_reasoning = adjusted.pop("reasoning_effort", None)
@@ -320,7 +335,11 @@ def _completion_kwargs_for_model(kwargs: dict, model: str) -> dict:
         if effective_temperature is not None:
             adjusted["temperature"] = effective_temperature
     if anthropic_reasoning is not None:
-        adjusted["reasoning_effort"] = anthropic_reasoning
+        if _uses_output_config_effort(model):
+            adjusted["thinking"] = dict(_OPUS5_THINKING_ADAPTIVE)
+            adjusted["output_config"] = {"effort": anthropic_reasoning}
+        else:
+            adjusted["reasoning_effort"] = anthropic_reasoning
     if requested_response_format is not None and _model_accepts_response_format(model):
         is_pydantic = isinstance(requested_response_format, type) and issubclass(
             requested_response_format, BaseModel
@@ -529,7 +548,7 @@ def call_llm(
         model: litellm model string.
         max_tokens: Maximum tokens in the response.
         temperature: Sampling temperature. Pass ``None`` to omit the parameter
-            entirely for models that reject it (e.g. claude-opus-4-8, which
+            entirely for models that reject it (e.g. claude-opus-5, which
             deprecated the field).
         reasoning_effort: Optional reasoning effort hint (model-dependent).
         response_format: Optional OpenAI-compatible response format hint.
