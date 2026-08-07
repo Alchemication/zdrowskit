@@ -26,6 +26,7 @@ from config import (
     FALLBACK_FLASH_MODEL,
     FALLBACK_MODEL,
     FALLBACK_PRO_MODEL,
+    OPENAI_LUNA_MODEL,
     PRIMARY_FLASH_MODEL,
     PRIMARY_PRO_MODEL,
     PROMPTS_DIR,
@@ -85,7 +86,9 @@ class TestFeatureDefaultModels:
         assert FALLBACK_MODEL == FALLBACK_PRO_MODEL == ANTHROPIC_OPUS_MODEL
         assert DEFAULT_INSIGHTS_MODEL == DEFAULT_COACH_MODEL == DEFAULT_NUDGE_MODEL
         assert DEFAULT_INSIGHTS_MODEL == ANTHROPIC_OPUS_MODEL
-        assert DEFAULT_CHAT_MODEL == PRIMARY_FLASH_MODEL
+        # Chat is the one flash-profile feature routed off DeepSeek:
+        # Flash claimed actions it never took in the chat eval suite.
+        assert DEFAULT_CHAT_MODEL == OPENAI_LUNA_MODEL
 
     def test_lightweight_utility_surfaces_default_models(self) -> None:
         assert PRIMARY_FLASH_MODEL == DEEPSEEK_FLASH_MODEL

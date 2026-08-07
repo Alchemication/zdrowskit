@@ -8,6 +8,7 @@ from config import (
     ANTHROPIC_HAIKU_MODEL,
     ANTHROPIC_OPUS_MODEL,
     FALLBACK_PRO_MODEL,
+    DEFAULT_CHAT_MODEL,
     PRIMARY_FLASH_MODEL,
     PRIMARY_PRO_MODEL,
 )
@@ -35,10 +36,10 @@ class TestModelPrefs:
             assert route.call_kwargs()["reasoning_effort"] == "high"
             assert route.call_kwargs()["temperature"] is None
 
-    def test_chat_default_uses_deepseek_flash(self, tmp_path):
+    def test_chat_default_uses_luna(self, tmp_path):
         route = resolve_model_route("chat", path=tmp_path / "models.json")
 
-        assert route.primary == PRIMARY_FLASH_MODEL
+        assert route.primary == DEFAULT_CHAT_MODEL
         assert route.fallback == ANTHROPIC_HAIKU_MODEL
         assert route.call_kwargs()["reasoning_effort"] == "high"
         assert route.call_kwargs()["temperature"] is None
@@ -155,7 +156,7 @@ class TestModelPrefs:
 
         chat = resolve_model_route("chat", path=path)
 
-        assert chat.primary == PRIMARY_FLASH_MODEL
+        assert chat.primary == DEFAULT_CHAT_MODEL
         assert chat.reasoning_effort == "high"
         assert chat.temperature is None
 
@@ -211,7 +212,7 @@ class TestModelPrefs:
         assert route.primary == PRIMARY_PRO_MODEL
         assert route.temperature == 0.3
 
-    def test_reset_feature_restores_chat_to_flash(self, tmp_path):
+    def test_reset_feature_restores_chat_default(self, tmp_path):
         path = tmp_path / "models.json"
         set_feature_route(
             "chat",
@@ -223,7 +224,7 @@ class TestModelPrefs:
         reset_feature_route("chat", path=path)
 
         route = resolve_model_route("chat", path=path)
-        assert route.primary == PRIMARY_FLASH_MODEL
+        assert route.primary == DEFAULT_CHAT_MODEL
         assert route.reasoning_effort == "high"
         assert route.temperature is None
 

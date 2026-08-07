@@ -167,7 +167,12 @@ class TestCaseLoading:
             "does_not_invent_warmup_problem",
             "alternative_is_framed_as_preference",
         ]
-        assert negative.judge_assertions == []
+        # The negative control asserts what the reply conveys, not the
+        # words it uses: two models answered correctly and failed the
+        # original lexical regexes 5/5.
+        assert [item["name"] for item in negative.judge_assertions] == [
+            "treats_shortened_session_as_not_meeting_the_prescription",
+        ]
         assert "3 easy + 2 tempo" in real.notes
         assert "short warmups" in negative.notes
         assert "generalize" in positive.notes

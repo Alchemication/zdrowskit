@@ -2533,7 +2533,7 @@ class TestModelsFlow:
         assert route.temperature == 0.3
 
     def test_models_reset_all_restores_defaults(self, tmp_path: Path) -> None:
-        from config import ANTHROPIC_OPUS_MODEL, PRIMARY_FLASH_MODEL
+        from config import ANTHROPIC_OPUS_MODEL, DEFAULT_CHAT_MODEL
         from model_prefs import resolve_model_route, set_feature_route
 
         daemon = _make_daemon(tmp_path)
@@ -2551,7 +2551,7 @@ class TestModelsFlow:
             )
             route = resolve_model_route("chat")
 
-        assert route.primary == PRIMARY_FLASH_MODEL
+        assert route.primary == DEFAULT_CHAT_MODEL
 
     def test_models_auto_fallback_falls_through_to_profile(
         self, tmp_path: Path

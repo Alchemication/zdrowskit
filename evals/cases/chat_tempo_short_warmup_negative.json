@@ -7,9 +7,9 @@
   "derived_from": {
     "feedback_id": 31,
     "llm_call_id": 608,
-    "hypothesis": "The prompt should still flag genuinely inadequate warmups; it should only stop calling 3 km easy an inadequate warmup."
+    "hypothesis": "The prompt should still flag genuinely inadequate warmups; it should only stop calling 3 km easy an inadequate warmup. Originally asserted with text regexes requiring the literal word 'warmup' adjacent to 'short'. Two unrelated models then failed it 5/5 while answering correctly — one framed the shortfall as total distance (2.5 km against 5 km) rather than as warm-up adequacy, which reaches the same coaching conclusion by a different route. The case was measuring vocabulary, so the semantic invariant moved to a judge assertion and the only surviving deterministic check is the explicit-endorsement guard."
   },
-  "intent": "Synthetic negative control for feedback #31: a 500 m easy warmup before a 2 km tempo block should be treated as too short for the prescribed 5 km tempo session.",
+  "intent": "Synthetic negative control for feedback #31: a 500 m easy warm-up before a 2 km tempo block must not be treated as satisfying the prescribed 5 km tempo session. The invariant is what the reply conveys, not the words it uses to convey it.",
   "fixture": {
     "today": "2026-05-01",
     "context": {
@@ -64,20 +64,6 @@
   },
   "assertions": [
     {
-      "type": "text_contains",
-      "name": "recognizes_short_warmup",
-      "patterns": [
-        "re:warm.?up.{0,40}(short|brief)|(?:short|brief).{0,40}warm.?up"
-      ]
-    },
-    {
-      "type": "text_contains",
-      "name": "does_not_count_as_full_prescribed_session",
-      "patterns": [
-        "re:\\b(not|doesn.?t|wouldn.?t)\\b.{0,50}\\b(count|full|prescribed|5\\s*km)|\\b(under|short of|less than)\\b.{0,40}\\bfull\\s+5\\s*km"
-      ]
-    },
-    {
       "type": "text_absent",
       "name": "does_not_call_500m_warmup_acceptable",
       "patterns": [
@@ -87,5 +73,11 @@
       ]
     }
   ],
-  "notes": "Synthetic negative control derived from feedback #31. It isolates the real coaching rule: short warmups should be challenged, but 3 km easy before 2 km tempo should not be."
+  "notes": "Synthetic negative control derived from feedback #31. It isolates the real coaching rule: short warmups and otherwise inadequate sessions should be challenged, while 3 km easy before 2 km tempo should not be. Its positive counterpart is chat_tempo_progressive_positive.\n",
+  "judge_assertions": [
+    {
+      "name": "treats_shortened_session_as_not_meeting_the_prescription",
+      "statement": "The response makes clear that 500 m easy followed by 2 km at tempo does not amount to the prescribed 5 km session with a 2 km tempo block — whether by naming the warm-up as too short, the total distance as 2.5 km against 5 km, or any equivalent. It does not tell the user this counts as the session as prescribed. Offering it as a worthwhile compromise, or asking what is driving the shortcut, is fine and does not violate this."
+    }
+  ]
 }
