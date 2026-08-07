@@ -27,6 +27,24 @@ Checklist:
   person's own data in evidence. Flag any invented cutoff, invented normal
   range, or appeal to "research"/"studies"/"population data" that is not in
   evidence.
+- Every quantity the draft states about a period must match the evidence:
+  counts of sessions, distances, durations, totals, streaks, whatever unit the
+  person's activity happens to use. **Check each figure in a compound claim
+  separately.** Drafts state several together — "3 runs + 2 lifts / 16.8 km" —
+  and one being right tells you nothing about its neighbours. A draft has
+  claimed the wrong session count while its lift count was scrutinised and
+  passed.
+- The week summary in `evidence` is authoritative for how many sessions the
+  period contains. Do not recount raw workout rows under your own rule about
+  what is long enough to count: a "correction" that disagrees with the summary
+  replaces a right number with a wrong one, which is worse than the error you
+  set out to fix.
+- Today's session appears both in the summary totals and in the day card for
+  today. It is one session. A total that equals the summary plus today's
+  activity has counted it twice.
+- Qualitative comparisons need no figure. "Volume is down on last week" or
+  "that is your strongest week in a while" are fine unsupported by an exact
+  number, and are not to be flagged as unverifiable.
 - Tone should be natural, not report-like.
 - If the right answer is silence, verdict is fail and correction is SKIP.
 - No markdown tables.
