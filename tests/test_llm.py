@@ -628,36 +628,57 @@ class TestCharts:
 
     def test_weekly_report_prompt_states_report_role_and_boundaries(self) -> None:
         prompt = (PROMPTS_DIR / "insights_prompt.md").read_text(encoding="utf-8")
-        assert (
-            "Purpose: this is a weekly report that interprets what happened" in prompt
-        )
-        assert "help the user understand what happened and what to do next." in prompt
+        normalized = " ".join(prompt.split())
+
+        assert "could not have worked out by opening their Health app" in normalized
         assert "## Recent User Notes" in prompt
         assert "## Recent Coaching History" in prompt
 
-    def test_weekly_report_memory_contract_handles_midweek_runs(self) -> None:
+    def test_weekly_report_prompt_caps_body_length(self) -> None:
+        """Length is the point of this format, so it must be stated as a hard
+        constraint with the actual budget, not as a stylistic preference."""
         prompt = (PROMPTS_DIR / "insights_prompt.md").read_text(encoding="utf-8")
         normalized = " ".join(prompt.split())
 
-        assert "Memory must not create a hidden plan" in normalized
-        assert "already be stated in the visible" in normalized
-        assert "Mid-week progress check" in normalized
-        assert "current-week open actions" in normalized
-        assert "Do not plan next week early" in normalized
-        assert "likely" in normalized
-        assert "settled lore" in normalized
+        assert "**The report body must fit in 1024 characters**" in normalized
+        assert "Do **not** list sessions day by day" in prompt
+        assert "Do not enumerate metrics" in normalized
 
-    def test_weekly_report_prompt_requires_run_sql_before_training_review(self) -> None:
-        """The Training Review template needs per-workout fields the summary
-        layer does not contain. The prompt must say so explicitly."""
+    def test_weekly_report_recommends_at_week_level(self) -> None:
+        """Day-level prescription belongs to the nudge, which runs on fresher
+        data. The report that duplicates it contradicts it a day later."""
         prompt = (PROMPTS_DIR / "insights_prompt.md").read_text(encoding="utf-8")
         normalized = " ".join(prompt.split())
-        assert "MUST call `run_sql` before drafting the Training Review" in normalized
-        assert "compact summary view" in normalized
+
+        assert "at most one priority, pitched at the week, not the day" in normalized
+        assert "daily prescription is the nudge's job" in normalized
+
+    def test_weekly_report_memory_contract_bounds_what_is_stored(self) -> None:
+        """Memory is replayed into every later prompt, so a wrong line there is
+        repeated for weeks. Two rules matter: no hidden plan, no stored figures
+        the database already holds."""
+        prompt = (PROMPTS_DIR / "insights_prompt.md").read_text(encoding="utf-8")
+        normalized = " ".join(prompt.split())
+
+        assert "at most two bullets" in normalized
+        assert "Store only what the database cannot recompute" in normalized
+        assert "Never store weekly counts, distances, averages or sleep figures" in (
+            normalized
+        )
+        assert "Never store a prescription that is not in the visible report" in (
+            normalized
+        )
+        assert "no coaching history there are no open threads" in normalized
+
+    def test_weekly_report_prompt_requires_run_sql_before_writing(self) -> None:
+        """The health-data section is a summary; the exact rows are what stop
+        the model inventing a number."""
+        prompt = (PROMPTS_DIR / "insights_prompt.md").read_text(encoding="utf-8")
+        normalized = " ".join(prompt.split())
+        assert "**Call `run_sql` before writing.**" in normalized
+        assert "The health-data section is a summary" in normalized
         assert "{schema_reference}" in prompt
-        assert "Correct flow:" in prompt
-        assert "Wrong flow:" in prompt
-        assert "Tool calls are not visible to the user" in prompt
+        assert "Tool calls are invisible to the user" in normalized
 
     def test_coach_prompt_uses_recent_coaching_feedback(self) -> None:
         """Coach must read the Recent Coaching Feedback section before
