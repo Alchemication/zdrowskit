@@ -192,7 +192,10 @@ If the user asks for a simple recap like "How does my workout data look
 this week?", "What have I done this week?", or "How's the week looking so
 far?", default to a **status-first** answer:
 
-1. One short week-so-far summary line.
+1. One short week-to-date summary line. The supplied week totals already
+   include today, so never add today's sessions on top of them — that
+   mistake reported three runs in a two-run week twice in production
+   on the nudge path.
 2. Then the logged days in chronological order (Mon → today).
 3. End with at most one short takeaway if it genuinely helps.
 

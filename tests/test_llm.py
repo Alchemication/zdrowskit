@@ -876,7 +876,7 @@ class TestPromptRenderers:
             today=date(2026, 4, 8),
         )
 
-        assert "### This Week So Far" in rendered
+        assert "### This Week to Date (totals include today)" in rendered
         assert "### This Week Days (Mon to today)" in rendered
         assert "### Today" not in rendered
         assert "### Recent Days" not in rendered
@@ -898,7 +898,12 @@ class TestPromptRenderers:
         assert "### Target Week Summary" in rendered
         assert "/2 runs" not in rendered
         assert "/2 lifts" not in rendered
-        assert "- Logged so far: 1 run, 0 lifts, 0 walks." in rendered
+        # Stated inclusively: a Today block follows, and "so far" beside
+        # it read as "before today", so models added today twice.
+        assert (
+            "- Week to date, including today (do not add today's sessions "
+            "again): 1 run, 0 lifts, 0 walks." in rendered
+        )
 
     def test_render_health_data_for_report_last_renders_full_target_week(self) -> None:
         rendered = render_health_data(

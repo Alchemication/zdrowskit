@@ -284,10 +284,24 @@ def _render_day_block(day: dict, withheld: frozenset[str] = frozenset()) -> str:
 
 
 def _render_week_summary_block(summary: dict, *, prompt_kind: str) -> str:
-    """Render the current target week's summary with semantic missing-data rules."""
+    """Render the current target week's summary with semantic missing-data rules.
+
+    The totals here already include today, and the heading says so because a
+    Today block follows immediately below and "logged so far" beside it is
+    genuinely ambiguous.
+
+    This is a clarity change, not a fix. Nudges overstated the week's run count
+    by one in W21 and again in W27, and the obvious suspect was this wording —
+    but an A/B over ten runs per variant scored 8/10 either way, so the phrasing
+    is not what causes it. The defect is intermittent, reproduces on DeepSeek
+    Flash, DeepSeek Pro and Opus 5 alike, and its mechanism is still unknown.
+    See nudge_week_totals_match_logged_workouts_w21.
+    """
     title = "### Target Week Summary"
     if prompt_kind == "chat":
-        title = "### This Week So Far"
+        # "So Far" carried the same trap as "logged so far" below: day cards
+        # for the week, today included, follow immediately after.
+        title = "### This Week to Date (totals include today)"
     lines = [title]
 
     week_label = summary.get("week_label")
@@ -298,7 +312,7 @@ def _render_week_summary_block(summary: dict, *, prompt_kind: str) -> str:
     lift_count = int(summary.get("lift_count", 0) or 0)
     walk_count = int(summary.get("walk_count", 0) or 0)
     lines.append(
-        "- Logged so far: "
+        "- Week to date, including today (do not add today's sessions again): "
         f"{run_count} {_pluralize(run_count, 'run')}, "
         f"{lift_count} {_pluralize(lift_count, 'lift')}, "
         f"{walk_count} {_pluralize(walk_count, 'walk')}."
