@@ -30,7 +30,7 @@ The Telegram panel groups features as Chat / Reports / Coach / Nudges / Utilitie
 
 A `Reset all` button on the main panel and `uv run python main.py models reset --all` restore everything to built-in defaults. Picking the `Auto` fallback, or `--fallback auto` from the CLI, defers to the profile's fallback so future profile changes propagate.
 
-Insights, coach, and nudges default to `anthropic/claude-opus-5` with `reasoning_effort=high`, temperature omitted, and `deepseek/deepseek-v4-pro` fallback. Chat defaults to `deepseek/deepseek-v4-flash` with `reasoning_effort=high` (engages DeepSeek thinking), temperature omitted, and `anthropic/claude-haiku-4-5` fallback.
+Insights, coach, and nudges default to `anthropic/claude-opus-5` with `reasoning_effort=high`, temperature omitted, and `deepseek/deepseek-v4-pro` fallback. Chat defaults to `openai/gpt-5.6-luna` with `reasoning_effort=high`, temperature omitted, and `anthropic/claude-haiku-4-5` fallback.
 
 Lightweight utility surfaces, including `/notify` interpretation and `/add` workout clone selection, default to `deepseek/deepseek-v4-flash` with `anthropic/claude-haiku-4-5` fallback. `/add` and verifier rewrites use `reasoning_effort=high` with temperature omitted; `/notify` stays plain Flash. On the DeepSeek primary, `high` engages thinking via translated `extra_body`; on the Anthropic fallback, the same effort is sent natively.
 
@@ -49,7 +49,7 @@ Current default routes:
 | Nudges | `anthropic/claude-opus-5` | up to 2/day |
 | Verification | `deepseek/deepseek-v4-pro` | reports, coach, nudges; Opus 5 fallback |
 | Verification rewrites | `deepseek/deepseek-v4-flash` | only when verifier asks |
-| Chat | `deepseek/deepseek-v4-flash` | on demand |
+| Chat | `openai/gpt-5.6-luna` | on demand |
 
 Using recent logged token sizes from this app, the always-on daemon lands around:
 
@@ -62,7 +62,7 @@ Using recent logged token sizes from this app, the always-on daemon lands around
 
 This assumes verification normally succeeds on DeepSeek Pro with thinking engaged (via `reasoning_effort=high`) and rewrite calls remain rare. Verification falls back to Opus 5 with the same `reasoning_effort=high` (sent natively) and omitted temperature.
 
-Chat is separate because it is user-driven. Routing chat to DeepSeek Flash is usually under one cent per turn, but quality may drop for harder analysis.
+Chat is separate because it is user-driven. Chat routes to GPT-5.6 Luna at about $0.0014 a turn. DeepSeek Flash is cheaper still, but measured against the chat eval suite it failed three of eleven cases, twice by claiming an action it never took — reporting a plan as updated with no `update_context` call, and citing a figure with no chart block. Chat has no verifier, so nothing catches that.
 
 Inspect actual spend from your local DB:
 
@@ -88,7 +88,7 @@ ZDROWSKIT_ANTHROPIC_OPUS_MODEL=anthropic/claude-opus-5
 ZDROWSKIT_INSIGHTS_MODEL=anthropic/claude-opus-5
 ZDROWSKIT_COACH_MODEL=anthropic/claude-opus-5
 ZDROWSKIT_NUDGE_MODEL=anthropic/claude-opus-5
-ZDROWSKIT_CHAT_MODEL=deepseek/deepseek-v4-flash
+ZDROWSKIT_CHAT_MODEL=openai/gpt-5.6-luna
 ZDROWSKIT_NOTIFY_MODEL=deepseek/deepseek-v4-flash
 ZDROWSKIT_ADD_CLONE_MODEL=deepseek/deepseek-v4-flash
 
@@ -105,11 +105,12 @@ ZDROWSKIT_MAX_TOKENS_VERIFICATION_REWRITE=16384
 
 ## API Keys
 
-The default configuration expects DeepSeek and Anthropic keys:
+The default configuration expects DeepSeek, Anthropic, and OpenAI keys:
 
 ```env
 DEEPSEEK_API_KEY=sk-...
 ANTHROPIC_API_KEY=sk-ant-...
+OPENAI_API_KEY=sk-...
 ```
 
 Set additional provider keys as needed for your chosen litellm model strings.

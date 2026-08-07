@@ -349,11 +349,27 @@ DEFAULT_NUDGE_MODEL: str = os.environ.get(
 )
 """Default model for proactive nudges."""
 
+OPENAI_LUNA_MODEL: str = os.environ.get(
+    "ZDROWSKIT_OPENAI_LUNA_MODEL",
+    "openai/gpt-5.6-luna",
+)
+"""Budget-tier OpenAI model used for interactive chat."""
+
 DEFAULT_CHAT_MODEL: str = os.environ.get(
     "ZDROWSKIT_CHAT_MODEL",
-    PRIMARY_FLASH_MODEL,
+    OPENAI_LUNA_MODEL,
 )
-"""Default model for interactive Telegram chat."""
+"""Default model for interactive Telegram chat.
+
+Measured against the chat eval suite at five runs per case, DeepSeek Flash
+failed three of eleven outright, and two of those failures were the model
+claiming an action it never took: "Plan's updated" with no `update_context`
+call, and "Figure 1 shows it" with no chart block. Chat is the one surface
+with no verifier, so nothing catches that. Luna passes both every time, has no
+zeroes anywhere in the suite, and costs about $0.11 a month at this call
+volume. Effort stays high: at medium three cases regress for 13% off p95
+latency.
+"""
 
 DEFAULT_NOTIFY_MODEL: str = os.environ.get(
     "ZDROWSKIT_NOTIFY_MODEL",
