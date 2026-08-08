@@ -207,9 +207,11 @@ INSIGHTS_MAX_VISIBLE_CHARS: int = 1024
 The size of a message read on a phone without scrolling, and the ceiling a
 Telegram photo caption allows. Enforced deterministically rather than by the
 verifier: it is a character count, and asking an LLM to do arithmetic spends
-one of its issue slots on something a regex cannot get wrong. `insights_prompt`
-and `verify_insights_prompt` state the same number in prose — update both if
-this changes."""
+one of its issue slots on something a regex cannot get wrong. The same number
+appears in prose in `insights_prompt.md` and in the Insights row of
+`docs/notifications.md` — update both if this changes. It is deliberately
+absent from `verify_insights_prompt.md`, which tells the verifier to ignore
+length precisely because this check runs before it."""
 
 MAX_TOKENS_COACH: int = _env_int("ZDROWSKIT_MAX_TOKENS_COACH", 8192)
 """Output token budget for coaching reviews. Coach runs are async and may need
