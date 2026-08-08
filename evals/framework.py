@@ -1052,6 +1052,22 @@ def _case_from_dict(raw: dict[str, Any], path: Path) -> EvalCase:
                 f"{path} {feature} fixture must include draft, evidence, "
                 "and source_messages"
             )
+        # slim_source_messages appends the draft as the final assistant turn, so
+        # the two are the same text in production. Re-seeding a draft without
+        # updating the turn leaves the verifier auditing the old one, which
+        # looks like a model failure rather than a stale fixture.
+        source_messages = fixture["source_messages"]
+        trailing = source_messages[-1] if source_messages else {}
+        if trailing.get("role") != "assistant":
+            raise ValueError(
+                f"{path} source_messages must end with the assistant turn "
+                "carrying the draft"
+            )
+        if trailing.get("content") != fixture["draft"]:
+            raise ValueError(
+                f"{path} source_messages[-1] does not match draft — update both "
+                "when re-seeding, or the verifier audits the stale text"
+            )
     elif feature == "memory":
         if "report" not in fixture:
             raise ValueError(f"{path} memory fixture must include report")
