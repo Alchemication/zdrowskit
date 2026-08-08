@@ -420,8 +420,16 @@ class TestRepoPrompts:
         assert prompt.index("Output rules") < prompt.index("Instructions")
         assert "If you need `run_sql`, call it directly" in prompt
         assert "output only the final nudge or `SKIP`" in prompt
-        assert "Figure 1" in prompt
-        assert "rendered as a separate figure before the nudge text" in normalized
+
+    def test_nudge_prompt_offers_no_chart(self) -> None:
+        """Charts left the nudge prompt: the block was a fifth of it and
+        produced a chart in 5 of 652 real nudges. Its absence is the point, so
+        a reintroduction should fail here rather than quietly cost tokens."""
+        prompt = (PROMPTS_DIR / "nudge_prompt.md").read_text(encoding="utf-8")
+
+        assert "<chart" not in prompt
+        assert "Figure 1" not in prompt
+        assert "{chart_theme}" not in prompt
 
     def test_nudge_prompt_has_ordered_skip_checklist(self) -> None:
         """The SKIP/write decision must be a single ordered checklist, not

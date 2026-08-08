@@ -1571,6 +1571,9 @@ class TestCmdNudge:
         send_telegram.assert_not_called()
 
     def test_chart_only_nudge_skips_without_sending(
+        # Nudges no longer offer charts, but a model can still emit a stray
+        # block. Stripping it must leave nothing to send rather than deliver
+        # raw plotly source to the user.
         self,
         in_memory_db,
         capsys,
@@ -1605,8 +1608,6 @@ class TestCmdNudge:
             )
             save_nudge = stack.enter_context(patch("cmd_nudge._save_nudge"))
             send_telegram = stack.enter_context(patch("cmd_nudge.send_telegram"))
-            send_photo = stack.enter_context(patch("cmd_nudge.send_telegram_photo"))
-            stack.enter_context(patch("cmd_nudge.render_chart", return_value=b"png"))
             result = cmd_nudge(args)
 
         assert capsys.readouterr().out == ""
@@ -1614,7 +1615,6 @@ class TestCmdNudge:
         assert result.llm_call_id == 31
         save_nudge.assert_not_called()
         send_telegram.assert_not_called()
-        send_photo.assert_not_called()
 
     def test_retries_when_model_returns_meta_text_instead_of_final_nudge(
         self,

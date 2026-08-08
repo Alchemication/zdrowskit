@@ -10,13 +10,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from charts import (
-    ChartResult,
-    chart_figure_caption,
-    extract_charts,
-    render_chart,
-    strip_charts,
-)
+from charts import strip_charts
 from cmd_llm_common import (
     CommandResult,
     apply_verification,
@@ -36,7 +30,7 @@ from llm import call_llm
 from llm_context import build_messages, load_context, load_prompt_text
 from llm_health import build_llm_data, format_recent_nudges, render_health_data
 from llm_verify import extract_tool_evidence, slim_source_messages
-from notify import send_telegram, send_telegram_photo
+from notify import send_telegram
 from store import create_llm_trace, open_db
 
 logger = logging.getLogger(__name__)
@@ -350,18 +344,9 @@ def cmd_nudge(
         return CommandResult(llm_call_id=result.llm_call_id)
     raw_text = verified_text.strip()
 
-    # Extract and render optional chart(s).
-    chart_blocks = extract_charts(raw_text)
-    nudge_charts: list[ChartResult] = []
-    for block in chart_blocks:
-        png = render_chart(block.code, health_data)
-        if png:
-            nudge_charts.append(
-                ChartResult(title=block.title, section=block.section, image_bytes=png)
-            )
-        else:
-            logger.warning("Nudge chart '%s' failed to render, skipping", block.title)
-
+    # Nudges no longer offer charts: the block cost a fifth of the prompt and
+    # produced one in 652 messages. Any chart the model still emits is stripped
+    # rather than rendered, so a stray block cannot reach the user as code.
     nudge_text = strip_charts(raw_text).strip()
     if not nudge_text:
         logger.warning(
@@ -396,13 +381,6 @@ def cmd_nudge(
     telegram_message_id: int | None = None
     subject = f"zdrowskit — {_trigger.replace('_', ' ')}"
     if use_telegram:
-        # Send chart photos before the text nudge.
-        for index, chart in enumerate(nudge_charts, start=1):
-            send_telegram_photo(
-                chart.image_bytes,
-                caption=chart_figure_caption(index, chart.title),
-                chat_id=telegram_chat_id(args),
-            )
         telegram_message_id = send_telegram(
             nudge_text,
             subject,
