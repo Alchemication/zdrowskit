@@ -64,25 +64,22 @@ class TestParseVerificationResult:
 
 
 class TestVerifierPromptContract:
-    def test_insights_verifier_rejects_a_memory_block_in_the_report(self) -> None:
-        """Memory is a separate call now. A block emitted here is stripped
-        before anyone sees it, so it is wasted output the writer should stop
-        producing — and the memory rules do not belong in this prompt."""
+    def test_insights_verifier_defers_mechanical_checks(self) -> None:
+        """Length and <memory> are counted deterministically before the
+        verifier runs. When they lived in this prompt they took two of four
+        issue slots on a legacy draft and crowded out the factual catch."""
         prompt = _prompt_text("verify_insights_prompt.md")
         normalized = " ".join(prompt.split())
 
-        assert "must not contain a `<memory>` block" in normalized
-        assert "Memory must not create hidden commitments" not in normalized
-        assert "Flag DB-derivable rollups in memory" not in normalized
+        assert "checked mechanically before you run" in normalized
+        assert "must fit in 1024 characters" not in normalized
+        assert "must not contain a `<memory>` block" not in normalized
 
-    def test_insights_verifier_enforces_the_short_report_contract(self) -> None:
-        """Length and scope are the report's contract now, so the verifier has
-        to be able to fail a draft that meets every factual check and is still
-        the wall of text nobody reads."""
+    def test_insights_verifier_still_judges_scope_and_advice(self) -> None:
+        """What survives in the prompt is what only a reader can judge."""
         prompt = _prompt_text("verify_insights_prompt.md")
         normalized = " ".join(prompt.split())
 
-        assert "must fit in 1024 characters" in normalized
         assert "must not restate what the Health app already shows" in normalized
         assert "Recommendations belong at week level" in normalized
         assert "Since That Week Ended" in normalized

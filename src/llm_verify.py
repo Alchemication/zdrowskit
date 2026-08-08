@@ -17,7 +17,9 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
+from charts import strip_charts
 from config import (
+    INSIGHTS_MAX_VISIBLE_CHARS,
     MAX_TOKENS_VERIFICATION,
     MAX_TOKENS_VERIFICATION_REWRITE,
     MAX_VERIFICATION_REVISIONS,
@@ -476,6 +478,14 @@ def _has_markdown_table(text: str) -> bool:
     )
 
 
+_MEMORY_BLOCK_RE = re.compile(r"<memory>.*?</memory>", re.DOTALL | re.IGNORECASE)
+
+
+def _visible_report_body(draft: str) -> str:
+    """Return what the user receives: charts and memory stripped."""
+    return _MEMORY_BLOCK_RE.sub("", strip_charts(draft)).strip()
+
+
 def deterministic_verification_issues(
     kind: VerificationKind,
     draft: str,
@@ -500,6 +510,39 @@ def deterministic_verification_issues(
                 correction="Rewrite the same content as bullets or short paragraphs.",
             )
         )
+    if kind == "insights":
+        # Both are mechanical, so they run here rather than in the verifier
+        # prompt. When they lived there they consumed two of four issue slots
+        # on a legacy-format draft and crowded out the factual catch the
+        # verifier was actually needed for.
+        if _MEMORY_BLOCK_RE.search(draft):
+            issues.append(
+                VerificationIssue(
+                    severity="major",
+                    quote="<memory>",
+                    problem=(
+                        "The report contains a <memory> block. Memory is a "
+                        "separate call, so this is stripped unseen."
+                    ),
+                    correction="Remove the <memory> block.",
+                )
+            )
+        visible = _visible_report_body(draft)
+        if len(visible) > INSIGHTS_MAX_VISIBLE_CHARS:
+            issues.append(
+                VerificationIssue(
+                    severity="major",
+                    quote=visible[:120],
+                    problem=(
+                        f"The report body is {len(visible)} characters, over "
+                        f"the {INSIGHTS_MAX_VISIBLE_CHARS}-character ceiling."
+                    ),
+                    correction=(
+                        "Cut to three short paragraphs: what the week was, "
+                        "what is interesting in it, one week-level priority."
+                    ),
+                )
+            )
     if kind == "nudge" and len(draft.split()) > 95 and draft.strip().upper() != "SKIP":
         issues.append(
             VerificationIssue(

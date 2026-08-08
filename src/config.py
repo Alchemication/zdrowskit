@@ -201,6 +201,16 @@ MAX_TOKENS_INSIGHTS: int = _env_int("ZDROWSKIT_MAX_TOKENS_INSIGHTS", 8192)
 """Output token budget for weekly insights reports. Reports are async and can
 include chart code, so the cap is higher than interactive chat."""
 
+INSIGHTS_MAX_VISIBLE_CHARS: int = 1024
+"""Hard ceiling on the weekly report body the user actually receives.
+
+The size of a message read on a phone without scrolling, and the ceiling a
+Telegram photo caption allows. Enforced deterministically rather than by the
+verifier: it is a character count, and asking an LLM to do arithmetic spends
+one of its issue slots on something a regex cannot get wrong. `insights_prompt`
+and `verify_insights_prompt` state the same number in prose — update both if
+this changes."""
+
 MAX_TOKENS_COACH: int = _env_int("ZDROWSKIT_MAX_TOKENS_COACH", 8192)
 """Output token budget for coaching reviews. Coach runs are async and may need
 room for narrative plus context-edit proposals."""
