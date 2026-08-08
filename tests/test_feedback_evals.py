@@ -177,42 +177,6 @@ class TestCaseLoading:
         assert "short warmups" in negative.notes
         assert "generalize" in positive.notes
 
-    def test_load_cases_reads_hidden_memory_contract_case(self) -> None:
-        cases = {case.id: case for case in load_cases()}
-
-        case = cases["verification_judge_insights_midweek_memory_contract_w20"]
-
-        assert case.feature == "verification_judge"
-        assert case.case_kind == "synthetic_negative"
-        # Silent-failure case: no thumbs-down can exist for a memory block
-        # the user never sees, so there is no feedback row to point at.
-        assert case.source_feedback_id is None
-        assert case.source_llm_call_id == 808
-        assert case.derived_from["trace_id"] == 551
-        assert case.fixture["kind"] == "insights"
-        assert case.fixture["evidence"]["week_complete"] is False
-        assert [item["name"] for item in case.judge_assertions] == [
-            "flags_midweek_memory_contract_violation"
-        ]
-        assert "strips <memory>" in case.notes
-
-    def test_load_cases_reads_insights_memory_writer_case(self) -> None:
-        cases = {case.id: case for case in load_cases()}
-
-        case = cases["insights_midweek_memory_current_week_w20"]
-
-        assert case.feature == "insights"
-        assert case.case_kind == "synthetic_negative"
-        # Silent-failure case: no thumbs-down can exist for a memory block
-        # the user never sees, so there is no feedback row to point at.
-        assert case.source_feedback_id is None
-        assert case.source_llm_call_id == 808
-        assert case.derived_from["trace_id"] == 551
-        assert case.derived_from["latest_completed_insights_call_id"] == 852
-        assert case.fixture["week_complete"] is False
-        assert "workout_all" in case.fixture["db_seed"]["tables"]
-        assert "current-week open actions" in case.intent
-
 
 class TestChatRunner:
     def test_update_context_tool_result_rejects_invalid_log_append(self) -> None:
@@ -1025,14 +989,14 @@ class TestChatRunner:
 
 
 class TestInsightsRunner:
-    def test_insights_case_runs_sql_loop_and_checks_memory(
+    def test_insights_case_runs_sql_loop_and_scores_the_short_report(
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         case = next(
             case
             for case in load_cases()
-            if case.id == "insights_midweek_memory_current_week_w20"
+            if case.id == "insights_fits_a_phone_notification_w31"
         )
         tool_call = _tool_call(
             "run_sql",
@@ -1040,26 +1004,37 @@ class TestInsightsRunner:
                 "query": (
                     "SELECT date, type, category, duration_min, hr_avg, "
                     "gpx_distance_km FROM workout_all "
-                    "WHERE date BETWEEN '2026-05-11' AND '2026-05-14'"
+                    "WHERE date BETWEEN '2026-07-27' AND '2026-08-02'"
                 )
             },
         )
         final_text = (
-            "# W20 Progress Check - Adam (Thu, 14 May)\n\n"
-            "## This Week's Priorities\n"
-            "1. One more easy 5 km Fri or Sat at 5:45-6:00/km.\n"
-            "2. Strength B before Sunday.\n\n"
-            "<memory>\n"
-            "- Visible W20 open action: easy 5 km Fri/Sat at 5:45-6:00/km "
-            "and Strength B before Sunday.\n"
-            "- Watchpoint: keep the next easy run genuinely easy; check HR "
-            "response after short sleep.\n"
-            "</memory>"
+            "W31: 3 runs, 2 lifts, 14.7 km, and the tempo drought ended.\n\n"
+            "What is interesting is the cost. HRV swung 51 ms inside 24 hours "
+            "mid-week, the fourth week running, and the weekly average sits "
+            "right on your baseline and hides it entirely.\n\n"
+            "Consolidate this week rather than extend."
+        )
+        # The case carries judge assertions, which run once the deterministic
+        # ones pass, so the loop needs a third response for the judge call.
+        judge_text = json.dumps(
+            {
+                "results": [
+                    {
+                        "name": assertion["name"],
+                        "reason": "stubbed",
+                        "evidence": "stubbed",
+                        "passed": True,
+                    }
+                    for assertion in case.judge_assertions
+                ]
+            }
         )
         mock_call = MagicMock(
             side_effect=[
                 _llm_result("", tool_calls=[tool_call]),
                 _llm_result(final_text, tool_calls=[]),
+                _llm_result(judge_text, tool_calls=[]),
             ]
         )
         monkeypatch.setattr(llm, "call_llm", mock_call)
@@ -1068,10 +1043,10 @@ class TestInsightsRunner:
 
         assert result.passed
         assert result.route["feature"] == "insights"
-        assert result.route["week"] == "current"
+        assert result.route["week"] == "last"
         assert result.execution is not None
         assert result.execution.tool_calls[0].name == "run_sql"
-        assert mock_call.call_count == 2
+        assert mock_call.call_count == 3
         first_kwargs = mock_call.call_args_list[0].kwargs
         assert first_kwargs["tools"][0]["function"]["name"] == "run_sql"
         second_messages = mock_call.call_args_list[1].args[0]

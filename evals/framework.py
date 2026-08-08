@@ -373,13 +373,13 @@ def run_case(
     if model is None:
         route = production_route(case.feature)
         model = str(route["model"])
+        # Temperature travels with the model, not with the effort override. A
+        # route pins it off because that model rejects or misbehaves with it —
+        # Opus 5 fails the request outright and silently falls back to DeepSeek,
+        # so the harness reports a score for a model it never called.
+        temperature = route.get("temperature")
         if inherit_effort:
             reasoning_effort = route.get("reasoning_effort")
-            # Temperature travels with the route or the run is not production.
-            # A route that pins temperature off does so because the model
-            # misbehaves with it, and sending the harness default instead
-            # measures a configuration the daemon never uses.
-            temperature = route.get("temperature")
     result = EvalResult(
         case_id=case.id,
         feature=case.feature,
@@ -1638,6 +1638,8 @@ def _evaluate_assertion(
         return _assert_memory_bullet_max(name, assertion, execution)
     if atype == "word_count_max":
         return _assert_word_count_max(name, assertion, execution)
+    if atype == "visible_char_count_max":
+        return _assert_visible_char_count_max(name, assertion, execution)
     if atype == "forbidden_opening":
         return _assert_forbidden_opening(name, assertion, execution)
     return AssertionResult(
@@ -1746,6 +1748,33 @@ def _assert_word_count_max(
         name=name,
         passed=count <= max_words,
         detail=f"{count} words, max {max_words}",
+    )
+
+
+def _assert_visible_char_count_max(
+    name: str,
+    assertion: dict[str, Any],
+    execution: EvalExecution,
+) -> AssertionResult:
+    """Cap the length of what the user actually receives.
+
+    ``word_count_max`` counts the whole response, chart source included, so it
+    cannot express the report's contract: a body that fits a phone notification.
+    Charts are sent as separate images and any stray memory block is stripped
+    before delivery, so neither counts against the budget.
+    """
+    max_chars = int(assertion["max_chars"])
+    visible = re.sub(
+        r"\s*<memory>.*?</memory>\s*",
+        "",
+        strip_charts(execution.text),
+        flags=re.DOTALL | re.IGNORECASE,
+    ).strip()
+    count = len(visible)
+    return AssertionResult(
+        name=name,
+        passed=count <= max_chars,
+        detail=f"{count} chars, max {max_chars}",
     )
 
 

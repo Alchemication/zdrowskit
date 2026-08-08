@@ -1,0 +1,11 @@
+Use case: ads-marketing
+Asset type: wide website hero triptych, reusable human activity imagery for a local-first personal health coach
+Primary request: Create one cohesive wide editorial image divided naturally into three equal vertical scenes: an adult man running outdoors in light rain, an adult woman sleeping naturally in a modest bedroom with a fitness watch visible, and an older adult woman doing a controlled strength exercise with a resistance band at home. The people should look like ordinary real people rather than fitness models.
+Scene/backdrop: authentic everyday European environments, uncluttered but lived-in; each scene visually distinct.
+Subject: candid real-looking adults performing the activities naturally, anatomically correct hands and limbs, believable clothing and posture.
+Style/medium: photorealistic documentary photography transformed through restrained late-1980s one-bit newspaper dithering and coarse halftone texture; still recognizably photographic and human, not pixel-art characters.
+Composition/framing: landscape 16:9, three equal vertical zones, subjects large and readable, center-weighted within each zone, enough dark/quiet edge space for website cropping. No borders or labels between scenes.
+Lighting/mood: warm, humane, understated, quietly optimistic; natural light and deep near-black shadows.
+Color palette: limited warm cream, charcoal black, muted phosphor green, tiny touches of faded signal orange.
+Constraints: no text, no logos, no brand marks, no UI, no medical setting, no futuristic holograms. Maintain a single coherent photographic treatment across all three scenes.
+Avoid: glossy stock-photo smiles, superhero physiques, neon cyberpunk, cartoon pixel art, fake screen text, watermarks.

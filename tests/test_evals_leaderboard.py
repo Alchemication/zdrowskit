@@ -604,7 +604,7 @@ class TestMatrix:
             load_cases(),
             feature="insights",
             production=False,
-            case_ids=["insights_midweek_memory_current_week_w20"],
+            case_ids=["insights_fits_a_phone_notification_w31"],
             models=["model-a", "model-b"],
             reasoning_efforts=["none", "high"],
             temperature=None,
@@ -615,6 +615,6 @@ class TestMatrix:
         assert {run.reasoning_effort for run in runs} == {None, "high"}
         assert all(
             [case.id for case in run.cases]
-            == ["insights_midweek_memory_current_week_w20"]
+            == ["insights_fits_a_phone_notification_w31"]
             for run in runs
         )
