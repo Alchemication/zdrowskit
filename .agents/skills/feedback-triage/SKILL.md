@@ -33,8 +33,15 @@ For nudge/coach/insights, bugs can live in source draft, verifier, or rewriter:
 
 - **Source draft wrong**: prompt/context/data assembly issue, or source model quality.
 - **Verifier missed real issue**: verifier under-active.
-- **Verifier invented issue**: verifier over-active / model-quality problem.
+- **Verifier invented issue**: verifier over-active / model-quality problem. The
+  call-601 pattern: the draft correctly said HRV was "still declining" (41.6
+  today vs 44.9 yesterday), the verifier called that an increase, and the
+  rewriter shipped "up slightly from yesterday's 44.9". The user blamed the
+  nudge writer, which had done nothing wrong.
 - **Rewriter mangled valid correction**: rewriter prompt/model issue.
+
+The stage the user names is the surface they saw, not necessarily the stage
+that broke. Walk the whole trace before seeding an eval against the writer.
 
 Read each stage's Final Response before assigning blame. The delivered text is the rewrite output when a rewrite exists; otherwise it is the source draft.
 
@@ -42,8 +49,8 @@ Read each stage's Final Response before assigning blame. The delivered text is t
 
 The user's complaint can be true while the LLM faithfully followed bad or stale prompt data.
 
-- **Resync drift**: HRV and other Apple Health metrics can change later in the day. Compare historical text in `recent_nudges_text` with current `health_data_text` before calling it a contradiction bug.
-- **Prompt assembly bug**: compare rendered prompt data with canonical DB rows via `store.open_db(store.default_db_path())` or `store.connect_db(..., migrate=True)`.
+- **Resync drift**: HRV and other Apple Health metrics can change later in the day. A morning nudge may quote HRV 35 ms while the evening reads 44.9 ms for the same date after a later sync — the model faithfully read the snapshot in front of it, and the user sees self-contradiction. Compare historical text in `recent_nudges_text` with current `health_data_text` before calling it a contradiction bug.
+- **Prompt assembly bug**: compare rendered prompt data with canonical DB rows via `store.open_db(store.default_db_path())` or `store.connect_db(..., migrate=True)`. When they disagree, the bug is in the assembly path — `store.load_snapshots()` / `llm_health.build_llm_data()` — not in the writer or verifier.
 - **Manual data precedence**: manual sleep lives in `manual_sleep` and `sleep_all` by night-start date. If manual and imported sleep both exist, prompt context should prefer manual.
 
 If prompt data was wrong, fix the data assembly path and add deterministic coverage there. Usually not an LLM eval.

@@ -1,75 +1,88 @@
 ---
 name: feedback-triage
-description: Use when the user mentions a thumbs-down, asks "what went wrong with this nudge/chat/coach/insight", references a specific feedback id, or asks to look at recent feedback. Covers the triage flow (how to walk an LLM call trace), how to localize a bug across the source/verify/rewrite chain, how to cross-check user-reported contradictions against data resyncs, and when to escalate to an eval (hand off to the `llm-evals` skill).
+description: Use when the user mentions a thumbs-down, asks "what went wrong with this nudge/chat/coach/insight", references a specific feedback id, or asks to look at recent feedback. Covers walking an LLM trace, assigning the bug to source/verify/rewrite/tool/data assembly, checking data drift, and deciding when to hand off to `llm-evals`.
 ---
 
 # Feedback Triage (zdrowskit)
 
-Upstream sibling of `llm-evals`: this skill covers analysis of an existing failure. Once a reproducible bug is localized, hand off to `llm-evals` for capturing it as a regression case.
+Analyze an existing thumbs-down or bad LLM output. Once the failing stage is clear and reproducible enough, hand off to `llm-evals`.
 
-## Standard sweep
+## Fast Path
 
-1. List recent feedback: `uv run python main.py llm-log --feedback` (or `--feedback --json` for full reasons).
-2. Pick the item — note `feedback_id`, `llm_call_id`, `category`, `message_type`.
-3. Inspect the cited call: `uv run python main.py llm-log --id <llm_call_id>`. The output includes the system+user prompt, the final response, and a metadata block.
-4. If the metadata contains a `*_verification` block (e.g. `nudge_verification`), the call went through the verify/rewrite pipeline — walk the chain (next section).
+1. List feedback: `uv run python main.py llm-log --feedback` (or `--feedback --json`).
+2. Inspect the cited call: `uv run python main.py llm-log --id <llm_call_id>`.
+3. Use the trace table as the map. For compact view: `uv run python main.py llm-log --trace <trace_id>`.
+4. Identify the delivered stage, then inspect only the relevant prompt, tool result, and final response.
 
-## Localize the bug across the verify/rewrite chain
+## Read The Trace
 
-For nudge/coach/insights surfaces, an LLM trace is **three calls**: source draft, verifier, optional rewriter. The text the user actually saw is the rewriter's output (or the source draft if verdict was `pass`). Bugs can live in any of the three. The metadata block on the source call exposes `verifier_call_id` and `rewrite_call_id` — inspect each:
+All related provider calls share `trace_id`: tool-loop iterations, synthesis retries, verifier, and rewriter.
 
-- **Source call**: did the draft itself have the issue the user complained about?
-- **Verifier call**: did the verifier flag a real problem (correct), miss a real problem (under-active), or invent one (the call-601 pattern — verifier introduced an arithmetic-reversal "correction" on a numerically correct draft)?
-- **Rewriter call**: did the rewriter faithfully apply the verifier's correction (so the bug is upstream in the verifier), or did it mangle a correct correction?
+- `iteration: 0`, `1`, ...: tool loop / draft calls.
+- `iteration: final_synthesis`, `truncation_retry`, `empty_retry`: recovery or answer synthesis.
+- `stage: verify`: verifier call.
+- `stage: rewrite`: bounded rewriter call.
 
-Reading the **Final Response** panel for each call is what tells you which stage owns the bug.
+`response_text` / Final Response is the delivered text. If metadata has `postprocessed_response_text: true`, inspect `metadata.raw_response_text` too.
 
-## Cross-check the user's claim against data resync
+For tool failures, compare the tool request and result inside the same trace. Repeated or near-repeated SQL/results usually means the model failed to synthesize from evidence it already had.
 
-The user's complaint may not be the actual verifier/model bug — it may be data drift the model has no awareness of. The canonical case: HRV (and other Apple Health metrics) resync repeatedly through the day. A morning nudge may quote HRV 35 ms; by evening the same date reads 44.9 ms after later sync. The user perceives this as the model contradicting itself, but the model is faithfully reading the current snapshot.
+## Assign Ownership
 
-Before blaming the LLM, check whether the user's "you said X, now you say Y" complaint is actually about a value that drifted between the historical nudge (in `recent_nudges_text`) and the current `health_data_text`. If so, the fix is either prompt-side (acknowledge resync drift) or product-side (don't emit nudges off freshly imported, still-noisy data).
+For nudge/coach/insights, bugs can live in source draft, verifier, or rewriter:
 
-## Cross-check rendered prompt data against canonical DB data
+- **Source draft wrong**: prompt/context/data assembly issue, or source model quality.
+- **Verifier missed real issue**: verifier under-active.
+- **Verifier invented issue**: verifier over-active / model-quality problem. The
+  call-601 pattern: the draft correctly said HRV was "still declining" (41.6
+  today vs 44.9 yesterday), the verifier called that an increase, and the
+  rewriter shipped "up slightly from yesterday's 44.9". The user blamed the
+  nudge writer, which had done nothing wrong.
+- **Rewriter mangled valid correction**: rewriter prompt/model issue.
 
-The value in the LLM prompt may be wrong even when the canonical table has the user's expected fact. Compare:
+The stage the user names is the surface they saw, not necessarily the stage
+that broke. Walk the whole trace before seeding an eval against the writer.
 
-- the rendered `## Health Data` / `Today` block in the source call
-- current DB rows via `store.open_db(store.default_db_path())` or `store.connect_db(..., migrate=True)`
-- canonical all-source views such as `sleep_all` / `workout_all`, especially when the user manually logged data
+Read each stage's Final Response before assigning blame. The delivered text is the rewrite output when a rewrite exists; otherwise it is the source draft.
 
-Manual sleep is stored in `manual_sleep` and exposed through `sleep_all` using the **night-start date**. If both imported and manual sleep rows exist for the same date, product context should prefer manual sleep. If the prompt still shows the imported value, localize the bug to data assembly (for example `store.load_snapshots()` / `llm_health.build_llm_data()`), not to the writer/verifier model.
+## Check Data First
 
-## Decide what to do next
+The user's complaint can be true while the LLM faithfully followed bad or stale prompt data.
 
-- **Verifier introduced the bug** → almost always a model-quality issue. A/B by flipping the verifier route's `reasoning_effort` via `main.py models` or Telegram `/models` (on DeepSeek, `high` engages thinking; `medium` leaves it off). Capture as a `verification_judge` real_regression if reproducible (the surface — `nudge`, `insights`, `coach` — is set by `fixture.kind`).
-- **Source draft already had it** → prompt or context issue. Capture as a `chat` or other surface real_regression if there's a chat trace; otherwise iterate on the prompt.
-- **Rewriter mangled a correct correction** → rewriter prompt issue.
-- **User-perception bug from data resync** → not an LLM eval target. Open a product/prompt issue instead.
-- **Prompt context was wrong** → fix the data assembly path and add a deterministic regression at the loader/rendering boundary; this is usually not an LLM eval target.
+- **Resync drift**: HRV and other Apple Health metrics can change later in the day. A morning nudge may quote HRV 35 ms while the evening reads 44.9 ms for the same date after a later sync — the model faithfully read the snapshot in front of it, and the user sees self-contradiction. Compare historical text in `recent_nudges_text` with current `health_data_text` before calling it a contradiction bug.
+- **Prompt assembly bug**: compare rendered prompt data with canonical DB rows via `store.open_db(store.default_db_path())` or `store.connect_db(..., migrate=True)`. When they disagree, the bug is in the assembly path — `store.load_snapshots()` / `llm_health.build_llm_data()` — not in the writer or verifier.
+- **Manual data precedence**: manual sleep lives in `manual_sleep` and `sleep_all` by night-start date. If manual and imported sleep both exist, prompt context should prefer manual.
 
-## Clean up bad delivered nudges
+If prompt data was wrong, fix the data assembly path and add deterministic coverage there. Usually not an LLM eval.
+
+## Decide
+
+- **Verifier introduced the bug**: model-quality issue. A/B verifier route reasoning via `main.py models` or Telegram `/models` (DeepSeek `high` engages thinking; `medium` leaves it off). Capture as `verification_judge` real_regression if reproducible (surface — `nudge` / `insights` / `coach` — set by `fixture.kind`).
+- **Source draft already had it**: prompt/context/model issue. Capture as `chat` or the relevant source surface if reproducible.
+- **Rewriter mangled a correct correction**: rewriter prompt/model issue.
+- **Data resync caused user confusion**: product/prompt issue, not an eval.
+- **Prompt context was wrong**: data assembly fix plus deterministic loader/rendering regression.
+
+## Bad Nudge Cleanup
 
 If a delivered nudge is factually wrong and would contaminate future prompts, remove it from daemon state after the root cause is fixed:
 
 1. Inspect `~/Documents/zdrowskit/.daemon_state.json`.
 2. Remove only the bad entry from `recent_nudges`.
-3. Recompute `last_nudge_ts` from the first remaining recent nudge, or set it to `null` if none remain.
+3. Recompute `last_nudge_ts` from the first remaining nudge, or set it to `null`.
 4. Recompute `nudge_count_today` from remaining `recent_nudges` whose `ts` starts with `nudge_date`.
-5. Verify the bad phrase/timestamp no longer appears in the state JSON.
+5. Verify the bad phrase/timestamp no longer appears in state JSON.
 
-Archived markdown files under `~/Documents/zdrowskit/Nudges/` are historical records. Future LLM context comes from daemon state, so do not delete archives unless the user explicitly asks.
+Archives under `~/Documents/zdrowskit/Nudges/` are historical records. Do not delete them unless the user explicitly asks.
 
-## Reproducibility threshold
+## Eval Handoff
 
-A "real" regression should reproduce ≥ ~20% under the same config. Below that, capture only if the failure is high-impact or you have a structural reason to believe a fix would lock it down. LLM output is non-deterministic even at temperature 0; running 5x is the cheap way to gauge.
+A real regression should reproduce at least roughly 20% under the same config. Below that, capture only if high-impact or structurally likely to recur. Run 5x as the cheap check.
 
-## Hand off to `llm-evals`
+When stage and surface are clear, switch to `llm-evals`. Supported eval features today: `chat` (full tool loop, `--model`-driven) and `verification_judge` (verifier-only, env-driven; `fixture.kind` selects `nudge` / `insights` / `coach`). Both share the `run_verify.py` runner for the verifier path.
 
-When you know which surface and stage to capture, switch to the `llm-evals` skill for fixture authoring, case_kind taxonomy, provenance fields, and deterministic-assertion rules. Supported eval features today: `chat` (full tool loop, `--model`-driven) and `verification_judge` (verifier-only, env-driven; `fixture.kind` selects `nudge` / `insights` / `coach`). Both share the `run_verify.py` runner for the verifier path.
+## Pitfalls
 
-## Pitfalls to remember
-
-- **Multi-model pipelines**: the nudge pipeline uses three different model picks (draft / verify / rewrite) resolved from `src/config.py` and `src/model_prefs.py`. `--model` on the eval runner only flows to the chat path. For verifier evals, change the verifier model via `ZDROWSKIT_VERIFICATION_MODEL` and the reasoning posture via `main.py models` / Telegram `/models`.
-- **Empty-verifier-response false-pass**: if the verifier hits its output token cap, the failure path emits a "verifier returned empty" critical issue. `text_absent` assertions trivially pass against this — always include an explicit assertion rejecting that failure mode in `verification_judge` cases.
-- **Verifier writes to the source call's metadata**: if you query the source call's metadata, the verification verdict is already there — no need to look it up separately.
+- **Multi-model pipelines**: nudge uses draft / verify / rewrite routes from `src/config.py` and `src/model_prefs.py`. `--model` on eval runner only flows to chat. For verifier evals, change verifier model via `ZDROWSKIT_VERIFICATION_MODEL` and reasoning via `main.py models` / Telegram `/models`.
+- **Empty-verifier-response false-pass**: if verifier hits output cap, failure emits "verifier returned empty" critical issue. `text_absent` assertions can trivially pass; add an assertion rejecting that failure mode.
+- **Verifier writes source metadata**: source-call metadata already contains verifier verdict and call IDs.
