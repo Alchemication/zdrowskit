@@ -1628,6 +1628,42 @@ class TestCallWithRetry:
         assert kwargs["temperature"] == 0.7
         assert "reasoning_effort" not in kwargs
 
+    def test_gpt5_attempt_always_states_a_reasoning_effort(self) -> None:
+        """GPT-5.6 rejects a tool-carrying request unless effort is explicit.
+
+        Omitting the parameter and passing None both 400 with the same error,
+        so the requested effort must survive translation and a missing one must
+        become "none". Chat sends tools on every turn: without this, a routed
+        GPT-5 model fails over to its fallback on every single request, and the
+        only visible symptom is a log line.
+        """
+        for requested, expected in (("high", "high"), (None, "none")):
+            kwargs = _completion_kwargs_for_model(
+                {
+                    "model": "openai/gpt-5.6-luna",
+                    "messages": [],
+                    "max_tokens": 10,
+                    "reasoning_effort": requested,
+                },
+                "openai/gpt-5.6-luna",
+            )
+
+            assert kwargs["reasoning_effort"] == expected
+
+    def test_non_reasoning_openai_attempt_leaves_effort_alone(self) -> None:
+        """The rule is scoped to the models that need it, not to OpenAI."""
+        kwargs = _completion_kwargs_for_model(
+            {
+                "model": "openai/gpt-4o-mini",
+                "messages": [],
+                "max_tokens": 10,
+                "reasoning_effort": None,
+            },
+            "openai/gpt-4o-mini",
+        )
+
+        assert "reasoning_effort" not in kwargs
+
     def test_opus5_attempt_uses_adaptive_thinking_and_output_config(self) -> None:
         """Opus 5 rejects reasoning_effort; it takes adaptive thinking + effort."""
         kwargs = _completion_kwargs_for_model(

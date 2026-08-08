@@ -159,6 +159,25 @@ def _is_anthropic_model(model: str) -> bool:
     )
 
 
+def _is_openai_model(model: str) -> bool:
+    """Return True when a LiteLLM model id targets OpenAI."""
+    normalized = model.lower()
+    return normalized.startswith("openai/") or normalized.startswith(
+        "openrouter/openai/"
+    )
+
+
+def _is_openai_reasoning_model(model: str) -> bool:
+    """Return True for OpenAI models that require an explicit reasoning effort.
+
+    GPT-5.6 rejects a tool-carrying request unless ``reasoning_effort`` is
+    stated outright — omitting the parameter and passing ``None`` both fail with
+    the same 400. Chat sends tools on every turn, so a routed model matching
+    this is unreachable without the explicit value.
+    """
+    return _is_openai_model(model) and "gpt-5" in model.lower()
+
+
 def _is_budget_model(model: str) -> bool:
     """Return True for low-cost model variants that should get cheap fallback."""
     normalized = model.lower()
@@ -169,6 +188,9 @@ def _is_budget_model(model: str) -> bool:
 # extra_body. Anything else (low/medium/none/None) sends no extra_body, leaving
 # thinking off. Anthropic models receive reasoning_effort natively.
 _DEEPSEEK_THINKING_ENABLED: dict[str, Any] = {"thinking": {"type": "enabled"}}
+
+_OPENAI_REASONING_OFF = "none"
+"""Effort OpenAI reasoning models take to mean "do not think"."""
 
 # Opus 5 replaced the reasoning transport its predecessors accept. Sending
 # reasoning_effort there is rejected with "thinking.type.enabled is not
@@ -357,6 +379,11 @@ def _completion_kwargs_for_model(kwargs: dict, model: str) -> dict:
             adjusted["extra_body"] = requested_extra_body
         elif _reasoning_engaged(model, requested_reasoning):
             adjusted["extra_body"] = dict(_DEEPSEEK_THINKING_ENABLED)
+    if _is_openai_reasoning_model(model):
+        # Never drop to omitted here: GPT-5.6 rejects a tool call without an
+        # explicit effort, so the surfaces that carry tools would fail over on
+        # every single request.
+        adjusted["reasoning_effort"] = requested_reasoning or _OPENAI_REASONING_OFF
     adjusted["model"] = model
     return adjusted
 

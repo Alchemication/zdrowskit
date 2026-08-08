@@ -32,9 +32,9 @@ A `Reset all` button on the main panel and `uv run python main.py models reset -
 
 Insights, coach, and nudges default to `anthropic/claude-opus-5` with `reasoning_effort=high`, temperature omitted, and `deepseek/deepseek-v4-pro` fallback. Chat defaults to `openai/gpt-5.6-luna` with `reasoning_effort=high`, temperature omitted, and `anthropic/claude-haiku-4-5` fallback.
 
-Lightweight utility surfaces, including `/notify` interpretation, `/add` workout clone selection, and weekly memory extraction, default to `deepseek/deepseek-v4-flash` with `anthropic/claude-haiku-4-5` fallback. `/add`, weekly memory, and verifier rewrites use `reasoning_effort=high` with temperature omitted; `/notify` stays plain Flash.
+Lightweight utility surfaces, including `/notify` interpretation and `/add` workout clone selection, default to `deepseek/deepseek-v4-flash` with `anthropic/claude-haiku-4-5` fallback. `/add` and verifier rewrites use `reasoning_effort=high` with temperature omitted; `/notify` stays plain Flash. Weekly memory routes to `openai/gpt-5.6-luna` with reasoning off.
 
-Weekly memory is a call of its own rather than a `<memory>` section of the report. Splitting it shortened the insights prompt, made the block scorable as an eval feature on its own, and moved it off the premium model — deciding which two lines to carry forward from a finished 1024-character report is a much smaller job than writing the report. Its token budget is 4096 despite emitting two bullets: DeepSeek Flash spends most of it reasoning, and at 1024 it returned empty text, which is indistinguishable from a week worth carrying nothing. On the DeepSeek primary, `high` engages thinking via translated `extra_body`; on the Anthropic fallback, the same effort is sent natively.
+Weekly memory is a call of its own rather than a `<memory>` section of the report. Splitting it shortened the insights prompt, made the block scorable as an eval feature on its own, and moved it off the premium model — deciding which two lines to carry forward from a finished 1024-character report is a much smaller job than writing the report. It runs on Luna with reasoning off, in about 200 tokens against a 1024 budget. DeepSeek Flash cannot do this job at all: it emits a reasoning trace whether or not thinking is requested, and exhausted the whole budget returning empty text at 1024, at 4096, and once at 8192 — and an empty block is indistinguishable from a week worth carrying nothing.
 
 Logged LLM calls record the effective model, and fallback calls include `requested_model` and `fallback_used` in params/metadata.
 
@@ -51,7 +51,7 @@ Current default routes:
 | Nudges | `anthropic/claude-opus-5` | up to 2/day |
 | Verification | `deepseek/deepseek-v4-pro` | reports, coach, nudges; Opus 5 fallback |
 | Verification rewrites | `deepseek/deepseek-v4-flash` | only when verifier asks |
-| Weekly memory | `deepseek/deepseek-v4-flash` | 1/week, after the report is sent |
+| Weekly memory | `openai/gpt-5.6-luna` | 1/week, after the report is sent |
 | Chat | `openai/gpt-5.6-luna` | on demand |
 
 Using recent logged token sizes from this app, the always-on daemon lands around:
@@ -66,6 +66,8 @@ Using recent logged token sizes from this app, the always-on daemon lands around
 This assumes verification normally succeeds on DeepSeek Pro with thinking engaged (via `reasoning_effort=high`) and rewrite calls remain rare. Verification falls back to Opus 5 with the same `reasoning_effort=high` (sent natively) and omitted temperature.
 
 Chat is separate because it is user-driven. Chat routes to GPT-5.6 Luna at about $0.0014 a turn. DeepSeek Flash is cheaper still, but measured against the chat eval suite it failed three of eleven cases, twice by claiming an action it never took — reporting a plan as updated with no `update_context` call, and citing a figure with no chart block. Chat has no verifier, so nothing catches that.
+
+Note that the run which picked Luna over Flash did not actually measure Luna: chat sends tools every turn, and until litellm 1.95.0 a tool-carrying Luna request was rejected outright and scored the fallback. Measured properly on 2026-08-08 at three runs per case, Luna scores 27 of 33 with one 0/3 and two flaky cases. Luna stays for now, but the Luna-versus-Flash comparison is owed a rerun on equal footing.
 
 Inspect actual spend from your local DB:
 
@@ -94,7 +96,7 @@ ZDROWSKIT_NUDGE_MODEL=anthropic/claude-opus-5
 ZDROWSKIT_CHAT_MODEL=openai/gpt-5.6-luna
 ZDROWSKIT_NOTIFY_MODEL=deepseek/deepseek-v4-flash
 ZDROWSKIT_ADD_CLONE_MODEL=deepseek/deepseek-v4-flash
-ZDROWSKIT_MEMORY_MODEL=deepseek/deepseek-v4-flash
+ZDROWSKIT_MEMORY_MODEL=openai/gpt-5.6-luna
 
 ZDROWSKIT_MAX_TOKENS_DEFAULT=4096
 ZDROWSKIT_MAX_TOKENS_INSIGHTS=8192
@@ -103,7 +105,7 @@ ZDROWSKIT_MAX_TOKENS_CHAT=4096
 ZDROWSKIT_MAX_TOKENS_NUDGE=4096
 ZDROWSKIT_MAX_TOKENS_NOTIFY=512
 ZDROWSKIT_MAX_TOKENS_ADD_CLONE=512
-ZDROWSKIT_MAX_TOKENS_MEMORY=4096
+ZDROWSKIT_MAX_TOKENS_MEMORY=1024
 ZDROWSKIT_MAX_TOKENS_VERIFICATION=16384
 ZDROWSKIT_MAX_TOKENS_VERIFICATION_REWRITE=16384
 ```

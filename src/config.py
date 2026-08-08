@@ -369,14 +369,21 @@ DEFAULT_CHAT_MODEL: str = os.environ.get(
 )
 """Default model for interactive Telegram chat.
 
-Measured against the chat eval suite at five runs per case, DeepSeek Flash
-failed three of eleven outright, and two of those failures were the model
-claiming an action it never took: "Plan's updated" with no `update_context`
-call, and "Figure 1 shows it" with no chart block. Chat is the one surface
-with no verifier, so nothing catches that. Luna passes both every time, has no
-zeroes anywhere in the suite, and costs about $0.11 a month at this call
-volume. Effort stays high: at medium three cases regress for 13% off p95
-latency.
+Chat is the one surface with no verifier, so a model that claims an action it
+never took — "Plan's updated" with no `update_context` call, "Figure 1 shows
+it" with no chart block — goes uncaught. DeepSeek Flash did that in two of its
+three failures across eleven cases, which is why chat moved off it.
+
+The comparison that picked Luna over Flash did not measure Luna. Chat sends
+tools on every turn, and until litellm 1.95.0 a tool-carrying Luna request was
+rejected outright, so every one of those runs scored the fallback instead. The
+first honest measurement, 2026-08-08 at three runs per case, puts Luna at 27 of
+33 with one case failing 0/3 (`chat_tempo_short_warmup_negative`) and two
+flaky. That is not the clean sweep this docstring used to claim.
+
+Luna stays for now because the alternative is the model that fabricates
+completed actions, and it costs about $0.11 a month at this call volume. Effort
+stays high. Both of those are due a rerun against Flash on equal footing.
 """
 
 DEFAULT_NOTIFY_MODEL: str = os.environ.get(
