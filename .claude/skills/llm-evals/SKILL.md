@@ -18,6 +18,29 @@ Recorded eval history has no backward-compatibility contract. Keep the schema cl
 - Prefer structured fixtures: pinned date, context snippets, conversation turns, and only the health data needed for the behavior under test.
 - Prefer deterministic assertions. Add LLM-as-judge only for narrow semantic invariants where tool-call, argument, text, word-count, or forbidden-opening assertions would be brittle or fake-precise.
 
+## Check the hypothesis before writing the case
+
+Provenance being *present* is not provenance being *true*. Before writing a
+case, verify every figure in the hypothesis against the source call's stored
+prompt with `uv run python main.py llm-log --id N`. Grep it for each number you
+are about to call invented, and confirm the value you assert as ground truth is
+actually the one the model was handed.
+
+Skipping this produces an **anti-test**: a case that forbids the correct
+answer. `nudge_states_only_recorded_metric_values` claimed the writer invented
+"HRV 41.6 ms"; the figure was in its data verbatim, as was the second instance
+the hypothesis cited. The case passed only when the model happened to omit the
+value entirely, so it swung between 0/5 and 4/5 and read for weeks as model
+instability. An anti-test is worse than no test: it rewards the failure it was
+written to catch, and its noise looks like a finding.
+
+A user's complaint names the surface they saw, not the stage that broke it.
+The same feedback blamed the nudge writer, which was correct; the defect was
+the verifier inverting an inequality and the rewriter shipping the result.
+Before seeding against the stage the user named, read the other calls in the
+trace — verifier and rewrite included — and seed against whichever one actually
+introduced the error.
+
 ## Silent failures (no thumbs-down to anchor on)
 
 Thumbs-down feedback remains the preferred seed — start from `--feedback` whenever possible. But some LLM outputs are *never user-visible*, so no thumbs-down can ever land. The feedback queue is blind to these by construction.
@@ -105,6 +128,18 @@ complete, since a verifier rejects an incomplete draft on structure alone and
 never reaches its claims. Only once the fixture isolates one behavior is
 residual flakiness a finding about the model. Never loosen an assertion merely
 to turn a case green.
+
+When re-seeding a `verification_judge` fixture, change the draft in **both**
+places. `slim_source_messages` appends the draft as the trailing assistant
+turn, so in production `fixture.draft` and `fixture.source_messages[-1]` are
+the same text. Editing only `draft` leaves the verifier auditing the old one
+while the case claims to test the new one — three fixtures shipped in that
+state and produced numbers nobody could interpret. The case loader now rejects
+a mismatch; fix the fixture rather than the guard.
+
+Before concluding a case is flaky, read what the verifier actually returned
+(`--details`). If it reported real defects that are not the target, the fixture
+is entangled, not the model unstable.
 
 ## Running evals
 

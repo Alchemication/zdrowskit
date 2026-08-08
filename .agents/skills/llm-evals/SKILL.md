@@ -18,6 +18,29 @@ Recorded eval history has no backward-compatibility contract. Keep the schema cl
 - Prefer structured fixtures: pinned date, context snippets, conversation turns, and only the health data needed for the behavior under test.
 - Prefer deterministic assertions. Add LLM-as-judge only for narrow semantic invariants where tool-call, argument, text, word-count, or forbidden-opening assertions would be brittle or fake-precise.
 
+## Check the hypothesis before writing the case
+
+Provenance being *present* is not provenance being *true*. Before writing a
+case, verify every figure in the hypothesis against the source call's stored
+prompt with `uv run python main.py llm-log --id N`. Grep it for each number you
+are about to call invented, and confirm the value you assert as ground truth is
+actually the one the model was handed.
+
+Skipping this produces an **anti-test**: a case that forbids the correct
+answer. `nudge_states_only_recorded_metric_values` claimed the writer invented
+"HRV 41.6 ms"; the figure was in its data verbatim, as was the second instance
+the hypothesis cited. The case passed only when the model happened to omit the
+value entirely, so it swung between 0/5 and 4/5 and read for weeks as model
+instability. An anti-test is worse than no test: it rewards the failure it was
+written to catch, and its noise looks like a finding.
+
+A user's complaint names the surface they saw, not the stage that broke it.
+The same feedback blamed the nudge writer, which was correct; the defect was
+the verifier inverting an inequality and the rewriter shipping the result.
+Before seeding against the stage the user named, read the other calls in the
+trace — verifier and rewrite included — and seed against whichever one actually
+introduced the error.
+
 ## Silent failures (no thumbs-down to anchor on)
 
 Thumbs-down feedback remains the preferred seed — start from `--feedback` whenever possible. But some LLM outputs are *never user-visible*, so no thumbs-down can ever land. The feedback queue is blind to these by construction.
@@ -37,7 +60,7 @@ For all of these, the LLM call log replaces the feedback queue as the seed:
 Provenance for silent-failure cases:
 
 - `source_llm_call_id`: the call that produced the silent output.
-- `source_feedback_id`: omit — there is no feedback row.
+- `source_feedback_id`: `null` — state it explicitly rather than omitting it, so a reader can tell "there is no feedback row" from "provenance was never filled in". Never use `0`: it names a feedback row that was never written.
 - `derived_from.hypothesis`: state the reviewer judgment plainly, e.g. "verifier suppressed a reasonable post-run nudge because it read tempo phrasing as a contradiction" or "insights memory dropped the recurring evening-headache pattern that should carry across weeks."
 - `case_kind` is still `real_regression` — the trace is real; only the seed differs.
 
@@ -76,6 +99,48 @@ Template:
 
 For prompt/tool behavior changes, run the relevant mocked tests plus the specific eval cases that represent the affected feedback cluster.
 
+## Run-to-run variability
+
+A single run is one sample, not a verdict. Identical inputs produce different
+output between runs, and for graded outputs the variation is not only wording:
+the verifier returns a *subset* of the issues it finds, so a draft with four
+defects can be flagged for two of them on one run and a different two on the
+next. A case asserting on one specific defect then passes or fails on a coin
+flip while looking entirely deterministic.
+
+- **Use `--repeat N` whenever a result will inform a decision** — adding a
+  case, judging a prompt change, comparing models. The summary reports a
+  per-case pass rate and marks anything strictly between 0 and N as `FLAKY`.
+  A case at 2/3 has told you almost nothing yet.
+- **Caching is off by default, and `--repeat` refuses to run with it.** A
+  cached response is one frozen sample replayed, so a cached suite reports
+  perfect stability however variable the model actually is. `--cache` exists
+  for iterating on assertions against a fixed response; never use it to judge
+  a model.
+- **A consistent 0/N is a healthy result**, not a broken case: it documents a
+  real gap. Flakiness is the dangerous state, because one run reports it as a
+  clean pass or a clean failure with equal confidence.
+
+When a case is flaky, suspect the fixture before the model. A fixture carrying
+several independent defects measures which one the model chose to report.
+Reduce it to a single defect — while keeping the artifact structurally
+complete, since a verifier rejects an incomplete draft on structure alone and
+never reaches its claims. Only once the fixture isolates one behavior is
+residual flakiness a finding about the model. Never loosen an assertion merely
+to turn a case green.
+
+When re-seeding a `verification_judge` fixture, change the draft in **both**
+places. `slim_source_messages` appends the draft as the trailing assistant
+turn, so in production `fixture.draft` and `fixture.source_messages[-1]` are
+the same text. Editing only `draft` leaves the verifier auditing the old one
+while the case claims to test the new one — three fixtures shipped in that
+state and produced numbers nobody could interpret. The case loader now rejects
+a mismatch; fix the fixture rather than the guard.
+
+Before concluding a case is flaky, read what the verifier actually returned
+(`--details`). If it reported real defects that are not the target, the fixture
+is entangled, not the model unstable.
+
 ## Running evals
 
 Use `evals.run` for one selected run:
@@ -84,6 +149,7 @@ Use `evals.run` for one selected run:
 uv run python -m evals.run
 uv run python -m evals.run --feature chat --record
 uv run python -m evals.run chat_log_life_disruption --details
+uv run python -m evals.run --feature verification_judge --repeat 3
 ```
 
 Use `evals.matrix` for model or route comparisons:
