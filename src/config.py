@@ -339,6 +339,12 @@ DEFAULT_MODEL: str = os.environ.get("ZDROWSKIT_DEFAULT_MODEL", PRIMARY_PRO_MODEL
 FALLBACK_MODEL: str = os.environ.get("ZDROWSKIT_FALLBACK_MODEL", FALLBACK_PRO_MODEL)
 """General fallback model paired with DEFAULT_MODEL."""
 
+OPENAI_LUNA_MODEL: str = os.environ.get(
+    "ZDROWSKIT_OPENAI_LUNA_MODEL",
+    "openai/gpt-5.6-luna",
+)
+"""Budget-tier OpenAI model used for chat, nudges, and weekly memory."""
+
 DEFAULT_INSIGHTS_MODEL: str = os.environ.get(
     "ZDROWSKIT_INSIGHTS_MODEL",
     ANTHROPIC_OPUS_MODEL,
@@ -353,15 +359,22 @@ DEFAULT_COACH_MODEL: str = os.environ.get(
 
 DEFAULT_NUDGE_MODEL: str = os.environ.get(
     "ZDROWSKIT_NUDGE_MODEL",
-    ANTHROPIC_OPUS_MODEL,
+    OPENAI_LUNA_MODEL,
 )
-"""Default model for proactive nudges."""
+"""Default model for proactive nudges.
 
-OPENAI_LUNA_MODEL: str = os.environ.get(
-    "ZDROWSKIT_OPENAI_LUNA_MODEL",
-    "openai/gpt-5.6-luna",
-)
-"""Budget-tier OpenAI model used for interactive chat and weekly memory."""
+Measured 2026-08-08 across the nudge eval cases at five runs per model. Luna
+took 80% against 40% for DeepSeek Flash, DeepSeek Pro and Opus 5 alike, swept
+the week-totals case 5/5, and answered in 4.6 s against 13-28 s.
+
+Opus 5 is the reason this default changed. It cost $0.098 a nudge — 80x Luna —
+and scored no better than the cheapest model in the lineup, including 0/5 on
+the case that guards against stating metric values the data does not contain.
+At the 2/day cap that is $1.37 a week against $0.017 for a worse result.
+
+No model passes that invented-metric case reliably; the best is 3/5. That is a
+prompt defect rather than a routing one, and picking a model cannot fix it.
+"""
 
 DEFAULT_CHAT_MODEL: str = os.environ.get(
     "ZDROWSKIT_CHAT_MODEL",

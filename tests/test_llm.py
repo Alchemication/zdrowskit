@@ -85,11 +85,13 @@ class TestFeatureDefaultModels:
     def test_high_judgment_surfaces_default_to_opus(self) -> None:
         assert DEFAULT_MODEL == PRIMARY_PRO_MODEL == DEEPSEEK_PRO_MODEL
         assert FALLBACK_MODEL == FALLBACK_PRO_MODEL == ANTHROPIC_OPUS_MODEL
-        assert DEFAULT_INSIGHTS_MODEL == DEFAULT_COACH_MODEL == DEFAULT_NUDGE_MODEL
-        assert DEFAULT_INSIGHTS_MODEL == ANTHROPIC_OPUS_MODEL
+        assert DEFAULT_INSIGHTS_MODEL == DEFAULT_COACH_MODEL == ANTHROPIC_OPUS_MODEL
         # Chat is the one flash-profile feature routed off DeepSeek:
         # Flash claimed actions it never took in the chat eval suite.
         assert DEFAULT_CHAT_MODEL == OPENAI_LUNA_MODEL
+        # Nudges left Opus: on the nudge cases it scored the same 40% as
+        # DeepSeek Pro at 65x the price, while Luna took 80%.
+        assert DEFAULT_NUDGE_MODEL == OPENAI_LUNA_MODEL
 
     def test_lightweight_utility_surfaces_default_models(self) -> None:
         assert PRIMARY_FLASH_MODEL == DEEPSEEK_FLASH_MODEL

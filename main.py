@@ -114,7 +114,7 @@ from commands import (
     cmd_telegram_setup,
 )
 from log import setup_logging
-from model_prefs import resolve_model_route
+from model_prefs import FEATURES, resolve_model_route
 from profiles import ProfileConfigError, cmd_profile, resolve_cli_profile
 
 
@@ -451,16 +451,9 @@ def main() -> None:
     )
 
     # models
-    feature_choices = [
-        "insights",
-        "coach",
-        "nudge",
-        "chat",
-        "notify",
-        "add_clone",
-        "verification",
-        "verification_rewrite",
-    ]
+    # Derived, never hand-listed: a duplicate of this list is how `memory`
+    # shipped as a routable feature that `models set` could not reach.
+    feature_choices = list(FEATURES)
     p_models = sub.add_parser("models", help="Show or change LLM model routing")
     p_models.add_argument("--profile", metavar="NAME")
     p_models.add_argument("--json", action="store_true", help="Output JSON")

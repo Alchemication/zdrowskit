@@ -9,6 +9,7 @@ from config import (
     ANTHROPIC_OPUS_MODEL,
     FALLBACK_PRO_MODEL,
     DEFAULT_CHAT_MODEL,
+    OPENAI_LUNA_MODEL,
     PRIMARY_FLASH_MODEL,
     PRIMARY_PRO_MODEL,
 )
@@ -28,13 +29,25 @@ from model_prefs import (
 
 class TestModelPrefs:
     def test_async_defaults_use_opus_with_high_reasoning_no_temperature(self, tmp_path):
-        for feature in ("insights", "coach", "nudge"):
+        for feature in ("insights", "coach"):
             route = resolve_model_route(feature, path=tmp_path / "models.json")
 
             assert route.primary == ANTHROPIC_OPUS_MODEL
             assert route.fallback == PRIMARY_PRO_MODEL
             assert route.call_kwargs()["reasoning_effort"] == "high"
             assert route.call_kwargs()["temperature"] is None
+
+    def test_nudge_default_is_luna_with_a_cheap_fallback(self, tmp_path):
+        """Nudges left Opus 5: measured on the nudge cases it scored the same
+        40% as DeepSeek Pro at 65x the price, so neither the primary nor the
+        fallback should be the premium model."""
+        route = resolve_model_route("nudge", path=tmp_path / "models.json")
+
+        assert route.primary == OPENAI_LUNA_MODEL
+        assert route.fallback == PRIMARY_PRO_MODEL
+        assert route.fallback != ANTHROPIC_OPUS_MODEL
+        assert route.call_kwargs()["reasoning_effort"] == "high"
+        assert route.call_kwargs()["temperature"] is None
 
     def test_chat_default_uses_luna(self, tmp_path):
         route = resolve_model_route("chat", path=tmp_path / "models.json")
@@ -69,7 +82,7 @@ class TestModelPrefs:
         reset_feature_route("nudge", path=path)
 
         route = resolve_model_route("nudge", path=path)
-        assert route.primary == ANTHROPIC_OPUS_MODEL
+        assert route.primary == OPENAI_LUNA_MODEL
         assert route.fallback == PRIMARY_PRO_MODEL
 
     def test_profile_route_updates_inherited_fallback(self, tmp_path):
@@ -133,7 +146,7 @@ class TestModelPrefs:
         nudge = resolve_model_route("nudge", path=path)
 
         assert insights.primary == ANTHROPIC_OPUS_MODEL
-        assert nudge.primary == ANTHROPIC_OPUS_MODEL
+        assert nudge.primary == OPENAI_LUNA_MODEL
         assert nudge.reasoning_effort == "high"
 
     def test_legacy_default_chat_route_migrates_to_new_defaults(self, tmp_path):
@@ -242,7 +255,7 @@ class TestModelPrefs:
 
         nudge = resolve_model_route("nudge", path=path)
         notify = resolve_model_route("notify", path=path)
-        assert nudge.primary == ANTHROPIC_OPUS_MODEL
+        assert nudge.primary == OPENAI_LUNA_MODEL
         assert notify.fallback != ANTHROPIC_OPUS_MODEL
 
     def test_set_chat_feature_returns_to_chat_controls_when_leaving_opus(

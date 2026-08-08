@@ -26,6 +26,7 @@ from config import (
     ANTHROPIC_OPUS_MODEL,
     DEFAULT_ADD_CLONE_MODEL,
     DEFAULT_CHAT_MODEL,
+    OPENAI_LUNA_MODEL,
     DEFAULT_COACH_MODEL,
     DEFAULT_INSIGHTS_MODEL,
     DEFAULT_MEMORY_MODEL,
@@ -188,6 +189,12 @@ def _feature_defaults(feature: str, primary: str) -> dict[str, Any]:
     entry: dict[str, Any] = {"profile": _default_profile(feature), "primary": primary}
     entry.update(_feature_model_defaults(feature, primary))
     if feature in ASYNC_QUALITY_FEATURES and primary == ANTHROPIC_OPUS_MODEL:
+        entry["fallback"] = PRIMARY_PRO_MODEL
+    elif feature == "nudge":
+        # Nudges sit in the pro profile, whose fallback is Opus 5. That is the
+        # wrong safety net here: measured on the nudge cases Opus 5 scored the
+        # same 40% as DeepSeek Pro while costing 65x more per call, so a
+        # primary outage would quietly multiply the bill for no gain.
         entry["fallback"] = PRIMARY_PRO_MODEL
     return entry
 
@@ -430,6 +437,16 @@ def _feature_model_defaults(feature: str, primary: str) -> dict[str, Any]:
             "reasoning_effort": (
                 "high" if feature in HIGH_REASONING_FEATURES else None
             ),
+        }
+    if primary == OPENAI_LUNA_MODEL:
+        # Luna carries three features now — chat, nudges, weekly memory — so it
+        # needs the same posture the other primaries declare. Temperature is
+        # omitted because GPT-5.6 rejects it alongside reasoning.
+        return {
+            "reasoning_effort": (
+                "high" if feature in HIGH_REASONING_FEATURES else None
+            ),
+            "temperature": None,
         }
     return {}
 
