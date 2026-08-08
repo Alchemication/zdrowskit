@@ -7,7 +7,7 @@ Each notification type is a distinct LLM call with its own prompt, context, tool
 | **Insights** | Full weekly report | Scheduled, default Monday 10am, or manual `/review` | 1x/week | ≤ 1024 chars | `run_sql` | Exactly 1 `<chart>`, skipped when it would mislead |
 | **Memory** | Decides what carries forward from the report | After each weekly report | 1x/week | ≤ 2 bullets | none | `<memory>` block appended to `history.md`; never sent to the user |
 | **Coach** | Weekly strategy review, only when proposals exist | After insights, silent on no-change weeks | 1x/week | ~300 words | `run_sql`, `update_context` for `strategy` only | `SKIP` if no changes warranted; bundled message with inline Accept/Reject buttons per edit |
-| **Nudge** | Short reactive next-action nudge | Data sync, file edit | Up to 2/day by default | 80 words | `run_sql` | `SKIP` if nothing changes; optional `<chart>` |
+| **Nudge** | Short reactive next-action nudge | Data sync, file edit | Up to 2/day by default | 80 words | `run_sql` | `SKIP` if nothing changes; text only, no chart |
 | **Sync alerts** | Tells you when health data has stopped arriving | Sustained ingest failure, checked on the scheduler tick | At most 1/day per condition | 2 lines | none | Recovery notice when it resolves |
 | **Chat** | Interactive conversation: answer the current message, ask anything, get charts | Your Telegram message | On demand | 150 words | `run_sql` up to 5/turn, `update_context` any file | Optional `<chart>`; at most one `update_context` |
 
