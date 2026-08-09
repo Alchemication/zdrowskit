@@ -362,6 +362,10 @@
     .turn b { display: block; margin-bottom: 6px; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; }
     .turn.you b { color: var(--orange); }
     .turn.coach b { color: var(--green-dark); }
+    /* The real bot avatar, shown where it actually appears. Not decoration:
+       the mockup is claiming to be a Telegram thread. */
+    .turn b.who { display: flex; align-items: center; gap: 7px; }
+    .turn b.who img { border-radius: 50%; border: 1px solid var(--line); }
     .turn p { margin: 0; font-size: 13px; line-height: 1.65; }
     .tool-call {
       margin: 10px 0;
@@ -667,7 +671,7 @@
             <p>How’s my HRV trending since January?</p>
           </div>
           <div class="turn coach">
-            <b>zdrowskit</b>
+            <b class="who"><img src="assets/bot-avatar.webp" alt="" width="22" height="22">zdrowskit</b>
             <div class="tool-call">query_health_db(
   "SELECT month, AVG(value) …"
 )</div>
