@@ -6,8 +6,8 @@ on:
       - main
     paths:
       - ".github/workflows/evals-pages.yml"
-      - "evals/leaderboard.py"
-      - "evals/leaderboard/runs.jsonl"
+      - "evals/leaderboard/**"
+      - "evals/cases/**"
       - "uv.lock"
       - "pyproject.toml"
   workflow_dispatch:
@@ -25,6 +25,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          # Full history so the leaderboard can diff each run's recorded commit
+          # against HEAD and tell whether the code it measured has changed.
+          # A shallow clone cannot resolve those shas and every row renders as
+          # "staleness unknown".
+          fetch-depth: 0
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
@@ -40,8 +46,11 @@ jobs:
       - name: Render leaderboard site
         run: |
           mkdir -p _site
+          # Render both from runs.jsonl rather than copying the committed
+          # Markdown: the checked-in snapshot can lag the history it summarises,
+          # and the published page should never be the stale one.
           uv run python -m evals.leaderboard render-html --html-path _site/index.html
-          cp evals/leaderboard.md _site/leaderboard.md
+          uv run python -m evals.leaderboard render --markdown-path _site/leaderboard.md
           cp evals/leaderboard/runs.jsonl _site/runs.jsonl
           touch _site/.nojekyll
 

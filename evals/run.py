@@ -12,6 +12,8 @@ from __future__ import annotations
 import argparse
 import sys
 from collections.abc import Iterable
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Any
 
 from rich.progress import (
     BarColumn,
@@ -23,6 +25,7 @@ from rich.progress import (
 
 from evals import leaderboard
 from evals.framework import (
+    EVAL_MAX_CONCURRENCY,
     EVAL_TEMPERATURE,
     EvalCache,
     EvalCase,
@@ -123,6 +126,17 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--concurrency",
+        type=int,
+        default=None,
+        help=(
+            "Eval executions to run in parallel. Defaults to --repeat, so "
+            "repeats of a case overlap instead of running back to back. Raise "
+            "it to also overlap different cases; capped at "
+            f"{EVAL_MAX_CONCURRENCY}."
+        ),
+    )
+    parser.add_argument(
         "--record",
         action="store_true",
         help="Record this eval run to the JSONL leaderboard history and regenerate markdown.",
@@ -144,6 +158,14 @@ def main() -> None:
         )
     if args.record_duplicate and not args.record:
         parser.error("--record-duplicate requires --record")
+    concurrency = args.repeat if args.concurrency is None else args.concurrency
+    if concurrency < 1:
+        parser.error("--concurrency must be at least 1")
+    if concurrency > 1 and args.cache:
+        parser.error(
+            "--concurrency cannot be used with --cache: the response cache is "
+            "a single SQLite connection and is not safe to share across threads."
+        )
 
     try:
         selected = select_cases(
@@ -167,6 +189,7 @@ def main() -> None:
         cache=cache,
         refresh_cache=args.refresh_cache,
         repeat=args.repeat,
+        concurrency=concurrency,
     )
     print_results(results)
     if args.details:
@@ -179,6 +202,7 @@ def main() -> None:
             reasoning_effort=reasoning_effort,
             max_tool_iterations=args.max_tool_iterations,
             feature_filter=args.feature,
+            repeat=args.repeat,
             allow_duplicate=args.record_duplicate,
         )
         if outcome.recorded:
@@ -205,23 +229,31 @@ def _run_selected_cases(
     cache: EvalCache | None = None,
     refresh_cache: bool = False,
     repeat: int = 1,
+    concurrency: int = 1,
 ):
-    selected = [case for case in cases for _ in range(max(repeat, 1))]
-    if len(selected) <= 1:
-        return [
-            run_case(
-                case,
-                model=model,
-                max_tool_iterations=max_tool_iterations,
-                reasoning_effort=reasoning_effort,
-                temperature=temperature,
-                cache=cache,
-                refresh_cache=refresh_cache,
-            )
-            for case in selected
-        ]
+    """Run every selected case, `repeat` times each.
 
-    results = []
+    Results come back in submission order — all attempts of the first case,
+    then the second — regardless of the order they finish in, so the printed
+    table and the recorded aggregation do not shuffle between runs.
+    """
+    selected = [case for case in cases for _ in range(max(repeat, 1))]
+
+    def _run(case: EvalCase):
+        return run_case(
+            case,
+            model=model,
+            max_tool_iterations=max_tool_iterations,
+            reasoning_effort=reasoning_effort,
+            temperature=temperature,
+            cache=cache,
+            refresh_cache=refresh_cache,
+        )
+
+    if len(selected) <= 1:
+        return [_run(case) for case in selected]
+
+    workers = max(1, min(concurrency, EVAL_MAX_CONCURRENCY, len(selected)))
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
@@ -229,22 +261,28 @@ def _run_selected_cases(
         TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
         TimeElapsedColumn(),
     ) as progress:
-        task_id = progress.add_task("Running feedback evals", total=len(selected))
-        for case in selected:
-            progress.update(task_id, description=f"[bold]{case.id}[/bold]")
-            results.append(
-                run_case(
-                    case,
-                    model=model,
-                    max_tool_iterations=max_tool_iterations,
-                    reasoning_effort=reasoning_effort,
-                    temperature=temperature,
-                    cache=cache,
-                    refresh_cache=refresh_cache,
-                )
-            )
-            progress.advance(task_id)
-    return results
+        label = "Running feedback evals"
+        if workers > 1:
+            label += f" ({workers} in parallel)"
+        task_id = progress.add_task(label, total=len(selected))
+        if workers == 1:
+            results = []
+            for case in selected:
+                progress.update(task_id, description=f"[bold]{case.id}[/bold]")
+                results.append(_run(case))
+                progress.advance(task_id)
+            return results
+
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = {
+                executor.submit(_run, case): index
+                for index, case in enumerate(selected)
+            }
+            ordered: list[Any] = [None] * len(selected)
+            for future in as_completed(futures):
+                ordered[futures[future]] = future.result()
+                progress.advance(task_id)
+    return ordered
 
 
 def _normalize_reasoning_effort(value: str) -> str | None:

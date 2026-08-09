@@ -14,8 +14,9 @@ from dataclasses import dataclass
 
 from evals import leaderboard
 from evals.framework import (
-    PRODUCTION_EFFORT,
+    EVAL_MAX_CONCURRENCY,
     EVAL_TEMPERATURE,
+    PRODUCTION_EFFORT,
     EvalCache,
     EvalCase,
     EvalResult,
@@ -101,6 +102,15 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--concurrency",
+        type=int,
+        default=None,
+        help=(
+            "Eval executions to run in parallel within a cell. Defaults to "
+            f"--repeat; capped at {EVAL_MAX_CONCURRENCY}."
+        ),
+    )
+    parser.add_argument(
         "--record",
         action="store_true",
         help="Record every matrix cell to the leaderboard history.",
@@ -122,6 +132,14 @@ def main() -> None:
         )
     if args.record_duplicate and not args.record:
         parser.error("--record-duplicate requires --record")
+    concurrency = args.repeat if args.concurrency is None else args.concurrency
+    if concurrency < 1:
+        parser.error("--concurrency must be at least 1")
+    if concurrency > 1 and args.cache:
+        parser.error(
+            "--concurrency cannot be used with --cache: the response cache is "
+            "a single SQLite connection and is not safe to share across threads."
+        )
 
     try:
         cases = load_cases()
@@ -150,6 +168,7 @@ def main() -> None:
             temperature=matrix_run.temperature,
             cache=cache,
             repeat=args.repeat,
+            concurrency=concurrency,
             refresh_cache=args.refresh_cache,
         )
         print_results(results)
@@ -159,6 +178,7 @@ def main() -> None:
                 matrix_run=matrix_run,
                 max_tool_iterations=args.max_tool_iterations,
                 feature_filter=args.feature,
+                repeat=args.repeat,
                 allow_duplicate=args.record_duplicate,
             )
         if not all(result.passed for result in results):
@@ -225,6 +245,7 @@ def _record_matrix_run(
     matrix_run: MatrixRun,
     max_tool_iterations: int,
     feature_filter: str | None,
+    repeat: int,
     allow_duplicate: bool,
 ) -> None:
     outcome = leaderboard.record_run(
@@ -234,6 +255,7 @@ def _record_matrix_run(
         reasoning_effort=matrix_run.reasoning_effort,
         max_tool_iterations=max_tool_iterations,
         feature_filter=feature_filter,
+        repeat=repeat,
         allow_duplicate=allow_duplicate,
     )
     if outcome.recorded:

@@ -54,6 +54,15 @@ Distinct from None, which means reasoning off: a feature production runs
 with thinking enabled must not be silently evaluated without it.
 """
 
+EVAL_MAX_CONCURRENCY = 12
+"""Ceiling on parallel eval executions, whatever `--concurrency` asks for.
+
+Eval calls are network-bound, so parallelism is nearly free in wall clock. The
+cap exists for the providers, not for us: a full suite fans out across three of
+them, and a burst large enough to trip a rate limit turns into retries and
+errored cases, which cost more time than the parallelism saved.
+"""
+
 
 # Which model_prefs feature backs each eval feature. Evals exist to check the
 # production path, so by default they must ask the model production would ask —
@@ -839,7 +848,7 @@ def _format_summary_metrics(results: list[EvalResult]) -> str:
     return "LLM summary: " + " | ".join(parts)
 
 
-def _score_counts(results: list[EvalResult]) -> tuple[int, int, int, float]:
+def score_counts(results: list[EvalResult]) -> tuple[int, int, int, float]:
     """Return (passed, failed, errored, accuracy) with errors excluded.
 
     Accuracy is computed only over cases that actually reached a verdict. A
@@ -857,7 +866,7 @@ def _score_counts(results: list[EvalResult]) -> tuple[int, int, int, float]:
 
 def _format_pass_fail_summary(results: list[EvalResult]) -> str:
     """Build a compact pass/fail summary for the result footer."""
-    passed, failed, errored, accuracy = _score_counts(results)
+    passed, failed, errored, accuracy = score_counts(results)
     summary = f"Accuracy: {accuracy:.1f}% | Passed: {passed} | Failed: {failed}"
     if errored:
         summary += f" | Errored: {errored}"
@@ -919,7 +928,7 @@ def _summary_rows(
     text_cls: type | None = None,
 ) -> list[tuple[str, Any]]:
     """Build rich-summary rows for the eval footer."""
-    passed, failed, errored, accuracy = _score_counts(results)
+    passed, failed, errored, accuracy = score_counts(results)
     rows: list[tuple[str, Any]] = [
         ("Accuracy", _render_accuracy_value(accuracy, text_cls=text_cls)),
         ("Passed", str(passed)),

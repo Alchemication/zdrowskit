@@ -46,7 +46,10 @@ uv run python -m evals.run chat_log_life_disruption     # one case
 uv run python -m evals.run --feature chat               # feature filter
 uv run python -m evals.run --feature insights           # insights writer cases
 uv run python -m evals.run --details                    # debug failed cases
+uv run python -m evals.run --repeat 3                   # sample each case 3x and report per-case pass rates
+uv run python -m evals.run --repeat 3 --concurrency 12  # same, fanned out across workers
 uv run python -m evals.run --record                     # persist a run to evals/leaderboard/runs.jsonl
+uv run python -m evals.run --repeat 3 --concurrency 12 --record   # a leaderboard-quality production run
 uv run python -m evals.matrix --feature chat --models deepseek/deepseek-v4-flash,deepseek/deepseek-v4-pro --reasoning-efforts high --record
 uv run python -m evals.matrix --feature insights --models anthropic/claude-opus-5,deepseek/deepseek-v4-pro --reasoning-efforts high --record
 uv run python -m evals.matrix --production --record     # current configured smoke suite
@@ -57,6 +60,20 @@ uv run python -m evals.leaderboard render-html          # rebuild evals/leaderbo
 These evals call the configured real model and may use network/API quota.
 
 Some models reject a `temperature` parameter (for example `claude-opus-5`). For those, pass `--no-temperature` to omit it from the request.
+
+### Repeats and caching
+
+Identical inputs produce different output between runs, so a single run is one sample, not a verdict. `--repeat N` runs every case N times and reports a per-case pass rate, marking anything strictly between 0 and N as `FLAKY`. Use it whenever a result will inform a decision — adding a case, judging a prompt change, comparing models.
+
+Response caching is **off by default**, and `--repeat` refuses to run with `--cache`: a cached response is one frozen sample replayed, so a cached suite reports perfect stability however variable the model actually is. `--cache` exists for iterating on assertions against a fixed response, never for judging a model.
+
+A consistent 0/N is a healthy result — it documents a real gap. Flakiness is the dangerous state, because one run reports it as a clean pass or a clean failure with equal confidence.
+
+### Concurrency
+
+Eval calls are network-bound, so repeats do not have to run back to back. `--concurrency N` runs N executions at once, across *all* cases and repeats — not just the repeats of one case. It defaults to `--repeat` and is capped at `EVAL_MAX_CONCURRENCY` (12) in `evals/framework.py`; the cap is there for the providers, since a burst large enough to trip a rate limit turns into retries and errored cases that cost more time than the parallelism saved.
+
+Results are returned in submission order regardless of completion order, so the printed table and the recorded aggregation do not shuffle between runs. `--concurrency` above 1 refuses to run with `--cache`, whose SQLite connection is not safe to share across threads.
 
 ## Supported features
 
@@ -94,12 +111,28 @@ Recorded runs store both the requested CLI model and the actual per-case route. 
 
 ## Leaderboard
 
-Recorded leaderboard runs live in `evals/leaderboard/runs.jsonl`. The generated Markdown snapshot lives in `evals/leaderboard.md`.
+Recorded runs live in `evals/leaderboard/runs.jsonl`. The Markdown snapshot is `evals/leaderboard.md` and the interactive report is `evals/leaderboard.html`, both generated from that history.
 
-Comparisons are scope-aware: runs over different case sets are rendered in separate sections rather than ranked together.
+The leaderboard answers two questions, in this order.
 
-Each recorded run includes per-feature pass/fail summaries and per-case route metadata. This keeps all-case smoke runs honest when different features resolve different production model routes.
+**Production** — one row per feature, taken from the newest run that resolved production routes (`evals.run` or `evals.matrix --production` with no `--model`), scored against the cases that exist in `evals/cases` today. This is the "how does what we ship perform" view, and it is the landing section. It calls out what the numbers do not cover:
 
-The interactive HTML report lives in `evals/leaderboard.html` and is generated from the same raw JSONL history.
+- features with cases but no recorded production run at all,
+- cases added since the run that produced the row,
+- rows recorded before the current commit,
+- rows recorded at `repeat=1`, where stability is unmeasured.
+
+**Variations** — one table per feature, comparing models, reasoning efforts, routes and repeat settings within that feature. Grouping is by feature, not by case set: a feature maps to one production route in `model_prefs`, matrix runs are already feature-scoped, and a model decision only means something inside a feature. Keying sections on the case-set hash instead made every newly added eval case start a fresh section with no history to compare against.
+
+Each row carries two accuracies, because they answer different questions:
+
+- **Strict** — the share of cases that passed *every* attempt. A flaky case scores as the unreliable result it is.
+- **Attempt** — attempt-weighted, the score a single run would be expected to report.
+
+They are equal at `repeat=1` and diverge exactly when cases are flaky. Rows rank on strict accuracy first. Errored attempts (a provider 500, say) stay out of both denominators, so an outage cannot read as a quality regression. Cost is reported per covered run (`total_cost / repeat`) so a `repeat=5` row is not ranked against a `repeat=1` row at five times the price.
+
+Repeat count is part of a row's identity, so a 5-sample run and a 1-sample run of the same commit and route stay as separate rows and never merge.
+
+Each record stores run-level metadata (`requested_model`, `is_production`, `reasoning_effort`, `repeat`, `git_sha`) plus one aggregated entry per case holding its pass rate, flaky flag, actual route, and the raw per-attempt latency, cost and failures.
 
 `evals/leaderboard.html` is published to GitHub Pages by `.github/workflows/evals-pages.yml` at <https://alchemication.github.io/zdrowskit/>. Enable Pages with **Settings -> Pages -> Source: GitHub Actions**; after that, pushes to `main` that update `evals/leaderboard/runs.jsonl` rebuild and deploy the latest leaderboard as the Pages `index.html`. The workflow can also be run manually from the Actions tab.

@@ -1,78 +1,69 @@
 # Feedback Eval Leaderboard
 
-Feedback-derived regression scorecard for zdrowskit evals. Sections compare only runs over the same recorded case set; this is not a general benchmark.
+Feedback-derived regression scorecard for zdrowskit evals. The production table is what the daemon ships today; the per-feature tables are alternatives measured against it. Not a general benchmark.
 
-## 14 cases · feature=all · case set `193f95385106`
+## Production
 
-Latest recorded: `2026-08-05T10:18:38Z`
+Latest run on production routes per feature, against the 28 cases in `evals/cases` today.
 
-Case IDs: `chat_explicit_add_to_log`, `chat_log_life_disruption`, `chat_log_social_rest_day`, `chat_plan_lookup_no_log`, `chat_running_speed_trend_chart_text_independent`, `chat_running_speed_trend_pace_format`, `chat_strategy_change_updates_weekly_plan`, `chat_tempo_end_counts`, `chat_tempo_progressive_positive`, `chat_tempo_short_warmup_negative`, `insights_midweek_memory_current_week_w20`, `verification_judge_insights_midweek_memory_contract_w20`, `verification_judge_insights_unsupported_vo2max_recency_w15`, `verification_judge_nudge_hrv_direction_reversal`
+| Feature | Route | Cases | Strict | Attempt | Flaky | Repeat | Avg Latency | Cost/run | Revision | Recorded |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
+| chat | gpt-5.6-luna (high) | 11/11 | 81.8% | 87.9% | 1 | 3 | 7.82s | $0.0132 | adc9c5e* | 2026-08-08 |
+| insights | claude-opus-5 (high) | 1/1 | 0.0% | 66.7% | 1 | 3 | 28.95s | $0.3072 | adc9c5e* | 2026-08-08 |
+| memory | gpt-5.6-luna | 3/3 | 100.0% | 100.0% | 0 | 3 | 1.27s | $0.0007 | adc9c5e* | 2026-08-08 |
+| nudge | gpt-5.6-luna (high) | 6/6 | 100.0% | 100.0% | 0 | 3 | 5.19s | $0.0095 | adc9c5e* | 2026-08-08 |
+| verification_judge | deepseek-v4-pro (high) | 7/7 | 42.9% | 71.4% | 3 | 3 | 50.55s | $0.0229 | adc9c5e* | 2026-08-08 |
 
-| Model | Reasoning | Accuracy | Passed | Failed | Routes | Avg Latency | p95 Latency | Total Cost | Avg Cost | Revision | Failed Cases |
-| --- | --- | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | --- | --- |
-| deepseek-v4-pro | none | 71.4% | 10 | 4 | chat: deepseek-v4-pro<br>insights: deepseek-v4-pro<br>verification_judge: deepseek-v4-pro | 32.36s | 85.75s | $0.0555 | $0.0040 | a46c2ec | chat_running_speed_trend_chart_text_independent, chat_tempo_end_counts, insights_midweek_memory_current_week_w20, verification_judge_insights_unsupported_vo2max_recency_w15 |
+## chat · 11 cases
 
-Latest-row feature breakdown:
+| Model | Reasoning | Repeat | Cases | Strict | Attempt | Flaky | Avg Latency | Cost/run | Revision | Failing |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
+| **production routes** | production | 3 | 11/11 | 81.8% | 87.9% | 1 | 7.82s | $0.0132 | adc9c5e* | `chat_running_speed_trend_chart_text_independent` 2/3<br>`chat_tempo_short_warmup_negative` 0/3 |
 
-| Feature | Cases | Accuracy | Passed | Failed | Routes |
-| --- | ---: | ---: | ---: | ---: | --- |
-| chat | 10 | 80.0% | 8 | 2 | deepseek-v4-pro |
-| insights | 1 | 0.0% | 0 | 1 | deepseek-v4-pro |
-| verification_judge | 3 | 66.7% | 2 | 1 | deepseek-v4-pro |
+Leading row (`production routes`, repeat=3) per-case stability:
 
-## 12 cases · feature=all · case set `41cbc11e02cb`
+- `chat_running_speed_trend_chart_text_independent` 2/3 FLAKY — includes_chart_block
+- `chat_tempo_short_warmup_negative` 0/3 fail — treats_shortened_session_as_not_meeting_the_prescription
 
-Latest recorded: `2026-05-11T21:29:00Z`
+## insights · 1 cases
 
-Case IDs: `chat_explicit_add_to_log`, `chat_log_life_disruption`, `chat_log_social_rest_day`, `chat_plan_lookup_no_log`, `chat_running_speed_trend_chart_text_independent`, `chat_running_speed_trend_pace_format`, `chat_strategy_change_updates_weekly_plan`, `chat_tempo_end_counts`, `chat_tempo_progressive_positive`, `chat_tempo_short_warmup_negative`, `verification_judge_insights_unsupported_vo2max_recency_w15`, `verification_judge_nudge_hrv_direction_reversal`
+| Model | Reasoning | Repeat | Cases | Strict | Attempt | Flaky | Avg Latency | Cost/run | Revision | Failing |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
+| **production routes** | production | 3 | 1/1 | 0.0% | 66.7% | 1 | 28.95s | $0.3072 | adc9c5e* | `insights_fits_a_phone_notification_w31` 2/3 |
 
-| Model | Reasoning | Accuracy | Passed | Failed | Routes | Avg Latency | p95 Latency | Total Cost | Avg Cost | Revision | Failed Cases |
-| --- | --- | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | --- | --- |
-| deepseek-v4-pro | none | 75.0% | 9 | 3 | chat: deepseek-v4-pro<br>verification_judge: deepseek-v4-pro | 44.71s | 157.75s | $0.0159 | $0.0013 | 4977a16* | chat_tempo_end_counts, chat_tempo_short_warmup_negative, verification_judge_insights_unsupported_vo2max_recency_w15 |
+Leading row (`production routes`, repeat=3) per-case stability:
 
-Latest-row feature breakdown:
+- `insights_fits_a_phone_notification_w31` 2/3 FLAKY — does_not_count_the_days_since_the_week_closed
 
-| Feature | Cases | Accuracy | Passed | Failed | Routes |
-| --- | ---: | ---: | ---: | ---: | --- |
-| chat | 10 | 80.0% | 8 | 2 | deepseek-v4-pro |
-| verification_judge | 2 | 50.0% | 1 | 1 | deepseek-v4-pro |
+## memory · 3 cases
 
-## 10 cases · feature=chat · case set `e746a0f4838c`
+| Model | Reasoning | Repeat | Cases | Strict | Attempt | Flaky | Avg Latency | Cost/run | Revision | Failing |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
+| **production routes** | production | 3 | 3/3 | 100.0% | 100.0% | 0 | 1.27s | $0.0007 | adc9c5e* | - |
 
-Latest recorded: `2026-05-11T21:19:50Z`
+Leading row (`production routes`) passed every case on every attempt.
 
-Case IDs: `chat_explicit_add_to_log`, `chat_log_life_disruption`, `chat_log_social_rest_day`, `chat_plan_lookup_no_log`, `chat_running_speed_trend_chart_text_independent`, `chat_running_speed_trend_pace_format`, `chat_strategy_change_updates_weekly_plan`, `chat_tempo_end_counts`, `chat_tempo_progressive_positive`, `chat_tempo_short_warmup_negative`
+## nudge · 6 cases
 
-| Model | Reasoning | Accuracy | Passed | Failed | Routes | Avg Latency | p95 Latency | Total Cost | Avg Cost | Revision | Failed Cases |
-| --- | --- | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | --- | --- |
-| deepseek-v4-pro | none | 90.0% | 9 | 1 | chat: deepseek-v4-pro | 28.07s | 65.09s | $0.0161 | $0.0016 | 4977a16 | chat_running_speed_trend_chart_text_independent |
+| Model | Reasoning | Repeat | Cases | Strict | Attempt | Flaky | Avg Latency | Cost/run | Revision | Failing |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
+| **production routes** | production | 3 | 6/6 | 100.0% | 100.0% | 0 | 5.19s | $0.0095 | adc9c5e* | - |
 
-## 2 cases · feature=verification_judge · case set `5eb9eb33e561`
+Leading row (`production routes`) passed every case on every attempt.
 
-Latest recorded: `2026-05-11T21:26:01Z`
+## verification_judge · 7 cases
 
-Case IDs: `verification_judge_insights_unsupported_vo2max_recency_w15`, `verification_judge_nudge_hrv_direction_reversal`
+| Model | Reasoning | Repeat | Cases | Strict | Attempt | Flaky | Avg Latency | Cost/run | Revision | Failing |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
+| **production routes** | production | 3 | 7/7 | 42.9% | 71.4% | 3 | 50.55s | $0.0229 | adc9c5e* | `verification_judge_insights_hrv_precedes_workout_w32` 2/3<br>`verification_judge_insights_invented_drought_length_w32` 2/3<br>`verification_judge_insights_unsupported_vo2max_recency_w15` 0/3<br>`verification_judge_nudge_compound_week_totals_w21` 2/3 |
 
-| Model | Reasoning | Accuracy | Passed | Failed | Routes | Avg Latency | p95 Latency | Total Cost | Avg Cost | Revision | Failed Cases |
-| --- | --- | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | --- | --- |
-| deepseek-v4-pro | high | 50.0% | 1 | 1 | verification_judge: deepseek-v4-pro (high) | 141.12s | 180.85s | $0.0074 | $0.0037 | 4977a16* | verification_judge_insights_unsupported_vo2max_recency_w15 |
+Leading row (`production routes`, repeat=3) per-case stability:
 
-## 1 cases · feature=all · case set `ab7d75487c5e`
+- `verification_judge_insights_hrv_precedes_workout_w32` 2/3 FLAKY — verifier_flagged_the_hrv_timing_claim
+- `verification_judge_insights_invented_drought_length_w32` 2/3 FLAKY — identifies_unsupported_week_count
+- `verification_judge_insights_unsupported_vo2max_recency_w15` 0/3 fail — verifier_did_not_pass_unsupported_claim, verifier_quoted_or_flagged_w15_recency
+- `verification_judge_nudge_compound_week_totals_w21` 2/3 FLAKY — verifier_examined_the_week_totals
 
-Latest recorded: `2026-05-20T09:03:27Z`
+---
 
-Case IDs: `verification_judge_insights_midweek_memory_contract_w20`
-
-| Model | Reasoning | Accuracy | Passed | Failed | Routes | Avg Latency | p95 Latency | Total Cost | Avg Cost | Revision | Failed Cases |
-| --- | --- | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | --- | --- |
-| deepseek-v4-pro | high | 100.0% | 1 | 0 | verification_judge: deepseek-v4-pro (high) | 135.99s | 135.99s | $0.0046 | $0.0046 | 51471a1* | - |
-
-## 1 cases · feature=all · case set `08ce45cee00a`
-
-Latest recorded: `2026-05-20T09:03:21Z`
-
-Case IDs: `insights_midweek_memory_current_week_w20`
-
-| Model | Reasoning | Accuracy | Passed | Failed | Routes | Avg Latency | p95 Latency | Total Cost | Avg Cost | Revision | Failed Cases |
-| --- | --- | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | --- | --- |
-| claude-opus-4-7 | high | 0.0% | 0 | 1 | insights: claude-opus-4-7 (high) | 51.57s | 51.57s | $0.2364 | $0.2364 | 51471a1* | insights_midweek_memory_current_week_w20 |
+Strict = cases passing every attempt. Attempt = attempt-weighted, the score one run would be expected to report. They diverge exactly when cases are flaky, and a flaky case is the one result a single run reports with false confidence.
