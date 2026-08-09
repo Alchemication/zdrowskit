@@ -402,6 +402,37 @@
     .fact p { margin: 0 0 10px; font-size: 12.5px; line-height: 1.65; }
     .fact .big { font-family: Georgia, serif; font-size: 38px; line-height: 1; letter-spacing: -.03em; }
 
+    /* Annual side-by-side: the yearly figures carry the contrast far better
+       than the monthly ones, which round to "about a dollar" either way. */
+    .compare { position: relative; margin: 14px 0 16px; }
+    .compare-row {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      padding: 9px 11px;
+      border: 1px solid var(--line);
+    }
+    .compare-row + .compare-row { border-top: 0; }
+    .compare-row b {
+      min-width: 66px;
+      font-family: Georgia, serif;
+      font-size: 26px;
+      font-weight: 500;
+      letter-spacing: -.02em;
+    }
+    .compare-row span { color: var(--muted); font-size: 11.5px; line-height: 1.45; }
+    .compare-row.win { border: 2px solid var(--ink); background: var(--green); }
+    .compare-row.win b { color: var(--ink); }
+    .compare-row.win span { color: var(--ink); }
+    .compare-x {
+      margin-top: 8px;
+      font-size: 11px;
+      font-weight: 900;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+      color: var(--orange);
+    }
+
     .trust {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -648,11 +679,20 @@
             leave it alone, around $1 if you chat with it daily.
           </p>
           <p>
-            Every job routes to the cheapest model measured to do it well. Send the
-            same six weeks of work to a frontier model like Claude Opus or GPT-Sol
-            instead and it costs <b>about 28x more</b> — $24 a month rather than
-            under $1.
+            Every job routes to the cheapest model measured to do it well. Over a
+            year, on the same workload:
           </p>
+          <div class="compare">
+            <div class="compare-row win">
+              <b>$10</b>
+              <span>a year — routed per task</span>
+            </div>
+            <div class="compare-row">
+              <b>$290</b>
+              <span>a year — all on a frontier model like Claude&nbsp;Opus or GPT&#8209;Sol</span>
+            </div>
+            <div class="compare-x">about 28x</div>
+          </div>
           <p><a href="docs/llm.html">How that breaks down →</a></p>
         </div>
         <div class="fact">
