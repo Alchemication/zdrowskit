@@ -79,6 +79,22 @@ missed pair costs a delayed import rather than lost data. An hour is wide
 enough to absorb a slow multi-megabyte route upload while an hour-old Workouts
 payload still describes today.
 """
+PUBLIC_DNS_RESOLVER_URL: str = "https://cloudflare-dns.com/dns-query"
+"""DNS-over-HTTPS endpoint used to resolve the Funnel hostname from outside.
+
+The host's own resolver is useless for this: MagicDNS answers for every tailnet
+member, so the Funnel name resolves locally to a 100.64.0.0/10 address even
+when its public record has disappeared and no phone can reach it. A resolver
+outside the tailnet is the only way to see what Auto Export sees. DoH is used
+rather than shelling out to ``dig`` so the check needs nothing but stdlib.
+"""
+PUBLIC_DNS_TIMEOUT_S: float = 5
+"""Seconds to wait for the public resolver before giving up.
+
+Generous for a single JSON lookup, short enough that a diagnostic command still
+returns promptly on a flaky network. A timeout reports "unknown", never
+"broken" — an offline laptop must not look like a missing DNS record.
+"""
 DATA_HEALTH_REALERT_S: int = 24 * 60 * 60
 """How long before an unresolved ingest problem is reported again."""
 DATA_HEALTH_SILENT_AFTER_H: float = 16

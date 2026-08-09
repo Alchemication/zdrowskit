@@ -580,10 +580,20 @@ def cmd_doctor(args: argparse.Namespace) -> None:  # noqa: ARG001
                     False,
                 )
             )
-        from cmd_ingest import receiver_health
+        from cmd_ingest import _tailscale_dns_name, public_dns_health, receiver_health
 
         receiver_ok, receiver_detail = receiver_health()
         checks.append(("HTTP receiver", receiver_ok, receiver_detail, True))
+        dns_name = _tailscale_dns_name()
+        if dns_name is None:
+            public_ok, public_detail = None, "Tailscale is offline or not connected"
+        else:
+            public_ok, public_detail = public_dns_health(dns_name)
+        # Only enforced when the lookup actually ran: an unreachable resolver
+        # says nothing about the record, and must not fail an offline machine.
+        checks.append(
+            ("Funnel public DNS", bool(public_ok), public_detail, public_ok is not None)
+        )
     checks.append(
         ("LLM API key", _env_has_any_model_key(), "DEEPSEEK/ANTHROPIC/OPENAI", True)
     )
