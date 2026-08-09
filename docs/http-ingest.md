@@ -184,7 +184,7 @@ the Funnel works. Stop the temporary server with Ctrl+C, then either point the
 same Funnel at the real receiver after `daemon-install`, or turn it off:
 
 ```bash
-tailscale funnel --https=443 off
+tailscale funnel reset
 ```
 
 ## iPhone Auto Export Setup
@@ -321,6 +321,25 @@ the public DNS URL when Tailscale is connected, token presence, arrival times,
 the last successful import, and the last error. `doctor` runs the same receiver
 probe, so a stopped daemon fails both.
 
+The `Public DNS:` line resolves the Funnel hostname through a public
+DNS-over-HTTPS resolver rather than the local one. This distinction matters more
+than it looks: MagicDNS answers for every tailnet member, so from this Mac the
+Funnel hostname resolves to a `100.64.0.0/10` address whether or not the public
+record exists. A local `curl` against the public URL therefore passes over the
+tailnet and proves nothing about what a phone can reach. Only an outside
+resolver sees what Auto Export sees.
+
+| `Public DNS:` | Meaning |
+|---|---|
+| `reachable` | The hostname resolves publicly, to the listed Tailscale ingress addresses. |
+| `NOT REACHABLE` | No public record. Auto Export cannot reach the Funnel regardless of how healthy the receiver looks locally. Recreate the Funnel as described below. |
+| `unknown` | The resolver itself could not be reached — usually this machine is offline. Says nothing about the record. |
+
+`doctor` runs the same check and fails on `NOT REACHABLE`, but never on
+`unknown`. Note that it covers DNS only: a resolvable hostname whose TLS
+handshake fails, as happens for a few minutes after recreating a Funnel, still
+reports `reachable`.
+
 Each profile also reports one `pairing:` line explaining whether the next import
 can happen:
 
@@ -340,15 +359,25 @@ triggering an automation is the fastest way to diagnose a family member's phone.
 ### Stop or Recreate the Funnel
 
 ```bash
-# Stop public access on HTTPS port 443.
-tailscale funnel --https=443 off
+# Stop public access, removing the serve configuration.
+tailscale funnel reset
 
 # Re-enable the same persistent mapping and URL.
 tailscale funnel --bg --https=443 http://127.0.0.1:8787
-
-# Remove every Funnel configuration from this Mac (broader than zdrowskit).
-tailscale funnel reset
 ```
+
+Older Tailscale releases accepted `tailscale funnel --https=443 off` as a
+toggle. On 1.98 that form is gone: `off` is parsed as a proxy target, so the
+command fails with `non-localhost target "off" must include a scheme` — and a
+preceding `off` may already have wiped the serve config. Check `tailscale
+funnel status` after any change; `No serve config` means public access is down
+and the mapping must be recreated with the command above.
+
+Recreating the Funnel also republishes the public DNS record, which is the fix
+when the hostname stops resolving outside the tailnet. Give it a few minutes
+afterwards: DNS propagation and the ingress certificate both lag the command,
+and until the certificate is issued the TLS handshake fails even though DNS
+already resolves.
 
 Stopping Funnel does not stop the zdrowskit daemon, Telegram, reports, or local
 database access. It only prevents new iPhone HTTP uploads from reaching the
@@ -363,6 +392,7 @@ receiver.
 | First Funnel command opens a browser | Approve Funnel for the tailnet; this provisions its policy and HTTPS support. |
 | Public URL does not resolve immediately | Initial public DNS propagation can take up to ten minutes. Avoid repeatedly recreating the Funnel/certificate. |
 | Local `/healthz` works, public URL does not | Run `tailscale funnel status`; port 443 must be a Funnel proxy to `http://127.0.0.1:8787`, not a private Tailscale Serve mapping. |
+| Auto Export reports "A server with the specified hostname could not be found" | The public DNS record is gone. `main.py ingest status` shows `Public DNS: NOT REACHABLE`. Recreate the Funnel to republish it, then allow a few minutes for DNS and the certificate. |
 | `/` returns `404` | Expected. Production exposes `GET /healthz` and authenticated `POST /v1/auto-export`, not a directory listing. |
 | Auto Export gets `401` | Re-enter the exact `Bearer <token>` authorization value or rotate the profile token. |
 | Auto Export gets `422` | Read the returned error; normally aggregation, headers, JSON format, or an oversized export. |
