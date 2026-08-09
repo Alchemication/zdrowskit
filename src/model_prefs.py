@@ -210,6 +210,18 @@ def _feature_defaults(feature: str, primary: str) -> dict[str, Any]:
         # This is a judgement call on price and speed, not a quality result.
         # Revisit once insights has enough cases to decide it properly.
         entry["fallback"] = PRIMARY_FLASH_MODEL
+    elif feature == "coach":
+        # Coach left Opus 5 on 2026-08-09 with no eval coverage at all — the
+        # only surface with none. This is explicitly not a measured win: there
+        # was no result showing Opus 5 earned 23x Luna's price here ($0.0956
+        # against $0.0041 a review), so keeping it was as unfounded as moving
+        # it. Flash fallback for the same reason as insights and nudge, and
+        # because coach output is verified, which is the net under an
+        # unmeasured change.
+        #
+        # Treat any report of worse proposals after this date as a candidate
+        # regression, and write coach cases before defending the choice.
+        entry["fallback"] = PRIMARY_FLASH_MODEL
     elif feature == "nudge":
         # Nudges sit in the pro profile, whose fallback is Opus 5. That is the
         # wrong safety net here: measured on the nudge cases Opus 5, DeepSeek

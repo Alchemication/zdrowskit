@@ -28,12 +28,18 @@ from model_prefs import (
 
 
 class TestModelPrefs:
-    def test_coach_still_defaults_to_opus_with_high_reasoning(self, tmp_path):
-        """Coach has no eval coverage, so it keeps the premium route."""
+    def test_coach_defaults_to_luna_falling_back_to_flash(self, tmp_path):
+        """Coach left Opus 5 on 2026-08-09 without eval evidence either way.
+
+        This is the one route change made on symmetry rather than measurement:
+        the harness has no coach runner, so no result ever showed Opus 5 earned
+        23x Luna's price here. The assertion pins the decision so a silent
+        revert is visible; it is not a claim that Luna scored better.
+        """
         route = resolve_model_route("coach", path=tmp_path / "models.json")
 
-        assert route.primary == ANTHROPIC_OPUS_MODEL
-        assert route.fallback == PRIMARY_PRO_MODEL
+        assert route.primary == OPENAI_LUNA_MODEL
+        assert route.fallback == PRIMARY_FLASH_MODEL
         assert route.call_kwargs()["reasoning_effort"] == "high"
         assert route.call_kwargs()["temperature"] is None
 

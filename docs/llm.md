@@ -2,7 +2,7 @@
 
 zdrowskit relies on capable models. The coach writes personalised reports, decides when to stay quiet, generates SQL queries against your data, and produces chart code.
 
-Default: Anthropic Opus 5 for async judgement surfaces, with high reasoning and temperature omitted. Telegram chat defaults to DeepSeek V4 Flash with DeepSeek thinking enabled for lower latency and cost.
+Default: GPT-5.6 Luna for the async judgement surfaces — reports, coach reviews and nudges — with high reasoning and temperature omitted, falling back to DeepSeek V4 Flash. Verification runs on Flash. No surface is on a premium model by default any more.
 
 Minimum: Claude Sonnet 4.6 or equivalent. Anything below that and the reports get generic, the queries get unreliable, and the charts break.
 
@@ -30,7 +30,7 @@ The Telegram panel groups features as Chat / Reports / Coach / Nudges / Utilitie
 
 A `Reset all` button on the main panel and `uv run python main.py models reset --all` restore everything to built-in defaults. Picking the `Auto` fallback, or `--fallback auto` from the CLI, defers to the profile's fallback so future profile changes propagate.
 
-Coach defaults to `anthropic/claude-opus-5` with `reasoning_effort=high`, temperature omitted, and `deepseek/deepseek-v4-pro` fallback. Insights moved to `openai/gpt-5.6-luna` with `reasoning_effort=high`, temperature omitted, and `deepseek/deepseek-v4-flash` fallback. Chat and nudges default to `openai/gpt-5.6-luna` with `reasoning_effort=high` and temperature omitted — chat falling back to `anthropic/claude-haiku-4-5`, nudges to `deepseek/deepseek-v4-flash`.
+Coach and insights default to `openai/gpt-5.6-luna` with `reasoning_effort=high`, temperature omitted, and `deepseek/deepseek-v4-flash` fallback. Chat and nudges default to `openai/gpt-5.6-luna` with `reasoning_effort=high` and temperature omitted — chat falling back to `anthropic/claude-haiku-4-5`, nudges to `deepseek/deepseek-v4-flash`.
 
 Lightweight utility surfaces, including `/notify` interpretation and `/add` workout clone selection, default to `deepseek/deepseek-v4-flash` with `anthropic/claude-haiku-4-5` fallback. `/add` and verifier rewrites use `reasoning_effort=high` with temperature omitted; `/notify` stays plain Flash. Weekly memory routes to `openai/gpt-5.6-luna` with reasoning off.
 
@@ -47,7 +47,7 @@ Current default routes:
 | Feature | Primary | Normal cadence |
 |---|---|---:|
 | Weekly report | `openai/gpt-5.6-luna` | 1/week |
-| Coach review | `anthropic/claude-opus-5` | 1/week |
+| Coach review | `openai/gpt-5.6-luna` | 1/week |
 | Nudges | `openai/gpt-5.6-luna` | up to 2/day |
 | Verification | `deepseek/deepseek-v4-flash` | reports, coach, nudges; Luna fallback |
 | Verification rewrites | `deepseek/deepseek-v4-flash` | only when verifier asks |
@@ -56,26 +56,27 @@ Current default routes:
 
 Six weeks of this app's own logged traffic (2026-06-29 to 2026-08-09), repriced
 at the routes above and with the removed mid-week report cycles excluded, lands
-around **$1 a month** — roughly $0.15-$0.35 in a given week:
+around **$0.85 a month** — between $0.15 and $0.25 in a given week:
 
 | Workload | Unit cost | Share of spend |
 |---|---:|---:|
-| Weekly report cycle: writer, verifier, rewriter, memory | ~$0.023/run | 9% |
-| Coach review | ~$0.097/run | 25% |
-| Nudge, including verification | ~$0.0039/nudge | 44% |
-| Chat | ~$0.0034/turn | 22% |
-| **Total** | | **~$0.26/week** |
+| Weekly report cycle: writer, verifier, rewriter, memory | ~$0.023/run | 12% |
+| Coach review | ~$0.004/run | 1% |
+| Nudge, including verification | ~$0.0039/nudge | 59% |
+| Chat | ~$0.0034/turn | 29% |
+| **Total** | | **~$0.20/week** |
 
-A bottom-up estimate agrees: one report, one coach review, two nudges a day,
-fifteen chat turns and a few logs a week comes to ~$0.23/week.
+A bottom-up estimate lands a little lower: one report, one coach review, two
+nudges a day, fifteen chat turns and a few logs a week comes to ~$0.13/week. The
+gap is nudge volume — see the note below.
 
 Two things move that number more than the model prices do. **Usage intensity:**
-chat is user-driven, and the light-to-heavy span above is $0.17 to $0.31 a week.
-**Which models you configure:** the coach is the last surface on Opus 5 and is a
-quarter of all spend on its own, while the report — previously the largest line —
-fell to about 6% when it moved to Luna. Routing the coach the same way would put
-the total under $0.20/week; it has no eval coverage, so that change would be
-unmeasured rather than merely cheaper.
+chat is user-driven, and the bottom-up span from light to heavy use is $0.07 to
+$0.22 a week. **Which models you configure:** every async surface now runs on a budget
+tier, so nothing dominates any more — the largest single line is chat, which is
+whatever you make it. Point any surface at a premium model and that one line will
+outweigh all the others combined; the coach on Opus 5 was 25% of spend on its own
+until 2026-08-09.
 
 Note that nudge *calls* ran at about 4.3/day against `MAX_NUDGES_PER_DAY = 2`.
 The cap governs delivered nudges; a trigger that the coach evaluates and then
@@ -113,8 +114,8 @@ ZDROWSKIT_PRIMARY_FLASH_MODEL=deepseek/deepseek-v4-flash
 ZDROWSKIT_FALLBACK_FLASH_MODEL=anthropic/claude-haiku-4-5
 ZDROWSKIT_ANTHROPIC_OPUS_MODEL=anthropic/claude-opus-5
 
-ZDROWSKIT_INSIGHTS_MODEL=anthropic/claude-opus-5
-ZDROWSKIT_COACH_MODEL=anthropic/claude-opus-5
+ZDROWSKIT_INSIGHTS_MODEL=openai/gpt-5.6-luna
+ZDROWSKIT_COACH_MODEL=openai/gpt-5.6-luna
 ZDROWSKIT_NUDGE_MODEL=openai/gpt-5.6-luna
 ZDROWSKIT_CHAT_MODEL=openai/gpt-5.6-luna
 ZDROWSKIT_NOTIFY_MODEL=deepseek/deepseek-v4-flash
@@ -176,7 +177,7 @@ Each product operation creates an `llm_trace` row. Related provider calls share 
 
 Verification calls are logged as `insights_verify`, `insights_rewrite`, `coach_verify`, `coach_rewrite`, `nudge_verify`, and `nudge_rewrite`. The original source call metadata also records the verifier verdict, issue counts, issue details, and verifier/rewrite call IDs.
 
-Reports left Opus 5 on 2026-08-09, on price rather than on a measured quality win. Over the three insights eval cases at five runs per model, Opus took 86.7% attempt-weighted against Luna's 73.3% and DeepSeek Flash's 66.7% — but cost $0.5852 per covered run against $0.0117 and $0.0076, roughly 60x. Luna and Flash tied on strict accuracy and swapped places between two consecutive runs of the same config, so three cases could not separate them; Luna took it on latency (20 s against 56 s) and because Flash once returned only SQL tool calls with no report body at all. Treat this as provisional: the comparison is under-powered, and it should be redone once insights has more than three cases. Coach stays on Opus because it has no eval coverage at all, so moving it would be unmeasured.
+Reports left Opus 5 on 2026-08-09, on price rather than on a measured quality win. Over the three insights eval cases at five runs per model, Opus took 86.7% attempt-weighted against Luna's 73.3% and DeepSeek Flash's 66.7% — but cost $0.5852 per covered run against $0.0117 and $0.0076, roughly 60x. Luna and Flash tied on strict accuracy and swapped places between two consecutive runs of the same config, so three cases could not separate them; Luna took it on latency (20 s against 56 s) and because Flash once returned only SQL tool calls with no report body at all. Treat this as provisional: the comparison is under-powered, and it should be redone once insights has more than three cases. Coach followed on 2026-08-09, but on a different basis. It has no eval coverage at all — the harness has no coach runner, so `feature: "coach"` is not a case kind that can be run — which means there was never a result showing Opus 5 earned 23x Luna's price here ($0.0956 against $0.0041 a review). Keeping it was as unfounded as moving it, only dearer. Coach output is verified, which is the net under an unmeasured change. Treat any report of worse proposals after this date as a candidate regression.
 
 The verifier moved from DeepSeek Pro to DeepSeek Flash on 2026-08-09, on accuracy rather than price. Over the seven `verification_judge` cases at five runs each, Flash took 85.7% strict against Pro's 57.1% and Luna's 57.1%, catching every seeded defect while still passing both sound-draft controls — and it largely fixed the unsupported-VO2max-recency case that Pro missed 0/5. Flash is not the cheap option on this workload: it emitted 2.5x Pro's output tokens, costing $0.00341 a call against $0.00315 and running 63 s against 50 s. The verifier is the trust backstop, so accuracy wins over both.
 

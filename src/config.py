@@ -370,9 +370,17 @@ for a quality lead the three insights cases were too few to confirm. See
 
 DEFAULT_COACH_MODEL: str = os.environ.get(
     "ZDROWSKIT_COACH_MODEL",
-    ANTHROPIC_OPUS_MODEL,
+    OPENAI_LUNA_MODEL,
 )
-"""Default model for coaching review/proposal generation."""
+"""Default model for coaching review/proposal generation.
+
+Moved off Opus 5 on 2026-08-09, and unlike reports and nudges this move was
+**not measured**: coach is the one surface with no eval cases. The reasoning is
+symmetry rather than evidence — there was no result showing Opus 5 was worth
+23x Luna here ($0.0956 against $0.0041 per review), so keeping it was as
+unfounded as moving it, only dearer. Coach output is verified (``VERIFY_COACH``)
+which is a real net under it. See ``model_prefs._feature_defaults``.
+"""
 
 DEFAULT_NUDGE_MODEL: str = os.environ.get(
     "ZDROWSKIT_NUDGE_MODEL",

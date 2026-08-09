@@ -82,14 +82,15 @@ class TestExtractMemory:
 
 
 class TestFeatureDefaultModels:
-    def test_high_judgment_surfaces_default_to_opus(self) -> None:
+    def test_high_judgment_surfaces_default_to_luna(self) -> None:
         assert DEFAULT_MODEL == PRIMARY_PRO_MODEL == DEEPSEEK_PRO_MODEL
         assert FALLBACK_MODEL == FALLBACK_PRO_MODEL == ANTHROPIC_OPUS_MODEL
-        assert DEFAULT_COACH_MODEL == ANTHROPIC_OPUS_MODEL
         # Reports left Opus on price: ~60x Luna per covered eval run for a
-        # lead three cases were too few to confirm. Coach has no eval
-        # coverage at all, so it stays.
+        # lead three cases were too few to confirm.
         assert DEFAULT_INSIGHTS_MODEL == OPENAI_LUNA_MODEL
+        # Coach followed on 2026-08-09, but unmeasured: the harness has no
+        # coach runner, so nothing ever showed Opus 5 was worth 23x here.
+        assert DEFAULT_COACH_MODEL == OPENAI_LUNA_MODEL
         # Chat is the one flash-profile feature routed off DeepSeek:
         # Flash claimed actions it never took in the chat eval suite.
         assert DEFAULT_CHAT_MODEL == OPENAI_LUNA_MODEL
