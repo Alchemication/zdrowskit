@@ -468,9 +468,16 @@ VERIFY_NUDGE: bool = _env_bool("ZDROWSKIT_VERIFY_NUDGE", True)
 
 VERIFICATION_MODEL: str = os.environ.get(
     "ZDROWSKIT_VERIFICATION_MODEL",
-    PRIMARY_PRO_MODEL,
+    PRIMARY_FLASH_MODEL,
 )
-"""Model used for evidence-bound verifier passes."""
+"""Model used for evidence-bound verifier passes.
+
+Flash, not Pro, on accuracy rather than price: over the seven
+verification_judge cases at five runs each it took 85.7% strict against Pro's
+57.1%, catching every seeded defect while still passing both sound drafts.
+Pro is marginally cheaper and faster here; the verifier is the trust backstop,
+so accuracy wins. See ``model_prefs`` for the fallback rationale.
+"""
 
 VERIFICATION_REWRITE_MODEL: str = os.environ.get(
     "ZDROWSKIT_VERIFICATION_REWRITE_MODEL",

@@ -65,15 +65,15 @@ Leading row (`production routes`) passed every case on every attempt.
 
 | Model | Reasoning | Repeat | Cases | Strict | Attempt | Flaky | Avg Latency | Cost/run | Revision | Failing |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
+| deepseek-v4-flash | high | 5 | 7/7 | 85.7% | 97.1% | 1 | 62.77s | $0.0239 | c015036* | `verification_judge_insights_unsupported_vo2max_recency_w15` 4/5 |
+| gpt-5.6-luna | high | 5 | 7/7 | 57.1% | 74.3% | 3 | 36.02s | $0.0479 | c015036* | `verification_judge_insights_hrv_precedes_workout_w32` 4/5<br>`verification_judge_insights_unsupported_vo2max_recency_w15` 1/5<br>`verification_judge_nudge_passes_accurate_week_totals` 1/5 |
+| deepseek-v4-pro | high | 5 | 7/7 | 57.1% | 71.4% | 2 | 49.64s | $0.0220 | c015036 | `verification_judge_insights_invented_drought_length_w32` 3/5<br>`verification_judge_insights_unsupported_vo2max_recency_w15` 0/5<br>`verification_judge_nudge_compound_week_totals_w21` 2/5 |
 | **production routes** | production | 3 | 7/7 | 42.9% | 71.4% | 3 | 50.55s | $0.0229 | adc9c5e* (stale) | `verification_judge_insights_hrv_precedes_workout_w32` 2/3<br>`verification_judge_insights_invented_drought_length_w32` 2/3<br>`verification_judge_insights_unsupported_vo2max_recency_w15` 0/3<br>`verification_judge_nudge_compound_week_totals_w21` 2/3 |
 | **production routes** | production | 3 | 7/7 | 25.0% | 37.5% | 0 | 73.48s | $0.0277 | 760d8b6 (stale) | `verification_judge_insights_hrv_precedes_workout_w32` errored<br>`verification_judge_insights_invented_drought_length_w32` errored<br>`verification_judge_insights_unsupported_vo2max_recency_w15` 0/3<br>`verification_judge_nudge_compound_week_totals_w21` 0/1<br>`verification_judge_nudge_passes_accurate_week_totals` errored<br>`verification_judge_nudge_passes_bereavement_soft_prescription` 0/1 |
 
-Leading row (`production routes`, repeat=3) per-case stability:
+Leading row (`deepseek-v4-flash`, repeat=5) per-case stability:
 
-- `verification_judge_insights_hrv_precedes_workout_w32` 2/3 FLAKY — verifier_flagged_the_hrv_timing_claim
-- `verification_judge_insights_invented_drought_length_w32` 2/3 FLAKY — identifies_unsupported_week_count
-- `verification_judge_insights_unsupported_vo2max_recency_w15` 0/3 fail — verifier_did_not_pass_unsupported_claim, verifier_quoted_or_flagged_w15_recency
-- `verification_judge_nudge_compound_week_totals_w21` 2/3 FLAKY — verifier_examined_the_week_totals
+- `verification_judge_insights_unsupported_vo2max_recency_w15` 4/5 FLAKY — verifier_did_not_pass_unsupported_claim, verifier_quoted_or_flagged_w15_recency
 
 ---
 

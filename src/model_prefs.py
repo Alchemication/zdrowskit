@@ -168,9 +168,16 @@ def default_model_prefs() -> dict[str, Any]:
                 "temperature": None,
             },
             "verification": {
-                "profile": "pro",
+                # Flash primary: 85.7% strict over the verifier cases against
+                # Pro's 57.1%, and it largely fixes the vo2max recency case
+                # that Pro missed 0/5. Luna fallback rather than Opus 5, whose
+                # billing ceiling errored thirteen verifier attempts in one
+                # run. Luna is the weaker verifier — it rejected a sound draft
+                # four times in five — so a Flash outage trades missed
+                # suppression for over-suppression until it clears.
+                "profile": "flash",
                 "primary": VERIFICATION_MODEL,
-                "fallback": ANTHROPIC_OPUS_MODEL,
+                "fallback": OPENAI_LUNA_MODEL,
                 "reasoning_effort": "high",
                 "temperature": None,
             },

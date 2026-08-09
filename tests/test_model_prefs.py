@@ -320,11 +320,18 @@ class TestModelPrefs:
         assert route.reasoning_effort == "high"
         assert route.temperature is None
 
-    def test_verifier_defaults_to_opus_fallback_with_high_reasoning(self, tmp_path):
+    def test_verifier_defaults_to_flash_with_luna_fallback(self, tmp_path):
+        """Flash took 85.7% strict over the verifier cases against Pro's 57.1%.
+
+        Chosen on accuracy, not price — Pro is marginally cheaper and faster on
+        this workload. The fallback left Opus 5 because its billing ceiling
+        errored thirteen verifier attempts in a single run.
+        """
         route = resolve_model_route("verification", path=tmp_path / "models.json")
 
-        assert route.primary == PRIMARY_PRO_MODEL
-        assert route.fallback == ANTHROPIC_OPUS_MODEL
+        assert route.primary == PRIMARY_FLASH_MODEL
+        assert route.fallback == OPENAI_LUNA_MODEL
+        assert route.fallback != ANTHROPIC_OPUS_MODEL
         assert route.reasoning_effort == "high"
         assert route.temperature is None
 
@@ -346,7 +353,7 @@ class TestModelPrefs:
 
         route = resolve_model_route("verification", path=path)
 
-        assert route.fallback == ANTHROPIC_OPUS_MODEL
+        assert route.fallback == OPENAI_LUNA_MODEL
         assert route.reasoning_effort == "high"
         assert route.temperature is None
 

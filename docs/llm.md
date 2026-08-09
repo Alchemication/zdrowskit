@@ -49,7 +49,7 @@ Current default routes:
 | Weekly report | `anthropic/claude-opus-5` | 1/week |
 | Coach review | `anthropic/claude-opus-5` | 1/week |
 | Nudges | `openai/gpt-5.6-luna` | up to 2/day |
-| Verification | `deepseek/deepseek-v4-pro` | reports, coach, nudges; Opus 5 fallback |
+| Verification | `deepseek/deepseek-v4-flash` | reports, coach, nudges; Luna fallback |
 | Verification rewrites | `deepseek/deepseek-v4-flash` | only when verifier asks |
 | Weekly memory | `openai/gpt-5.6-luna` | 1/week, after the report is sent |
 | Chat | `openai/gpt-5.6-luna` | on demand |
@@ -156,3 +156,7 @@ Each product operation creates an `llm_trace` row. Related provider calls share 
 Verification calls are logged as `insights_verify`, `insights_rewrite`, `coach_verify`, `coach_rewrite`, `nudge_verify`, and `nudge_rewrite`. The original source call metadata also records the verifier verdict, issue counts, issue details, and verifier/rewrite call IDs.
 
 Reports left Opus 5 on 2026-08-09, on price rather than on a measured quality win. Over the three insights eval cases at five runs per model, Opus took 86.7% attempt-weighted against Luna's 73.3% and DeepSeek Flash's 66.7% — but cost $0.5852 per covered run against $0.0117 and $0.0076, roughly 60x. Luna and Flash tied on strict accuracy and swapped places between two consecutive runs of the same config, so three cases could not separate them; Luna took it on latency (20 s against 56 s) and because Flash once returned only SQL tool calls with no report body at all. Treat this as provisional: the comparison is under-powered, and it should be redone once insights has more than three cases. Coach stays on Opus because it has no eval coverage at all, so moving it would be unmeasured.
+
+The verifier moved from DeepSeek Pro to DeepSeek Flash on 2026-08-09, on accuracy rather than price. Over the seven `verification_judge` cases at five runs each, Flash took 85.7% strict against Pro's 57.1% and Luna's 57.1%, catching every seeded defect while still passing both sound-draft controls — and it largely fixed the unsupported-VO2max-recency case that Pro missed 0/5. Flash is not the cheap option on this workload: it emitted 2.5x Pro's output tokens, costing $0.00341 a call against $0.00315 and running 63 s against 50 s. The verifier is the trust backstop, so accuracy wins over both.
+
+The fallback moved off Opus 5 in the same change: its billing ceiling errored thirteen verifier attempts in a single run, which is the failure mode a fallback exists to prevent. Luna takes it, with a known weakness — it rejected a sound draft four times in five, so while Flash is down the verifier over-suppresses rather than under-catches. That is the safer direction for a backstop, but it is not free: suppressed content reaches nobody and collects no feedback.
