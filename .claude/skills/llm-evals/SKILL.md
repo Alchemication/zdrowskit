@@ -41,6 +41,59 @@ Before seeding against the stage the user named, read the other calls in the
 trace — verifier and rewrite included — and seed against whichever one actually
 introduced the error.
 
+### The prompt check is necessary, not sufficient
+
+Grepping the stored prompt proves the model *had* a figure. It does not prove
+the figure means what the hypothesis says. When a hypothesis claims a value is
+wrong, check the **source database**, not only the prompt:
+
+```bash
+sqlite3 ~/Documents/zdrowskit/profiles/<name>/health.db \
+  "select date, gpx_distance_km, hr_avg from workout_all where date between 'X' and 'Y';"
+```
+
+Adam's W31 evidence holds two 6 km runs two seconds per kilometre apart —
+Saturday 1 Aug at 5:45/km and 158 bpm inside the week, Friday 7 Aug at 5:47/km
+and 159 bpm after it. A case asserting "5:47/km and 159 bpm is not Saturday"
+passes the prompt grep and still fails the model for answering correctly,
+because the correct Saturday run matches that description within rounding.
+
+**When two records in the evidence are near-identical, the assertion must name
+both and say which day or row each belongs to.** An assertion that names only
+the forbidden answer will fail the right one.
+
+### Read the whole artifact, not one regex match
+
+`re.search` returns the first hit. That draft used "Saturday's 6k" twice — once
+correctly for the tempo run, once wrongly carrying Friday's figures — and
+reading only the first match produced two anti-tests in one session: a writer
+case that failed correct answers 0/3, and then, on the strength of that
+misreading, a verifier case whose 0/6 was the verifier being right six times.
+Print the full response before drawing any conclusion about which stage broke.
+
+A verifier issue is a claim to check, not a verdict to build on. It is another
+model's output and it is wrong often enough to matter in both directions.
+
+### Validate the assertion before believing the result
+
+A clean 0/N is equally the signature of a real reproducible defect and of a
+case that forbids the correct answer. The summary cannot tell you which. Run
+the assertion against the original defective text and against that same text
+with only the defect corrected — a real case fails the first and passes the
+second:
+
+```python
+from evals.framework import load_cases, run_judge_assertions, EvalExecution
+case = next(c for c in load_cases() if c.id == "<case-id>")
+for label, text in (("bad", defective_draft), ("good", corrected_draft)):
+    for r in run_judge_assertions(case, EvalExecution(text=text)):
+        print(label, r.name, r.passed)
+```
+
+Do this whenever a new case reports 0/N on its first run. Disambiguating an
+assertion that cannot separate two similar records is not loosening it; giving
+up and widening it until the case goes green is.
+
 ## Silent failures (no thumbs-down to anchor on)
 
 Thumbs-down feedback remains the preferred seed — start from `--feedback` whenever possible. But some LLM outputs are *never user-visible*, so no thumbs-down can ever land. The feedback queue is blind to these by construction.
@@ -112,6 +165,11 @@ flip while looking entirely deterministic.
   case, judging a prompt change, comparing models. The summary reports a
   per-case pass rate and marks anything strictly between 0 and N as `FLAKY`.
   A case at 2/3 has told you almost nothing yet.
+- **Fan out with `--concurrency N`.** Eval calls are network-bound, so
+  repeats need not run back to back. It parallelises across all cases and
+  repeats, defaults to `--repeat`, and is capped at `EVAL_MAX_CONCURRENCY`
+  (12). A full suite at `--repeat 3 --concurrency 12` is minutes, not hours,
+  so there is no reason to judge a model from one sample.
 - **Caching is off by default, and `--repeat` refuses to run with it.** A
   cached response is one frozen sample replayed, so a cached suite reports
   perfect stability however variable the model actually is. `--cache` exists
@@ -169,4 +227,8 @@ If `evals/.cache.sqlite` was wiped, the first run is fresh. Otherwise use `--ref
 - Do not use the full `verify_and_rewrite` pipeline for model selection. If rewrite behavior needs coverage, add a separate rewrite-step feature from real rewrite failures.
 - Mixed `--production` runs are smoke/regression checks. Make model decisions from feature-scoped matrix runs.
 
-Leaderboard records store run-level `requested_model` plus per-case actual `route` metadata. Actual model identity belongs to the case route, not a top-level compatibility field.
+Leaderboard records store run-level `requested_model`, `is_production` and `repeat`, plus one aggregated entry per case holding its pass rate, flaky flag, actual `route`, and raw per-attempt latency/cost/failures. Actual model identity belongs to the case route, not a top-level compatibility field.
+
+The leaderboard groups by **feature**, not by case set. The landing view is the production scorecard: the newest production-route run per feature, scored against the cases on disk today, with explicit callouts for features never recorded, cases added since the run, stale commits, and `repeat=1` rows whose stability is unmeasured. Everything else is a per-feature variation table.
+
+Rows carry strict accuracy (cases passing every attempt) and attempt accuracy (attempt-weighted); they are equal at `repeat=1` and diverge exactly when cases are flaky. Rank on strict. Record with `--repeat 3` or more — a `repeat=1` row measures nothing about stability and the leaderboard says so on its face.
