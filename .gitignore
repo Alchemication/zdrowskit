@@ -16,3 +16,6 @@ evals/.cache.sqlite
 
 # Built marketing site (marketing/build.py)
 _site/
+
+# Build-time cache for marketing/render_diagrams.py
+marketing/.cache/

@@ -11,6 +11,24 @@ uv run --group site python marketing/build.py
 python3 -m http.server -d _site 8765
 ```
 
+## Diagrams
+
+Mermaid blocks in `docs/*.md` are pre-rendered to SVG and inlined, so the
+published pages carry no Mermaid runtime — the browser bundle is ~3.5 MB, which
+is far more than eight flowcharts are worth. The Markdown keeps the Mermaid
+source, so GitHub still renders it natively in the repo.
+
+After changing any ```mermaid block:
+
+```bash
+uv run python marketing/render_diagrams.py    # needs Chrome; CHROME_BIN overrides
+uv run python marketing/render_diagrams.py --check   # CI-style assertion only
+```
+
+SVGs are content-addressed by the hash of their source and committed under
+`assets/diagrams/`. `marketing/build.py` fails if a block has no matching SVG,
+so an edited diagram cannot silently ship stale.
+
 `_site/` is gitignored and rebuilt from scratch on every run. CI does the same
 via `.github/workflows/pages.yml`.
 

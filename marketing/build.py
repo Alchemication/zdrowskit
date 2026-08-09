@@ -26,6 +26,11 @@ from pathlib import Path
 
 from markdown_it import MarkdownIt
 
+# Sibling module: both live in marketing/, which is sys.path[0] when this file
+# is run as a script. Importing the id function rather than reimplementing it
+# keeps the build and the renderer agreeing on which SVG belongs to which fence.
+from render_diagrams import DIAGRAM_DIR, diagram_id
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SITE_SRC = REPO_ROOT / "marketing" / "site"
 DOCS_SRC = REPO_ROOT / "docs"
@@ -257,6 +262,28 @@ table {{ width: 100%; border-collapse: collapse; margin: 20px 0; font-size: 13px
 th, td {{ padding: 9px 11px; border: 1px solid rgba(21,25,15,.3); text-align: left; vertical-align: top; }}
 th {{ background: rgba(21,25,15,.06); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }}
 .table-scroll {{ overflow-x: auto; }}
+/* Pre-rendered Mermaid, inlined as SVG. Flowcharts are much wider than a
+   comfortable prose measure, so the figure breaks out of the text column to
+   the full site width — the difference between a legible diagram and a
+   thumbnail. Anything still too wide scrolls inside the figure. */
+.diagram {{
+  position: relative;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(1180px, calc(100vw - 32px));
+  overflow-x: auto;
+  margin: 30px 0;
+  padding: 20px 18px;
+  border: 2px solid var(--ink);
+  background: rgba(255,255,255,.3);
+  box-shadow: var(--shadow);
+}}
+/* The SVG carries its intrinsic size, so small diagrams sit at natural scale
+   and only oversized ones are scaled down to the frame. */
+.diagram svg {{ display: block; max-width: 100%; height: auto; margin: 0 auto; }}
+.diagram .node rect, .diagram .node polygon,
+.diagram .node circle, .diagram .node path {{ stroke-width: 2px; }}
+.diagram .edgePath .path, .diagram .flowchart-link {{ stroke-width: 1.8px; }}
 .lede {{ margin: 0 0 34px; color: var(--muted); }}
 .doc-list {{ list-style: none; margin: 0; padding: 0; }}
 .doc-list li {{ padding: 15px 0; border-bottom: 1px solid rgba(21,25,15,.22); }}
@@ -301,6 +328,39 @@ def wrap_tables(body: str) -> str:
     )
 
 
+def install_mermaid_renderer(md: MarkdownIt) -> None:
+    """Make ```mermaid fences render as their pre-built SVG.
+
+    The diagrams are rendered ahead of time by `marketing/render_diagrams.py`
+    so the published page carries no Mermaid runtime. The Markdown keeps the
+    Mermaid source, which is what GitHub renders natively.
+
+    Args:
+        md: The renderer to patch.
+    """
+    default_fence = md.renderer.rules.get("fence")
+
+    def fence(tokens: list, idx: int, options: dict, env: dict) -> str:
+        token = tokens[idx]
+        if token.info.strip() != "mermaid":
+            return default_fence(tokens, idx, options, env)
+
+        key = diagram_id(token.content)
+        svg_path = DIAGRAM_DIR / f"{key}.svg"
+        if not svg_path.exists():
+            print(
+                f"error: a mermaid diagram has no pre-rendered SVG ({key}.svg).\n"
+                "The diagram source changed since it was last rendered. Run:\n"
+                "  uv run python marketing/render_diagrams.py",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
+        svg = svg_path.read_text(encoding="utf-8")
+        return f'<figure class="diagram">{svg}</figure>\n'
+
+    md.renderer.rules["fence"] = fence
+
+
 def build_docs(out: Path, base_css: str) -> list[Doc]:
     """Render every `docs/*.md` into `_site/docs/`.
 
@@ -313,6 +373,7 @@ def build_docs(out: Path, base_css: str) -> list[Doc]:
     """
     md = MarkdownIt("commonmark", {"html": False, "linkify": True})
     md.enable(["table", "strikethrough"])
+    install_mermaid_renderer(md)
 
     sources = sorted(DOCS_SRC.glob("*.md"))
     order = {slug: i for i, slug in enumerate(DOCS_ORDER)}
