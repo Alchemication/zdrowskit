@@ -78,6 +78,21 @@ whatever you make it. Point any surface at a premium model and that one line wil
 outweigh all the others combined; the coach on Opus 5 was 25% of spend on its own
 until 2026-08-09.
 
+### Routing policy
+
+The routing is meant to move. New models arrive and prices fall faster than any
+fixed choice stays right, so a route is a current measurement rather than a
+decision — every candidate is scored against the same cases, and a surface moves
+when the numbers justify it. On the evidence so far that trend runs one way:
+this app's cost fell roughly 28x over a handful of routing changes without a
+rewrite.
+
+What it does not promise is that every move is a straight win. Reports got
+cheaper and measurably less accurate at the same time (86.7% attempt-weighted
+to 73.3%), and coach moved with no measurement at all. Both are recorded here
+and on the leaderboard rather than smoothed over. The commitment is that the
+trade is written down, not that there is never one.
+
 ### What the routing is worth
 
 Per-task routing exists to make the previous table small. Repricing exactly the
