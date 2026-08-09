@@ -30,7 +30,7 @@ The Telegram panel groups features as Chat / Reports / Coach / Nudges / Utilitie
 
 A `Reset all` button on the main panel and `uv run python main.py models reset --all` restore everything to built-in defaults. Picking the `Auto` fallback, or `--fallback auto` from the CLI, defers to the profile's fallback so future profile changes propagate.
 
-Insights and coach default to `anthropic/claude-opus-5` with `reasoning_effort=high`, temperature omitted, and `deepseek/deepseek-v4-pro` fallback. Chat and nudges default to `openai/gpt-5.6-luna` with `reasoning_effort=high` and temperature omitted — chat falling back to `anthropic/claude-haiku-4-5`, nudges to `deepseek/deepseek-v4-pro`.
+Insights and coach default to `anthropic/claude-opus-5` with `reasoning_effort=high`, temperature omitted, and `deepseek/deepseek-v4-pro` fallback. Chat and nudges default to `openai/gpt-5.6-luna` with `reasoning_effort=high` and temperature omitted — chat falling back to `anthropic/claude-haiku-4-5`, nudges to `deepseek/deepseek-v4-flash`.
 
 Lightweight utility surfaces, including `/notify` interpretation and `/add` workout clone selection, default to `deepseek/deepseek-v4-flash` with `anthropic/claude-haiku-4-5` fallback. `/add` and verifier rewrites use `reasoning_effort=high` with temperature omitted; `/notify` stays plain Flash. Weekly memory routes to `openai/gpt-5.6-luna` with reasoning off.
 
@@ -65,7 +65,7 @@ Using recent logged token sizes from this app, the always-on daemon lands around
 
 This assumes verification normally succeeds on DeepSeek Pro with thinking engaged (via `reasoning_effort=high`) and rewrite calls remain rare. Verification falls back to Opus 5 with the same `reasoning_effort=high` (sent natively) and omitted temperature.
 
-Nudges moved off Opus 5 on 2026-08-08. Measured across the nudge eval cases at five runs per model, Luna took 80% while DeepSeek Flash, DeepSeek Pro and Opus 5 all sat at 40%; Luna also swept the week-totals case 5/5 and answered in 4.6 s against 13-28 s. Opus 5 cost $0.098 a nudge — 80x Luna — for no measured gain, which is why the fallback is DeepSeek Pro rather than the profile's premium default. Note that no model passes the invented-metric case reliably (best 3/5): that is a prompt defect, not a routing one.
+Nudges moved off Opus 5 on 2026-08-08. Measured across the nudge eval cases at five runs per model, Luna took 80% while DeepSeek Flash, DeepSeek Pro and Opus 5 all sat at 40%; Luna also swept the week-totals case 5/5 and answered in 4.6 s against 13-28 s. Opus 5 cost $0.098 a nudge — 80x Luna — for no measured gain, which is why the fallback is not the profile's premium default. It moved from DeepSeek Pro to DeepSeek Flash on 2026-08-09: all three scored the same 40%, and Luna's observed failure is `max_output_tokens` — it spends the output budget on reasoning and emits nothing — so a reasoning model inheriting the same effort and ceiling is the tier most likely to repeat it. Note that no model passes the invented-metric case reliably (best 3/5): that is a prompt defect, not a routing one.
 
 Chat is separate because it is user-driven. Chat routes to GPT-5.6 Luna at about $0.0014 a turn. DeepSeek Flash is cheaper still, but measured against the chat eval suite it failed three of eleven cases, twice by claiming an action it never took — reporting a plan as updated with no `update_context` call, and citing a figure with no chart block. Chat has no verifier, so nothing catches that.
 

@@ -37,15 +37,18 @@ class TestModelPrefs:
             assert route.call_kwargs()["reasoning_effort"] == "high"
             assert route.call_kwargs()["temperature"] is None
 
-    def test_nudge_default_is_luna_with_a_cheap_fallback(self, tmp_path):
-        """Nudges left Opus 5: measured on the nudge cases it scored the same
-        40% as DeepSeek Pro at 65x the price, so neither the primary nor the
-        fallback should be the premium model."""
+    def test_nudge_default_is_luna_falling_back_to_flash(self, tmp_path):
+        """Opus 5, DeepSeek Pro and DeepSeek Flash all scored 40% on the nudge
+        cases, so the fallback should be the cheapest of them. Pro is also a
+        reasoning model on the same effort and token ceiling as Luna, which
+        makes it liable to repeat the max_output_tokens failure it is there to
+        catch."""
         route = resolve_model_route("nudge", path=tmp_path / "models.json")
 
         assert route.primary == OPENAI_LUNA_MODEL
-        assert route.fallback == PRIMARY_PRO_MODEL
+        assert route.fallback == PRIMARY_FLASH_MODEL
         assert route.fallback != ANTHROPIC_OPUS_MODEL
+        assert route.fallback != PRIMARY_PRO_MODEL
         assert route.call_kwargs()["reasoning_effort"] == "high"
         assert route.call_kwargs()["temperature"] is None
 
@@ -83,7 +86,7 @@ class TestModelPrefs:
 
         route = resolve_model_route("nudge", path=path)
         assert route.primary == OPENAI_LUNA_MODEL
-        assert route.fallback == PRIMARY_PRO_MODEL
+        assert route.fallback == PRIMARY_FLASH_MODEL
 
     def test_profile_route_updates_inherited_fallback(self, tmp_path):
         path = tmp_path / "models.json"

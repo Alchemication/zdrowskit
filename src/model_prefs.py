@@ -192,10 +192,16 @@ def _feature_defaults(feature: str, primary: str) -> dict[str, Any]:
         entry["fallback"] = PRIMARY_PRO_MODEL
     elif feature == "nudge":
         # Nudges sit in the pro profile, whose fallback is Opus 5. That is the
-        # wrong safety net here: measured on the nudge cases Opus 5 scored the
-        # same 40% as DeepSeek Pro while costing 65x more per call, so a
-        # primary outage would quietly multiply the bill for no gain.
-        entry["fallback"] = PRIMARY_PRO_MODEL
+        # wrong safety net here: measured on the nudge cases Opus 5, DeepSeek
+        # Pro and DeepSeek Flash all scored the same 40%, so paying for a
+        # premium fallback buys nothing when the primary is down.
+        #
+        # Flash rather than Pro because of how Luna fails. It falls back on
+        # "unable to complete request: max_output_tokens" — it spends the
+        # output budget on reasoning and never emits text. Pro is itself a
+        # reasoning model and inherits the same effort and ceiling, so it is
+        # the one tier most likely to reproduce the failure it is catching.
+        entry["fallback"] = PRIMARY_FLASH_MODEL
     return entry
 
 
