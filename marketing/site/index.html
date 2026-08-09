@@ -52,13 +52,18 @@
       max-width: 850px;
       margin: 0;
       font-family: Georgia, "Times New Roman", serif;
-      font-size: clamp(44px, 6.6vw, 86px);
+      font-size: clamp(40px, 5.6vw, 72px);
       font-weight: 500;
-      line-height: .91;
+      line-height: .95;
+      /* Keeps the second sentence from orphaning its last word; browsers
+         without support just wrap normally. */
+      text-wrap: balance;
       letter-spacing: -.055em;
     }
 
-    h1 em { color: var(--green-dark); font-style: italic; }
+    /* Each sentence gets its own line: the contrast between them is the
+       headline's whole argument, and it disappears when they share one. */
+    h1 em { display: block; color: var(--green-dark); font-style: italic; }
 
     .hero-copy {
       margin: 0 0 7px;
@@ -514,7 +519,7 @@
     <section class="shell hero">
       <div>
         <div class="eyebrow">Apple Health, with context</div>
-        <h1>Your watch records what happened. <em>Understand what comes next.</em></h1>
+        <h1>Apple shows you rings. <em>zdrowskit gives you a coach.</em></h1>
       </div>
       <div>
         <p class="hero-copy">
