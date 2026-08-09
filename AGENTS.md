@@ -4,9 +4,16 @@ Always use `uv run`, never plain `python`. Full command list: `docs/commands.md`
 
 Debug LLM behavior with `uv run python main.py llm-log --id N` — full stored trace (messages, tool use, response) for one call.
 
+All health-data commands are profile-scoped. Use `--profile NAME`; omission
+means the operator profile from `profiles.toml`. An explicit `--db` is only for
+existing experimental databases and must never create one implicitly.
+
 `src/llm.py`: `reasoning_effort` is the single reasoning knob — Anthropic gets it natively; DeepSeek translates `high`/`max` into `extra_body={"thinking": {"type": "enabled"}}` and treats anything else as off. Translation lives in `_completion_kwargs_for_model` so per-attempt fallback handles each provider correctly. Per-feature reasoning is set via `main.py models` / `src/model_prefs.py`.
 
-Open DBs via `store.open_db()` or `store.connect_db(..., migrate=True)` — these auto-apply pending migrations. Use raw `sqlite3.connect()` only when you specifically need to skip migration.
+Open known DBs via `store.open_db()` or `store.connect_db(..., migrate=True)` —
+these auto-apply pending migrations. Resolve user-facing paths through
+`profiles.resolve_cli_profile()` first so a missing path cannot silently create
+an empty DB. Use raw `sqlite3.connect()` only when you specifically need to skip migration.
 
 Schema changes go in new timestamped migration files under `src/db/migrations/`. No ad-hoc `ALTER TABLE`, column-existence checks, or schema-patching in application code.
 
