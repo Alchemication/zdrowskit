@@ -316,7 +316,7 @@
       align-items: start;
     }
 
-    .ask h2, .trust h2 {
+    .ask h2, .trust h2, .routing-grid h2 {
       margin: 0 0 18px;
       font-family: Georgia, serif;
       font-size: clamp(34px, 4.4vw, 58px);
@@ -382,10 +382,51 @@
 
     .fact-grid {
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: repeat(2, 1fr);
       gap: 18px;
       margin-top: 8px;
     }
+
+    .routing-section { padding: 0 0 84px; }
+
+    .routing-grid {
+      display: grid;
+      grid-template-columns: .85fr 1.15fr;
+      gap: clamp(28px, 5vw, 60px);
+      align-items: start;
+    }
+
+    .routing-grid p { color: var(--muted); font-size: 13.5px; line-height: 1.7; }
+    .routing-grid em { color: var(--ink); font-style: italic; }
+    .routing-note { border-left: 5px solid var(--orange); padding-left: 16px; }
+    .routing-foot { margin: 14px 0 0; font-size: 11.5px !important; }
+
+    .routing-scroll { overflow-x: auto; border: 2px solid var(--ink); box-shadow: var(--shadow); }
+
+    table.routing { width: 100%; min-width: 460px; border-collapse: collapse; background: rgba(255,255,255,.28); }
+    table.routing th {
+      padding: 11px 13px;
+      background: var(--ink);
+      color: var(--paper);
+      font-size: 10px;
+      font-weight: 900;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      text-align: left;
+    }
+    table.routing td {
+      padding: 12px 13px;
+      border-bottom: 1px solid var(--line);
+      font-size: 12.5px;
+      line-height: 1.55;
+      vertical-align: top;
+    }
+    table.routing tbody tr:last-child td { border-bottom: 0; }
+    table.routing td:first-child { font-weight: 800; white-space: nowrap; }
+    table.routing code { font-size: 11.5px; white-space: nowrap; }
+    /* An unmeasured route is marked, not blended in. */
+    table.routing tr.gap { background: rgba(229,110,54,.13); }
+    table.routing tr.gap td:last-child { color: #7c3208; }
 
     .fact {
       padding: 22px;
@@ -464,7 +505,7 @@
       .person strong { font-size: 20px; }
       .core { grid-template-columns: 1fr; }
       .machine { border: 0; border-bottom: 2px solid var(--green); }
-      .outputs, .fact-grid { grid-template-columns: 1fr; }
+      .outputs, .fact-grid, .routing-grid { grid-template-columns: 1fr; }
       .outputs { gap: 42px; }
       .message::before { top: -44px; height: 42px; }
     }
@@ -656,8 +697,45 @@
       </div>
     </section>
 
+    <section class="shell routing-section" aria-labelledby="routing-label">
+      <div class="section-label" id="routing-label">04 / Every job gets its own model</div>
+      <div class="routing-grid">
+        <div>
+          <h2>The model that writes your report is not the one that checks it.</h2>
+          <p>
+            Each surface is scored against the same eval cases and routed to whatever
+            measured best for that job — which is how the verifier ended up on the
+            <em>cheapest</em> model here. It beat both premium options at catching bad
+            claims, and being cheap is why it can check every report instead of a sample.
+          </p>
+          <p>
+            Every route has a fallback, so one provider having a bad morning degrades
+            the answer rather than losing it.
+          </p>
+          <p>
+            New models land and prices fall constantly. Each candidate gets measured
+            against the same cases, and a route moves when the numbers justify it —
+            cheaper, better, or a trade written down in the open. Costs should keep
+            falling from here.
+          </p>
+          <p class="routing-note">
+            Routes are chosen by measurement; the leaderboard shows which, and where
+            the gaps are. <a href="evals/">Read the leaderboard →</a>
+          </p>
+        </div>
+        <div>
+          {{ROUTING_TABLE}}
+          <p class="routing-foot">
+            Read from the shipped defaults when this page was built, so it cannot
+            drift from the code. Re-scored against {{EVAL_CASE_COUNT}} eval cases;
+            last recorded {{EVAL_UPDATED}}.
+          </p>
+        </div>
+      </div>
+    </section>
+
     <section class="shell facts" aria-labelledby="facts-label">
-      <div class="section-label" id="facts-label">04 / Before you start</div>
+      <div class="section-label" id="facts-label">05 / Before you start</div>
       <div class="fact-grid">
         <div class="fact">
           <b>What you need</b>
@@ -694,21 +772,6 @@
             <div class="compare-x">about 28x</div>
           </div>
           <p><a href="docs/llm.html">How that breaks down →</a></p>
-        </div>
-        <div class="fact">
-          <b>How well it works</b>
-          <p>
-            Every routing change is re-scored against <b>{{EVAL_CASE_COUNT}} eval cases</b> and
-            the results are published in full — including the cases that still fail.
-          </p>
-          <p>
-            New models land and prices fall constantly. Each candidate gets measured
-            against the same cases, and a route moves when the numbers justify it —
-            cheaper, better, or a trade written down in the open. Costs should keep
-            falling from here.
-          </p>
-          <p>Last recorded {{EVAL_UPDATED}}.</p>
-          <p><a href="evals/">Read the leaderboard →</a></p>
         </div>
       </div>
     </section>
