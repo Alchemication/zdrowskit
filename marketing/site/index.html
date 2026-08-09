@@ -430,7 +430,7 @@
     .fact ul { margin: 0; padding-left: 18px; }
     .fact li { margin-bottom: 7px; font-size: 12.5px; line-height: 1.6; }
     .fact p { margin: 0 0 10px; font-size: 12.5px; line-height: 1.65; }
-    .fact .big { font-family: Georgia, serif; font-size: 38px; line-height: 1; letter-spacing: -.03em; }
+    .fact p:last-child { margin-bottom: 0; }
 
     /* Annual side-by-side: the yearly figures carry the contrast far better
        than the monthly ones, which round to "about a dollar" either way. */
@@ -542,9 +542,8 @@
         </div>
         <p class="btn-sub">Set up, then share with family &amp; friends</p>
         <p class="signal">
-          Free and open source. Self-hosted on one machine you own.<br>
-          Requires an Apple Watch, an always-on computer, and your own LLM API
-          key &mdash; about $10 a year.
+          Free and open source. Needs an Apple Watch, an always-on computer, and
+          your own LLM API key &mdash; about $10 a year.
         </p>
       </div>
     </section>
@@ -574,7 +573,7 @@
           <div class="step-num">04</div>
           <div class="step-icon" aria-hidden="true">▰↯</div>
           <div class="step-title">Start a dialogue</div>
-          <div class="step-note">Insights, restrained nudges and questions on demand.</div>
+          <div class="step-note">Insights, nudges, and answers when you ask.</div>
         </article>
       </div>
     </section>
@@ -641,7 +640,7 @@
         </div>
 
         <p class="illustrative">
-          Messages shown are illustrative examples of the three output types, not output from a real person’s account.
+          Illustrative examples, not output from a real person’s account.
         </p>
       </div>
     </section>
@@ -657,8 +656,8 @@
             suspect, and it goes and looks.
           </p>
           <p>
-            If a chart makes the answer clearer, it renders one and sends it back in the same
-            conversation. Reply to a report, update your goals mid-chat, ask a follow-up.
+            If a chart makes the answer clearer, it renders one into the same thread. Reply
+            to a report, update your goals mid-chat, ask a follow-up.
           </p>
           <div class="cta">
             <a class="btn" href="docs/user-flow.html">What a week looks like</a>
@@ -694,23 +693,20 @@
         <div>
           <p>
             Reports, nudges, chat and the verifier that reads them each run on a
-            different model, at a different reasoning level, with its own fallback.
-            Each one is scored against the same eval cases and routed to whatever
-            measured best for that job — which is how the verifier ended up on the
-            <em>cheapest</em> model of the lot. It beat both premium options at
-            catching bad claims, and being cheap is why it can check every report
-            instead of a sample.
+            different model, at a different reasoning level. Every one is scored
+            against the same eval cases and routed to whatever measured best — which
+            is how the verifier ended up on the <em>cheapest</em> model of the lot.
+            It beat both premium options at catching bad claims, and being cheap is
+            why it can check every report instead of a sample.
           </p>
           <p>
-            Every route has a fallback, so one provider having a bad morning degrades
-            the answer rather than losing it. New models land and prices fall
-            constantly; each candidate gets measured against the same cases, and a
-            route moves when the numbers justify it — cheaper, better, or a trade
-            written down in the open. Costs should keep falling from here.
+            Each route keeps a fallback, so a provider having a bad morning degrades
+            the answer rather than losing it. Routes move when a new candidate
+            measures better.
           </p>
           <p class="routing-note">
-            Routes are chosen by measurement; the leaderboard shows which, and where
-            the gaps are. <a href="evals/">Read the leaderboard →</a>
+            The leaderboard shows every route, what it scored, and where the gaps
+            still are. <a href="evals/">Read the leaderboard →</a>
           </p>
           <p class="routing-foot">
             Re-scored against {{EVAL_CASE_COUNT}} eval cases; last recorded
@@ -736,15 +732,9 @@
         </div>
         <div class="fact">
           <b>What it costs to run</b>
-          <p class="big">under $1<span style="font-size:14px"> /month</span></p>
           <p>
-            LLM spend measured over six weeks of real use on the default models —
-            weekly report, coach review, nudges and chat. Nearer $0.30 if you mostly
-            leave it alone, around $1 if you chat with it daily.
-          </p>
-          <p>
-            Every job routes to the cheapest model measured to do it well. Over a
-            year, on the same workload:
+            LLM spend, measured over six weeks of real use on the default models.
+            Over a year, on the same workload:
           </p>
           <div class="compare">
             <div class="compare-row win">
@@ -757,7 +747,10 @@
             </div>
             <div class="compare-x">about 28x</div>
           </div>
-          <p><a href="docs/llm.html">How that breaks down →</a></p>
+          <p>
+            Nearer $4 if you mostly leave it alone, about $11 if you chat with it
+            daily. <a href="docs/llm.html">How that breaks down →</a>
+          </p>
         </div>
       </div>
     </section>
