@@ -53,15 +53,23 @@ def _headers(
     }
 
 
-def _body(kind: str) -> bytes:
-    """Return a minimal payload accepted by the production parser."""
+def _body(kind: str, *, variant: int = 0) -> bytes:
+    """Return a minimal payload accepted by the production parser.
+
+    Args:
+        kind: Either ``metrics`` or ``workouts``.
+        variant: Nudges one quantity so a later upload of the same kind hashes
+            differently, the way a real refreshed export does.
+    """
     if kind == "metrics":
         data = {
             "metrics": [
                 {
                     "name": "step_count",
                     "units": "count",
-                    "data": [{"date": "2026-08-02 00:00:00 +0000", "qty": 1234}],
+                    "data": [
+                        {"date": "2026-08-02 00:00:00 +0000", "qty": 1234 + variant}
+                    ],
                 }
             ]
         }
@@ -71,7 +79,7 @@ def _body(kind: str) -> bytes:
                 {
                     "name": "Outdoor Walk",
                     "start": "2026-08-02 08:00:00 +0000",
-                    "duration": 1800,
+                    "duration": 1800 + variant,
                     "route": [
                         {
                             "latitude": 53.3,
@@ -212,7 +220,9 @@ class TestHttpIngestManager:
         assert retry.pair_ready is False
         assert len(ready) == 1
 
-    def test_next_cycle_waits_until_both_uploads_advance(self, tmp_path: Path) -> None:
+    def test_next_cycle_imports_a_refreshed_half_against_its_partner(
+        self, tmp_path: Path
+    ) -> None:
         profile = _profile(tmp_path)
         ready: list[tuple[str, str]] = []
         manager = HttpIngestManager(
@@ -255,11 +265,16 @@ class TestHttpIngestManager:
             second_metrics_body,
         )
 
-        assert metrics_only.pair_ready is False
-        assert manager.pending_pairs() == []
-        assert len(ready) == 1
+        # The Workouts half is unchanged but still well inside the pairing
+        # window, so it is current data. Holding the new Metrics back until
+        # Workouts also changed stranded whichever half arrived second.
+        assert metrics_only.pair_ready is True
+        assert len(ready) == 2
+        second_digest = ready[-1][1]
+        assert manager.begin_import("adam", second_digest) is not None
+        manager.finish_import("adam", second_digest, success=True)
 
-        complete_pair = manager.accept(
+        unchanged_pair = manager.accept(
             "adam",
             validate_upload(
                 _headers("workouts", session_id=second_workouts_session),
@@ -268,7 +283,9 @@ class TestHttpIngestManager:
             _body("workouts"),
         )
 
-        assert complete_pair.pair_ready is True
+        # A new session id over identical bytes is a resend, not new data.
+        assert unchanged_pair.pair_ready is False
+        assert manager.pending_pairs() == []
         assert len(ready) == 2
 
     def test_next_cycle_does_not_reuse_half_of_an_inflight_pair(
@@ -484,6 +501,10 @@ class TestPayloadArchive:
         assert "will not be replayable" in caplog.text
 
 
+_PAIR_WINDOW_S = 60 * 60
+"""Production pairing window, so health messages are asserted against it."""
+
+
 class TestIngestHealth:
     def _state(self, profile: Profile, payload: dict) -> None:
         """Write an ingest state file for the profile."""
@@ -499,7 +520,9 @@ class TestIngestHealth:
         profile = _profile(tmp_path)
         self._state(profile, {"uploads": {}, "receipts": []})
 
-        health = assess_ingest_health(profile, silent_after_h=24, split_after_h=6)
+        health = assess_ingest_health(
+            profile, silent_after_h=24, split_after_h=6, pair_window_s=_PAIR_WINDOW_S
+        )
 
         # Mid-setup, not broken.
         assert health.is_alerting is False
@@ -519,7 +542,10 @@ class TestIngestHealth:
 
         assert (
             assess_ingest_health(
-                profile, silent_after_h=24, split_after_h=6
+                profile,
+                silent_after_h=24,
+                split_after_h=6,
+                pair_window_s=_PAIR_WINDOW_S,
             ).is_alerting
             is False
         )
@@ -539,7 +565,12 @@ class TestIngestHealth:
 
         # A locked phone overnight must never look like a broken one.
         assert (
-            assess_ingest_health(profile, silent_after_h=24, split_after_h=6).status
+            assess_ingest_health(
+                profile,
+                silent_after_h=24,
+                split_after_h=6,
+                pair_window_s=_PAIR_WINDOW_S,
+            ).status
             == "silent"
         ) is False
 
@@ -559,7 +590,9 @@ class TestIngestHealth:
             },
         )
 
-        health = assess_ingest_health(profile, silent_after_h=24, split_after_h=6)
+        health = assess_ingest_health(
+            profile, silent_after_h=24, split_after_h=6, pair_window_s=_PAIR_WINDOW_S
+        )
 
         # Everything that arrived did import. Telling someone to realign two
         # automations that fired simultaneously sends them chasing a non-bug;
@@ -579,12 +612,14 @@ class TestIngestHealth:
             },
         )
 
-        health = assess_ingest_health(profile, silent_after_h=24, split_after_h=6)
+        health = assess_ingest_health(
+            profile, silent_after_h=24, split_after_h=6, pair_window_s=_PAIR_WINDOW_S
+        )
 
         assert health.status == "silent"
         assert "Auto Export" in health.detail
 
-    def test_uploads_that_never_pair_are_reported_with_the_fix(
+    def test_halves_outside_the_window_are_blamed_on_the_schedules(
         self, tmp_path: Path
     ) -> None:
         profile = _profile(tmp_path)
@@ -593,16 +628,49 @@ class TestIngestHealth:
             {
                 "uploads": {
                     "metrics": {"received_at": self._at(0.1)},
-                    "workouts": {"received_at": self._at(0.7)},
+                    "workouts": {"received_at": self._at(1.8)},
                 },
                 "last_imported_at": self._at(9),
             },
         )
 
-        health = assess_ingest_health(profile, silent_after_h=24, split_after_h=6)
+        health = assess_ingest_health(
+            profile,
+            silent_after_h=24,
+            split_after_h=6,
+            pair_window_s=_PAIR_WINDOW_S,
+        )
 
         assert health.status == "split"
         assert "same schedule" in health.detail
+
+    def test_halves_inside_the_window_are_not_blamed_on_the_schedules(
+        self, tmp_path: Path
+    ) -> None:
+        profile = _profile(tmp_path)
+        self._state(
+            profile,
+            {
+                "uploads": {
+                    "metrics": {"received_at": self._at(0.1)},
+                    "workouts": {"received_at": self._at(0.45)},
+                },
+                "last_imported_at": self._at(9),
+            },
+        )
+
+        health = assess_ingest_health(
+            profile,
+            silent_after_h=24,
+            split_after_h=6,
+            pair_window_s=_PAIR_WINDOW_S,
+        )
+
+        # 21m apart inside a 60m window pairs fine. Sending someone to realign
+        # automations that are already aligned is how this alert wasted a day.
+        assert health.status == "split"
+        assert "same schedule" not in health.detail
+        assert "the import on this end is stuck" in health.detail
 
     def test_one_half_never_configured_is_reported_as_split(
         self, tmp_path: Path
@@ -623,7 +691,9 @@ class TestIngestHealth:
             },
         )
 
-        health = assess_ingest_health(profile, silent_after_h=24, split_after_h=6)
+        health = assess_ingest_health(
+            profile, silent_after_h=24, split_after_h=6, pair_window_s=_PAIR_WINDOW_S
+        )
 
         assert health.status == "split"
         assert "Workouts" in health.detail
@@ -647,7 +717,9 @@ class TestIngestHealth:
             },
         )
 
-        health = assess_ingest_health(profile, silent_after_h=24, split_after_h=6)
+        health = assess_ingest_health(
+            profile, silent_after_h=24, split_after_h=6, pair_window_s=_PAIR_WINDOW_S
+        )
 
         assert health.status == "error"
         assert "parser rejected the payload" in health.detail
@@ -658,7 +730,9 @@ class TestIngestHealth:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("{ not json", encoding="utf-8")
 
-        health = assess_ingest_health(profile, silent_after_h=24, split_after_h=6)
+        health = assess_ingest_health(
+            profile, silent_after_h=24, split_after_h=6, pair_window_s=_PAIR_WINDOW_S
+        )
 
         assert health.status == "error"
         assert str(path) in health.detail
@@ -716,6 +790,80 @@ class TestPairStatus:
         assert state["pair_state"] == "split"
         assert "pairing window" in state["pair_detail"]
         assert "will not import yet" in caplog.text
+
+    def _import_one_pair(self, manager: HttpIngestManager) -> None:
+        """Drive a first Workouts + Metrics pair all the way through import."""
+        for kind in ("workouts", "metrics"):
+            body = _body(kind)
+            accepted = manager.accept(
+                "adam", validate_upload(_headers(kind), body), body
+            )
+        assert accepted.pair_ready is True
+        digest = manager.pending_pairs()[0][1]
+        assert manager.begin_import("adam", digest) is not None
+        manager.finish_import("adam", digest, success=True)
+
+    def test_a_refreshed_half_imports_without_waiting_for_its_partner(
+        self, tmp_path: Path
+    ) -> None:
+        profile = _profile(tmp_path)
+        manager = HttpIngestManager(
+            {"adam": profile},
+            pair_window_s=_PAIR_WINDOW_S,
+            on_pair_ready=lambda name, digest: None,
+        )
+        self._import_one_pair(manager)
+
+        # Workouts fires minutes after Metrics, as two automations normally do.
+        # Requiring both halves to be new stranded this payload until the next
+        # Metrics upload, which is how a whole day of data went missing.
+        fresh = _body("workouts", variant=1)
+        accepted = manager.accept(
+            "adam", validate_upload(_headers("workouts"), fresh), fresh
+        )
+
+        assert accepted.pair_ready is True
+        assert manager.status()["adam"]["pair_state"] == "ready"
+
+    def test_an_unchanged_re_upload_does_not_import_again(self, tmp_path: Path) -> None:
+        profile = _profile(tmp_path)
+        manager = HttpIngestManager(
+            {"adam": profile},
+            pair_window_s=_PAIR_WINDOW_S,
+            on_pair_ready=lambda name, digest: None,
+        )
+        self._import_one_pair(manager)
+
+        # Auto Export resends a rolling window; an identical pair is a no-op.
+        again = _body("workouts")
+        accepted = manager.accept(
+            "adam", validate_upload(_headers("workouts"), again), again
+        )
+
+        assert accepted.pair_ready is False
+        assert manager.status()["adam"]["pair_state"] == "imported"
+
+    def test_a_pair_awaiting_import_is_not_reported_as_up_to_date(
+        self, tmp_path: Path
+    ) -> None:
+        profile = _profile(tmp_path)
+        manager = HttpIngestManager(
+            {"adam": profile},
+            pair_window_s=_PAIR_WINDOW_S,
+            on_pair_ready=lambda name, digest: None,
+        )
+        for kind in ("workouts", "metrics"):
+            body = _body(kind)
+            manager.accept("adam", validate_upload(_headers(kind), body), body)
+        digest = manager.pending_pairs()[0][1]
+        manager.begin_import("adam", digest)
+
+        state = manager.status()["adam"]
+
+        # Nothing has been imported yet. Calling this "up to date" is what hid
+        # the stall behind a reassuring `ingest status`.
+        assert state["pair_state"] == "pending"
+        assert state["last_imported_at"] is None
 
 
 class TestHttpImportSafety:
