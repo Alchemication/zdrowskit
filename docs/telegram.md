@@ -2,6 +2,32 @@
 
 Telegram is used for nudges, chat, daemon-triggered reports, approvals, rejections, and model/notification controls.
 
+## Bot Ownership
+
+One Telegram bot belongs to one zdrowskit installation and its single polling
+daemon. The bot can serve every profile in that installation; it is not one bot
+per person. A newly created bot is the least surprising choice, but an existing
+unused bot is also valid if zdrowskit has exclusive use of its token.
+
+Do not configure two daemons or another long-polling application with the same
+token. They do not load-balance the bot's messages. Telegram exposes one update
+stream per bot, competing `getUpdates` calls produce `409 Conflict` responses,
+and inbound chat and callback handling will fail intermittently. Outbound sends
+working from both processes does not make this configuration safe.
+
+The supported arrangements are:
+
+```text
+one bot → one daemon → operator + hosted profiles
+
+your bot  → your daemon
+their bot → their independent daemon
+```
+
+Sharing one official bot across independent backends would require a central
+gateway to own Telegram polling and route every update. zdrowskit does not
+implement that architecture.
+
 ## Configuration
 
 Add your bot credentials to `.env`:

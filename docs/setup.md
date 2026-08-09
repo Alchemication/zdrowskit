@@ -13,7 +13,7 @@ routing, see [LLM setup](llm.md). To migrate an existing installation, use
 - [Tailscale](https://tailscale.com/docs/install/mac) on the host, with its CLI integration and launch-at-login enabled
 - Apple Health data exported by [Auto Export](https://apps.apple.com/app/myhealth-export-to-icloud/id6737380982)
 - LLM API keys for the providers you want to use
-- Telegram bot credentials if you want notifications and chat
+- A dedicated Telegram bot token if you want notifications and chat
 
 Direct HTTP delivery through Tailscale is recommended for new installations.
 The local/iCloud and Google Drive sources remain available, particularly for
@@ -25,6 +25,25 @@ Before the repository setup, install/sign in to Tailscale and confirm
 `tailscale status` works in Terminal. The HTTP guide covers the macOS app
 variants, CLI Integration, first Funnel approval, persistence, and testing from
 another device.
+
+## Create the Telegram Bot
+
+Each Telegram-enabled installation needs exclusive control of one bot token.
+The bot does not have to be newly created, but no other application or
+zdrowskit daemon may poll the same token. Telegram does not distribute updates
+between competing consumers: concurrent `getUpdates` pollers conflict, and
+inbound messages and callback buttons become unreliable.
+
+Create a bot with [BotFather](https://t.me/BotFather), or dedicate an existing
+unused bot to this installation. One bot serves the operator and every hosted
+profile; family members and friends do not create separate bots. A second
+independent operator running their own zdrowskit installation needs a different
+bot token.
+
+After `uv run python main.py setup` creates `.env`, add the token as
+`TELEGRAM_BOT_TOKEN`. Do not give the token to hosted users. Before starting
+the daemon, message the bot once and obtain the operator's numeric Telegram ID
+as described in [Telegram configuration](telegram.md#configuration).
 
 ## First Run
 

@@ -38,11 +38,14 @@ Three loops run continuously:
 - [Tailscale](https://tailscale.com/docs/install/mac) on the host; HTTP + Funnel is the default transport
 - Python 3.12+ and [uv](https://github.com/astral-sh/uv)
 - A capable LLM provider API key
-- Telegram bot for notifications and chat
+- A dedicated Telegram bot token for notifications and chat. One bot serves
+  every profile on the installation, but its token must not be reused by a
+  second polling daemon.
 
 ## Scale It Is Built For
 
-zdrowskit is a family-and-friends tool: one machine, one daemon, one bot,
+zdrowskit is a family-and-friends tool: one machine, one daemon, one
+exclusively polled bot,
 serving roughly 1-10 people the operator knows personally. That assumption is
 deliberate and shows up everywhere — profiles are added by hand-editing a TOML
 roster and restarting, there is no self-service signup or web admin, and the
