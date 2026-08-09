@@ -16,6 +16,8 @@ It is a Telegram conversation, not a dashboard: reply to a report, update your g
 
 Your raw data stays local in SQLite on your machine. LLM calls do send the relevant slice of your data to the configured provider. If your health data leaving the machine for an LLM API is a dealbreaker, this is not the tool for you. See [LLM setup](docs/llm.md) for model and API details.
 
+Site: <https://alchemication.github.io/zdrowskit/> — with the [docs](https://alchemication.github.io/zdrowskit/docs/) and the [eval leaderboard](https://alchemication.github.io/zdrowskit/evals/) rendered from this repo on every push.
+
 Built by Adam Napora (adamsky). *Zdrowie* is Polish for health. *Kit* is the tool.
 
 Under the hood: SQLite for storage, [litellm](https://github.com/BerriAI/litellm) for provider-agnostic LLM calls, [Plotly](https://plotly.com/python/) + Kaleido for charts, [watchdog](https://github.com/gorakhargosh/watchdog) for filesystem events, and Telegram Bot API for delivery.

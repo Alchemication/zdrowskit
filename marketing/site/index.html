@@ -1,0 +1,693 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>zdrowskit — a private health coach for your Apple Health data</title>
+  <meta name="description" content="Self-hosted, open-source coach that reads your Apple Health data alongside your goals, plan, injuries and journal, then talks to you in Telegram. Runs on one machine you own.">
+  <link rel="canonical" href="https://alchemication.github.io/zdrowskit/">
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="zdrowskit — a private health coach for your Apple Health data">
+  <meta property="og:description" content="Self-hosted, open-source coach that reads your Apple Health data alongside your goals, plan, injuries and journal, then talks to you in Telegram.">
+  <meta property="og:url" content="https://alchemication.github.io/zdrowskit/">
+  <meta property="og:image" content="https://alchemication.github.io/zdrowskit/assets/people-triptych.webp">
+  <meta name="twitter:card" content="summary_large_image">
+  <style>
+/* The shared palette and site chrome (assets/base.css) are inlined in place of
+   the token below by marketing/build.py. Everything after it is specific to
+   this page. Opening index.html straight from disk therefore looks unstyled —
+   build the site to view it. */
+{{BASE_CSS}}
+
+    body {
+      background:
+        radial-gradient(circle at 12% 9%, rgba(255,255,255,.6), transparent 22rem),
+        repeating-linear-gradient(0deg, rgba(21,25,15,.025) 0 1px, transparent 1px 4px),
+        var(--paper);
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      z-index: 20;
+      pointer-events: none;
+      opacity: .15;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 160 160' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.95' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.25'/%3E%3C/svg%3E");
+      mix-blend-mode: multiply;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: 1.25fr .75fr;
+      gap: clamp(32px, 6vw, 72px);
+      align-items: end;
+      padding: clamp(56px, 9vw, 104px) 0 54px;
+    }
+
+    .eyebrow { margin-bottom: 24px; transform: rotate(-1deg); }
+
+    h1 {
+      max-width: 850px;
+      margin: 0;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: clamp(44px, 6.6vw, 86px);
+      font-weight: 500;
+      line-height: .91;
+      letter-spacing: -.055em;
+    }
+
+    h1 em { color: var(--green-dark); font-style: italic; }
+
+    .hero-copy {
+      margin: 0 0 7px;
+      padding-left: 18px;
+      border-left: 5px solid var(--orange);
+      font-size: 15px;
+      line-height: 1.7;
+    }
+
+    .hero-copy b { display: block; margin-bottom: 10px; }
+
+    .cta {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: start;
+      gap: 12px;
+      margin-top: 26px;
+    }
+
+    /* Names what setup actually gets you, so the call to action reads as the
+       whole promise rather than just an install. Sits under the row instead of
+       inside the button, which would widen it and wrap the second button. */
+    .btn-sub {
+      margin: 11px 0 0;
+      color: var(--muted);
+      font-size: 10.5px;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+    }
+
+    .signal {
+      margin: 20px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.7;
+    }
+
+    .sequence-wrap { padding: 18px 0 72px; }
+
+    .section-label {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 20px;
+      font-size: 11px;
+      font-weight: 900;
+      letter-spacing: .14em;
+      text-transform: uppercase;
+    }
+
+    .section-label::after {
+      content: "";
+      height: 2px;
+      flex: 1;
+      background: var(--ink);
+    }
+
+    .sequence {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      border: 2px solid var(--ink);
+      background: rgba(255,255,255,.18);
+      box-shadow: var(--shadow);
+    }
+
+    .step {
+      position: relative;
+      min-height: 138px;
+      padding: 20px;
+      border-right: 2px solid var(--ink);
+    }
+
+    .step:last-child { border: 0; }
+    .step:not(:last-child)::after {
+      content: "▶";
+      position: absolute;
+      z-index: 2;
+      top: 50%;
+      right: -10px;
+      padding: 2px;
+      color: var(--orange);
+      background: var(--paper);
+      transform: translateY(-50%);
+    }
+
+    .step-num { color: var(--orange); font-size: 11px; font-weight: 900; }
+    .step-icon { margin: 18px 0 12px; font-size: 24px; line-height: 1; }
+    .step-title { font-size: 13px; font-weight: 900; text-transform: uppercase; }
+    .step-note { margin-top: 7px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+
+    .loop-stage {
+      position: relative;
+      padding: 74px 0 90px;
+      color: var(--paper);
+      background: var(--ink);
+      overflow: hidden;
+    }
+
+    .loop-stage::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      opacity: .06;
+      background: repeating-linear-gradient(90deg, transparent 0 34px, var(--paper) 34px 35px);
+    }
+
+    .loop-stage .section-label::after { background: var(--paper); }
+
+    .people {
+      position: relative;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      min-height: 460px;
+      margin-top: 32px;
+      border: 2px solid var(--paper);
+      background-image: url("assets/people-triptych.webp");
+      background-size: cover;
+      background-position: center;
+      box-shadow: 8px 8px 0 var(--orange);
+      isolation: isolate;
+    }
+
+    .people::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      z-index: -1;
+      background: linear-gradient(180deg, transparent 45%, rgba(21,25,15,.88) 100%);
+    }
+
+    .person {
+      display: flex;
+      flex-direction: column;
+      justify-content: end;
+      padding: 22px;
+      border-right: 2px solid rgba(238,231,210,.8);
+    }
+
+    .person:last-child { border: 0; }
+    .person-kicker { color: var(--green); font-size: 11px; font-weight: 900; letter-spacing: .12em; }
+    .person strong { margin-top: 6px; font-family: Georgia, serif; font-size: 29px; font-weight: 500; }
+    .person small { margin-top: 4px; color: var(--paper-2); font-size: 12px; }
+
+    .downlink { position: relative; height: 122px; }
+
+    .downlink::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 50%;
+      border-left: 2px dashed var(--green);
+    }
+
+    .packet {
+      position: absolute;
+      top: 15px;
+      left: calc(50% - 5px);
+      width: 11px;
+      height: 11px;
+      background: var(--orange);
+      animation: packet 2.4s linear infinite;
+    }
+
+    .packet:nth-child(2) { animation-delay: -1.2s; }
+
+    .core {
+      display: grid;
+      grid-template-columns: .75fr 1.25fr;
+      border: 2px solid var(--green);
+      background: #0c1109;
+      box-shadow: 8px 8px 0 var(--green-dark);
+    }
+
+    .machine {
+      display: grid;
+      place-items: center;
+      min-height: 310px;
+      padding: 32px;
+      border-right: 2px solid var(--green);
+      text-align: center;
+    }
+
+    .machine-face {
+      width: min(230px, 100%);
+      padding: 17px;
+      border: 12px solid var(--paper-2);
+      border-radius: 8px;
+      background: #0a1609;
+      box-shadow: inset 0 0 30px rgba(183,219,82,.18), 8px 8px 0 #000;
+      color: var(--green);
+      text-align: left;
+    }
+
+    .screen-title { font-size: 16px; font-weight: 900; }
+    .screen-line { margin-top: 13px; font-size: 11px; line-height: 1.6; opacity: .88; }
+    .cursor { display: inline-block; width: 7px; height: 12px; background: var(--green); animation: blink .8s steps(1) infinite; }
+
+    .context {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 1px;
+      background: var(--green-dark);
+    }
+
+    .context-item {
+      min-height: 154px;
+      padding: 27px;
+      background: #11180d;
+    }
+
+    .context-item b { display: block; margin-bottom: 10px; color: var(--orange); font-size: 11px; letter-spacing: .12em; }
+    .context-item span { font-family: Georgia, serif; font-size: 24px; }
+    .context-item p { margin: 9px 0 0; color: #bcbeaa; font-size: 12px; line-height: 1.55; }
+
+    .outputs {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 18px;
+      margin-top: 72px;
+    }
+
+    .message {
+      position: relative;
+      min-height: 235px;
+      padding: 22px;
+      border: 2px solid var(--paper);
+      background: var(--paper);
+      color: var(--ink);
+      box-shadow: 6px 6px 0 var(--green-dark);
+    }
+
+    .message::before { content: ""; position: absolute; top: -74px; left: 50%; height: 72px; border-left: 2px dashed var(--green); }
+    .message-type { display: flex; justify-content: space-between; gap: 10px; padding-bottom: 13px; border-bottom: 1px solid var(--ink); color: var(--green-dark); font-size: 10px; font-weight: 900; letter-spacing: .1em; }
+    .message h3 { margin: 18px 0 11px; font-family: Georgia, serif; font-size: 26px; font-weight: 500; line-height: 1.05; }
+    .message p { margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.6; }
+    .message .actions { display: flex; gap: 8px; margin-top: 18px; }
+    .pill { padding: 7px 9px; border: 1px solid var(--ink); font-size: 10px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+    .pill-yes { background: var(--green); }
+
+    .illustrative {
+      margin: 26px 0 0;
+      color: var(--paper-2);
+      font-size: 11px;
+      line-height: 1.6;
+      opacity: .85;
+    }
+
+    .ask { padding: 84px 0; }
+
+    .ask-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: clamp(28px, 5vw, 64px);
+      align-items: start;
+    }
+
+    .ask h2, .trust h2 {
+      margin: 0 0 18px;
+      font-family: Georgia, serif;
+      font-size: clamp(34px, 4.4vw, 58px);
+      font-weight: 500;
+      line-height: 1;
+      letter-spacing: -.04em;
+    }
+
+    .ask p { color: var(--muted); font-size: 14px; line-height: 1.7; }
+
+    .thread {
+      border: 2px solid var(--ink);
+      background: rgba(255,255,255,.28);
+      box-shadow: var(--shadow);
+    }
+
+    .thread-head {
+      display: flex;
+      justify-content: space-between;
+      padding: 12px 16px;
+      border-bottom: 2px solid var(--ink);
+      background: var(--ink);
+      color: var(--paper);
+      font-size: 10px;
+      font-weight: 900;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+    }
+
+    .turn { padding: 16px; border-bottom: 1px dashed rgba(21,25,15,.3); }
+    .turn:last-child { border-bottom: 0; }
+    .turn b { display: block; margin-bottom: 6px; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; }
+    .turn.you b { color: var(--orange); }
+    .turn.coach b { color: var(--green-dark); }
+    .turn p { margin: 0; font-size: 13px; line-height: 1.65; }
+    .tool-call {
+      margin: 10px 0;
+      padding: 9px 11px;
+      border: 1px solid rgba(21,25,15,.4);
+      background: var(--ink);
+      color: var(--green);
+      font-size: 11px;
+      overflow-x: auto;
+      white-space: pre;
+    }
+    .chart-stub {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 7px;
+      height: 118px;
+      margin: 12px 0 4px;
+      padding: 10px;
+      border: 1px solid rgba(21,25,15,.4);
+      background:
+        repeating-linear-gradient(0deg, rgba(21,25,15,.08) 0 1px, transparent 1px 22px),
+        rgba(255,255,255,.5);
+    }
+    .chart-stub i { flex: 1; min-width: 0; background: var(--green-dark); }
+    .chart-caption { color: var(--muted); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; }
+
+    .facts { padding: 0 0 84px; }
+
+    .fact-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 18px;
+      margin-top: 8px;
+    }
+
+    .fact {
+      padding: 22px;
+      border: 2px solid var(--ink);
+      background: rgba(255,255,255,.22);
+      box-shadow: var(--shadow);
+    }
+
+    /* Direct child only: the card heading. A <b> inside a paragraph must stay
+       inline, or emphasised phrases break onto their own line. */
+    .fact > b { display: block; margin-bottom: 12px; color: var(--green-dark); font-size: 11px; letter-spacing: .1em; text-transform: uppercase; }
+    .fact ul { margin: 0; padding-left: 18px; }
+    .fact li { margin-bottom: 7px; font-size: 12.5px; line-height: 1.6; }
+    .fact p { margin: 0 0 10px; font-size: 12.5px; line-height: 1.65; }
+    .fact .big { font-family: Georgia, serif; font-size: 38px; line-height: 1; letter-spacing: -.03em; }
+
+    .trust {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: clamp(28px, 5vw, 70px);
+      padding: 0 0 90px;
+    }
+
+    .boundary { margin: 0 0 16px; padding: 18px 20px; border: 2px solid var(--ink); background: rgba(255,255,255,.2); box-shadow: 4px 4px 0 var(--ink); }
+    .boundary b { display: block; margin-bottom: 7px; color: var(--green-dark); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+    .boundary p { margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.6; }
+    .boundary.warn { background: rgba(229,110,54,.12); border-color: var(--orange); box-shadow: 4px 4px 0 var(--orange); }
+    .boundary.warn b { color: #a8410f; }
+
+    footer { padding: 25px 0 44px; }
+
+    @keyframes pulse { 50% { opacity: .35; } }
+    @keyframes blink { 50% { opacity: 0; } }
+    @keyframes packet { from { transform: translateY(0) rotate(0); } to { transform: translateY(96px) rotate(180deg); } }
+
+    @media (max-width: 900px) {
+      .hero, .trust, .ask-grid { grid-template-columns: 1fr; }
+      .hero { align-items: start; }
+      .sequence { grid-template-columns: 1fr 1fr; }
+      .step:nth-child(2) { border-right: 0; }
+      .step:nth-child(-n+2) { border-bottom: 2px solid var(--ink); }
+      .step:nth-child(2)::after { display: none; }
+      .people { min-height: 580px; background-size: auto 100%; }
+      .person { padding: 14px; }
+      .person strong { font-size: 20px; }
+      .core { grid-template-columns: 1fr; }
+      .machine { border: 0; border-bottom: 2px solid var(--green); }
+      .outputs, .fact-grid { grid-template-columns: 1fr; }
+      .outputs { gap: 42px; }
+      .message::before { top: -44px; height: 42px; }
+    }
+
+    @media (max-width: 520px) {
+      .hero { padding-top: 44px; }
+      h1 { font-size: 42px; }
+      .sequence { grid-template-columns: 1fr; box-shadow: 4px 4px 0 var(--ink); }
+      .step { min-height: 110px; border-right: 0; border-bottom: 2px solid var(--ink) !important; }
+      .step:last-child { border-bottom: 0 !important; }
+      .step::after { display: none; }
+      .people { grid-template-columns: 1fr; min-height: 930px; background-image: none; }
+      .person { min-height: 310px; border: 0; border-bottom: 2px solid var(--paper); background-image: linear-gradient(180deg, transparent 45%, rgba(21,25,15,.9)), url("assets/people-triptych.webp"); background-size: 300% 100%; }
+      .person:nth-child(1) { background-position: left center; }
+      .person:nth-child(2) { background-position: center center; }
+      .person:nth-child(3) { background-position: right center; border-bottom: 0; }
+      .context { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header class="shell topbar">
+    <a class="wordmark" href="./">ZDROW<span>//</span>SKIT</a>
+    <nav>
+      <a href="docs/">Docs</a>
+      <a href="evals/">Evals</a>
+      <a href="https://github.com/Alchemication/zdrowskit">GitHub</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="shell hero">
+      <div>
+        <div class="eyebrow">Apple Health, with context</div>
+        <h1>Your watch records what happened. <em>Understand what comes next.</em></h1>
+      </div>
+      <div>
+        <p class="hero-copy">
+          <b>A private health coach you run yourself.</b>
+          It reads your Apple Health data alongside your goals, training plan, injuries and journal — then talks to you in Telegram.
+        </p>
+        <div class="cta">
+          <a class="btn btn-primary" href="docs/setup.html">Get started</a>
+          <a class="btn" href="https://github.com/Alchemication/zdrowskit">View source</a>
+        </div>
+        <p class="btn-sub">Set up, then share with family &amp; friends</p>
+        <p class="signal">
+          Free and open source. Self-hosted on one machine you own.<br>
+          Requires an Apple Watch, an always-on computer and your own LLM API key.
+        </p>
+      </div>
+    </section>
+
+    <section class="shell sequence-wrap" aria-labelledby="setup-label">
+      <div class="section-label" id="setup-label">01 / One-time setup</div>
+      <div class="sequence">
+        <article class="step">
+          <div class="step-num">01</div>
+          <div class="step-icon" aria-hidden="true">▣⌁</div>
+          <div class="step-title">Set up the kit</div>
+          <div class="step-note">One always-on Mac or Linux box. One Telegram bot.</div>
+        </article>
+        <article class="step">
+          <div class="step-num">02</div>
+          <div class="step-icon" aria-hidden="true">◉+◉</div>
+          <div class="step-title">Connect someone</div>
+          <div class="step-note">A family member or friend you personally trust.</div>
+        </article>
+        <article class="step">
+          <div class="step-num">03</div>
+          <div class="step-icon" aria-hidden="true">⌚⇢▤</div>
+          <div class="step-title">Auto-export</div>
+          <div class="step-note">Apple Health arrives quietly from their iPhone.</div>
+        </article>
+        <article class="step">
+          <div class="step-num">04</div>
+          <div class="step-icon" aria-hidden="true">▰↯</div>
+          <div class="step-title">Start a dialogue</div>
+          <div class="step-note">Insights, restrained nudges and questions on demand.</div>
+        </article>
+      </div>
+    </section>
+
+    <section class="loop-stage" aria-labelledby="loop-label">
+      <div class="shell">
+        <div class="section-label" id="loop-label">02 / The quiet, recurring loop</div>
+
+        <div class="people" role="img" aria-label="Three scenes: a man running in light rain, a woman asleep wearing a fitness watch, and an older woman doing resistance-band training at home.">
+          <div class="person">
+            <span class="person-kicker">07:12 / ACTIVITY</span>
+            <strong>A wet morning run.</strong>
+            <small>pace · heart rate · route</small>
+          </div>
+          <div class="person">
+            <span class="person-kicker">23:41 / RECOVERY</span>
+            <strong>An ordinary night.</strong>
+            <small>sleep · HRV · resting heart rate</small>
+          </div>
+          <div class="person">
+            <span class="person-kicker">17:30 / TRAINING</span>
+            <strong>Strength at home.</strong>
+            <small>workout · effort · consistency</small>
+          </div>
+        </div>
+
+        <div class="downlink" aria-hidden="true">
+          <i class="packet"></i><i class="packet"></i>
+        </div>
+
+        <div class="core">
+          <div class="machine">
+            <div class="machine-face">
+              <div class="screen-title">ZDROWSKIT_</div>
+              <div class="screen-line">PROFILE: ANNA<br>DATA: CURRENT<br>CONTEXT: LOADED<br>COACH: LISTENING</div>
+              <div class="screen-line">&gt; looking for what matters <span class="cursor"></span></div>
+            </div>
+          </div>
+          <div class="context">
+            <div class="context-item"><b>01 / HEALTH DATA</b><span>What happened</span><p>Metrics, workouts, routes, sleep and long-term baselines.</p></div>
+            <div class="context-item"><b>02 / YOUR PLAN</b><span>What you intended</span><p>Training schedule, goals, diet and recovery targets.</p></div>
+            <div class="context-item"><b>03 / YOUR JOURNAL</b><span>Why it happened</span><p>Travel, illness, workload, motivation and ordinary life.</p></div>
+            <div class="context-item"><b>04 / MEMORY</b><span>What came before</span><p>Previous weeks, accepted changes and coaching history.</p></div>
+          </div>
+        </div>
+
+        <div class="outputs">
+          <article class="message">
+            <div class="message-type"><span>WEEKLY INSIGHT</span><span>MON 08:02</span></div>
+            <h3>Fitness held steady through a disrupted week.</h3>
+            <p>Your easy pace stayed near baseline despite two short nights. The missed interval session looks like sensible restraint, not lost momentum.</p>
+          </article>
+          <article class="message">
+            <div class="message-type"><span>TIMELY NUDGE</span><span>TODAY 11:14</span></div>
+            <h3>Keep today genuinely easy.</h3>
+            <p>HRV is below your normal range after yesterday’s harder run. The planned recovery session still fits; there is no need to “make up” Tuesday.</p>
+          </article>
+          <article class="message">
+            <div class="message-type"><span>COACH PROPOSAL</span><span>AWAITING YOU</span></div>
+            <h3>Move Friday strength to Thursday?</h3>
+            <p>This separates it from your long run and matches the pattern from your more consistent weeks.</p>
+            <div class="actions"><span class="pill pill-yes">Approve</span><span class="pill">Reject</span></div>
+          </article>
+        </div>
+
+        <p class="illustrative">
+          Messages shown are illustrative examples of the three output types, not output from a real person’s account.
+        </p>
+      </div>
+    </section>
+
+    <section class="shell ask" aria-labelledby="ask-label">
+      <div class="section-label" id="ask-label">03 / Ask it anything</div>
+      <div class="ask-grid">
+        <div>
+          <h2>It queries your whole history, then answers.</h2>
+          <p>
+            The coach writes SQL against your own database, so questions are not limited to
+            a fixed set of dashboard cards. Ask about a pace, a trend, or a correlation you
+            suspect, and it goes and looks.
+          </p>
+          <p>
+            If a chart makes the answer clearer, it renders one and sends it back in the same
+            conversation. Reply to a report, update your goals mid-chat, ask a follow-up.
+          </p>
+          <div class="cta">
+            <a class="btn" href="docs/user-flow.html">What a week looks like</a>
+          </div>
+        </div>
+        <div class="thread">
+          <div class="thread-head"><span>Telegram</span><span>Chat</span></div>
+          <div class="turn you">
+            <b>You</b>
+            <p>How’s my HRV trending since January?</p>
+          </div>
+          <div class="turn coach">
+            <b>zdrowskit</b>
+            <div class="tool-call">query_health_db(
+  "SELECT month, AVG(value) …"
+)</div>
+            <div class="chart-stub" aria-hidden="true">
+              <i style="height:38%"></i><i style="height:46%"></i><i style="height:41%"></i>
+              <i style="height:55%"></i><i style="height:62%"></i><i style="height:58%"></i>
+              <i style="height:71%"></i><i style="height:79%"></i>
+            </div>
+            <div class="chart-caption">chart rendered and sent</div>
+            <p>Up and to the right — the monthly average has climbed steadily since January, with the usual dip during your March illness.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="shell facts" aria-labelledby="facts-label">
+      <div class="section-label" id="facts-label">04 / Before you start</div>
+      <div class="fact-grid">
+        <div class="fact">
+          <b>What you need</b>
+          <ul>
+            <li>Apple Watch + iPhone</li>
+            <li>An always-on macOS or Linux machine</li>
+            <li>Python 3.12+ and uv</li>
+            <li>Tailscale on the host</li>
+            <li>A Telegram bot</li>
+            <li>An LLM provider API key</li>
+          </ul>
+        </div>
+        <div class="fact">
+          <b>What it costs to run</b>
+          <p class="big">~$0.51<span style="font-size:14px"> /week</span></p>
+          <p>
+            Projected LLM spend for the always-on daemon at default caps — weekly report,
+            coach review and nudges. Chat is on top, at roughly $0.0014 a turn.
+          </p>
+          <p><a href="docs/llm.html">How that breaks down →</a></p>
+        </div>
+        <div class="fact">
+          <b>How well it works</b>
+          <p>
+            Every routing change is re-scored against <b>{{EVAL_CASE_COUNT}} eval cases</b> and
+            the results are published in full — including the cases that still fail.
+          </p>
+          <p>Last recorded {{EVAL_UPDATED}}.</p>
+          <p><a href="evals/">Read the leaderboard →</a></p>
+        </div>
+      </div>
+    </section>
+
+    <section class="shell trust">
+      <h2>A household appliance,<br>not a health-data platform.</h2>
+      <div>
+        <div class="boundary">
+          <b>Raw history stays local</b>
+          <p>Each person’s Apple Health history lives in a separate SQLite database on your own machine. There is no zdrowskit server, no account, and no signup.</p>
+        </div>
+        <div class="boundary warn">
+          <b>But your data does reach an LLM provider</b>
+          <p>Reports, nudges and answers send the relevant slice of your health data to whichever model provider you configure. If health data leaving your machine for an LLM API is a dealbreaker, this is not the tool for you.</p>
+        </div>
+        <div class="boundary">
+          <b>The operator can read everything</b>
+          <p>Built for roughly 1–10 people who know each other. Profiles are added by hand-editing a TOML roster; whoever runs the host can read every hosted person’s database. Trust replaces the access controls a real multi-tenant service would need.</p>
+        </div>
+        <p class="signal"><a href="docs/limitations.html">Full list of limitations →</a></p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="shell">
+    <span>ZDROWSKIT — <em>zdrowie</em> is Polish for health</span>
+    <nav>
+      <a href="docs/">Docs</a>
+      <a href="evals/">Evals</a>
+      <a href="docs/limitations.html">Limitations</a>
+      <a href="https://github.com/Alchemication/zdrowskit">GitHub</a>
+    </nav>
+  </footer>
+</body>
+</html>

@@ -22,6 +22,12 @@ dev = [
     "pytest-cov==7.0.0",
     "ruff==0.15.6",
 ]
+# Only needed to build the marketing site (`marketing/build.py`); the daemon and
+# CLI never import these. markdown-it-py also arrives transitively via rich, but
+# the site build pins it directly rather than relying on another package's dep.
+site = [
+    "markdown-it-py==4.0.0",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

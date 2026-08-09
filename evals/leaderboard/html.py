@@ -16,6 +16,53 @@ _NOTE = (
     "The production table is what the daemon ships today. Everything below it "
     "is an alternative measured against that baseline."
 )
+_GITHUB_REPO = "https://github.com/Alchemication/zdrowskit"
+
+# The shared palette and site chrome. Inlined rather than linked so the rendered
+# page stays a single self-contained file that works from disk as well as from
+# the published site.
+_BASE_CSS_PATH = (
+    Path(__file__).resolve().parents[2] / "marketing" / "site" / "assets" / "base.css"
+)
+
+
+def _load_base_css() -> str:
+    """Read the shared site stylesheet.
+
+    Returns:
+        The stylesheet text, or "" if it is missing, in which case the page
+        still renders with its own rules and browser defaults.
+    """
+    try:
+        return _BASE_CSS_PATH.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+
+
+def _site_chrome(nav_base: str) -> tuple[str, str]:
+    """Build the shared site header and footer for the published leaderboard.
+
+    Args:
+        nav_base: Relative path from this page back to the site root, e.g. `../`.
+
+    Returns:
+        A `(header, footer)` pair of HTML strings.
+    """
+    header = f"""  <header class="shell topbar">
+    <a class="wordmark" href="{nav_base}">ZDROW<span>//</span>SKIT</a>
+    <nav>
+      <a href="{nav_base}docs/">Docs</a>
+      <a href="{nav_base}evals/">Evals</a>
+      <a href="{_GITHUB_REPO}">GitHub</a>
+    </nav>
+  </header>
+"""
+    footer = f"""  <footer class="shell">
+    <span>ZDROWSKIT</span>
+    <span><a href="{_GITHUB_REPO}/blob/main/docs/evals.md">How these are measured</a></span>
+  </footer>
+"""
+    return header, footer
 
 
 def render_leaderboard_html(
@@ -24,8 +71,23 @@ def render_leaderboard_html(
     inventory: list[EvalCase] | None = None,
     head_sha: str | None = None,
     stale_check: Callable[[str], bool | None] | None = None,
+    nav_base: str | None = None,
 ) -> str:
-    """Render an interactive HTML leaderboard from persisted run records."""
+    """Render an interactive HTML leaderboard from persisted run records.
+
+    Args:
+        runs: Persisted run records.
+        inventory: Current eval cases, used to flag runs recorded before a case
+            existed.
+        head_sha: Commit to diff recorded revisions against for staleness.
+        stale_check: Override for the staleness resolver.
+        nav_base: Relative path to the site root, which adds the shared site
+            header and footer. Omit for the standalone local artifact, whose
+            sibling `docs/` holds Markdown rather than the built pages.
+
+    Returns:
+        A complete, self-contained HTML document.
+    """
     payload = build_scorecard(
         runs, inventory=inventory, head_sha=head_sha, stale_check=stale_check
     )
@@ -38,16 +100,18 @@ def render_leaderboard_html(
     )
     app = '<div id="app"></div>' if runs else empty
     data_json = json.dumps(payload, sort_keys=True).replace("</", "<\\/")
+    header, footer = _site_chrome(nav_base) if nav_base is not None else ("", "")
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{_TITLE}</title>
-  <style>{_STYLE}</style>
+  <title>{_TITLE} — zdrowskit</title>
+  <meta name="description" content="Feedback-derived regression scores for every zdrowskit LLM surface, published in full.">
+  <style>{_load_base_css()}{_STYLE}</style>
 </head>
 <body>
-  <main class="page">
+{header}  <main class="page shell">
     <section class="hero">
       <div class="eyebrow">Eval Leaderboard</div>
       <h1>{_TITLE}</h1>
@@ -55,7 +119,7 @@ def render_leaderboard_html(
     </section>
     {app}
   </main>
-  <script id="leaderboard-data" type="application/json">{data_json}</script>
+{footer}  <script id="leaderboard-data" type="application/json">{data_json}</script>
   <script>{_SCRIPT}</script>
 </body>
 </html>"""
@@ -68,113 +132,105 @@ def write_leaderboard_html(
     inventory: list[EvalCase] | None = None,
     head_sha: str | None = None,
     stale_check: Callable[[str], bool | None] | None = None,
+    nav_base: str | None = None,
 ) -> str:
-    """Write the rendered leaderboard HTML to disk."""
+    """Write the rendered leaderboard HTML to disk.
+
+    Args:
+        runs: Persisted run records.
+        html_path: Destination path; defaults to the repo's `HTML_PATH`.
+        inventory: Current eval cases.
+        head_sha: Commit to diff recorded revisions against for staleness.
+        stale_check: Override for the staleness resolver.
+        nav_base: Relative path to the site root; see `render_leaderboard_html`.
+
+    Returns:
+        The rendered HTML that was written.
+    """
     path = html_path or HTML_PATH
     path.parent.mkdir(parents=True, exist_ok=True)
     content = render_leaderboard_html(
-        runs, inventory=inventory, head_sha=head_sha, stale_check=stale_check
+        runs,
+        inventory=inventory,
+        head_sha=head_sha,
+        stale_check=stale_check,
+        nav_base=nav_base,
     )
     path.write_text(content, encoding="utf-8")
     return content
 
 
+# Leaderboard-specific rules only. The palette and the site chrome (body,
+# .shell, .topbar, footer) come from `marketing/site/assets/base.css`, which is
+# inlined ahead of this block — see `_load_base_css`. Do not redeclare tokens
+# here; that is how the page drifts away from the rest of the site.
 _STYLE = """
-    :root {
-      --bg: #f5f1e8;
-      --panel: #fffdf8;
-      --panel-2: #f1e9da;
-      --ink: #1d2228;
-      --muted: #6a6f75;
-      --line: #d8ccba;
-      --accent: #0f766e;
-      --good: #2f855a;
-      --warn: #b7791f;
-      --bad: #c53030;
-      --shadow: 0 18px 40px rgba(36, 33, 29, 0.08);
-      --radius: 20px;
-    }
-    * { box-sizing: border-box; }
+    /* Score semantics. Only this page grades a number, so these live here
+       rather than in the shared base. */
+    :root { --good: #2e4a25; --warn: #8f3d10; --bad: #a8280f; }
     html, body { width: 100%; overflow-x: clip; }
-    body {
-      margin: 0;
-      font-family: "Avenir Next", "Segoe UI", sans-serif;
-      color: var(--ink);
-      background:
-        radial-gradient(circle at top right, rgba(15, 118, 110, 0.10), transparent 32%),
-        linear-gradient(180deg, #faf7f1, var(--bg));
-    }
-    code {
-      font-family: "SFMono-Regular", "Menlo", monospace;
-      background: #f3efe6;
-      padding: 0.12rem 0.32rem;
-      border-radius: 0.4rem;
-    }
-    .page {
-      width: min(1480px, 100%);
-      margin: 0 auto;
-      padding: clamp(24px, 3vw, 40px) clamp(16px, 2vw, 24px) 56px;
-    }
-    .hero { display: grid; gap: 12px; margin-bottom: 26px; }
-    .eyebrow {
-      color: var(--accent);
-      text-transform: uppercase;
-      letter-spacing: 0.14em;
-      font-size: 0.78rem;
-      font-weight: 700;
-    }
+    .shell { width: min(1480px, calc(100% - 32px)); }
+    a { color: var(--green-dark); }
+    .page { padding: clamp(28px, 3vw, 44px) 0 56px; }
+    .hero { display: grid; gap: 12px; margin-bottom: 30px; }
+    .hero .eyebrow { justify-self: start; }
     h1 {
       margin: 0;
-      font-size: clamp(2rem, 3.7vw, 3.6rem);
-      line-height: 0.95;
-      font-family: "Iowan Old Style", "Palatino Linotype", serif;
-      font-weight: 700;
+      font-size: clamp(34px, 5vw, 62px);
+      line-height: .95;
+      letter-spacing: -.04em;
+      font-family: Georgia, "Times New Roman", serif;
+      font-weight: 500;
     }
-    .lede { max-width: 900px; color: var(--muted); line-height: 1.6; }
+    .lede { max-width: 900px; color: var(--muted); line-height: 1.65; }
     .section-title {
-      margin: 32px 0 14px;
-      font-family: "Iowan Old Style", "Palatino Linotype", serif;
-      font-size: 1.6rem;
+      margin: 40px 0 14px;
+      padding-top: 18px;
+      border-top: 2px solid var(--ink);
+      font-family: Georgia, serif;
+      font-size: 30px;
+      font-weight: 500;
+      letter-spacing: -.02em;
     }
-    .section-sub { margin: -6px 0 16px; color: var(--muted); font-size: 0.92rem; }
+    .section-sub { margin: -4px 0 18px; color: var(--muted); font-size: 13px; line-height: 1.6; }
     .prod-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
       gap: 16px;
     }
     .prod-card {
-      background: var(--panel);
-      border: 1px solid rgba(216, 204, 186, 0.9);
-      border-radius: 18px;
-      padding: 18px;
+      background: rgba(255,255,255,.22);
+      border: 2px solid var(--ink);
       box-shadow: var(--shadow);
+      padding: 18px;
       display: grid;
       gap: 8px;
     }
-    .prod-card.missing { opacity: 0.75; border-style: dashed; }
+    .prod-card.missing { border-style: dashed; box-shadow: none; opacity: .8; }
     .prod-card h3 {
       margin: 0;
-      font-size: 0.82rem;
+      font-size: 11px;
       text-transform: uppercase;
-      letter-spacing: 0.08em;
-      color: var(--muted);
+      letter-spacing: .1em;
+      color: var(--green-dark);
     }
-    .prod-score { margin: 0; font-size: 2.1rem; font-weight: 700; line-height: 1; }
-    .prod-meta { color: var(--muted); font-size: 0.86rem; line-height: 1.5; }
+    .prod-score { margin: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+    .prod-meta { color: var(--muted); font-size: 12px; line-height: 1.6; }
     .warnings { display: grid; gap: 10px; margin-top: 16px; }
     .warning {
-      padding: 12px 14px;
-      border-radius: 14px;
-      border: 1px solid rgba(183, 121, 31, 0.28);
-      background: rgba(183, 121, 31, 0.10);
-      color: #7c5310;
-      font-size: 0.9rem;
-      line-height: 1.5;
+      padding: 14px 16px;
+      border: 2px solid var(--orange);
+      background: rgba(229,110,54,.12);
+      box-shadow: 4px 4px 0 var(--orange);
+      color: #7c3208;
+      font-size: 12.5px;
+      line-height: 1.6;
     }
     .warning.bad {
-      border-color: rgba(197, 48, 48, 0.28);
-      background: rgba(197, 48, 48, 0.09);
-      color: #8d2020;
+      border-color: var(--bad);
+      background: rgba(168,40,15,.10);
+      box-shadow: 4px 4px 0 var(--bad);
+      color: #8d2010;
     }
     .layout {
       display: grid;
@@ -184,130 +240,133 @@ _STYLE = """
       min-width: 0;
     }
     .sidebar, .content-card {
-      background: color-mix(in srgb, var(--panel) 86%, white);
-      border: 1px solid rgba(216, 204, 186, 0.9);
-      border-radius: var(--radius);
+      background: rgba(255,255,255,.22);
+      border: 2px solid var(--ink);
       box-shadow: var(--shadow);
     }
     .sidebar, .content, .content-card, .table-wrap { min-width: 0; }
     .sidebar { position: sticky; top: 18px; padding: 20px; display: grid; gap: 18px; }
     .sidebar h2, .content-card h2 {
       margin: 0;
-      font-size: 1rem;
+      font-size: 11px;
       text-transform: uppercase;
-      letter-spacing: 0.08em;
-      color: var(--muted);
+      letter-spacing: .1em;
+      color: var(--green-dark);
+      font-weight: 900;
     }
     .filter-grid { display: grid; gap: 14px; }
     .field { display: grid; gap: 6px; }
-    .field label, .toggle { font-size: 0.86rem; color: var(--muted); font-weight: 600; }
+    .field label, .toggle { font-size: 12px; color: var(--muted); font-weight: 700; }
     select, input[type="search"] {
       width: 100%;
-      border: 1px solid var(--line);
-      border-radius: 14px;
-      background: white;
+      border: 2px solid var(--ink);
+      background: var(--paper);
       color: var(--ink);
-      padding: 12px 14px;
+      padding: 10px 12px;
       font: inherit;
+      font-size: 12.5px;
+    }
+    select:focus-visible, input[type="search"]:focus-visible {
+      outline: 2px solid var(--orange);
+      outline-offset: 1px;
     }
     .toggle-row { display: grid; gap: 10px; }
     .toggle { display: flex; align-items: center; gap: 10px; }
-    .toggle input { width: 18px; height: 18px; accent-color: var(--accent); }
+    .toggle input { width: 16px; height: 16px; accent-color: var(--green-dark); }
     .scope-meta {
       display: grid;
       gap: 8px;
       padding: 14px;
-      border-radius: 16px;
-      background: var(--panel-2);
-      border: 1px solid rgba(216, 204, 186, 0.9);
+      border: 1px solid var(--line);
+      background: rgba(21,25,15,.05);
     }
-    .scope-meta span { color: var(--muted); font-size: 0.9rem; }
+    .scope-meta span { color: var(--muted); font-size: 12px; }
     .case-list {
       margin: 0;
       padding-left: 18px;
       max-height: 220px;
       overflow: auto;
       color: var(--muted);
-      font-size: 0.9rem;
-      line-height: 1.45;
+      font-size: 12px;
+      line-height: 1.5;
     }
+    /* Case ids are long, unbroken snake_case; without this they clip against
+       the sidebar rather than wrapping. */
+    .case-list li, .chip { overflow-wrap: anywhere; }
     .content { display: grid; gap: 20px; }
     .content-card { padding: 18px 18px 8px; }
     .table-wrap {
       overflow: auto;
-      border-radius: 18px;
-      border: 1px solid rgba(216, 204, 186, 0.8);
-      background: white;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.35);
+      margin-top: 14px;
     }
     table { width: 100%; border-collapse: collapse; min-width: 1020px; }
     thead th {
       position: sticky;
       top: 0;
-      background: #f7f1e7;
-      color: var(--muted);
+      background: var(--ink);
+      color: var(--paper);
       text-transform: uppercase;
-      letter-spacing: 0.06em;
-      font-size: 0.74rem;
-      padding: 14px 16px;
+      letter-spacing: .08em;
+      font-size: 10px;
+      padding: 12px 14px;
       text-align: left;
-      border-bottom: 1px solid var(--line);
     }
     tbody td {
-      padding: 14px 16px;
-      border-bottom: 1px solid rgba(216, 204, 186, 0.55);
+      padding: 13px 14px;
+      border-bottom: 1px solid var(--line);
       vertical-align: top;
-      font-size: 0.94rem;
+      font-size: 12.5px;
     }
-    tbody tr:hover { background: rgba(15, 118, 110, 0.04); }
-    tbody tr.is-production { background: rgba(15, 118, 110, 0.07); }
-    .model-cell { display: grid; gap: 2px; }
-    .model-cell strong { font-size: 0.98rem; }
+    tbody tr:hover { background: rgba(183,219,82,.16); }
+    tbody tr.is-production { background: rgba(46,74,37,.09); }
+    .model-cell { display: grid; gap: 3px; }
+    .model-cell strong { font-size: 13px; }
     .muted { color: var(--muted); }
     .pill {
       display: inline-flex;
       align-items: center;
-      padding: 0.22rem 0.62rem;
-      border-radius: 999px;
-      font-size: 0.8rem;
-      font-weight: 700;
-      background: var(--panel-2);
-      border: 1px solid rgba(216, 204, 186, 0.9);
+      padding: 3px 8px;
+      border: 1px solid var(--ink);
+      background: var(--paper-2);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: .04em;
     }
-    .pill.good { background: rgba(47, 133, 90, 0.12); color: var(--good); border-color: rgba(47, 133, 90, 0.22); }
-    .pill.warn { background: rgba(183, 121, 31, 0.12); color: var(--warn); border-color: rgba(183, 121, 31, 0.22); }
-    .pill.bad { background: rgba(197, 48, 48, 0.12); color: var(--bad); border-color: rgba(197, 48, 48, 0.2); }
-    .pill.prod { background: rgba(15, 118, 110, 0.14); color: var(--accent); border-color: rgba(15, 118, 110, 0.28); }
+    .pill.good { background: rgba(46,74,37,.16); color: var(--good); }
+    .pill.warn { background: rgba(229,110,54,.22); color: var(--warn); }
+    .pill.bad { background: rgba(168,40,15,.16); color: var(--bad); }
+    .pill.prod { background: var(--green); color: var(--ink); }
     .accuracy-stack { display: grid; gap: 8px; min-width: 130px; }
-    .bar { width: 100%; height: 10px; border-radius: 999px; background: #eee5d7; overflow: hidden; }
-    .bar > span { display: block; height: 100%; border-radius: inherit; }
+    .bar { width: 100%; height: 9px; border: 1px solid var(--ink); background: var(--paper-2); overflow: hidden; }
+    .bar > span { display: block; height: 100%; }
     .case-chips { display: flex; flex-wrap: wrap; gap: 6px; max-width: 340px; }
     .chip {
-      font-size: 0.76rem;
-      padding: 0.16rem 0.5rem;
-      border-radius: 999px;
-      border: 1px solid transparent;
-      font-family: "SFMono-Regular", "Menlo", monospace;
+      font-size: 11px;
+      padding: 2px 6px;
+      border: 1px solid var(--line);
+      font-family: inherit;
     }
-    .chip.pass { background: rgba(47, 133, 90, 0.12); color: var(--good); }
-    .chip.flaky { background: rgba(183, 121, 31, 0.16); color: var(--warn); border-color: rgba(183, 121, 31, 0.35); }
-    .chip.fail { background: rgba(197, 48, 48, 0.12); color: var(--bad); }
-    .chip.errored { background: #ece7dd; color: var(--muted); }
+    .chip.pass { background: rgba(46,74,37,.14); color: var(--good); }
+    .chip.flaky { background: rgba(229,110,54,.2); color: var(--warn); border-color: var(--orange); }
+    .chip.fail { background: rgba(168,40,15,.14); color: var(--bad); border-color: var(--bad); }
+    .chip.errored { background: rgba(21,25,15,.08); color: var(--muted); }
     .empty-state {
       padding: 64px 24px;
       text-align: center;
-      background: color-mix(in srgb, var(--panel) 88%, white);
-      border: 1px solid rgba(216, 204, 186, 0.9);
-      border-radius: var(--radius);
+      background: rgba(255,255,255,.22);
+      border: 2px solid var(--ink);
       box-shadow: var(--shadow);
     }
-    .empty-state h2 { margin-top: 0; font-family: "Iowan Old Style", serif; }
-    .footnote { margin-top: 12px; color: var(--muted); font-size: 0.83rem; }
+    .empty-state h2 { margin-top: 0; font-family: Georgia, serif; font-weight: 500; }
+    .footnote { margin-top: 12px; color: var(--muted); font-size: 11.5px; line-height: 1.6; }
     @media (max-width: 1040px) {
       .layout { grid-template-columns: 1fr; }
       .sidebar { position: static; }
     }
     @media (max-width: 720px) {
-      .page { padding: 24px 16px 40px; }
+      .shell { width: min(100% - 22px, 1480px); }
       .prod-grid { grid-template-columns: 1fr; }
     }
 """

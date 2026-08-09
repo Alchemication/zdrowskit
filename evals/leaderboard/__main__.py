@@ -32,6 +32,14 @@ def main() -> None:
     )
     render_html_parser.add_argument("--runs-path", type=Path, default=RUNS_PATH)
     render_html_parser.add_argument("--html-path", type=Path, default=HTML_PATH)
+    render_html_parser.add_argument(
+        "--nav-base",
+        default=None,
+        help=(
+            "Relative path to the public-site root (e.g. '../'), which adds the "
+            "shared site header and footer. Omit for the standalone local file."
+        ),
+    )
     args = parser.parse_args()
 
     if args.command not in {"render", "render-html"}:
@@ -44,7 +52,9 @@ def main() -> None:
         write_leaderboard_markdown(runs, args.markdown_path, head_sha=head_sha)
         print(f"Rendered leaderboard with {len(runs)} run(s) to {args.markdown_path}")
         return
-    write_leaderboard_html(runs, args.html_path, head_sha=head_sha)
+    write_leaderboard_html(
+        runs, args.html_path, head_sha=head_sha, nav_base=args.nav_base
+    )
     print(f"Rendered HTML leaderboard with {len(runs)} run(s) to {args.html_path}")
 
 

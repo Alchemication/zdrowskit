@@ -1,11 +1,14 @@
-name: Eval Leaderboard Pages
+name: Public Site
 
 on:
   push:
     branches:
       - main
     paths:
-      - ".github/workflows/evals-pages.yml"
+      - ".github/workflows/pages.yml"
+      - "marketing/**"
+      - "docs/**"
+      - "README.md"
       - "evals/leaderboard/**"
       - "evals/cases/**"
       - "uv.lock"
@@ -41,18 +44,14 @@ jobs:
         run: uv python install
 
       - name: Install dependencies
-        run: uv sync --locked
+        run: uv sync --locked --group site
 
-      - name: Render leaderboard site
-        run: |
-          mkdir -p _site
-          # Render both from runs.jsonl rather than copying the committed
-          # Markdown: the checked-in snapshot can lag the history it summarises,
-          # and the published page should never be the stale one.
-          uv run python -m evals.leaderboard render-html --html-path _site/index.html
-          uv run python -m evals.leaderboard render --markdown-path _site/leaderboard.md
-          cp evals/leaderboard/runs.jsonl _site/runs.jsonl
-          touch _site/.nojekyll
+      - name: Build site
+        # Renders the landing page, docs/*.md, and the leaderboard into _site/.
+        # The leaderboard is rendered from runs.jsonl rather than copied from the
+        # committed Markdown: the checked-in snapshot can lag the history it
+        # summarises, and the published page should never be the stale one.
+        run: uv run --group site python marketing/build.py --out _site
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5

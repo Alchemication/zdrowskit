@@ -2045,6 +2045,9 @@ dev = [
     { name = "pytest-cov" },
     { name = "ruff" },
 ]
+site = [
+    { name = "markdown-it-py" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -2065,6 +2068,7 @@ dev = [
     { name = "pytest-cov", specifier = "==7.0.0" },
     { name = "ruff", specifier = "==0.15.6" },
 ]
+site = [{ name = "markdown-it-py", specifier = "==4.0.0" }]
 
 [[package]]
 name = "zipp"

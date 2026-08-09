@@ -59,3 +59,7 @@ Challenge my ideas early. If an approach is over-engineered, fragile, or has a s
 ## Code map
 
 `main.py` is dispatch only — subcommand handlers live in `src/commands.py` plus `src/cmd_*.py` (split as `commands.py` grew past ~1000 lines). The always-on daemon is similarly factored across `src/daemon.py` and `src/daemon_*.py` flows.
+
+The public site is built by `marketing/build.py` (`uv run --group site python marketing/build.py`) into a gitignored `_site/`, and deployed by `.github/workflows/pages.yml`. It has three inputs: the hand-written landing page in `marketing/site/`, `docs/*.md` rendered to HTML, and the eval leaderboard. Docs pages are generated — never hand-write a second copy of a doc for the web. Figures the landing page cites about the evals are `{{PLACEHOLDER}}` tokens resolved at build time from `runs.jsonl`; the build fails on an unresolved token rather than publishing it.
+
+`marketing/site/assets/base.css` is the only place the site's palette and chrome are defined. Every page inlines it at build time — including the leaderboard, which reads the file directly from `evals/leaderboard/html.py` — so each page stays self-contained without forking the design. Never redeclare a colour token in a page's own stylesheet.

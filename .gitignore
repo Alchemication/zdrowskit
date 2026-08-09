@@ -13,3 +13,6 @@ wheels/
 MyHealth
 .env
 evals/.cache.sqlite
+
+# Built marketing site (marketing/build.py)
+_site/
