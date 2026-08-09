@@ -23,6 +23,7 @@ PAIR_STATE_LABELS = {
     "ready": "queued for import",
     "waiting": "waiting for the other half",
     "split": "halves arrived too far apart",
+    "pending": "staged but not imported",
     "imported": "up to date",
 }
 
@@ -214,7 +215,7 @@ def cmd_ingest_status(args: argparse.Namespace) -> None:  # noqa: ARG001
         print(f"  workouts received: {state['workouts_received_at'] or 'never'}")
         print(f"  last imported: {state['last_imported_at'] or 'never'}")
         print(f"  pairing: {PAIR_STATE_LABELS[state['pair_state']]}")
-        if state["pair_state"] in {"waiting", "split"}:
+        if state["pair_state"] in {"waiting", "split", "pending"}:
             print(f"    {state['pair_detail']}")
         if state["last_error"]:
             print(f"  last error: {state['last_error']['message']}")

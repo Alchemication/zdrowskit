@@ -35,6 +35,7 @@ from config import (
     GOOGLE_DRIVE_POLL_INTERVAL_S,
     GOOGLE_DRIVE_SERVICE_ACCOUNT,
     HEALTH_DEBOUNCE_S,
+    HTTP_INGEST_PAIR_WINDOW_S,
     LOCK_FILE,
     LOG_FILE,
     SCHEDULED_CHECK_INTERVAL_S,
@@ -1135,6 +1136,7 @@ class ProfileRuntime:
                 self.profile,
                 silent_after_h=settings["silent_after_h"],
                 split_after_h=settings["split_after_h"],
+                pair_window_s=HTTP_INGEST_PAIR_WINDOW_S,
             )
         except OSError:
             logger.exception("Could not assess ingest health for %s", self.profile.name)

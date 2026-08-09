@@ -496,6 +496,7 @@ def assess_ingest_health(
     *,
     silent_after_h: float,
     split_after_h: float,
+    pair_window_s: float,
     now: datetime | None = None,
 ) -> IngestHealth:
     """Judge whether a profile's phone is still successfully feeding the system.
@@ -510,8 +511,10 @@ def assess_ingest_health(
     ``split``
         Uploads *are* arriving but no pair has imported. Much stronger signal,
         because the phone is demonstrably talking to us, so this is detected
-        far sooner. Almost always two Auto Export automations on schedules
-        that have drifted apart.
+        far sooner. Usually two Auto Export automations on schedules that have
+        drifted apart — but only when the arrival gap actually exceeds the
+        pairing window, which is why that window has to be passed in. Inside
+        it, the phone is doing its job and the fault is on this side.
     ``error``
         The last import failed and none has succeeded since.
 
@@ -524,6 +527,8 @@ def assess_ingest_health(
         silent_after_h: Hours of total silence before reporting ``silent``.
         split_after_h: Hours without a successful import, while uploads keep
             arriving, before reporting ``split``.
+        pair_window_s: Arrival gap the importer tolerates, so a stall can be
+            blamed on drifting schedules only when the halves really missed it.
         now: Override for the current time.
 
     Returns:
@@ -619,14 +624,28 @@ def assess_ingest_health(
         )
 
     gap = abs((arrivals["metrics"] - arrivals["workouts"]).total_seconds())
+    stalled = _format_gap(stalled_for * 3600)
+    if gap > pair_window_s:
+        detail = (
+            f"Data has been arriving for {stalled} but nothing has imported: "
+            f"Metrics and Workouts are {_format_gap(gap)} apart, outside the "
+            f"{_format_gap(pair_window_s)} window in which they import "
+            "together. Set both Auto Export automations to the same schedule "
+            "so they run at the same time."
+        )
+    else:
+        # Telling someone to fix schedules that are already fine sends them
+        # after the one thing that is demonstrably working.
+        detail = (
+            f"Data has been arriving for {stalled} but nothing has imported. "
+            f"Metrics and Workouts are only {_format_gap(gap)} apart, well "
+            f"inside the {_format_gap(pair_window_s)} pairing window, so the "
+            "phone is fine and the import on this end is stuck. Check the "
+            "daemon log and restart it."
+        )
     return IngestHealth(
         status="split",
-        detail=(
-            f"Data has been arriving for {_format_gap(stalled_for * 3600)} but "
-            f"nothing has imported: Metrics and Workouts are {_format_gap(gap)} "
-            "apart and only import together. Set both Auto Export automations "
-            "to the same schedule so they run at the same time."
-        ),
+        detail=detail,
         since=last_import.isoformat() if last_import else None,
     )
 
@@ -769,7 +788,14 @@ class HttpIngestManager:
             )
         if self._pair_candidate(state, profile_name=profile_name) is not None:
             return "ready", "both halves staged and queued for import"
-        return "imported", "both halves already imported"
+        if self._pair_digest(state) == state.get("last_import_pair"):
+            return "imported", "both halves already imported"
+        # Staged payloads the last receipt does not cover. Reporting these as
+        # imported is how a stalled pair stayed invisible in `ingest status`.
+        return "pending", (
+            "both halves are staged but no import has recorded them yet; "
+            "an import may still be running"
+        )
 
     def _upload_markers(self, state: dict[str, Any]) -> dict[str, str] | None:
         """Return request identities for the latest Metrics and Workouts uploads."""
@@ -792,7 +818,15 @@ class HttpIngestManager:
         *,
         profile_name: str,
     ) -> tuple[str, dict[str, str]] | None:
-        """Return a complete pair only when both halves advanced after import."""
+        """Return a complete pair once at least one half advanced after import.
+
+        Requiring *both* halves to be new deadlocks the common case: the two
+        automations rarely fire simultaneously, so whichever half lands second
+        pairs with an already-imported partner and would be refused until its
+        own partner uploaded again. The digest check above already rejects a
+        pair that is identical to the last imported one, so re-reading an
+        unchanged half is the harmless price of importing the fresh one.
+        """
         pair_digest = self._pair_digest(state)
         markers = self._upload_markers(state)
         if pair_digest is None or markers is None:
@@ -800,10 +834,13 @@ class HttpIngestManager:
         if pair_digest == state.get("last_import_pair"):
             return None
         previous = state.get("last_import_uploads")
-        if isinstance(previous, dict) and any(
+        if isinstance(previous, dict) and all(
             previous.get(kind) == marker for kind, marker in markers.items()
         ):
             return None
+        # Overlap with a running import stays ``any``: this only defers the new
+        # pair until that import finishes and rewrites ``last_import_uploads``,
+        # so it cannot deadlock the way the check above did.
         for (inflight_profile, _digest), inflight_markers in self._inflight.items():
             if inflight_profile == profile_name and any(
                 inflight_markers.get(kind) == marker for kind, marker in markers.items()

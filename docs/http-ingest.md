@@ -268,9 +268,14 @@ Per profile, the ingest cache is bounded to:
 - a small state file with the latest hashes and at most 100 import receipts
 - one transient immutable pair while an import is running
 
-An identical completed pair is acknowledged but not re-imported. A crash after
-HTTP `202` leaves the latest pair on disk; daemon startup detects and imports
-it. Parser failures keep the latest pair and a short error record for diagnosis.
+Each half imports as soon as it is new, against whatever partner is currently
+staged, provided the two are still within the pairing window. Requiring both
+halves to be new instead would strand whichever one arrived second, since two
+automations rarely fire at the same instant. Freshness is the window's job, not
+the import's. An identical completed pair is acknowledged but not re-imported.
+A crash after HTTP `202` leaves the latest pair on disk; daemon startup detects
+and imports it. Parser failures keep the latest pair and a short error record
+for diagnosis.
 
 ## Raw Payload Archive
 
@@ -321,8 +326,9 @@ can happen:
 
 | `pairing:` | Meaning |
 |---|---|
-| `up to date` | Both halves arrived and imported. Steady state. |
+| `up to date` | Both halves arrived and the last import covers exactly them. Steady state. |
 | `queued for import` | Both halves are staged; the daemon is importing them now. |
+| `staged but not imported` | Both halves are on disk but no receipt covers them yet — normally an import running right now. If it persists, the import is stuck; check the daemon log. |
 | `waiting for the other half` | Only Metrics or only Workouts has ever arrived, or the other half is missing. Check that both automations exist and use the same URL and token. |
 | `halves arrived too far apart` | Both arrived, but more than an hour apart, so they were not paired. The next export resends the same window, so this delays an import rather than losing it; give both automations the same schedule. |
 
