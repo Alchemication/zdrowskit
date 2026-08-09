@@ -391,8 +391,8 @@
 
     .routing-grid {
       display: grid;
-      grid-template-columns: .85fr 1.15fr;
-      gap: clamp(28px, 5vw, 60px);
+      grid-template-columns: 1fr 1fr;
+      gap: clamp(28px, 5vw, 70px);
       align-items: start;
     }
 
@@ -401,32 +401,6 @@
     .routing-note { border-left: 5px solid var(--orange); padding-left: 16px; }
     .routing-foot { margin: 14px 0 0; font-size: 11.5px !important; }
 
-    .routing-scroll { overflow-x: auto; border: 2px solid var(--ink); box-shadow: var(--shadow); }
-
-    table.routing { width: 100%; min-width: 460px; border-collapse: collapse; background: rgba(255,255,255,.28); }
-    table.routing th {
-      padding: 11px 13px;
-      background: var(--ink);
-      color: var(--paper);
-      font-size: 10px;
-      font-weight: 900;
-      letter-spacing: .1em;
-      text-transform: uppercase;
-      text-align: left;
-    }
-    table.routing td {
-      padding: 12px 13px;
-      border-bottom: 1px solid var(--line);
-      font-size: 12.5px;
-      line-height: 1.55;
-      vertical-align: top;
-    }
-    table.routing tbody tr:last-child td { border-bottom: 0; }
-    table.routing td:first-child { font-weight: 800; white-space: nowrap; }
-    table.routing code { font-size: 11.5px; white-space: nowrap; }
-    /* An unmeasured route is marked, not blended in. */
-    table.routing tr.gap { background: rgba(229,110,54,.13); }
-    table.routing tr.gap td:last-child { color: #7c3208; }
 
     .fact {
       padding: 22px;
@@ -554,7 +528,8 @@
         <p class="btn-sub">Set up, then share with family &amp; friends</p>
         <p class="signal">
           Free and open source. Self-hosted on one machine you own.<br>
-          Requires an Apple Watch, an always-on computer and your own LLM API key.
+          Requires an Apple Watch, an always-on computer, and your own LLM API
+          key &mdash; about $10 a year.
         </p>
       </div>
     </section>
@@ -700,35 +675,31 @@
     <section class="shell routing-section" aria-labelledby="routing-label">
       <div class="section-label" id="routing-label">04 / Every job gets its own model</div>
       <div class="routing-grid">
+        <h2>The model that writes your report is not the one that checks it.</h2>
         <div>
-          <h2>The model that writes your report is not the one that checks it.</h2>
           <p>
-            Each surface is scored against the same eval cases and routed to whatever
+            Reports, nudges, chat and the verifier that reads them each run on a
+            different model, at a different reasoning level, with its own fallback.
+            Each one is scored against the same eval cases and routed to whatever
             measured best for that job — which is how the verifier ended up on the
-            <em>cheapest</em> model here. It beat both premium options at catching bad
-            claims, and being cheap is why it can check every report instead of a sample.
+            <em>cheapest</em> model of the lot. It beat both premium options at
+            catching bad claims, and being cheap is why it can check every report
+            instead of a sample.
           </p>
           <p>
             Every route has a fallback, so one provider having a bad morning degrades
-            the answer rather than losing it.
-          </p>
-          <p>
-            New models land and prices fall constantly. Each candidate gets measured
-            against the same cases, and a route moves when the numbers justify it —
-            cheaper, better, or a trade written down in the open. Costs should keep
-            falling from here.
+            the answer rather than losing it. New models land and prices fall
+            constantly; each candidate gets measured against the same cases, and a
+            route moves when the numbers justify it — cheaper, better, or a trade
+            written down in the open. Costs should keep falling from here.
           </p>
           <p class="routing-note">
             Routes are chosen by measurement; the leaderboard shows which, and where
             the gaps are. <a href="evals/">Read the leaderboard →</a>
           </p>
-        </div>
-        <div>
-          {{ROUTING_TABLE}}
           <p class="routing-foot">
-            Read from the shipped defaults when this page was built, so it cannot
-            drift from the code. Re-scored against {{EVAL_CASE_COUNT}} eval cases;
-            last recorded {{EVAL_UPDATED}}.
+            Re-scored against {{EVAL_CASE_COUNT}} eval cases; last recorded
+            {{EVAL_UPDATED}}.
           </p>
         </div>
       </div>

@@ -84,32 +84,6 @@ DOCS_BLURBS = {
 }
 
 
-# The landing page shows the user-facing surfaces only, in narrative order:
-# the report, the checker that reads it, the two things that reach you, and the
-# one route that is not backed by measurement. The other four features in
-# `model_prefs` are utility calls nobody asks about.
-ROUTING_FEATURES: tuple[str, ...] = (
-    "insights",
-    "verification",
-    "chat",
-    "nudge",
-    "coach",
-)
-
-# Why each route is what it is, in the reader's terms. Model names and
-# fallbacks are read from the code so they cannot go stale; this cannot be, so
-# the build fails rather than shipping a surface with no explanation.
-ROUTING_WHY: dict[str, str] = {
-    "insights": "Judgement work, but a frontier model measured no better here — and cost 60x more.",
-    "verification": "Measured best at catching bad claims: 85.7% against 57.1% for both premium options. Being cheap is why it can check every report rather than a sample.",
-    "chat": "You are waiting on this one. Seven seconds beats thirty.",
-    "nudge": "Scored 80% against 40% for three pricier models, and answers in under five seconds.",
-    "coach": "No eval coverage — this route was chosen on price, not evidence.",
-}
-
-# Routes with no measurement behind them. Called out in the table rather than
-# blended in: a scorecard that hides its own gaps is not worth publishing.
-ROUTING_GAPS: frozenset[str] = frozenset({"coach"})
 
 
 @dataclass(frozen=True)
@@ -484,57 +458,6 @@ def landing_placeholders() -> dict[str, str]:
     return {"EVAL_CASE_COUNT": str(count), "EVAL_UPDATED": created}
 
 
-def routing_table() -> str:
-    """Render the per-feature model routing as an HTML table.
-
-    Model names, fallbacks and reasoning levels come from
-    `model_prefs.default_model_prefs()` so the published table always matches
-    the shipped defaults — the routes changed four times in three days once,
-    and a hand-written copy would have been wrong within a week. It reads
-    defaults rather than any profile, so it never shows a local override.
-
-    Returns:
-        An HTML `<table>`.
-
-    Raises:
-        SystemExit: If a listed feature has no entry in `ROUTING_WHY`.
-    """
-    sys.path.insert(0, str(REPO_ROOT / "src"))
-    import model_prefs
-
-    defaults = model_prefs.default_model_prefs()["features"]
-
-    missing = [f for f in ROUTING_FEATURES if f not in ROUTING_WHY]
-    if missing:
-        print(
-            f"error: no ROUTING_WHY entry for: {', '.join(missing)}.\n"
-            "Every routed surface on the landing page needs a plain-language "
-            "reason. Add one in marketing/build.py.",
-            file=sys.stderr,
-        )
-        raise SystemExit(1)
-
-    rows = []
-    for feature in ROUTING_FEATURES:
-        entry = defaults.get(feature, {})
-        label = model_prefs.FEATURE_LABELS.get(feature, feature)
-        model = model_prefs.model_label(str(entry.get("primary", "—")))
-        gap = feature in ROUTING_GAPS
-        rows.append(
-            f"    <tr{' class="gap"' if gap else ''}>"
-            f"<td>{html.escape(label)}</td>"
-            f"<td><code>{html.escape(model)}</code></td>"
-            f"<td>{html.escape(ROUTING_WHY[feature])}</td></tr>"
-        )
-    body = "\n".join(rows)
-    return (
-        '<div class="routing-scroll">\n  <table class="routing">\n'
-        "    <thead><tr><th>Job</th><th>Model</th><th>Why this one</th></tr></thead>\n"
-        f"    <tbody>\n{body}\n    </tbody>\n"
-        "  </table>\n</div>"
-    )
-
-
 def render_landing(out: Path, base_css: str) -> None:
     """Copy the landing page, substituting its build-time placeholders.
 
@@ -549,7 +472,6 @@ def render_landing(out: Path, base_css: str) -> None:
     page = (SITE_SRC / "index.html").read_text(encoding="utf-8")
     substitutions = {
         "BASE_CSS": base_css,
-        "ROUTING_TABLE": routing_table(),
         **landing_placeholders(),
     }
     for name, value in substitutions.items():
