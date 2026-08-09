@@ -78,6 +78,51 @@ whatever you make it. Point any surface at a premium model and that one line wil
 outweigh all the others combined; the coach on Opus 5 was 25% of spend on its own
 until 2026-08-09.
 
+### What the routing is worth
+
+Per-task routing exists to make the previous table small. Repricing exactly the
+same six weeks of calls — same prompts, same token counts — as if every surface
+ran on a frontier model. Opus 5 is the stand-in below because it is the tier
+this app actually measured; another frontier model such as GPT-Sol prices
+close enough that the conclusion does not move.
+
+| | Per-task routing | Everything on Opus 5 |
+|---|---:|---:|
+| 6 weeks | $1.20 | $33.42 |
+| Per week | $0.20 | $5.57 |
+| Per month | $0.87 | $24.14 |
+| Per year | **$10.42** | **$289.68** |
+
+**About 28x.** Per surface:
+
+| Surface | Current | On Opus 5 | Ratio |
+|---|---:|---:|---:|
+| Nudges | $0.5731 | $13.37 | 23x |
+| Chat | $0.3435 | $8.36 | 24x |
+| Verification (nudge) | $0.1268 | $6.60 | 52x |
+| Reports | $0.0960 | $2.26 | 24x |
+| Verification (report) | $0.0299 | $1.58 | 53x |
+| Coach | $0.0168 | $0.39 | 23x |
+
+The spread is the interesting part. Surfaces on Luna land near 23-25x, because
+Opus 5 costs 25x Luna on input and about 21x on output, and real traffic is
+mostly input — a week of health data as context. The verification surfaces run
+on Flash and land near 52x, because Flash is cheaper still. Verification is a
+third of the all-Opus bill and 13% of the routed one: checking the output is
+only affordable at all because the checker is not the expensive model.
+
+Two honest caveats. This holds token counts fixed, which is an approximation —
+a different model writes a different number of tokens, so the real figure would
+drift. And it is not a quality claim: reports measurably lost accuracy moving
+off Opus 5 (86.7% attempt-weighted to 73.3%), and coach moved with no
+measurement at all.
+
+Individual surfaces have been quoted at 50-80x elsewhere in this document — for
+instance Opus 5 at $0.098 a nudge against Luna, roughly 80x. Those come from
+eval runs, which are output-heavier than production traffic and sometimes
+compare against Flash rather than Luna. Both figures are real; 28x is the one
+that describes a month of actual use.
+
 Note that nudge *calls* ran at about 4.3/day against `MAX_NUDGES_PER_DAY = 2`.
 The cap governs delivered nudges; a trigger that the coach evaluates and then
 decides to stay quiet about still costs a call. Estimating nudges from the cap
