@@ -4,32 +4,36 @@ Feedback-derived regression scorecard for zdrowskit evals. The production table 
 
 ## Production
 
-Latest run on production routes per feature, against the 28 cases in `evals/cases` today.
+Latest run on production routes per feature, against the 30 cases in `evals/cases` today.
 
 | Feature | Route | Cases | Strict | Attempt | Flaky | Repeat | Avg Latency | Cost/run | Revision | Recorded |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
-| chat | gpt-5.6-luna (high) | 11/11 | 81.8% | 87.9% | 1 | 3 | 7.82s | $0.0132 | adc9c5e* | 2026-08-08 |
-| insights | claude-opus-5 (high) | 1/1 | 0.0% | 66.7% | 1 | 3 | 28.95s | $0.3072 | adc9c5e* | 2026-08-08 |
-| memory | gpt-5.6-luna | 3/3 | 100.0% | 100.0% | 0 | 3 | 1.27s | $0.0007 | adc9c5e* | 2026-08-08 |
-| nudge | gpt-5.6-luna (high) | 6/6 | 100.0% | 100.0% | 0 | 3 | 5.19s | $0.0095 | adc9c5e* | 2026-08-08 |
-| verification_judge | deepseek-v4-pro (high) | 7/7 | 42.9% | 71.4% | 3 | 3 | 50.55s | $0.0229 | adc9c5e* | 2026-08-08 |
+| chat | gpt-5.6-luna (high) | 11/11 | 81.8% | 87.9% | 1 | 3 | 7.82s | $0.0132 | adc9c5e* (stale) | 2026-08-08 |
+| insights | claude-opus-5 (high) | 1/3 | 0.0% | 66.7% | 1 | 3 | 28.95s | $0.3072 | adc9c5e* (stale) | 2026-08-08 |
+| memory | gpt-5.6-luna | 3/3 | 100.0% | 100.0% | 0 | 3 | 1.27s | $0.0007 | adc9c5e* (stale) | 2026-08-08 |
+| nudge | gpt-5.6-luna (high) | 6/6 | 100.0% | 100.0% | 0 | 3 | 5.19s | $0.0095 | adc9c5e* (stale) | 2026-08-08 |
+| verification_judge | deepseek-v4-pro (high) | 7/7 | 42.9% | 71.4% | 3 | 3 | 50.55s | $0.0229 | adc9c5e* (stale) | 2026-08-08 |
+
+**`insights` is missing 2 case(s)** added since that run: `insights_does_not_contradict_the_stated_hrv_trend`, `insights_does_not_label_a_post_week_run_with_the_wrong_day`
+
+**Measured code that has since changed:** `chat`, `insights`, `memory`, `nudge`, `verification_judge`. Re-record to score the code as it stands.
 
 ## chat · 11 cases
 
 | Model | Reasoning | Repeat | Cases | Strict | Attempt | Flaky | Avg Latency | Cost/run | Revision | Failing |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
-| **production routes** | production | 3 | 11/11 | 81.8% | 87.9% | 1 | 7.82s | $0.0132 | adc9c5e* | `chat_running_speed_trend_chart_text_independent` 2/3<br>`chat_tempo_short_warmup_negative` 0/3 |
+| **production routes** | production | 3 | 11/11 | 81.8% | 87.9% | 1 | 7.82s | $0.0132 | adc9c5e* (stale) | `chat_running_speed_trend_chart_text_independent` 2/3<br>`chat_tempo_short_warmup_negative` 0/3 |
 
 Leading row (`production routes`, repeat=3) per-case stability:
 
 - `chat_running_speed_trend_chart_text_independent` 2/3 FLAKY — includes_chart_block
 - `chat_tempo_short_warmup_negative` 0/3 fail — treats_shortened_session_as_not_meeting_the_prescription
 
-## insights · 1 cases
+## insights · 3 cases
 
 | Model | Reasoning | Repeat | Cases | Strict | Attempt | Flaky | Avg Latency | Cost/run | Revision | Failing |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
-| **production routes** | production | 3 | 1/1 | 0.0% | 66.7% | 1 | 28.95s | $0.3072 | adc9c5e* | `insights_fits_a_phone_notification_w31` 2/3 |
+| **production routes** | production | 3 | 1/3 | 0.0% | 66.7% | 1 | 28.95s | $0.3072 | adc9c5e* (stale) | `insights_fits_a_phone_notification_w31` 2/3 |
 
 Leading row (`production routes`, repeat=3) per-case stability:
 
@@ -39,7 +43,7 @@ Leading row (`production routes`, repeat=3) per-case stability:
 
 | Model | Reasoning | Repeat | Cases | Strict | Attempt | Flaky | Avg Latency | Cost/run | Revision | Failing |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
-| **production routes** | production | 3 | 3/3 | 100.0% | 100.0% | 0 | 1.27s | $0.0007 | adc9c5e* | - |
+| **production routes** | production | 3 | 3/3 | 100.0% | 100.0% | 0 | 1.27s | $0.0007 | adc9c5e* (stale) | - |
 
 Leading row (`production routes`) passed every case on every attempt.
 
@@ -47,7 +51,7 @@ Leading row (`production routes`) passed every case on every attempt.
 
 | Model | Reasoning | Repeat | Cases | Strict | Attempt | Flaky | Avg Latency | Cost/run | Revision | Failing |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
-| **production routes** | production | 3 | 6/6 | 100.0% | 100.0% | 0 | 5.19s | $0.0095 | adc9c5e* | - |
+| **production routes** | production | 3 | 6/6 | 100.0% | 100.0% | 0 | 5.19s | $0.0095 | adc9c5e* (stale) | - |
 
 Leading row (`production routes`) passed every case on every attempt.
 
@@ -55,7 +59,7 @@ Leading row (`production routes`) passed every case on every attempt.
 
 | Model | Reasoning | Repeat | Cases | Strict | Attempt | Flaky | Avg Latency | Cost/run | Revision | Failing |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
-| **production routes** | production | 3 | 7/7 | 42.9% | 71.4% | 3 | 50.55s | $0.0229 | adc9c5e* | `verification_judge_insights_hrv_precedes_workout_w32` 2/3<br>`verification_judge_insights_invented_drought_length_w32` 2/3<br>`verification_judge_insights_unsupported_vo2max_recency_w15` 0/3<br>`verification_judge_nudge_compound_week_totals_w21` 2/3 |
+| **production routes** | production | 3 | 7/7 | 42.9% | 71.4% | 3 | 50.55s | $0.0229 | adc9c5e* (stale) | `verification_judge_insights_hrv_precedes_workout_w32` 2/3<br>`verification_judge_insights_invented_drought_length_w32` 2/3<br>`verification_judge_insights_unsupported_vo2max_recency_w15` 0/3<br>`verification_judge_nudge_compound_week_totals_w21` 2/3 |
 
 Leading row (`production routes`, repeat=3) per-case stability:
 
