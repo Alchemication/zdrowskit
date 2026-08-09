@@ -1622,6 +1622,23 @@ class TestCallWithRetry:
             PRIMARY_FLASH_MODEL,
         ]
 
+    def test_luna_falls_back_to_flash_not_pro(self) -> None:
+        """OpenAI models had no branch and fell through to DEFAULT_MODEL.
+
+        That sent Luna to DeepSeek Pro — a premium reasoning model inheriting
+        the same effort and token ceiling as the primary, and so liable to
+        repeat the max_output_tokens failure it was there to catch.
+        """
+        chain = _fallback_chain(OPENAI_LUNA_MODEL)
+
+        assert chain == [OPENAI_LUNA_MODEL, PRIMARY_FLASH_MODEL]
+        assert PRIMARY_PRO_MODEL not in chain
+
+    def test_premium_openai_models_still_pair_with_pro(self) -> None:
+        chain = _fallback_chain("openai/gpt-5-pro")
+
+        assert chain == ["openai/gpt-5-pro", PRIMARY_PRO_MODEL]
+
     def test_deepseek_attempt_omits_reasoning_effort(self) -> None:
         kwargs = _completion_kwargs_for_model(
             {

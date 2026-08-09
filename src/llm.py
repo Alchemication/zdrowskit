@@ -179,9 +179,13 @@ def _is_openai_reasoning_model(model: str) -> bool:
 
 
 def _is_budget_model(model: str) -> bool:
-    """Return True for low-cost model variants that should get cheap fallback."""
+    """Return True for low-cost model variants that should get cheap fallback.
+
+    Luna counts: it is the budget-tier primary here, backing chat, nudges and
+    weekly memory, and it must not fail over to a premium reasoning model.
+    """
     normalized = model.lower()
-    return "haiku" in normalized or "flash" in normalized
+    return "haiku" in normalized or "flash" in normalized or "luna" in normalized
 
 
 # DeepSeek thinking mode is binary; high/max reasoning_effort engages it via
@@ -324,6 +328,17 @@ def _fallback_chain(model: str, fallback_models: list[str] | None = None) -> lis
             ]
         )
     if _is_anthropic_model(model):
+        return _dedupe_models(
+            [
+                model,
+                PRIMARY_FLASH_MODEL if _is_budget_model(model) else PRIMARY_PRO_MODEL,
+            ]
+        )
+    if _is_openai_model(model):
+        # Without this branch OpenAI models fell through to DEFAULT_MODEL,
+        # which is DeepSeek Pro. That sent Luna — a budget model whose observed
+        # failure is spending its output budget on reasoning — to a premium
+        # reasoning model inheriting the same effort and ceiling.
         return _dedupe_models(
             [
                 model,
