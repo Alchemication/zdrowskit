@@ -190,6 +190,13 @@ class EvalExecution:
     cost: float | None = None
     cache_hits: int = 0
     cache_misses: int = 0
+    effective_models: list[str] = field(default_factory=list)
+    """Models that actually answered, in call order.
+
+    Distinct from the model the route asked for: `call_llm` falls back on
+    error, so a run can be scored against a model nobody configured. Recording
+    only the request made those substitutions invisible to the leaderboard.
+    """
 
 
 @dataclass
@@ -529,6 +536,17 @@ def _execute_case(
     else:
         raise ValueError(f"Unsupported eval feature: {case.feature}")
     result.execution = execution
+    # `call_llm` falls back on error, so the model that answered is not always
+    # the one the route asked for. Score against what answered: attributing a
+    # fallback's results to the requested model is how a leaderboard reports a
+    # comparison nobody ran.
+    answered = [m for m in execution.effective_models if m]
+    if answered:
+        result.route = {**result.route, "requested_primary": result.model}
+        result.model = answered[-1]
+        result.route["fallback_used"] = any(
+            m != result.route["primary"] for m in answered
+        )
 
 
 def _eval_route(
@@ -1224,10 +1242,14 @@ def run_tool_loop(
     cache_hits = 0
     cache_misses = 0
     last_result: Any = None
+    effective_models: list[str] = []
 
     def _accumulate(result: Any, cache_hit: bool) -> None:
         nonlocal input_tokens, output_tokens, total_tokens
         nonlocal latency_s, cost, cache_hits, cache_misses
+        answered = getattr(result, "model", None)
+        if answered:
+            effective_models.append(str(answered))
         if cache_hit:
             cache_hits += 1
         else:
@@ -1271,6 +1293,7 @@ def run_tool_loop(
                 cost=cost or None,
                 cache_hits=cache_hits,
                 cache_misses=cache_misses,
+                effective_models=list(effective_models),
             )
 
         messages.append(_assistant_message(last_result))
@@ -1315,6 +1338,7 @@ def run_tool_loop(
         cost=cost or None,
         cache_hits=cache_hits,
         cache_misses=cache_misses,
+        effective_models=list(effective_models),
     )
 
 

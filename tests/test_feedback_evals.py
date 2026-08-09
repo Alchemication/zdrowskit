@@ -745,7 +745,10 @@ class TestChatRunner:
         mock_call = MagicMock(
             return_value=llm.LLMResult(
                 text='{"verdict":"pass","issues":[],"confidence":"high"}',
-                model="test-verifier",
+                # LLMResult.model is the model that answered. Naming a stub
+                # here would look like a fallback to the runner, which now
+                # scores against whichever model actually replied.
+                model="deepseek/deepseek-v4-pro",
                 input_tokens=100,
                 output_tokens=10,
                 total_tokens=110,

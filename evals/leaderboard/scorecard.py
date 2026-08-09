@@ -177,6 +177,9 @@ def _variation_row(
         "revision_label": format_revision(run),
         "stale": bool(is_stale(git_sha)),
         "case_rows": [_case_row(row) for row in rows],
+        "fallback_case_ids": [
+            str(row["case_id"]) for row in rows if row.get("fallback_used")
+        ],
         "flaky_case_ids": [str(row["case_id"]) for row in rows if row["flaky"]],
         "failed_case_ids": [
             str(row["case_id"]) for row in rows if row["outcome"] == "fail"

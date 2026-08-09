@@ -163,6 +163,18 @@ def _production_notes(scorecard: dict[str, Any]) -> list[str]:
             + ", ".join(f"`{feature}`" for feature in stale)
             + ". Re-record to score the code as it stands."
         )
+    fell_back = [
+        entry["row"]["feature"]
+        for entry in scorecard["production"]
+        if entry["row"] is not None and entry["row"]["fallback_case_ids"]
+    ]
+    if fell_back:
+        notes.append(
+            "**Answered by a fallback model:** "
+            + ", ".join(f"`{feature}`" for feature in fell_back)
+            + ". The route's primary failed on at least one case, so those "
+            "scores belong to the fallback, not the model named above."
+        )
     single_sample = [
         entry["row"]["feature"]
         for entry in scorecard["production"]

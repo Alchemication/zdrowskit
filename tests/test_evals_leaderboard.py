@@ -250,6 +250,55 @@ class TestRepeatAggregation:
         assert summary["errored_case_count"] == 1
 
 
+class TestFallbackVisibility:
+    """A fallback must not be scored under the model the route asked for."""
+
+    def test_record_marks_a_case_answered_by_a_fallback(self) -> None:
+        result = _eval_result("case-a", passed=True)
+        result.model = "deepseek/deepseek-v4-flash"
+        result.route = {
+            **result.route,
+            "primary": "openai/gpt-5.6-luna",
+            "requested_primary": "openai/gpt-5.6-luna",
+            "fallback_used": True,
+        }
+
+        record = _build_record(
+            case_ids=["case-a"],
+            results=[result],
+            requested_model=None,
+            reasoning_effort="production",
+            created_at="2026-04-11T10:00:00Z",
+            run_id="run-fallback",
+        )
+
+        assert record["per_case"][0]["fallback_used"] is True
+        assert record["per_case"][0]["model"] == "deepseek/deepseek-v4-flash"
+
+    def test_markdown_says_which_features_a_fallback_answered(self) -> None:
+        result = _eval_result("case-a", passed=True, feature="nudge")
+        result.model = "deepseek/deepseek-v4-flash"
+        result.route = {
+            **result.route,
+            "primary": "openai/gpt-5.6-luna",
+            "fallback_used": True,
+        }
+        record = _build_record(
+            case_ids=["case-a"],
+            results=[result],
+            requested_model=None,
+            reasoning_effort="production",
+            created_at="2026-04-11T10:00:00Z",
+            run_id="run-fallback-md",
+        )
+
+        markdown = leaderboard.render_leaderboard_markdown(
+            [record], inventory=[_case("case-a", "nudge")]
+        )
+
+        assert "Answered by a fallback model:** `nudge`" in markdown
+
+
 class TestProductionScorecard:
     def test_production_row_uses_latest_production_run_per_feature(self) -> None:
         old = _build_record(

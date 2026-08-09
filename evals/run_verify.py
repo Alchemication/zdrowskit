@@ -96,6 +96,9 @@ def run_verification_judge_case(
             cost=getattr(llm_result, "cost", None),
             cache_hits=1 if cache_hit else 0,
             cache_misses=0 if cache_hit else 1,
+            effective_models=(
+                [str(llm_result.model)] if getattr(llm_result, "model", None) else []
+            ),
         ),
         model,
         {

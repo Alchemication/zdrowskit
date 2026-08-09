@@ -245,6 +245,9 @@ def _aggregate_per_case(results: list[EvalResult]) -> list[dict[str, Any]]:
                 "case_kind": first.case_kind,
                 "model": first.model,
                 "route": first.route,
+                "fallback_used": any(
+                    bool((a.route or {}).get("fallback_used")) for a in attempts
+                ),
                 "runs": len(attempts),
                 "scored": len(scored),
                 "errored": len(attempts) - len(scored),
