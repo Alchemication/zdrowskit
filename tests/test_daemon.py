@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import daemon as daemon_module
 import daemon_runners as daemon_runners_module
+from cmd_llm_common import InsufficientWeekData
 from cmd_llm_common import CommandResult
 from context_edit import (
     ContextEdit,
@@ -89,6 +90,34 @@ class TestWeeklyReportScheduling:
             None,
             detail=None,
         )
+
+    def test_weekly_report_skips_quietly_when_the_week_has_no_data(
+        self, tmp_path: Path
+    ) -> None:
+        """A profile onboarded mid-week must not be told its report failed.
+
+        The condition resolves itself as data accumulates, so it is a skip,
+        not a failure — otherwise every new user gets an error notification on
+        every scheduled run until their first complete week lands.
+        """
+        daemon = _make_daemon(tmp_path)
+
+        with (
+            patch.object(daemon, "_run_import"),
+            patch(
+                "cmd_insights.cmd_insights",
+                side_effect=InsufficientWeekData("No health data for 2026-W31."),
+            ),
+            patch.object(daemon, "_notify_user_failure") as notify_failure,
+            patch.object(daemon, "_record_event") as record_event,
+        ):
+            daemon._run_weekly_report()
+
+        notify_failure.assert_not_called()
+        kinds = [call.args[1] for call in record_event.call_args_list]
+        assert "insufficient_data" in kinds
+        today = daemon_runners_module.date.today().isoformat()
+        assert daemon._state["last_review_skip_date"] == today
 
     def test_weekly_report_does_not_re_run_after_failure_same_day(
         self, tmp_path: Path

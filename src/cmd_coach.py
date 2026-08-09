@@ -14,6 +14,7 @@ from data_maturity import build_data_maturity
 from cmd_llm_common import (
     CommandResult,
     apply_verification,
+    fail_without_week_data,
     normalize_reasoning_effort,
     route_kwargs,
     save_baselines,
@@ -117,8 +118,7 @@ def cmd_coach(
     week = getattr(args, "week", "current")
     health_data = build_llm_data(conn, getattr(args, "months", 3), week=week)
     if health_data["current_week"]["summary"] is None:
-        logger.error("Database is empty. Run 'import' first.")
-        sys.exit(1)
+        fail_without_week_data(conn, health_data)
 
     baselines = compute_baselines(conn)
     milestones = compute_milestones(conn)

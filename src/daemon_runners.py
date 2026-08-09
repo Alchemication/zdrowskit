@@ -21,6 +21,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from cmd_llm_common import InsufficientWeekData
 from config import (
     COACH_SUPPRESSION_S,
     MIN_NUDGE_INTERVAL_S,
@@ -529,6 +530,14 @@ class DaemonRunnerHandler:
                 self._d._record_report("review")
                 self._d._state["last_report_ts"] = datetime.now().isoformat()
                 self._d._save_state()
+            except InsufficientWeekData as exc:
+                logger.info("Manual review skipped: %s", exc)
+                self._d._record_event(
+                    "insights",
+                    "insufficient_data",
+                    str(exc),
+                    {"kind": "review"},
+                )
             except SystemExit:
                 # Snapshot before our own logger.error overwrites the capture.
                 captured = cap.last_message
@@ -605,6 +614,19 @@ class DaemonRunnerHandler:
                     llm_call_id=result.llm_call_id,
                 )
                 self._d._run_coach(week="last", skip_import=True)
+            except InsufficientWeekData as exc:
+                # A profile onboarded mid-week has no complete week yet. That
+                # resolves itself, so record a skip and stay quiet rather than
+                # telling a new user their report failed every scheduled run.
+                logger.info("Weekly review skipped: %s", exc)
+                self._d._state["last_review_skip_date"] = date.today().isoformat()
+                self._d._save_state()
+                self._d._record_event(
+                    "insights",
+                    "insufficient_data",
+                    str(exc),
+                    {"kind": "weekly"},
+                )
             except SystemExit:
                 captured = cap.last_message
                 suppression = cap.last_suppression
@@ -884,6 +906,14 @@ class DaemonRunnerHandler:
                         {"week": week, "force": force},
                         llm_call_id=cmd_result.llm_call_id,
                     )
+            except InsufficientWeekData as exc:
+                logger.info("Coaching review skipped: %s", exc)
+                self._d._record_event(
+                    "coach",
+                    "insufficient_data",
+                    str(exc),
+                    {"week": week, "force": force},
+                )
             except SystemExit:
                 captured = cap.last_message
                 suppression = cap.last_suppression

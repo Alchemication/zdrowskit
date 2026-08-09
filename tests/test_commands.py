@@ -9,10 +9,16 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import call, patch
 
+import pytest
+
 from cmd_db import cmd_db
 from cmd_coach import cmd_coach
 from cmd_insights import cmd_insights
-from cmd_llm_common import apply_verification
+from cmd_llm_common import (
+    InsufficientWeekData,
+    apply_verification,
+    fail_without_week_data,
+)
 from cmd_llm_log import cmd_llm_log
 from cmd_notify_interpreter import interpret_notify_request
 from cmd_nudge import cmd_nudge
@@ -1999,3 +2005,34 @@ class TestCmdDb:
         out = capsys.readouterr().out
         assert "Applied" in out
         assert "20260404_154500__002_add_llm_call_cost" in out
+
+
+class TestFailWithoutWeekData:
+    """A missing week and a missing database need different outcomes."""
+
+    def _conn(self, rows: list[str]) -> sqlite3.Connection:
+        conn = sqlite3.connect(":memory:")
+        conn.execute("CREATE TABLE daily (date TEXT)")
+        conn.executemany("INSERT INTO daily (date) VALUES (?)", [(d,) for d in rows])
+        conn.commit()
+        return conn
+
+    def test_empty_database_exits_and_says_to_import(self, caplog) -> None:
+        """An empty database is a setup problem the user has to act on."""
+        with pytest.raises(SystemExit):
+            fail_without_week_data(self._conn([]), {"week_label": "2026-W31"})
+
+        assert "database is empty" in caplog.text.lower()
+        assert "import" in caplog.text.lower()
+
+    def test_young_database_raises_insufficient_not_system_exit(self) -> None:
+        """A cold-start profile resolves itself; it must not read as a failure."""
+        conn = self._conn(["2026-08-03", "2026-08-04", "2026-08-05"])
+
+        with pytest.raises(InsufficientWeekData) as excinfo:
+            fail_without_week_data(conn, {"week_label": "2026-W31"})
+
+        message = str(excinfo.value)
+        assert "2026-W31" in message
+        assert "2026-08-03 to 2026-08-05" in message
+        assert "empty" not in message.lower()

@@ -16,6 +16,7 @@ from charts import ChartResult, extract_charts, render_chart, strip_charts
 from cmd_llm_common import (
     CommandResult,
     apply_verification,
+    fail_without_week_data,
     hit_token_ceiling,
     normalize_reasoning_effort,
     route_kwargs,
@@ -213,8 +214,7 @@ def cmd_insights(
     conn = open_db(Path(args.db))
     health_data = build_llm_data(conn, args.months, week=REPORT_WEEK)
     if health_data["current_week"]["summary"] is None:
-        logger.error("Database is empty. Run 'import' first.")
-        sys.exit(1)
+        fail_without_week_data(conn, health_data)
 
     baselines = None
     milestones = None

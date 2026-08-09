@@ -93,6 +93,7 @@ sys.path.insert(0, str(Path(__file__).parent / "src"))
 from cmd_db import cmd_db
 from cmd_events import CATEGORIES as EVENT_CATEGORIES, cmd_events
 from cmd_coach import cmd_coach
+from cmd_llm_common import InsufficientWeekData
 from cmd_insights import cmd_insights
 from cmd_ingest import cmd_ingest
 from cmd_llm_log import cmd_llm_log
@@ -679,6 +680,11 @@ def main() -> None:
         dispatch[args.cmd](args)
     except ProfileConfigError as exc:
         parser.error(str(exc))
+    except InsufficientWeekData as exc:
+        # Not a crash: the profile is simply younger than the week it was
+        # asked to report on. Say so plainly rather than showing a traceback.
+        print(str(exc), file=sys.stderr)
+        raise SystemExit(1) from None
 
 
 if __name__ == "__main__":

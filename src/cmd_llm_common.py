@@ -6,7 +6,7 @@ import logging
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 from config import (
     ENABLE_LLM_VERIFICATION,
@@ -18,6 +18,7 @@ from config import (
 from llm import LLMResult
 from llm_verify import VerificationKind, verify_and_rewrite
 from model_prefs import resolve_model_route
+from store import load_date_range
 
 logger = logging.getLogger(__name__)
 
@@ -177,3 +178,48 @@ def apply_verification(
     if result.verdict == "fail":
         return None
     return result.revised_text if result.revised_text is not None else draft
+
+
+class InsufficientWeekData(Exception):
+    """The requested week has no data, though the database itself is not empty.
+
+    Distinct from an empty database, which is a setup problem the user must
+    act on. This one resolves itself: a profile onboarded mid-week simply has
+    no complete week to report on yet. Callers that run unattended should
+    record it as a skip rather than surface it as a failure.
+    """
+
+
+def fail_without_week_data(
+    conn: sqlite3.Connection,
+    health_data: dict[str, Any],
+) -> NoReturn:
+    """Stop a report that found no data for the week it was asked to cover.
+
+    An empty database and a database that simply does not reach the requested
+    week are different problems with different fixes, and reporting both as
+    "run import first" sends a user with a freshly imported database off to
+    re-import it. A cold-start profile whose first readings land mid-week hits
+    the second case on every scheduled run until its data catches up, so it
+    raises `InsufficientWeekData` and the daemon logs a skip instead of
+    notifying the user that their report failed.
+
+    Args:
+        conn: Open health database connection.
+        health_data: The assembled payload whose week summary came back empty.
+
+    Raises:
+        InsufficientWeekData: The database holds data, but none for this week.
+        SystemExit: The database holds no data at all.
+    """
+    date_range = load_date_range(conn)
+    if date_range is None:
+        logger.error("The health database is empty. Run 'import' first.")
+        raise SystemExit(1)
+    first, last = date_range
+    week_label = health_data.get("week_label") or "the requested week"
+    raise InsufficientWeekData(
+        f"No health data for {week_label}. The database covers {first} to "
+        f"{last}. Import the missing days with 'import', or wait until that "
+        "week has data."
+    )
