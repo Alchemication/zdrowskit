@@ -46,7 +46,7 @@ Current default routes:
 
 | Feature | Primary | Normal cadence |
 |---|---|---:|
-| Weekly report | `anthropic/claude-opus-5` | 1/week |
+| Weekly report | `openai/gpt-5.6-luna` | 1/week |
 | Coach review | `anthropic/claude-opus-5` | 1/week |
 | Nudges | `openai/gpt-5.6-luna` | up to 2/day |
 | Verification | `deepseek/deepseek-v4-flash` | reports, coach, nudges; Luna fallback |
@@ -54,16 +54,37 @@ Current default routes:
 | Weekly memory | `openai/gpt-5.6-luna` | 1/week, after the report is sent |
 | Chat | `openai/gpt-5.6-luna` | on demand |
 
-Using recent logged token sizes from this app, the always-on daemon lands around:
+Six weeks of this app's own logged traffic (2026-06-29 to 2026-08-09), repriced
+at the routes above and with the removed mid-week report cycles excluded, lands
+around **$1 a month** — roughly $0.15-$0.35 in a given week:
 
-| Workload | Projected cost |
-|---|---:|
-| Report, including DeepSeek verification | ~$0.10/week |
-| Coach review | ~$0.10/week |
-| Nudges at the 2/day cap, including DeepSeek verification | ~$0.21/week |
-| **Daemon total at default caps** | **~$0.51/week** |
+| Workload | Unit cost | Share of spend |
+|---|---:|---:|
+| Weekly report cycle: writer, verifier, rewriter, memory | ~$0.023/run | 9% |
+| Coach review | ~$0.097/run | 25% |
+| Nudge, including verification | ~$0.0039/nudge | 44% |
+| Chat | ~$0.0034/turn | 22% |
+| **Total** | | **~$0.26/week** |
 
-This assumes verification normally succeeds on DeepSeek Pro with thinking engaged (via `reasoning_effort=high`) and rewrite calls remain rare. Verification falls back to Opus 5 with the same `reasoning_effort=high` (sent natively) and omitted temperature.
+A bottom-up estimate agrees: one report, one coach review, two nudges a day,
+fifteen chat turns and a few logs a week comes to ~$0.23/week.
+
+Two things move that number more than the model prices do. **Usage intensity:**
+chat is user-driven, and the light-to-heavy span above is $0.17 to $0.31 a week.
+**Which models you configure:** the coach is the last surface on Opus 5 and is a
+quarter of all spend on its own, while the report — previously the largest line —
+fell to about 6% when it moved to Luna. Routing the coach the same way would put
+the total under $0.20/week; it has no eval coverage, so that change would be
+unmeasured rather than merely cheaper.
+
+Note that nudge *calls* ran at about 4.3/day against `MAX_NUDGES_PER_DAY = 2`.
+The cap governs delivered nudges; a trigger that the coach evaluates and then
+decides to stay quiet about still costs a call. Estimating nudges from the cap
+alone understates them roughly twofold.
+
+Verification normally succeeds on DeepSeek Flash with thinking engaged (via
+`reasoning_effort=high`) and rewrite calls remain rare. Verification falls back
+to Luna with the same `reasoning_effort=high` and omitted temperature.
 
 Nudges moved off Opus 5 on 2026-08-08. Measured across the nudge eval cases at five runs per model, Luna took 80% while DeepSeek Flash, DeepSeek Pro and Opus 5 all sat at 40%; Luna also swept the week-totals case 5/5 and answered in 4.6 s against 13-28 s. Opus 5 cost $0.098 a nudge — 80x Luna — for no measured gain, which is why the fallback is not the profile's premium default. It moved from DeepSeek Pro to DeepSeek Flash on 2026-08-09 — in `model_prefs` and, more importantly, in `_fallback_chain`, which had no OpenAI branch and sent every Luna call to `DEFAULT_MODEL` (DeepSeek Pro) regardless of what the route configured: all three scored the same 40%, and Luna's observed failure is `max_output_tokens` — it spends the output budget on reasoning and emits nothing — so a reasoning model inheriting the same effort and ceiling is the tier most likely to repeat it. Note that no model passes the invented-metric case reliably (best 3/5): that is a prompt defect, not a routing one.
 
