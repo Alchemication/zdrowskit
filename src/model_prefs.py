@@ -190,6 +190,19 @@ def _feature_defaults(feature: str, primary: str) -> dict[str, Any]:
     entry.update(_feature_model_defaults(feature, primary))
     if feature in ASYNC_QUALITY_FEATURES and primary == ANTHROPIC_OPUS_MODEL:
         entry["fallback"] = PRIMARY_PRO_MODEL
+    elif feature == "insights":
+        # Reports left Opus 5 on cost, not on a measured quality win. Measured
+        # over the three insights cases at five runs each, Opus took 86.7%
+        # attempt-weighted against Luna's 73.3% and Flash's 66.7% — but at
+        # $0.5852 a covered run against $0.0117 and $0.0076, roughly 60x. Luna
+        # and Flash tied on strict accuracy and traded places between two
+        # consecutive runs of the same config, so three cases could not
+        # separate them; Luna wins on latency (20s against 56s) and did not
+        # show the empty-report failure Flash produced once.
+        #
+        # This is a judgement call on price and speed, not a quality result.
+        # Revisit once insights has enough cases to decide it properly.
+        entry["fallback"] = PRIMARY_FLASH_MODEL
     elif feature == "nudge":
         # Nudges sit in the pro profile, whose fallback is Opus 5. That is the
         # wrong safety net here: measured on the nudge cases Opus 5, DeepSeek

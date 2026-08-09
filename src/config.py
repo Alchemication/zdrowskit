@@ -359,9 +359,14 @@ OPENAI_LUNA_MODEL: str = os.environ.get(
 
 DEFAULT_INSIGHTS_MODEL: str = os.environ.get(
     "ZDROWSKIT_INSIGHTS_MODEL",
-    ANTHROPIC_OPUS_MODEL,
+    OPENAI_LUNA_MODEL,
 )
-"""Default model for weekly insights reports."""
+"""Default model for weekly insights reports.
+
+Moved off Opus 5 on cost: roughly 60x the price of Luna per covered eval run,
+for a quality lead the three insights cases were too few to confirm. See
+``model_prefs._feature_defaults``.
+"""
 
 DEFAULT_COACH_MODEL: str = os.environ.get(
     "ZDROWSKIT_COACH_MODEL",

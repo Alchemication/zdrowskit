@@ -129,6 +129,28 @@ class TestIdentity:
 
         assert single != repeated
 
+    def test_run_fingerprint_changes_with_dirty_state(self) -> None:
+        """An uncommitted case edit changes what a run measures.
+
+        case_set_id hashes case ids, not case content, so without this an
+        edited assertion reruns to an identical fingerprint and the result is
+        discarded as a duplicate — exactly when the rerun is the point.
+        """
+        kwargs = {
+            "git_sha": "abc",
+            "case_set_id": "case-set",
+            "requested_model": "anthropic/test-model",
+            "reasoning_effort": "high",
+            "max_tool_iterations": 5,
+            "route_set_id": "route-a",
+            "repeat": 3,
+        }
+
+        clean = leaderboard.compute_run_fingerprint(**kwargs, dirty=False)
+        dirty = leaderboard.compute_run_fingerprint(**kwargs, dirty=True)
+
+        assert clean != dirty
+
     def test_route_set_id_is_independent_of_repeat_count(self) -> None:
         """Repeat must not leak into route identity, or rows never collapse."""
         single = _build_record(

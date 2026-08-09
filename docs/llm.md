@@ -30,7 +30,7 @@ The Telegram panel groups features as Chat / Reports / Coach / Nudges / Utilitie
 
 A `Reset all` button on the main panel and `uv run python main.py models reset --all` restore everything to built-in defaults. Picking the `Auto` fallback, or `--fallback auto` from the CLI, defers to the profile's fallback so future profile changes propagate.
 
-Insights and coach default to `anthropic/claude-opus-5` with `reasoning_effort=high`, temperature omitted, and `deepseek/deepseek-v4-pro` fallback. Chat and nudges default to `openai/gpt-5.6-luna` with `reasoning_effort=high` and temperature omitted — chat falling back to `anthropic/claude-haiku-4-5`, nudges to `deepseek/deepseek-v4-flash`.
+Coach defaults to `anthropic/claude-opus-5` with `reasoning_effort=high`, temperature omitted, and `deepseek/deepseek-v4-pro` fallback. Insights moved to `openai/gpt-5.6-luna` with `reasoning_effort=high`, temperature omitted, and `deepseek/deepseek-v4-flash` fallback. Chat and nudges default to `openai/gpt-5.6-luna` with `reasoning_effort=high` and temperature omitted — chat falling back to `anthropic/claude-haiku-4-5`, nudges to `deepseek/deepseek-v4-flash`.
 
 Lightweight utility surfaces, including `/notify` interpretation and `/add` workout clone selection, default to `deepseek/deepseek-v4-flash` with `anthropic/claude-haiku-4-5` fallback. `/add` and verifier rewrites use `reasoning_effort=high` with temperature omitted; `/notify` stays plain Flash. Weekly memory routes to `openai/gpt-5.6-luna` with reasoning off.
 
@@ -154,3 +154,5 @@ ZDROWSKIT_VERIFY_NUDGE=1
 Each product operation creates an `llm_trace` row. Related provider calls share the same trace: tool-loop iterations, final synthesis retries, verification, and rewrites. `uv run python main.py llm-log --id N` shows the selected call plus its trace; `uv run python main.py llm-log --trace N` shows the trace call list directly.
 
 Verification calls are logged as `insights_verify`, `insights_rewrite`, `coach_verify`, `coach_rewrite`, `nudge_verify`, and `nudge_rewrite`. The original source call metadata also records the verifier verdict, issue counts, issue details, and verifier/rewrite call IDs.
+
+Reports left Opus 5 on 2026-08-09, on price rather than on a measured quality win. Over the three insights eval cases at five runs per model, Opus took 86.7% attempt-weighted against Luna's 73.3% and DeepSeek Flash's 66.7% — but cost $0.5852 per covered run against $0.0117 and $0.0076, roughly 60x. Luna and Flash tied on strict accuracy and swapped places between two consecutive runs of the same config, so three cases could not separate them; Luna took it on latency (20 s against 56 s) and because Flash once returned only SQL tool calls with no report body at all. Treat this as provisional: the comparison is under-powered, and it should be redone once insights has more than three cases. Coach stays on Opus because it has no eval coverage at all, so moving it would be unmeasured.

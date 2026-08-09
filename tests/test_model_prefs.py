@@ -28,14 +28,30 @@ from model_prefs import (
 
 
 class TestModelPrefs:
-    def test_async_defaults_use_opus_with_high_reasoning_no_temperature(self, tmp_path):
-        for feature in ("insights", "coach"):
-            route = resolve_model_route(feature, path=tmp_path / "models.json")
+    def test_coach_still_defaults_to_opus_with_high_reasoning(self, tmp_path):
+        """Coach has no eval coverage, so it keeps the premium route."""
+        route = resolve_model_route("coach", path=tmp_path / "models.json")
 
-            assert route.primary == ANTHROPIC_OPUS_MODEL
-            assert route.fallback == PRIMARY_PRO_MODEL
-            assert route.call_kwargs()["reasoning_effort"] == "high"
-            assert route.call_kwargs()["temperature"] is None
+        assert route.primary == ANTHROPIC_OPUS_MODEL
+        assert route.fallback == PRIMARY_PRO_MODEL
+        assert route.call_kwargs()["reasoning_effort"] == "high"
+        assert route.call_kwargs()["temperature"] is None
+
+    def test_insights_defaults_to_luna_falling_back_to_flash(self, tmp_path):
+        """Reports left Opus 5 on price, not on a measured quality win.
+
+        Opus led attempt-weighted accuracy over the three insights cases but
+        cost roughly 60x per covered run, and three cases could not separate
+        Luna from Flash — they traded places between consecutive runs of the
+        same config. Revisit when insights has enough cases to decide it.
+        """
+        route = resolve_model_route("insights", path=tmp_path / "models.json")
+
+        assert route.primary == OPENAI_LUNA_MODEL
+        assert route.fallback == PRIMARY_FLASH_MODEL
+        assert route.primary != ANTHROPIC_OPUS_MODEL
+        assert route.call_kwargs()["reasoning_effort"] == "high"
+        assert route.call_kwargs()["temperature"] is None
 
     def test_nudge_default_is_luna_falling_back_to_flash(self, tmp_path):
         """Opus 5, DeepSeek Pro and DeepSeek Flash all scored 40% on the nudge
@@ -118,12 +134,14 @@ class TestModelPrefs:
         # picked auto" from "default chat fallback".
         assert json.loads(path.read_text())["features"]["chat"]["fallback"] is None
 
-    def test_missing_fallback_key_falls_through_to_profile(self, tmp_path):
+    def test_missing_fallback_key_falls_through_to_the_feature_default(
+        self, tmp_path
+    ) -> None:
         path = tmp_path / "models.json"
         path.write_text(json.dumps({"features": {"insights": {}}}))
 
         route = resolve_model_route("insights", path=path)
-        assert route.fallback == PRIMARY_PRO_MODEL
+        assert route.fallback == PRIMARY_FLASH_MODEL
 
     def test_legacy_v1_default_async_routes_migrate_to_new_defaults(self, tmp_path):
         path = tmp_path / "models.json"
@@ -148,7 +166,7 @@ class TestModelPrefs:
         insights = resolve_model_route("insights", path=path)
         nudge = resolve_model_route("nudge", path=path)
 
-        assert insights.primary == ANTHROPIC_OPUS_MODEL
+        assert insights.primary == OPENAI_LUNA_MODEL
         assert nudge.primary == OPENAI_LUNA_MODEL
         assert nudge.reasoning_effort == "high"
 

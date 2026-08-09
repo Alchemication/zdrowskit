@@ -50,16 +50,24 @@ def compute_run_fingerprint(
     max_tool_iterations: int,
     route_set_id: str,
     repeat: int,
+    dirty: bool = False,
 ) -> str:
     """Return a stable fingerprint for one comparable eval run.
 
     Repeat count is part of the identity: a 5-sample run and a 1-sample run of
     the same commit and route are different measurements, and the duplicate
     guard must not discard the more informative one as an already-seen rerun.
+
+    So is a dirty tree. `case_set_id` hashes case ids, not case content, so
+    editing an assertion and rerunning produced an identical fingerprint and
+    the result was thrown away as a duplicate — silently, and exactly when the
+    rerun was the point. A committed edit moves `git_sha`; an uncommitted one
+    only shows up here.
     """
     return _stable_hash(
         {
             "git_sha": git_sha,
+            "dirty": dirty,
             "case_set_id": case_set_id,
             "requested_model": requested_model,
             "reasoning_effort": reasoning_effort,
@@ -137,6 +145,7 @@ def build_run_record(
         max_tool_iterations=max_tool_iterations,
         route_set_id=record["route_set_id"],
         repeat=repeat,
+        dirty=record["dirty"],
     )
     return record
 

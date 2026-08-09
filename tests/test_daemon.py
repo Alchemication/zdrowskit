@@ -2541,7 +2541,11 @@ class TestModelsFlow:
     def test_models_auto_fallback_falls_through_to_profile(
         self, tmp_path: Path
     ) -> None:
-        from config import ANTHROPIC_OPUS_MODEL, FALLBACK_PRO_MODEL
+        from config import (
+            ANTHROPIC_OPUS_MODEL,
+            FALLBACK_PRO_MODEL,
+            OPENAI_LUNA_MODEL,
+        )
         from model_prefs import resolve_model_route, selectable_models
 
         daemon = _make_daemon(tmp_path)
@@ -2582,7 +2586,8 @@ class TestModelsFlow:
         assert route.fallback == FALLBACK_PRO_MODEL
         assert route.reasoning_effort == "high"
         assert route.temperature is None
-        assert insights_route.primary == ANTHROPIC_OPUS_MODEL
+        # Untouched features keep their own defaults; insights is on Luna.
+        assert insights_route.primary == OPENAI_LUNA_MODEL
 
     def test_models_primary_fallback_accept_flow(self, tmp_path: Path) -> None:
         from config import ANTHROPIC_HAIKU_MODEL, PRIMARY_FLASH_MODEL
