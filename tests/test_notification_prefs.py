@@ -9,6 +9,7 @@ from notification_prefs import (
     DEFAULT_NOTIFICATION_PREFS,
     apply_notification_changes,
     effective_notification_prefs,
+    evaluate_data_health_delivery,
     evaluate_nudge_delivery,
     format_notification_summary,
     load_notification_prefs,
@@ -91,6 +92,57 @@ class TestNotificationPrefs:
 
         assert decision["status"] == "deferred"
         assert decision["reason"] == "earliest_time"
+
+    def test_data_health_defers_overnight_until_morning(self) -> None:
+        decision = evaluate_data_health_delivery(
+            DEFAULT_NOTIFICATION_PREFS,
+            now=datetime.fromisoformat("2026-04-05T02:00:00+00:00"),
+        )
+
+        assert decision["status"] == "deferred"
+        assert decision["reason"] == "quiet_hours"
+        # Held until the same morning's 08:00 window close, not dropped.
+        assert decision["until"] == "2026-04-05T08:00:00+00:00"
+
+    def test_data_health_late_evening_defers_to_next_morning(self) -> None:
+        decision = evaluate_data_health_delivery(
+            DEFAULT_NOTIFICATION_PREFS,
+            now=datetime.fromisoformat("2026-04-05T23:00:00+00:00"),
+        )
+
+        assert decision["status"] == "deferred"
+        # Past the evening open, the close rolls to the following day.
+        assert decision["until"] == "2026-04-06T08:00:00+00:00"
+
+    def test_data_health_daytime_is_allowed(self) -> None:
+        decision = evaluate_data_health_delivery(
+            DEFAULT_NOTIFICATION_PREFS,
+            now=datetime.fromisoformat("2026-04-05T12:00:00+00:00"),
+        )
+
+        assert decision["status"] == "allowed"
+
+    def test_data_health_mute_outranks_quiet_hours(self) -> None:
+        prefs = apply_notification_changes(
+            DEFAULT_NOTIFICATION_PREFS,
+            [
+                {
+                    "action": "mute_until",
+                    "target": "data_health",
+                    "expires_at": "2026-04-12T00:00:00+00:00",
+                    "source_text": "mute sync alerts for a week",
+                }
+            ],
+            now=datetime.fromisoformat("2026-04-05T12:00:00+00:00"),
+        )
+
+        decision = evaluate_data_health_delivery(
+            prefs,
+            now=datetime.fromisoformat("2026-04-05T12:00:00+00:00"),
+        )
+
+        assert decision["status"] == "suppressed"
+        assert decision["reason"] == "temporary_mute"
 
     def test_scheduled_report_due_uses_custom_schedule(self) -> None:
         prefs = apply_notification_changes(

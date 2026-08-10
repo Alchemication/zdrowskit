@@ -110,6 +110,19 @@ DATA_HEALTH_SPLIT_AFTER_H: float = 6
 Far shorter than the silence threshold: uploads still arriving prove the phone
 is reachable, so a stalled import is a real fault rather than a quiet evening.
 """
+DATA_HEALTH_QUIET_START_HHMM: str = "22:00"
+"""Local time after which ingest-health alerts are held until morning.
+
+A stalled import is never fixable while the operator is asleep, so waking them
+is pure noise: the fault persists until they act either way. The alert is held,
+not dropped — it fires at DATA_HEALTH_QUIET_END_HHMM. Paired with the end time
+this brackets a 22:00-08:00 do-not-disturb window."""
+DATA_HEALTH_QUIET_END_HHMM: str = "08:00"
+"""Local time at which a held ingest-health alert is released.
+
+Set to a normal waking hour so an overnight fault surfaces first thing, in time
+to act well inside the ~48h Auto Export window (see DATA_HEALTH_SILENT_AFTER_H)
+before the missed days can no longer be recovered."""
 BASELINE_MIN_SAMPLES: int = 5
 """Observations required before a rolling window is reported as an average.
 

@@ -105,6 +105,15 @@ Each condition is reported once and then not again for 24 hours while it
 persists, and a one-line recovery notice is sent when it clears — an alert you
 cannot tell has resolved is one you learn to ignore.
 
+Sync alerts are held during quiet hours (22:00–08:00 local) and released at
+08:00, rather than waking anyone at 2am. A stalled import is never fixable while
+you are asleep — the fault persists until you act either way — so an overnight
+alert is pure noise. The alert is *held*, not dropped: the daemon keeps
+re-checking and delivers the first one after the window closes. Recovery
+notices are held the same way, so a fault you heard about in the evening that
+clears at 3am still gets its all-clear in the morning. A fault that both begins
+and resolves overnight is never sent at all.
+
 Alerts go to the affected profile, not to the operator, because the person who
 can fix it is the one holding the phone. They obey the same mute and disable
 machinery as everything else (`data_health`), and when suppressed the condition

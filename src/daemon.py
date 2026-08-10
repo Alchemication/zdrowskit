@@ -1142,23 +1142,47 @@ class ProfileRuntime:
             logger.exception("Could not assess ingest health for %s", self.profile.name)
             return
 
+        # One local now for every delivery decision below: quiet-hours gating is
+        # wall-clock, so the recovery ping and the alert must agree on the time.
+        now = datetime.now(timezone.utc).astimezone()
+
         alerted = self._state.get("data_health_alert")
         if not health.is_alerting:
             if alerted:
+                recovery = evaluate_data_health_delivery(prefs, now=now)
+                if recovery["status"] == "deferred":
+                    # Hold the record, not just the message: an alert the user
+                    # cannot tell has resolved is one they learn to ignore, so a
+                    # fault that clears overnight still gets its morning notice.
+                    # A suppressed one is dropped below, as the user asked for.
+                    return
                 self._state.pop("data_health_alert", None)
                 self._save_state()
-                if evaluate_data_health_delivery(prefs)["status"] == "allowed":
+                if recovery["status"] == "allowed":
                     self._poller.send_reply(
                         "✅ **Sync is working again** — health data is importing "
                         "normally."
                     )
             return
 
-        now_iso = datetime.now(timezone.utc).isoformat()
+        now_iso = now.astimezone(timezone.utc).isoformat()
         if isinstance(alerted, dict) and alerted.get("status") == health.status:
             last_sent = alerted.get("sent_at")
             if last_sent and not _older_than(last_sent, DATA_HEALTH_REALERT_S):
                 return
+
+        decision = evaluate_data_health_delivery(prefs, now=now)
+        if decision["status"] == "deferred":
+            # A quiet-hours hold, not a delivery failure: leave the alert
+            # unrecorded so a later tick re-evaluates and delivers once the
+            # window closes. Recording it as sent would let the 24h de-dup guard
+            # above swallow the alert entirely.
+            logger.info(
+                "Ingest health alert for %s deferred until %s (quiet hours)",
+                self.profile.name,
+                decision.get("until", "morning"),
+            )
+            return
 
         # Record before sending: a delivery failure must not cause a retry storm
         # on the next tick, and the log still carries the detail either way.
@@ -1171,7 +1195,6 @@ class ProfileRuntime:
             health.detail,
         )
 
-        decision = evaluate_data_health_delivery(prefs)
         if decision["status"] != "allowed":
             logger.info(
                 "Ingest health alert suppressed by prefs: %s",
