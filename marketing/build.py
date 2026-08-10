@@ -84,8 +84,6 @@ DOCS_BLURBS = {
 }
 
 
-
-
 @dataclass(frozen=True)
 class Doc:
     """A rendered documentation page.
