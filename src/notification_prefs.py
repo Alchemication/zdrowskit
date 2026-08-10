@@ -16,11 +16,13 @@ from __future__ import annotations
 import copy
 import json
 import logging
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 from pathlib import Path
 from typing import Any
 
 from config import (
+    DATA_HEALTH_QUIET_END_HHMM,
+    DATA_HEALTH_QUIET_START_HHMM,
     DATA_HEALTH_SILENT_AFTER_H,
     DATA_HEALTH_SPLIT_AFTER_H,
     NOTIFICATION_PREFS_PATH,
@@ -102,6 +104,36 @@ def _parse_timestamp(value: str) -> datetime | None:
 def _parse_hhmm(value: str) -> time:
     """Parse a 24-hour HH:MM string."""
     return datetime.strptime(value, "%H:%M").time()
+
+
+def _defer_until_quiet_end(now: datetime, start: time, end: time) -> datetime | None:
+    """Return when to resume if ``now`` is inside a quiet window, else None.
+
+    The window runs ``start``..``end`` and may wrap past midnight when
+    ``start`` > ``end`` (e.g. 22:00..08:00). The returned time is the next
+    ``end`` boundary at or after ``now``.
+
+    Args:
+        now: The current, timezone-aware moment.
+        start: Local clock time the quiet window opens.
+        end: Local clock time the quiet window closes.
+
+    Returns:
+        The datetime to resume sending, or None when ``now`` is outside the
+        window.
+    """
+    current = now.time().replace(second=0, microsecond=0)
+    wraps = start > end
+    in_quiet = (
+        (start <= current or current < end) if wraps else (start <= current < end)
+    )
+    if not in_quiet:
+        return None
+    resume = now.replace(hour=end.hour, minute=end.minute, second=0, microsecond=0)
+    if wraps and current >= start:
+        # Past the evening open, so the close is tomorrow morning.
+        resume += timedelta(days=1)
+    return resume
 
 
 def _normalise_overrides(overrides: object) -> dict[str, dict[str, Any]]:
@@ -346,6 +378,17 @@ def evaluate_data_health_delivery(
         }
     if not effective["data_health"]["enabled"]:
         return {"status": "suppressed", "reason": "disabled"}
+    resume = _defer_until_quiet_end(
+        now,
+        _parse_hhmm(DATA_HEALTH_QUIET_START_HHMM),
+        _parse_hhmm(DATA_HEALTH_QUIET_END_HHMM),
+    )
+    if resume is not None:
+        return {
+            "status": "deferred",
+            "reason": "quiet_hours",
+            "until": resume.isoformat(),
+        }
     return {"status": "allowed", "reason": "enabled"}
 
 

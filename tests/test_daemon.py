@@ -7,7 +7,10 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 import daemon as daemon_module
+import notification_prefs as notification_prefs_module
 import daemon_runners as daemon_runners_module
 from cmd_llm_common import InsufficientWeekData
 from cmd_llm_common import CommandResult
@@ -2881,6 +2884,23 @@ class TestFailureCapture:
 
 
 class TestIngestHealthAlerts:
+    @pytest.fixture(autouse=True)
+    def _no_quiet_hours(self):
+        """Neutralise the quiet-hours window for tests not about it.
+
+        With an empty window every delivery decision is time-independent, so
+        these tests stay deterministic whatever hour the suite runs.
+        """
+        with (
+            patch.object(
+                notification_prefs_module, "DATA_HEALTH_QUIET_START_HHMM", "00:00"
+            ),
+            patch.object(
+                notification_prefs_module, "DATA_HEALTH_QUIET_END_HHMM", "00:00"
+            ),
+        ):
+            yield
+
     def _runtime(self, tmp_path: Path, health) -> ProfileRuntime:
         """Return a runtime wired to an HTTP profile reporting *health*."""
         from profiles import Profile
@@ -2977,3 +2997,70 @@ class TestIngestHealthAlerts:
         runtime._poller.send_reply.assert_not_called()
         # The operator can still find it in the log even when the user muted it.
         assert "split detail" in caplog.text
+
+    def test_quiet_hours_defer_without_sending_or_recording(
+        self, tmp_path: Path
+    ) -> None:
+        """A 2am fault is held: no message, and no state, so the morning tick
+        still delivers it rather than the de-dup guard swallowing it."""
+        runtime = self._runtime(tmp_path, self._health("split"))
+        prefs = load_notification_prefs(runtime._notification_prefs_path)
+        # 02:00 local sits inside the default 22:00-08:00 window. A naive value
+        # astimezone()s to local wall time, keeping the check timezone-agnostic.
+        night = daemon_module.datetime(2026, 4, 5, 2, 0)
+        fake_datetime = MagicMock(wraps=daemon_module.datetime)
+        fake_datetime.now.return_value = night
+
+        with (
+            patch.object(
+                notification_prefs_module, "DATA_HEALTH_QUIET_START_HHMM", "22:00"
+            ),
+            patch.object(
+                notification_prefs_module, "DATA_HEALTH_QUIET_END_HHMM", "08:00"
+            ),
+            patch.object(daemon_module, "datetime", fake_datetime),
+            patch(
+                "http_ingest.assess_ingest_health",
+                return_value=self._health("split"),
+            ),
+        ):
+            runtime._check_ingest_health(prefs)
+
+        runtime._poller.send_reply.assert_not_called()
+        assert "data_health_alert" not in runtime._state
+
+    def test_overnight_recovery_is_held_until_morning(self, tmp_path: Path) -> None:
+        """A fault alerted in the evening and cleared at 3am still gets its
+        recovery notice: holding the message must not drop the record."""
+        runtime = self._runtime(tmp_path, self._health("split"))
+        prefs = load_notification_prefs(runtime._notification_prefs_path)
+        runtime._state["data_health_alert"] = {
+            "status": "split",
+            "sent_at": "2026-04-04T20:00:00+00:00",
+        }
+
+        def _tick(hour: int) -> None:
+            fake_datetime = MagicMock(wraps=daemon_module.datetime)
+            fake_datetime.now.return_value = daemon_module.datetime(2026, 4, 5, hour, 0)
+            with (
+                patch.object(
+                    notification_prefs_module, "DATA_HEALTH_QUIET_START_HHMM", "22:00"
+                ),
+                patch.object(
+                    notification_prefs_module, "DATA_HEALTH_QUIET_END_HHMM", "08:00"
+                ),
+                patch.object(daemon_module, "datetime", fake_datetime),
+                patch(
+                    "http_ingest.assess_ingest_health",
+                    return_value=self._health("ok"),
+                ),
+            ):
+                runtime._check_ingest_health(prefs)
+
+        _tick(3)
+        runtime._poller.send_reply.assert_not_called()
+        assert "data_health_alert" in runtime._state
+
+        _tick(9)
+        assert "working again" in runtime._poller.send_reply.call_args.args[0]
+        assert "data_health_alert" not in runtime._state
