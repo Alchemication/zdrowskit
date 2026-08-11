@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -14,15 +13,16 @@ from evals.leaderboard.scorecard import (
 )
 
 _INTRO = (
-    "Feedback-derived regression scorecard for zdrowskit evals. The production "
+    "Regression scorecard for zdrowskit evals. A case is one frozen input plus "
+    "checks on the answer; most are recorded from real failures. The first "
     "table is what the daemon ships today; the per-feature tables are "
-    "alternatives measured against it. Not a general benchmark."
+    "alternatives measured on the same cases. Not a general benchmark."
 )
 _STABILITY_NOTE = (
-    "Strict = cases passing every attempt. Attempt = attempt-weighted, the "
-    "score one run would be expected to report. They diverge exactly when "
-    "cases are flaky, and a flaky case is the one result a single run reports "
-    "with false confidence."
+    "Strict = the share of cases that passed every attempt. Attempt = the "
+    "share of individual attempts that passed, i.e. the score one run would be "
+    "expected to report. They diverge exactly when cases are flaky, and a "
+    "flaky case is the one result a single run reports with false confidence."
 )
 
 
@@ -31,13 +31,10 @@ def render_leaderboard_markdown(
     *,
     inventory: list[EvalCase] | None = None,
     head_sha: str | None = None,
-    stale_check: Callable[[str], bool | None] | None = None,
 ) -> str:
     """Render leaderboard markdown from persisted run records."""
-    scorecard = build_scorecard(
-        runs, inventory=inventory, head_sha=head_sha, stale_check=stale_check
-    )
-    lines = ["# Feedback Eval Leaderboard", "", _INTRO, ""]
+    scorecard = build_scorecard(runs, inventory=inventory, head_sha=head_sha)
+    lines = ["# Eval Leaderboard", "", _INTRO, ""]
     if not runs:
         lines.extend(
             [
@@ -62,14 +59,11 @@ def write_leaderboard_markdown(
     *,
     inventory: list[EvalCase] | None = None,
     head_sha: str | None = None,
-    stale_check: Callable[[str], bool | None] | None = None,
 ) -> str:
     """Write the rendered leaderboard markdown to disk."""
     path = markdown_path or MARKDOWN_PATH
     path.parent.mkdir(parents=True, exist_ok=True)
-    content = render_leaderboard_markdown(
-        runs, inventory=inventory, head_sha=head_sha, stale_check=stale_check
-    )
+    content = render_leaderboard_markdown(runs, inventory=inventory, head_sha=head_sha)
     path.write_text(content, encoding="utf-8")
     return content
 
@@ -77,13 +71,14 @@ def write_leaderboard_markdown(
 def _production_lines(scorecard: dict[str, Any]) -> list[str]:
     """Render the production scorecard table."""
     lines = [
-        "## Production",
+        "## What ships today",
         "",
-        f"Latest run on production routes per feature, against the "
-        f"{scorecard['total_cases']} cases in `evals/cases` today.",
+        f"The most recent scored run for each feature, on the model it "
+        f"actually runs on, against the {scorecard['total_cases']} cases in "
+        f"`evals/cases` today.",
         "",
         "| Feature | Route | Cases | Strict | Attempt | Flaky | Repeat "
-        "| Avg Latency | Cost/run | Revision | Recorded |",
+        "| Avg Latency | Cost/run | Commit | Recorded |",
         "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |",
     ]
     for entry in scorecard["production"]:
@@ -134,34 +129,24 @@ def _production_lines(scorecard: dict[str, Any]) -> list[str]:
 
 
 def _production_notes(scorecard: dict[str, Any]) -> list[str]:
-    """Render coverage and staleness warnings under the production table."""
+    """Render what the production table does not cover."""
     notes: list[str] = []
     uncovered = scorecard["uncovered_features"]
     if uncovered:
         notes.append(
-            "**No production run recorded for:** "
+            "**Never measured on the model it ships with:** "
             + ", ".join(f"`{feature}`" for feature in uncovered)
-            + ". A green table above says nothing about these."
+            + ". Whatever the rows above say, they say nothing about these."
         )
     for entry in scorecard["production"]:
         row = entry["row"]
         if row is None or not row["missing_case_ids"]:
             continue
         notes.append(
-            f"**`{entry['feature']}` is missing {len(row['missing_case_ids'])} "
-            f"case(s)** added since that run: "
+            f"**`{entry['feature']}` was last measured before "
+            f"{len(row['missing_case_ids'])} case(s) existed**, so its score "
+            f"does not cover: "
             + ", ".join(f"`{case_id}`" for case_id in row["missing_case_ids"])
-        )
-    stale = [
-        entry["row"]["feature"]
-        for entry in scorecard["production"]
-        if entry["row"] is not None and entry["row"]["stale"]
-    ]
-    if stale:
-        notes.append(
-            "**Measured code that has since changed:** "
-            + ", ".join(f"`{feature}`" for feature in stale)
-            + ". Re-record to score the code as it stands."
         )
     fell_back = [
         entry["row"]["feature"]
@@ -172,8 +157,8 @@ def _production_notes(scorecard: dict[str, Any]) -> list[str]:
         notes.append(
             "**Answered by a fallback model:** "
             + ", ".join(f"`{feature}`" for feature in fell_back)
-            + ". The route's primary failed on at least one case, so those "
-            "scores belong to the fallback, not the model named above."
+            + ". The first-choice model failed on at least one case, so part "
+            "of that score belongs to the fallback, not the model named above."
         )
     single_sample = [
         entry["row"]["feature"]
@@ -182,9 +167,10 @@ def _production_notes(scorecard: dict[str, Any]) -> list[str]:
     ]
     if single_sample:
         notes.append(
-            "**Single sample (repeat=1):** "
+            "**Measured once only (repeat=1):** "
             + ", ".join(f"`{feature}`" for feature in single_sample)
-            + ". Stability is unmeasured; rerun with `--repeat 3` or more."
+            + ". A single sample cannot tell a reliable pass from a lucky "
+            "one; rerun with `--repeat 3` or more."
         )
     if not notes:
         return []
@@ -195,12 +181,14 @@ def _variation_lines(scorecard: dict[str, Any]) -> list[str]:
     """Render one comparison table per feature."""
     lines: list[str] = []
     for section in scorecard["features"]:
+        heading = [f"## {section['feature']} · {section['total_cases']} cases", ""]
+        if section.get("blurb"):
+            heading.extend([str(section["blurb"]), ""])
         lines.extend(
             [
-                f"## {section['feature']} · {section['total_cases']} cases",
-                "",
+                *heading,
                 "| Model | Reasoning | Repeat | Cases | Strict | Attempt | Flaky "
-                "| Avg Latency | Cost/run | Revision | Failing |",
+                "| Avg Latency | Cost/run | Commit | Not passing |",
                 "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: "
                 "| --- | --- |",
             ]
@@ -268,8 +256,8 @@ def _coverage_label(row: dict[str, Any], total_cases: int) -> str:
 
 
 def _revision_cell(row: dict[str, Any]) -> str:
-    """Render a revision label, marking rows behind the current commit."""
-    return f"{row['revision_label']} (stale)" if row["stale"] else row["revision_label"]
+    """Render the commit a row was recorded at."""
+    return row["revision_label"]
 
 
 def _failing_cell(row: dict[str, Any]) -> str:

@@ -14,11 +14,24 @@ every new eval case start a fresh section with no history to compare against.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from typing import Any
 
 from evals.framework import EvalCase, load_cases
-from evals.leaderboard.record import code_changed_since, route_label
+from evals.leaderboard.record import route_label
+
+FEATURE_BLURBS = {
+    "chat": "Answering your questions in Telegram, including the SQL it writes.",
+    "insights": "The weekly report.",
+    "nudge": "Short, timely messages during the day.",
+    "memory": "What carries over from one week to the next.",
+    "verification_judge": "The second model that fact-checks a draft before it is sent.",
+}
+"""Plain-language description of each feature, for readers outside the codebase.
+
+The leaderboard is published, so `verification_judge` has to mean something to
+someone who has never seen `model_prefs`. A feature with no entry here renders
+without a description rather than with a placeholder.
+"""
 
 
 def build_scorecard(
@@ -26,7 +39,6 @@ def build_scorecard(
     *,
     inventory: list[EvalCase] | None = None,
     head_sha: str | None = None,
-    stale_check: Callable[[str], bool | None] | None = None,
 ) -> dict[str, Any]:
     """Build the production scorecard and per-feature variation tables.
 
@@ -34,21 +46,18 @@ def build_scorecard(
         runs: All persisted run records.
         inventory: Cases on disk today. Defaults to loading `evals/cases`.
         head_sha: Current commit, recorded in the payload for display.
-        stale_check: Decides whether a run's commit predates a change to the
-            code it measured. Defaults to a git diff over `EVAL_SOURCE_PATHS`.
 
     Returns:
         A payload shared by the Markdown and HTML renderers.
     """
     cases = load_cases() if inventory is None else inventory
-    is_stale = stale_check or code_changed_since
     by_feature = _inventory_by_feature(cases)
     production = [
-        _production_row(feature, case_ids, runs, is_stale=is_stale)
+        _production_row(feature, case_ids, runs)
         for feature, case_ids in sorted(by_feature.items())
     ]
     features = [
-        _feature_section(feature, case_ids, runs, is_stale=is_stale)
+        _feature_section(feature, case_ids, runs)
         for feature, case_ids in sorted(by_feature.items())
     ]
     return {
@@ -74,8 +83,6 @@ def _production_row(
     feature: str,
     inventory_case_ids: list[str],
     runs: list[dict[str, Any]],
-    *,
-    is_stale: Callable[[str], bool | None],
 ) -> dict[str, Any]:
     """Build the production scorecard row for one feature."""
     candidates = [
@@ -86,21 +93,20 @@ def _production_row(
     if not candidates:
         return {
             "feature": feature,
+            "blurb": FEATURE_BLURBS.get(feature, ""),
             "total_cases": len(inventory_case_ids),
             "row": None,
             "missing_case_ids": inventory_case_ids,
         }
     run = candidates[0]
-    row = _variation_row(run, feature, is_stale=is_stale)
+    row = _variation_row(run, feature)
     covered = set(row["case_ids"])
     row["missing_case_ids"] = [
         case_id for case_id in inventory_case_ids if case_id not in covered
     ]
-    row["stale_cases"] = [
-        case_id for case_id in row["case_ids"] if case_id not in set(inventory_case_ids)
-    ]
     return {
         "feature": feature,
+        "blurb": FEATURE_BLURBS.get(feature, ""),
         "total_cases": len(inventory_case_ids),
         "row": row,
         "missing_case_ids": row["missing_case_ids"],
@@ -111,8 +117,6 @@ def _feature_section(
     feature: str,
     inventory_case_ids: list[str],
     runs: list[dict[str, Any]],
-    *,
-    is_stale: Callable[[str], bool | None],
 ) -> dict[str, Any]:
     """Build the variation table for one feature."""
     latest_by_identity: dict[tuple[Any, ...], dict[str, Any]] = {}
@@ -126,10 +130,7 @@ def _feature_section(
             int(run.get("repeat", 1)),
         )
         latest_by_identity.setdefault(identity, run)
-    rows = [
-        _variation_row(run, feature, is_stale=is_stale)
-        for run in latest_by_identity.values()
-    ]
+    rows = [_variation_row(run, feature) for run in latest_by_identity.values()]
     rows.sort(
         key=lambda row: (
             -float(row["strict_accuracy"]),
@@ -141,18 +142,14 @@ def _feature_section(
     )
     return {
         "feature": feature,
+        "blurb": FEATURE_BLURBS.get(feature, ""),
         "total_cases": len(inventory_case_ids),
         "case_ids": inventory_case_ids,
         "rows": rows,
     }
 
 
-def _variation_row(
-    run: dict[str, Any],
-    feature: str,
-    *,
-    is_stale: Callable[[str], bool | None],
-) -> dict[str, Any]:
+def _variation_row(run: dict[str, Any], feature: str) -> dict[str, Any]:
     """Build one comparable row from a run's slice of a feature."""
     rows = _feature_rows(run, feature)
     metrics = slice_metrics(rows, repeat=int(run.get("repeat", 1)))
@@ -175,7 +172,7 @@ def _variation_row(
         "git_sha_short": git_sha[:7] if git_sha != "unknown" else git_sha,
         "dirty": bool(run.get("dirty", False)),
         "revision_label": format_revision(run),
-        "stale": bool(is_stale(git_sha)),
+        "recorded_on": str(run.get("created_at", ""))[:10],
         "case_rows": [_case_row(row) for row in rows],
         "fallback_case_ids": [
             str(row["case_id"]) for row in rows if row.get("fallback_used")
@@ -235,6 +232,11 @@ def slice_metrics(rows: list[dict[str, Any]], *, repeat: int) -> dict[str, Any]:
     total_cost = sum(costs) if costs else None
     return {
         "case_count": len(rows),
+        # The denominators behind the two percentages. A published percentage
+        # that cannot be read back as "N of M" is a number the reader has to
+        # take on trust.
+        "scored_case_count": len(scored_rows),
+        "scored_attempts": scored,
         "accuracy": (passed / scored * 100.0) if scored else 0.0,
         "strict_accuracy": (
             (stable_pass / len(scored_rows) * 100.0) if scored_rows else 0.0
@@ -263,13 +265,14 @@ def _newest_first(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def format_requested_model(requested_model: str | None) -> str:
-    """Render the requested model, or note that production routes were used.
+    """Render the requested model, or say the shipped route answered.
 
-    A run without an explicit --model asks each feature's own production
-    route, so there is no single model to name.
+    A run without an explicit --model asks each feature's own configured
+    route, so there is no single model to name. The row's `routes` field names
+    the model that actually answered.
     """
     if not requested_model:
-        return "production routes"
+        return "Shipped route"
     return requested_model.split("/")[-1]
 
 
@@ -281,7 +284,14 @@ def format_revision(run: dict[str, Any]) -> str:
 
 
 def display_reasoning_effort(value: str | None) -> str:
-    """Render a stored reasoning effort for leaderboard display."""
+    """Render a stored reasoning effort for leaderboard display.
+
+    A production run records the literal string "production" here, because no
+    single effort was requested — each feature used its own. Naming it as a
+    reasoning level reads as one, so it is spelled out instead.
+    """
+    if value == "production":
+        return "as configured"
     return value or "none"
 
 

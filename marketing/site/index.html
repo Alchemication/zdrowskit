@@ -692,12 +692,13 @@
         <h2>The model that writes your report is not the one that checks it.</h2>
         <div>
           <p>
-            Reports, nudges, chat and the verifier that reads them each run on a
-            different model, at a different reasoning level. Every one is scored
-            against the same eval cases and routed to whatever measured best — which
-            is how the verifier ended up on the <em>cheapest</em> model of the lot.
-            It beat both premium options at catching bad claims, and being cheap is
-            why it can check every report instead of a sample.
+            Reports, nudges, chat and the fact-checker that reads them each run on a
+            different model, at a different reasoning level. Every one is scored on
+            the same test cases — frozen inputs with a known right answer, most of
+            them recorded from real mistakes — and routed to whatever measured best.
+            That is how the fact-checker ended up on a <em>budget</em> model rather
+            than a premium one: it caught bad claims that both expensive candidates
+            missed, 86% of cases against 57%.
           </p>
           <p>
             Each route keeps a fallback, so a provider having a bad morning degrades
@@ -705,8 +706,9 @@
             measures better.
           </p>
           <p class="routing-note">
-            The leaderboard shows every route, what it scored, and where the gaps
-            still are. <a href="evals/">Read the leaderboard →</a>
+            The leaderboard publishes every score, including the bad ones: what was
+            tested, what passed, and what is still unreliable.
+            <a href="evals/">Read the leaderboard →</a>
           </p>
           <p class="routing-foot">
             Re-scored against {{EVAL_CASE_COUNT}} eval cases; last recorded
