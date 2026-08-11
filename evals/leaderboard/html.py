@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -11,12 +10,71 @@ from evals.framework import EvalCase
 from evals.leaderboard.record import HTML_PATH
 from evals.leaderboard.scorecard import build_scorecard
 
-_TITLE = "Feedback Eval Leaderboard"
+_TITLE = "Eval Leaderboard"
 _NOTE = (
-    "The production table is what the daemon ships today. Everything below it "
-    "is an alternative measured against that baseline."
+    "Every part of zdrowskit that talks to a language model is scored against "
+    "a fixed set of test cases: a frozen input — a date, the health data, the "
+    "conversation so far — plus checks on what the answer must and must not "
+    "say. Most cases are recorded from real failures. Every score is published "
+    "here, including the bad ones."
 )
 _GITHUB_REPO = "https://github.com/Alchemication/zdrowskit"
+
+# The published page has to stand on its own: a reader who has never seen the
+# codebase still meets "strict", "flaky" and "repeat" in the first table. Each
+# entry defines the term in the terms of the thing being measured, not in the
+# vocabulary of the harness.
+_GLOSSARY = (
+    (
+        "Case",
+        "One frozen input plus the checks on its answer — for example: given "
+        "this week's data, the weekly report must not claim HRV rose when it "
+        "fell.",
+    ),
+    (
+        "Feature",
+        "The part of the product under test. Each one is scored separately, on "
+        "its own cases and its own model.",
+    ),
+    (
+        "Repeat",
+        "How many times each case was run. The same input does not produce the "
+        "same answer twice, so one run is a sample, not a verdict.",
+    ),
+    (
+        "Strict",
+        "The share of cases that passed <em>every</em> attempt. This is the "
+        "headline score, and the harsh one.",
+    ),
+    (
+        "Attempt",
+        "The share of individual attempts that passed — the score a single run "
+        "would be expected to report. It sits above strict whenever some cases "
+        "only pass sometimes.",
+    ),
+    (
+        "Flaky",
+        "Cases that passed on some attempts and failed on others. The most "
+        "dangerous result there is: one run reports it as a clean pass or a "
+        "clean failure with equal confidence.",
+    ),
+    (
+        "Route",
+        "The model that answers, its reasoning level, and the fallback used if "
+        "the provider fails. Written <code>model (reasoning) -&gt; fallback</code>.",
+    ),
+    (
+        "Cost / run",
+        "Average spend to run that feature's whole case set once, in USD. "
+        "Normalised by repeat, so a 5-sample row is not five times the price of "
+        "a 1-sample one.",
+    ),
+    (
+        "Recorded",
+        "The date and commit the run was measured at. Scores move when prompts "
+        "and models move, so an old row describes old code.",
+    ),
+)
 
 # The shared palette and site chrome. Inlined rather than linked so the rendered
 # page stays a single self-contained file that works from disk as well as from
@@ -65,12 +123,25 @@ def _site_chrome(nav_base: str) -> tuple[str, str]:
     return header, footer
 
 
+def _glossary_html() -> str:
+    """Render the always-visible legend for the page's vocabulary."""
+    items = "\n".join(
+        f"      <div><dt>{term}</dt><dd>{definition}</dd></div>"
+        for term, definition in _GLOSSARY
+    )
+    return (
+        '  <section class="legend">\n'
+        "    <h2>How to read this page</h2>\n"
+        f'    <dl class="legend-grid">\n{items}\n    </dl>\n'
+        "  </section>\n"
+    )
+
+
 def render_leaderboard_html(
     runs: list[dict[str, Any]],
     *,
     inventory: list[EvalCase] | None = None,
     head_sha: str | None = None,
-    stale_check: Callable[[str], bool | None] | None = None,
     nav_base: str | None = None,
 ) -> str:
     """Render an interactive HTML leaderboard from persisted run records.
@@ -79,8 +150,7 @@ def render_leaderboard_html(
         runs: Persisted run records.
         inventory: Current eval cases, used to flag runs recorded before a case
             existed.
-        head_sha: Commit to diff recorded revisions against for staleness.
-        stale_check: Override for the staleness resolver.
+        head_sha: Current commit, recorded in the payload.
         nav_base: Relative path to the site root, which adds the shared site
             header and footer. Omit for the standalone local artifact, whose
             sibling `docs/` holds Markdown rather than the built pages.
@@ -88,9 +158,7 @@ def render_leaderboard_html(
     Returns:
         A complete, self-contained HTML document.
     """
-    payload = build_scorecard(
-        runs, inventory=inventory, head_sha=head_sha, stale_check=stale_check
-    )
+    payload = build_scorecard(runs, inventory=inventory, head_sha=head_sha)
     empty = (
         '<div class="empty-state">'
         "<h2>No recorded eval runs yet</h2>"
@@ -107,7 +175,7 @@ def render_leaderboard_html(
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{_TITLE} — zdrowskit</title>
-  <meta name="description" content="Feedback-derived regression scores for every zdrowskit LLM surface, published in full.">
+  <meta name="description" content="Regression scores for every zdrowskit LLM feature, published in full — what was tested, what passed, and what is still flaky.">
   <style>{_load_base_css()}{_STYLE}</style>
 </head>
 <body>
@@ -117,7 +185,7 @@ def render_leaderboard_html(
       <h1>{_TITLE}</h1>
       <div class="lede">{_NOTE}</div>
     </section>
-    {app}
+{_glossary_html()}    {app}
   </main>
 {footer}  <script id="leaderboard-data" type="application/json">{data_json}</script>
   <script>{_SCRIPT}</script>
@@ -131,7 +199,6 @@ def write_leaderboard_html(
     *,
     inventory: list[EvalCase] | None = None,
     head_sha: str | None = None,
-    stale_check: Callable[[str], bool | None] | None = None,
     nav_base: str | None = None,
 ) -> str:
     """Write the rendered leaderboard HTML to disk.
@@ -140,8 +207,7 @@ def write_leaderboard_html(
         runs: Persisted run records.
         html_path: Destination path; defaults to the repo's `HTML_PATH`.
         inventory: Current eval cases.
-        head_sha: Commit to diff recorded revisions against for staleness.
-        stale_check: Override for the staleness resolver.
+        head_sha: Current commit, recorded in the payload.
         nav_base: Relative path to the site root; see `render_leaderboard_html`.
 
     Returns:
@@ -153,7 +219,6 @@ def write_leaderboard_html(
         runs,
         inventory=inventory,
         head_sha=head_sha,
-        stale_check=stale_check,
         nav_base=nav_base,
     )
     path.write_text(content, encoding="utf-8")
@@ -183,6 +248,39 @@ _STYLE = """
       font-weight: 500;
     }
     .lede { max-width: 900px; color: var(--muted); line-height: 1.65; }
+    .legend {
+      padding: 20px 22px 6px;
+      border: 2px solid var(--ink);
+      background: rgba(255,255,255,.22);
+      box-shadow: var(--shadow);
+    }
+    .legend h2 {
+      margin: 0 0 14px;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .1em;
+      color: var(--green-dark);
+      font-weight: 900;
+    }
+    .legend-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(255px, 1fr));
+      gap: 4px 26px;
+      margin: 0;
+    }
+    .legend-grid > div { padding: 9px 0; border-top: 1px solid var(--line); }
+    .legend-grid dt {
+      font-size: 12px;
+      font-weight: 900;
+      letter-spacing: .05em;
+      text-transform: uppercase;
+    }
+    .legend-grid dd {
+      margin: 5px 0 0;
+      color: var(--muted);
+      font-size: 12.5px;
+      line-height: 1.55;
+    }
     .section-title {
       margin: 40px 0 14px;
       padding-top: 18px;
@@ -214,7 +312,30 @@ _STYLE = """
       letter-spacing: .1em;
       color: var(--green-dark);
     }
-    .prod-score { margin: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+    .prod-blurb { margin: -2px 0 4px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+    .prod-score { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    .prod-headline {
+      font-family: Georgia, serif;
+      font-size: 34px;
+      line-height: 1;
+      letter-spacing: -.03em;
+    }
+    .prod-headline.good { color: var(--good); }
+    .prod-headline.warn { color: var(--warn); }
+    .prod-headline.bad { color: var(--bad); }
+    /* Every number on the card is followed by the count it came from: a bare
+       percentage is the thing readers reported not being able to interpret. */
+    .prod-facts { margin: 4px 0 0; display: grid; gap: 7px; font-size: 12px; }
+    .prod-facts > div { display: grid; grid-template-columns: 74px minmax(0, 1fr); gap: 10px; }
+    .prod-facts dt {
+      color: var(--green-dark);
+      font-size: 10.5px;
+      font-weight: 900;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      padding-top: 2px;
+    }
+    .prod-facts dd { margin: 0; color: var(--muted); line-height: 1.5; }
     .prod-meta { color: var(--muted); font-size: 12px; line-height: 1.6; }
     .warnings { display: grid; gap: 10px; margin-top: 16px; }
     .warning {
@@ -403,38 +524,71 @@ function fmtCost(value) {
   return value == null ? "—" : `$${Number(value).toFixed(4)}`;
 }
 
+// Mirrors display_reasoning_effort in scorecard.py: a production run records
+// the literal "production" here because each feature used its own level.
+function displayReasoning(value) {
+  if (value === "production") return "as configured";
+  return value || "none";
+}
+
+function plural(count, word) {
+  return `${count} ${word}${count === 1 ? "" : "s"}`;
+}
+
 function productionCards() {
   return payload.production.map((entry) => {
     const row = entry.row;
+    const head = `
+      <h3>${escapeHtml(entry.feature)}</h3>
+      ${entry.blurb ? `<p class="prod-blurb">${escapeHtml(entry.blurb)}</p>` : ""}
+    `;
     if (!row) {
       return `
         <article class="prod-card missing">
-          <h3>${escapeHtml(entry.feature)}</h3>
-          <p class="prod-score muted">—</p>
+          ${head}
+          <p class="prod-score muted">Not measured yet</p>
           <div class="prod-meta">
-            Never recorded on production routes.<br>
-            ${entry.total_cases} case(s) waiting.
+            ${plural(entry.total_cases, "case")} written, no recorded run on the
+            model this feature ships with.
           </div>
         </article>
       `;
     }
-    const flaky = row.flaky_count
-      ? `<span class="pill warn">${row.flaky_count} flaky</span>`
-      : "";
+    const scoredAttempts = row.scored_attempts;
+    const facts = [
+      [
+        "Strict",
+        `${row.stable_pass_count} of ${plural(row.scored_case_count, "case")} passed
+         all ${plural(row.repeat, "attempt")}`
+      ],
+      [
+        "Attempt",
+        `${row.passed} of ${plural(scoredAttempts, "attempt")} passed
+         (${fmtPercent(row.accuracy)})`
+      ],
+      row.flaky_count
+        ? ["Flaky", `${plural(row.flaky_count, "case")} passed sometimes, failed others`]
+        : ["Flaky", "None — every case landed the same way each time"],
+      ["Route", escapeHtml(row.routes.join(", ") || "—")],
+      [
+        "Cost",
+        `${fmtCost(row.cost_per_repeat)} per run · ${fmtSeconds(row.avg_latency_s)} per attempt`
+      ],
+      [
+        "Recorded",
+        `${escapeHtml(row.recorded_on)} · commit ${escapeHtml(row.revision_label)}`
+      ]
+    ];
     return `
       <article class="prod-card">
-        <h3>${escapeHtml(entry.feature)}</h3>
+        ${head}
         <p class="prod-score">
-          <span class="pill ${scoreClass(row.strict_accuracy)}">${fmtPercent(row.strict_accuracy)}</span>
-          ${flaky}
+          <span class="prod-headline ${scoreClass(row.strict_accuracy)}">${fmtPercent(row.strict_accuracy)}</span>
+          <span class="muted">of cases passed every attempt</span>
         </p>
-        <div class="prod-meta">
-          ${escapeHtml(row.routes.join(", ") || "—")}<br>
-          ${row.case_ids.length}/${entry.total_cases} cases · repeat ${row.repeat}
-          · attempt ${fmtPercent(row.accuracy)}<br>
-          ${fmtSeconds(row.avg_latency_s)} · ${fmtCost(row.cost_per_repeat)}/run
-          · ${escapeHtml(row.revision_label)}${row.stale ? " (stale)" : ""}
-        </div>
+        <dl class="prod-facts">
+          ${facts.map(([term, value]) => `<div><dt>${term}</dt><dd>${value}</dd></div>`).join("")}
+        </dl>
       </article>
     `;
   }).join("");
@@ -445,8 +599,9 @@ function productionWarnings() {
   if (payload.uncovered_features.length) {
     notes.push([
       "bad",
-      `No production run recorded for <strong>${payload.uncovered_features.map(escapeHtml).join(", ")}</strong>.
-       A green scorecard says nothing about these features.`
+      `Never measured on the model it ships with:
+       <strong>${payload.uncovered_features.map(escapeHtml).join(", ")}</strong>.
+       Whatever the other cards say, they say nothing about these.`
     ]);
   }
   for (const entry of payload.production) {
@@ -454,27 +609,32 @@ function productionWarnings() {
     if (!row || !row.missing_case_ids.length) continue;
     notes.push([
       "",
-      `<strong>${escapeHtml(entry.feature)}</strong> was recorded before
-       ${row.missing_case_ids.length} current case(s) existed:
+      `<strong>${escapeHtml(entry.feature)}</strong> was last measured before
+       ${plural(row.missing_case_ids.length, "case")} existed, so its score does
+       not cover:
        ${row.missing_case_ids.map((id) => `<code>${escapeHtml(id)}</code>`).join(", ")}`
     ]);
   }
-  const stale = payload.production.filter((entry) => entry.row && entry.row.stale);
-  if (stale.length) {
+  const fellBack = payload.production.filter(
+    (entry) => entry.row && entry.row.fallback_case_ids.length
+  );
+  if (fellBack.length) {
     notes.push([
       "",
-      `Measured code that has since changed:
-       <strong>${stale.map((entry) => escapeHtml(entry.feature)).join(", ")}</strong>.
-       Re-record to score the code as it stands.`
+      `Answered by a fallback model:
+       <strong>${fellBack.map((entry) => escapeHtml(entry.feature)).join(", ")}</strong>.
+       The first-choice model failed on at least one case, so part of that score
+       belongs to the fallback rather than the model named on the card.`
     ]);
   }
   const single = payload.production.filter((entry) => entry.row && entry.row.repeat < 2);
   if (single.length) {
     notes.push([
       "",
-      `Single sample (repeat=1):
+      `Measured once only:
        <strong>${single.map((entry) => escapeHtml(entry.feature)).join(", ")}</strong>.
-       Stability is unmeasured — rerun with <code>--repeat 3</code> or more.`
+       A single sample cannot tell a reliable pass from a lucky one — these need
+       a rerun at three attempts or more.`
     ]);
   }
   if (!notes.length) return "";
@@ -503,23 +663,25 @@ if (payload.features && payload.features.length) {
     sort: "strict_accuracy",
     flakyOnly: false,
     productionOnly: false,
-    hideStale: false,
     query: ""
   };
 
   app.innerHTML = `
-    <h2 class="section-title">Production</h2>
+    <h2 class="section-title">What ships today</h2>
     <p class="section-sub">
-      Latest run on production routes per feature, against the
-      ${payload.total_cases} cases in <code>evals/cases</code> today.
+      The most recent scored run for each feature, on the model it actually
+      runs on, against the ${payload.total_cases} cases written so far.
+      Anything the numbers do not cover is spelled out underneath them.
     </p>
     <div class="prod-grid">${productionCards()}</div>
     ${productionWarnings()}
 
-    <h2 class="section-title">Variations</h2>
+    <h2 class="section-title">Model comparisons</h2>
     <p class="section-sub">
-      Alternatives for one feature at a time. Strict counts cases passing every
-      attempt; attempt is attempt-weighted. They diverge exactly when cases are flaky.
+      The same cases, run on other models and reasoning levels — this is how a
+      feature's model gets chosen, and it is why the fact-checker runs on a
+      budget model that beat the premium ones. One feature at a time, since a
+      model is only better or worse at a specific job.
     </p>
     <div class="layout">
       <aside class="sidebar">
@@ -554,42 +716,43 @@ if (payload.features && payload.features.length) {
           </div>
           <div class="toggle-row">
             <label class="toggle"><input id="flaky-only" type="checkbox" />Has flaky cases</label>
-            <label class="toggle"><input id="production-only" type="checkbox" />Production routes only</label>
-            <label class="toggle"><input id="hide-stale" type="checkbox" />Current commit only</label>
+            <label class="toggle"><input id="production-only" type="checkbox" />What ships only</label>
           </div>
         </div>
         <div class="scope-meta">
           <strong id="scope-title"></strong>
+          <span id="scope-blurb"></span>
           <span id="scope-meta"></span>
           <ul id="scope-cases" class="case-list"></ul>
         </div>
       </aside>
       <section class="content">
         <section class="content-card">
-          <h2>Runs</h2>
+          <h2>Measured setups</h2>
           <div class="table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th>Run</th>
-                  <th>Strict</th>
-                  <th>Attempt</th>
-                  <th>Repeat</th>
-                  <th>Cases</th>
-                  <th>Flaky</th>
-                  <th>Avg Latency</th>
-                  <th>Cost/run</th>
-                  <th>Revision</th>
-                  <th>Not passing</th>
+                  <th title="The model asked, its reasoning level, and when it was run">Model</th>
+                  <th title="Share of cases that passed every attempt">Strict</th>
+                  <th title="Share of individual attempts that passed">Attempt</th>
+                  <th title="How many times each case was run">Repeat</th>
+                  <th title="Cases this run covered">Cases</th>
+                  <th title="Cases that passed some attempts and failed others">Flaky</th>
+                  <th title="Average time for one attempt">Avg Latency</th>
+                  <th title="Average spend to run the whole case set once">Cost/run</th>
+                  <th title="Commit the run was recorded at">Recorded</th>
+                  <th title="Cases that did not pass every attempt, with their pass rate">Not passing</th>
                 </tr>
               </thead>
               <tbody id="results-body"></tbody>
             </table>
           </div>
           <div class="footnote">
-            One row per model, reasoning, route and repeat setting — the newest of each.
-            Repeat is part of the identity: a 5-sample row and a 1-sample row are
-            different measurements and are never merged.
+            One row per model, reasoning level, route and repeat count — the newest of
+            each. Repeat is part of a row's identity: a five-sample run and a
+            one-sample run of the same model are different measurements, so they are
+            never merged.
           </div>
         </section>
       </section>
@@ -603,9 +766,9 @@ if (payload.features && payload.features.length) {
     sort: document.getElementById("sort-filter"),
     flakyOnly: document.getElementById("flaky-only"),
     productionOnly: document.getElementById("production-only"),
-    hideStale: document.getElementById("hide-stale"),
     query: document.getElementById("query-filter"),
     scopeTitle: document.getElementById("scope-title"),
+    scopeBlurb: document.getElementById("scope-blurb"),
     scopeMeta: document.getElementById("scope-meta"),
     scopeCases: document.getElementById("scope-cases"),
     body: document.getElementById("results-body")
@@ -648,7 +811,6 @@ if (payload.features && payload.features.length) {
     rows = rows.filter((row) => state.reasoning === "all" || (row.reasoning_effort || "none") === state.reasoning);
     rows = rows.filter((row) => !state.flakyOnly || row.flaky_count > 0);
     rows = rows.filter((row) => !state.productionOnly || row.is_production);
-    rows = rows.filter((row) => !state.hideStale || !row.stale);
     rows = rows.filter((row) => {
       if (!query) return true;
       const haystack = [
@@ -680,7 +842,7 @@ if (payload.features && payload.features.length) {
           <div class="model-cell">
             <strong>${escapeHtml(row.model_display)}</strong>
             <span class="muted">
-              ${escapeHtml(row.reasoning_effort || "none")}
+              ${escapeHtml(displayReasoning(row.reasoning_effort))}
               · ${escapeHtml(row.created_at.slice(0, 16).replace("T", " "))}
               ${row.is_production ? '<span class="pill prod">production</span>' : ""}
             </span>
@@ -700,7 +862,7 @@ if (payload.features && payload.features.length) {
         <td>${row.flaky_count || "—"}</td>
         <td>${fmtSeconds(row.avg_latency_s)}</td>
         <td>${fmtCost(row.cost_per_repeat)}</td>
-        <td><span class="pill">${escapeHtml(row.revision_label)}${row.stale ? " stale" : ""}</span></td>
+        <td class="muted">${escapeHtml(row.recorded_on)}<br>${escapeHtml(row.revision_label)}</td>
         <td><div class="case-chips">${caseChips(row)}</div></td>
       `;
       els.body.appendChild(tr);
@@ -709,7 +871,8 @@ if (payload.features && payload.features.length) {
 
   function renderScopeMeta(section) {
     els.scopeTitle.textContent = `${section.feature} · ${section.total_cases} cases`;
-    els.scopeMeta.textContent = `${section.rows.length} recorded variation(s)`;
+    els.scopeBlurb.textContent = section.blurb || "";
+    els.scopeMeta.textContent = `${plural(section.rows.length, "measured setup")} below. Every one was scored on these cases:`;
     els.scopeCases.innerHTML = "";
     for (const caseId of section.case_ids) {
       const li = document.createElement("li");
@@ -723,7 +886,7 @@ if (payload.features && payload.features.length) {
     const models = Array.from(new Set(section.rows.map((row) => row.model_display))).sort();
     const reasoning = Array.from(new Set(section.rows.map((row) => row.reasoning_effort || "none"))).sort();
     buildOptions(els.model, [{ value: "all", label: "All models" }, ...models.map((value) => ({ value, label: value }))], state.model);
-    buildOptions(els.reasoning, [{ value: "all", label: "All reasoning levels" }, ...reasoning.map((value) => ({ value, label: value }))], state.reasoning);
+    buildOptions(els.reasoning, [{ value: "all", label: "All reasoning levels" }, ...reasoning.map((value) => ({ value, label: displayReasoning(value) }))], state.reasoning);
   }
 
   function render() {
@@ -753,7 +916,6 @@ if (payload.features && payload.features.length) {
   els.sort.addEventListener("change", (event) => { state.sort = event.target.value; render(); });
   els.flakyOnly.addEventListener("change", (event) => { state.flakyOnly = event.target.checked; render(); });
   els.productionOnly.addEventListener("change", (event) => { state.productionOnly = event.target.checked; render(); });
-  els.hideStale.addEventListener("change", (event) => { state.hideStale = event.target.checked; render(); });
   els.query.addEventListener("input", (event) => { state.query = event.target.value; render(); });
   refreshDynamicOptions();
   render();

@@ -410,54 +410,6 @@ def _compute_route_set_id(per_case: list[dict[str, Any]]) -> str:
     return _stable_hash(route_payload)
 
 
-EVAL_SOURCE_PATHS = (
-    "src",
-    "main.py",
-    "evals/framework.py",
-    "evals/cases",
-    "evals/run.py",
-    "evals/matrix.py",
-)
-"""Paths whose changes can move an eval score.
-
-Chosen as the code an eval actually exercises: the app under test, the harness
-that drives it, and the cases themselves. Deliberately excludes
-`evals/leaderboard/` — recording a run commits its own results, so counting
-that as a change would mark every run stale the moment it was published.
-"""
-
-
-def code_changed_since(sha: str | None, repo_root: Path = _ROOT) -> bool | None:
-    """Return whether eval-relevant source changed between `sha` and HEAD.
-
-    Staleness cannot be `sha != HEAD`. Recording a run and committing its
-    results advances HEAD by construction, so that test marks every published
-    row stale forever and the warning stops meaning anything.
-
-    Args:
-        sha: The commit a run was recorded at.
-        repo_root: Repository to inspect.
-
-    Returns:
-        True or False, or None when the answer is unknowable — an unknown sha,
-        a shallow clone missing the commit, or no git at all. Callers treat
-        None as "not stale" so a row is never flagged on a guess.
-    """
-    if not sha or sha == "unknown":
-        return None
-    try:
-        completed = subprocess.run(
-            ["git", "diff", "--name-only", f"{sha}..HEAD", "--", *EVAL_SOURCE_PATHS],
-            cwd=repo_root,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    except Exception:
-        return None
-    return bool(completed.stdout.strip())
-
-
 def route_label(route: dict[str, Any]) -> str:
     """Return a compact route label for reports."""
     primary = str(route["primary"])

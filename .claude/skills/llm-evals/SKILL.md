@@ -1,20 +1,27 @@
 ---
 name: llm-evals
-description: Use when adding, modifying, or running LLM evaluation cases in evals/ (zdrowskit project). Covers feedback-derived regression philosophy, case-kind taxonomy, provenance fields, fixture preferences, deterministic and judge assertions, route-aware leaderboard records, matrix runs, and the boundary between mocked pytest and opt-in real-LLM evals.
+description: Use when adding, modifying, or running LLM evaluation cases in evals/ (zdrowskit project). Covers seeding from real failures and when a synthetic case earns its place, case-kind taxonomy, provenance fields, fixture preferences, deterministic and judge assertions, route-aware leaderboard records, matrix runs, and the boundary between mocked pytest and opt-in real-LLM evals.
 ---
 
 # LLM Evals (zdrowskit)
 
-LLM evals in `evals/` are feedback-derived regressions, not a generated benchmark suite. Do not add broad LLM-created scenarios, stale blueprint/cache machinery, or cases without provenance.
+LLM evals in `evals/` are regressions, not a generated benchmark suite. Do not add broad LLM-created scenarios, stale blueprint/cache machinery, or cases without provenance.
 
 Recorded eval history has no backward-compatibility contract. Keep the schema clean and update renderers/tests/callers together when the record shape changes.
 
 ## When adding eval coverage
 
-- Start from a real thumbs-down feedback item. Use `uv run python main.py llm-log --feedback` to find it and `uv run python main.py llm-log --id N` to inspect the trace.
-- Add the real failure first as `case_kind: "real_regression"`.
-- Add only the minimum synthetic controls needed to isolate the hypothesis or guard a false positive, using `case_kind: "synthetic_positive"` or `case_kind: "synthetic_negative"`.
-- Preserve provenance on every case with `source_feedback_id`, `source_llm_call_id`, and `derived_from.hypothesis`.
+**A real failure is the recommended seed.** Start from a real thumbs-down feedback item — `uv run python main.py llm-log --feedback` to find it, `uv run python main.py llm-log --id N` to inspect the trace — and add it first as `case_kind: "real_regression"`. It is proof the defect ships, and it hands you the exact fixture that broke.
+
+**A good synthetic case is welcome on its own merits**, not only as a satellite of a real one. It earns its place when it pins a behavior worth shipping a fix for and would catch a plausible regression. The shapes that qualify:
+
+- **Positive control** (`case_kind: "synthetic_positive"`) — the model must keep doing the right thing. `verification_judge_nudge_passes_accurate_week_totals` is the load-bearing example: without it, a trigger-happy verifier scores well by suppressing everything.
+- **False-positive guard** (`case_kind: "synthetic_negative"`) — the neighbouring input that only looks like the failure, which the model must not fire on.
+- **A stated rule with no failure yet** — a hard constraint the prompt already makes, e.g. a nudge fitting a phone notification.
+
+What still does not belong: broad taste judgements ("is this good coaching"), bulk LLM-generated scenarios, and any case whose hypothesis you cannot state in one sentence.
+
+- Preserve provenance on every case, synthetic included, with `source_feedback_id`, `source_llm_call_id`, and `derived_from.hypothesis`. A synthetic case still points `source_llm_call_id` at a real call whose shape it copies — an invented fixture drifts from what production actually sends.
 - Prefer structured fixtures: pinned date, context snippets, conversation turns, and only the health data needed for the behavior under test.
 - Prefer deterministic assertions. Add LLM-as-judge only for narrow semantic invariants where tool-call, argument, text, word-count, or forbidden-opening assertions would be brittle or fake-precise.
 
@@ -229,6 +236,8 @@ If `evals/.cache.sqlite` was wiped, the first run is fresh. Otherwise use `--ref
 
 Leaderboard records store run-level `requested_model`, `is_production` and `repeat`, plus one aggregated entry per case holding its pass rate, flaky flag, actual `route`, and raw per-attempt latency/cost/failures. Actual model identity belongs to the case route, not a top-level compatibility field.
 
-The leaderboard groups by **feature**, not by case set. The landing view is the production scorecard: the newest production-route run per feature, scored against the cases on disk today, with explicit callouts for features never recorded, cases added since the run, stale commits, and `repeat=1` rows whose stability is unmeasured. Everything else is a per-feature variation table.
+The leaderboard groups by **feature**, not by case set. The landing view is the production scorecard ("What ships today"): the newest production-route run per feature, scored against the cases on disk today, with explicit callouts for features never recorded, cases added since the run, scores a fallback model answered, and `repeat=1` rows whose stability is unmeasured. Everything else is a per-feature comparison table.
+
+The leaderboard is published, so it is written for a reader who has never seen this codebase: every percentage is stated as "N of M" beside it, every feature carries a plain-language blurb from `FEATURE_BLURBS` in `evals/leaderboard/scorecard.py`, and the page opens with a legend for strict / attempt / flaky / repeat / route. Keep new columns and callouts to that standard — a bare number the reader has to take on trust does not belong there.
 
 Rows carry strict accuracy (cases passing every attempt) and attempt accuracy (attempt-weighted); they are equal at `repeat=1` and diverge exactly when cases are flaky. Rank on strict. Record with `--repeat 3` or more — a `repeat=1` row measures nothing about stability and the leaderboard says so on its face.

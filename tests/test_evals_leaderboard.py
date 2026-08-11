@@ -14,7 +14,7 @@ from evals import run as eval_run
 from evals.framework import AssertionResult, EvalCase, EvalExecution, EvalResult
 from evals.leaderboard import __main__ as leaderboard_cli
 from evals.leaderboard import record as leaderboard_record
-from evals.leaderboard.scorecard import build_scorecard
+from evals.leaderboard.scorecard import FEATURE_BLURBS, build_scorecard
 
 
 def _eval_result(
@@ -390,63 +390,51 @@ class TestProductionScorecard:
 
         assert scorecard["production"][0]["missing_case_ids"] == ["case-b"]
 
-    def test_rows_are_stale_when_measured_code_has_changed(self) -> None:
+    def test_production_row_carries_a_plain_language_feature_blurb(self) -> None:
+        """The page is published, so every feature name needs a translation."""
         run = _build_record(
             case_ids=["case-a"],
             results=[_eval_result("case-a", passed=True)],
             requested_model=None,
             reasoning_effort="production",
             created_at="2026-04-11T10:00:00Z",
-            run_id="run-stale",
-            git_sha="oldsha1234",
+            run_id="run-blurb",
         )
 
         scorecard = build_scorecard(
-            [run], inventory=[_case("case-a")], stale_check=lambda sha: True
+            [run], inventory=[_case("case-a", feature="verification_judge")]
         )
 
-        assert scorecard["production"][0]["row"]["stale"] is True
+        entry = scorecard["production"][0]
+        assert entry["feature"] == "verification_judge"
+        assert entry["blurb"] == FEATURE_BLURBS["verification_judge"]
 
-    def test_rows_are_not_stale_when_only_the_commit_moved(self) -> None:
-        """Recording a run commits its own results and advances HEAD.
-
-        Treating that as staleness would flag every published row forever.
-        """
+    def test_row_reports_the_denominators_behind_both_percentages(self) -> None:
+        """A published percentage has to be readable back as "N of M"."""
         run = _build_record(
-            case_ids=["case-a"],
-            results=[_eval_result("case-a", passed=True)],
+            case_ids=["case-a", "case-b"],
+            results=[
+                _eval_result("case-a", passed=True),
+                _eval_result("case-a", passed=True),
+                _eval_result("case-b", passed=True),
+                _eval_result("case-b", passed=False),
+            ],
             requested_model=None,
             reasoning_effort="production",
             created_at="2026-04-11T10:00:00Z",
-            run_id="run-fresh",
-            git_sha="oldsha1234",
+            run_id="run-denominators",
+            repeat=2,
         )
 
-        scorecard = build_scorecard(
-            [run],
-            inventory=[_case("case-a")],
-            head_sha="newsha5678",
-            stale_check=lambda sha: False,
-        )
+        row = build_scorecard([run], inventory=[_case("case-a"), _case("case-b")])[
+            "production"
+        ][0]["row"]
 
-        assert scorecard["production"][0]["row"]["stale"] is False
-
-    def test_unknowable_staleness_does_not_flag_a_row(self) -> None:
-        """A shallow CI clone cannot resolve the sha; never flag on a guess."""
-        run = _build_record(
-            case_ids=["case-a"],
-            results=[_eval_result("case-a", passed=True)],
-            requested_model=None,
-            reasoning_effort="production",
-            created_at="2026-04-11T10:00:00Z",
-            run_id="run-unknown",
-        )
-
-        scorecard = build_scorecard(
-            [run], inventory=[_case("case-a")], stale_check=lambda sha: None
-        )
-
-        assert scorecard["production"][0]["row"]["stale"] is False
+        assert row["scored_case_count"] == 2
+        assert row["stable_pass_count"] == 1
+        assert row["scored_attempts"] == 4
+        assert row["passed"] == 3
+        assert row["recorded_on"] == "2026-04-11"
 
     def test_variation_rows_are_grouped_by_feature_not_case_set(self) -> None:
         """Adding a case must not orphan a feature's comparison history."""
@@ -633,8 +621,8 @@ class TestRendering:
             [run], inventory=[_case("case-a", "chat"), _case("case-n", "nudge")]
         )
 
-        assert markdown.index("## Production") < markdown.index("## chat")
-        assert "No production run recorded for:** `nudge`" in markdown
+        assert markdown.index("## What ships today") < markdown.index("## chat")
+        assert "Never measured on the model it ships with:** `nudge`" in markdown
 
     def test_markdown_warns_when_production_is_a_single_sample(self) -> None:
         run = _build_record(
@@ -650,7 +638,7 @@ class TestRendering:
             [run], inventory=[_case("case-a")]
         )
 
-        assert "Single sample (repeat=1)" in markdown
+        assert "Measured once only (repeat=1)" in markdown
 
     def test_html_contains_scorecard_and_stability_filters(self) -> None:
         run = _build_record(
@@ -675,7 +663,6 @@ class TestRendering:
         assert "feature-filter" in html
         assert "flaky-only" in html
         assert "production-only" in html
-        assert "hide-stale" in html
         assert "strict_accuracy" in html
         assert "leaderboard-data" in html
         assert "case-a" in html
@@ -909,7 +896,7 @@ class TestCli:
         leaderboard_cli.main()
 
         assert "Rendered leaderboard with 1 run(s)" in capsys.readouterr().out
-        assert "Feedback Eval Leaderboard" in markdown_path.read_text(encoding="utf-8")
+        assert "# Eval Leaderboard" in markdown_path.read_text(encoding="utf-8")
 
     def test_leaderboard_render_html_cli_rebuilds_html(
         self,
