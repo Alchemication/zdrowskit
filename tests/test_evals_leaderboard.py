@@ -11,7 +11,13 @@ import pytest
 from evals import leaderboard
 from evals import matrix as eval_matrix
 from evals import run as eval_run
-from evals.framework import AssertionResult, EvalCase, EvalExecution, EvalResult
+from evals.framework import (
+    AssertionResult,
+    CapturedToolCall,
+    EvalCase,
+    EvalExecution,
+    EvalResult,
+)
 from evals.leaderboard import __main__ as leaderboard_cli
 from evals.leaderboard import record as leaderboard_record
 from evals.leaderboard.scorecard import FEATURE_BLURBS, build_scorecard
@@ -27,6 +33,9 @@ def _eval_result(
     latency_s: float = 1.0,
     cost: float | None = 0.01,
     error: str | None = None,
+    tool_names: list[str] | None = None,
+    tools_offered: int = 0,
+    hit_iteration_cap: bool = False,
 ) -> EvalResult:
     assertions = [AssertionResult(name="ok", passed=True)]
     if not passed:
@@ -57,6 +66,12 @@ def _eval_result(
             input_tokens=10,
             output_tokens=5,
             total_tokens=15,
+            tool_calls=[
+                CapturedToolCall(name=name, arguments={}, tool_call_id=f"call-{i}")
+                for i, name in enumerate(tool_names or [])
+            ],
+            tools_offered=tools_offered or (1 if tool_names else 0),
+            hit_iteration_cap=hit_iteration_cap,
         ),
         error=error,
     )
@@ -671,6 +686,119 @@ class TestRendering:
         markdown = leaderboard.render_leaderboard_markdown([], inventory=[])
 
         assert "No recorded eval runs yet" in markdown
+
+
+class TestTrajectory:
+    """Tool-call paths, which pass rate hides entirely."""
+
+    def test_records_average_path_and_flags_a_rerun_that_took_another_route(
+        self,
+    ) -> None:
+        record = _build_record(
+            case_ids=["case-a"],
+            results=[
+                _eval_result("case-a", passed=True, tool_names=["run_sql"]),
+                _eval_result("case-a", passed=True, tool_names=["run_sql", "run_sql"]),
+            ],
+            requested_model="anthropic/model-a",
+            reasoning_effort="high",
+            created_at="2026-04-11T10:00:00Z",
+            run_id="run-traj",
+            repeat=2,
+        )
+
+        row = record["per_case"][0]
+        assert row["tool_calls_avg"] == pytest.approx(1.5)
+        assert (row["tool_calls_min"], row["tool_calls_max"]) == (1, 2)
+        assert row["path_varied"] is True
+        assert row["tool_paths"] == [["run_sql"], ["run_sql", "run_sql"]]
+        assert [a["tool_names"] for a in row["attempts"]] == [
+            ["run_sql"],
+            ["run_sql", "run_sql"],
+        ]
+
+    def test_identical_paths_are_not_flagged_as_varied(self) -> None:
+        record = _build_record(
+            case_ids=["case-a"],
+            results=[
+                _eval_result("case-a", passed=True, tool_names=["run_sql"]),
+                _eval_result("case-a", passed=True, tool_names=["run_sql"]),
+            ],
+            requested_model="anthropic/model-a",
+            reasoning_effort="high",
+            created_at="2026-04-11T10:00:00Z",
+            run_id="run-steady",
+            repeat=2,
+        )
+
+        assert record["per_case"][0]["path_varied"] is False
+        assert record["summary"]["varied_path_count"] == 0
+
+    def test_a_feature_with_no_tool_loop_reports_unknown_not_zero(self) -> None:
+        """verification_judge is one call by design.
+
+        Recording 0 there would publish it as a model that declined to use
+        tools it was never offered.
+        """
+        record = _build_record(
+            case_ids=["case-a"],
+            results=[_eval_result("case-a", passed=True, feature="verification_judge")],
+            requested_model="anthropic/model-a",
+            reasoning_effort="high",
+            created_at="2026-04-11T10:00:00Z",
+            run_id="run-notools",
+        )
+
+        row = record["per_case"][0]
+        assert row["tools_offered"] == 0
+        assert row["tool_calls_avg"] is None
+        assert record["summary"]["avg_tool_calls"] is None
+
+    def test_scorecard_exposes_trajectory_for_the_dashboard(self) -> None:
+        run = _build_record(
+            case_ids=["case-a", "case-b"],
+            results=[
+                _eval_result("case-a", passed=True, tool_names=["run_sql"]),
+                _eval_result("case-a", passed=True, tool_names=["run_sql", "run_sql"]),
+                _eval_result("case-b", passed=True, tool_names=["run_sql"]),
+                _eval_result("case-b", passed=True, tool_names=["run_sql"]),
+            ],
+            requested_model=None,
+            reasoning_effort="production",
+            created_at="2026-04-11T10:00:00Z",
+            run_id="run-scored",
+            repeat=2,
+        )
+
+        row = build_scorecard([run], inventory=[_case("case-a"), _case("case-b")])[
+            "production"
+        ][0]["row"]
+
+        assert row["avg_tool_calls"] == pytest.approx(1.25)
+        assert row["varied_path_count"] == 1
+        assert row["case_rows"][0]["path_varied"] is True
+        assert row["case_rows"][1]["path_varied"] is False
+
+    def test_runs_recorded_before_trajectory_existed_render_as_unknown(self) -> None:
+        """Old rows in runs.jsonl have no trajectory keys at all."""
+        run = _build_record(
+            case_ids=["case-a"],
+            results=[_eval_result("case-a", passed=True)],
+            requested_model=None,
+            reasoning_effort="production",
+            created_at="2026-04-11T10:00:00Z",
+            run_id="run-legacy",
+        )
+        for case_row in run["per_case"]:
+            for key in ("tool_calls_avg", "path_varied", "tool_paths"):
+                case_row.pop(key, None)
+
+        row = build_scorecard([run], inventory=[_case("case-a")])["production"][0][
+            "row"
+        ]
+
+        assert row["avg_tool_calls"] is None
+        assert row["varied_path_count"] == 0
 
 
 class TestCli:

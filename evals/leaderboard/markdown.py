@@ -78,8 +78,9 @@ def _production_lines(scorecard: dict[str, Any]) -> list[str]:
         f"`evals/cases` today.",
         "",
         "| Feature | Route | Cases | Strict | Attempt | Flaky | Repeat "
-        "| Avg Latency | Cost/run | Commit | Recorded |",
-        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |",
+        "| Tool calls | Avg Latency | Cost/run | Commit | Recorded |",
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: "
+        "| --- | --- |",
     ]
     for entry in scorecard["production"]:
         row = entry["row"]
@@ -91,6 +92,7 @@ def _production_lines(scorecard: dict[str, Any]) -> list[str]:
                         str(entry["feature"]),
                         "_never recorded_",
                         f"0/{entry['total_cases']}",
+                        "-",
                         "-",
                         "-",
                         "-",
@@ -115,6 +117,7 @@ def _production_lines(scorecard: dict[str, Any]) -> list[str]:
                     _format_percent(row["accuracy"]),
                     str(row["flaky_count"]),
                     str(row["repeat"]),
+                    _trajectory_cell(row),
                     _format_optional_seconds(row["avg_latency_s"]),
                     _format_optional_cost(row["cost_per_repeat"]),
                     _revision_cell(row),
@@ -188,9 +191,9 @@ def _variation_lines(scorecard: dict[str, Any]) -> list[str]:
             [
                 *heading,
                 "| Model | Reasoning | Repeat | Cases | Strict | Attempt | Flaky "
-                "| Avg Latency | Cost/run | Commit | Not passing |",
+                "| Tool calls | Avg Latency | Cost/run | Commit | Not passing |",
                 "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: "
-                "| --- | --- |",
+                "| ---: | --- | --- |",
             ]
         )
         for row in section["rows"]:
@@ -205,6 +208,7 @@ def _variation_lines(scorecard: dict[str, Any]) -> list[str]:
                         _format_percent(row["strict_accuracy"]),
                         _format_percent(row["accuracy"]),
                         str(row["flaky_count"]),
+                        _trajectory_cell(row),
                         _format_optional_seconds(row["avg_latency_s"]),
                         _format_optional_cost(row["cost_per_repeat"]),
                         _revision_cell(row),
@@ -268,6 +272,22 @@ def _failing_cell(row: dict[str, Any]) -> str:
         if case["outcome"] != "pass"
     ]
     return "<br>".join(parts) if parts else "-"
+
+
+def _trajectory_cell(row: dict[str, Any]) -> str:
+    """Render average tool calls per attempt, flagging unstable paths.
+
+    "-" means the feature has no tool loop, or the run predates trajectory
+    capture. Either way the number is unknown, which is not the same as zero.
+    """
+    average = row.get("avg_tool_calls")
+    if average is None:
+        return "-"
+    cell = f"{float(average):.1f}"
+    varied = int(row.get("varied_path_count") or 0)
+    if varied:
+        cell += f" ({varied} varied)"
+    return cell
 
 
 def _format_percent(value: float) -> str:

@@ -234,7 +234,9 @@ If `evals/.cache.sqlite` was wiped, the first run is fresh. Otherwise use `--ref
 - Do not use the full `verify_and_rewrite` pipeline for model selection. If rewrite behavior needs coverage, add a separate rewrite-step feature from real rewrite failures.
 - Mixed `--production` runs are smoke/regression checks. Make model decisions from feature-scoped matrix runs.
 
-Leaderboard records store run-level `requested_model`, `is_production` and `repeat`, plus one aggregated entry per case holding its pass rate, flaky flag, actual `route`, and raw per-attempt latency/cost/failures. Actual model identity belongs to the case route, not a top-level compatibility field.
+Leaderboard records store run-level `requested_model`, `is_production` and `repeat`, plus one aggregated entry per case holding its pass rate, flaky flag, actual `route`, trajectory (`tool_calls_avg`/`min`/`max`, distinct `tool_paths`, `path_varied`, `hit_iteration_cap`), and raw per-attempt latency/cost/`tool_names`/failures.
+
+Trajectory is unknown, never zero, for a feature with no tool loop (`memory`, `verification_judge`) and for runs recorded before it was captured — `EvalExecution.tools_offered` is what separates "never given tools" from "chose not to call any". Actual model identity belongs to the case route, not a top-level compatibility field.
 
 The leaderboard groups by **feature**, not by case set. The landing view is the production scorecard ("What ships today"): the newest production-route run per feature, scored against the cases on disk today, with explicit callouts for features never recorded, cases added since the run, scores a fallback model answered, and `repeat=1` rows whose stability is unmeasured. Everything else is a per-feature comparison table.
 

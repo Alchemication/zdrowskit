@@ -190,6 +190,30 @@ an outage cannot read as a quality regression. Cost is reported per covered run
 (`total_cost / repeat`) so a 5-sample row is not ranked against a 1-sample row
 at five times the price.
 
+## Trajectory
+
+Pass rate says whether a case landed. It says nothing about how, and "how" is
+where the cost, the latency and much of the instability live. Every attempt
+therefore records the tool calls it made, in order:
+
+```
+chat_running_speed_trend_pace_format   2 paths   3/3 passing
+  ×2   run_sql → reply
+  ×1   run_sql → run_sql → update_context → reply
+```
+
+Three passes, two different routes. The score is clean and the behaviour is
+not settled — a distinction the accuracy columns cannot make.
+
+Recorded per case: average, minimum and maximum tool calls, every distinct
+path with the number of attempts that took it, and whether any attempt
+exhausted `max_tool_iterations` and was forced to answer with what it had. The
+leaderboard shows the average per row and expands to the full paths on click.
+
+Features with no tool loop — `memory` and `verification_judge` are single calls
+by design — record this as unknown rather than zero, so "was never given tools"
+cannot be read as "chose not to use them".
+
 ## Leaderboard
 
 Recorded runs append to `evals/leaderboard/runs.jsonl`. Both views are generated
@@ -215,8 +239,8 @@ It answers two questions, in this order:
 
 Each record stores run-level metadata (`requested_model`, `is_production`,
 `reasoning_effort`, `repeat`, `git_sha`) plus one aggregated entry per case with
-its pass rate, flaky flag, actual route, and raw per-attempt latency, cost and
-failures. There is no backward-compatibility contract on this file: when the
+its pass rate, flaky flag, actual route, trajectory, and raw per-attempt
+latency, cost, tool path and failures. There is no backward-compatibility contract on this file: when the
 shape changes, update the renderers and tests with it.
 
 The leaderboard is published at

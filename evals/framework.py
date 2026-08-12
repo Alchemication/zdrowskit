@@ -197,6 +197,18 @@ class EvalExecution:
     error, so a run can be scored against a model nobody configured. Recording
     only the request made those substitutions invisible to the leaderboard.
     """
+    tools_offered: int = 0
+    """How many tool schemas this call path put in front of the model.
+
+    Zero means the feature has no tool loop at all — `verification_judge` and
+    `memory` are single calls by design. Without it, "made no tool calls" and
+    "was never given tools" are the same number, and the leaderboard would
+    report the verifier as having skipped tools it was never offered.
+    """
+    hit_iteration_cap: bool = False
+    """True when the loop exhausted `max_tool_iterations` and was forced to
+    synthesise an answer. A trajectory that ends at the ceiling is a different
+    result from one that ended because the model was finished."""
 
 
 @dataclass
@@ -1294,6 +1306,7 @@ def run_tool_loop(
                 cache_hits=cache_hits,
                 cache_misses=cache_misses,
                 effective_models=list(effective_models),
+                tools_offered=len(tools or []),
             )
 
         messages.append(_assistant_message(last_result))
@@ -1308,7 +1321,10 @@ def run_tool_loop(
                 }
             )
 
-    if last_result is not None and _result_tool_calls(last_result):
+    hit_iteration_cap = last_result is not None and bool(
+        _result_tool_calls(last_result)
+    )
+    if hit_iteration_cap:
         last_result, cache_hit = _call_llm_for_eval(
             messages=messages,
             model=model,
@@ -1339,6 +1355,8 @@ def run_tool_loop(
         cache_hits=cache_hits,
         cache_misses=cache_misses,
         effective_models=list(effective_models),
+        tools_offered=len(tools or []),
+        hit_iteration_cap=hit_iteration_cap,
     )
 
 

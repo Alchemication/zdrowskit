@@ -272,9 +272,51 @@ def _aggregate_per_case(results: list[EvalResult]) -> list[dict[str, Any]]:
                     }
                 ),
                 "attempts": [_build_attempt(attempt) for attempt in attempts],
+                **_trajectory(attempts),
             }
         )
     return rows
+
+
+def _trajectory(attempts: list[EvalResult]) -> dict[str, Any]:
+    """Summarise the tool-call path a case took across its attempts.
+
+    Pass rate says whether a case landed; it says nothing about how. Two
+    attempts can both pass with one calling `run_sql` twice and the other
+    answering straight from context — a difference in cost, latency and
+    reliability that the score hides completely.
+
+    Args:
+        attempts: Every attempt recorded for one case.
+
+    Returns:
+        Trajectory fields for the case row. `tool_calls_avg` is None when the
+        feature offers no tools at all, so "never given tools" cannot be read
+        as "chose not to use them".
+    """
+    executions = [a.execution for a in attempts if a.execution is not None]
+    if not executions or not any(e.tools_offered for e in executions):
+        return {
+            "tools_offered": executions[0].tools_offered if executions else 0,
+            "tool_calls_avg": None,
+            "tool_calls_min": None,
+            "tool_calls_max": None,
+            "tool_paths": [],
+            "path_varied": False,
+            "hit_iteration_cap": False,
+        }
+    counts = [len(e.tool_calls) for e in executions]
+    paths = [[call.name for call in e.tool_calls] for e in executions]
+    unique_paths = sorted({tuple(path) for path in paths})
+    return {
+        "tools_offered": max(e.tools_offered for e in executions),
+        "tool_calls_avg": sum(counts) / len(counts),
+        "tool_calls_min": min(counts),
+        "tool_calls_max": max(counts),
+        "tool_paths": [list(path) for path in unique_paths],
+        "path_varied": len(unique_paths) > 1,
+        "hit_iteration_cap": any(e.hit_iteration_cap for e in executions),
+    }
 
 
 def _case_outcome(passes: int, scored: int) -> str:
@@ -302,6 +344,14 @@ def _build_attempt(result: EvalResult) -> dict[str, Any]:
         ],
         "latency_s": execution.latency_s if execution is not None else None,
         "cost": execution.cost if execution is not None else None,
+        # The path, not just its length: a rerun that swaps two tools is the
+        # same count and a different trajectory.
+        "tool_names": [call.name for call in execution.tool_calls]
+        if execution is not None
+        else [],
+        "hit_iteration_cap": bool(execution.hit_iteration_cap)
+        if execution is not None
+        else False,
     }
 
 
@@ -354,7 +404,21 @@ def build_summary_metrics(
         "total_tokens": sum(execution.total_tokens for execution in executions),
         "cache_hits": sum(execution.cache_hits for execution in executions),
         "cache_misses": sum(execution.cache_misses for execution in executions),
+        "avg_tool_calls": _avg_tool_calls(executions),
+        "varied_path_count": sum(1 for row in per_case if row.get("path_varied")),
     }
+
+
+def _avg_tool_calls(executions: list[Any]) -> float | None:
+    """Average tool calls per attempt, over attempts that were offered tools.
+
+    Attempts with no tool loop are excluded rather than counted as zero, which
+    would drag a tool-using feature's average toward nothing.
+    """
+    with_tools = [e for e in executions if e.tools_offered]
+    if not with_tools:
+        return None
+    return sum(len(e.tool_calls) for e in with_tools) / len(with_tools)
 
 
 def build_feature_summary(
