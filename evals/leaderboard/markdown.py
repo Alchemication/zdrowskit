@@ -248,9 +248,12 @@ def _stability_lines(row: dict[str, Any]) -> list[str]:
 
 
 def _model_cell(row: dict[str, Any]) -> str:
-    """Render the model cell, flagging production rows."""
+    """Render the model cell, saying outright which row is the shipped one.
+
+    Bold alone carried that meaning before, which no legend explained.
+    """
     if row["is_production"]:
-        return f"**{row['model_display']}**"
+        return f"**{row['model_display']}** (ships today)"
     return row["model_display"]
 
 
@@ -283,10 +286,23 @@ def _trajectory_cell(row: dict[str, Any]) -> str:
     average = row.get("avg_tool_calls")
     if average is None:
         return "-"
-    cell = f"{float(average):.1f}"
+    used = int(row.get("tool_using_case_count") or 0)
+    if not used:
+        return "none used"
+    low, high = row.get("tool_calls_min"), row.get("tool_calls_max")
+    if low == high:
+        span = f"{high} each"
+    elif low == 0:
+        # A case that used tools on one attempt and not on another: "0-2"
+        # invites the reader to wonder how a tool-using case made no calls.
+        span = f"up to {high}"
+    else:
+        span = f"{low}-{high}"
+    label = "case" if used == 1 else "cases"
+    cell = f"{float(average):.1f} avg ({used} {label}, {span})"
     varied = int(row.get("varied_path_count") or 0)
     if varied:
-        cell += f" ({varied} varied)"
+        cell += f", {varied} varied"
     return cell
 
 
