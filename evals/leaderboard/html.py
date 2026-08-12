@@ -64,6 +64,13 @@ _GLOSSARY = (
         "the provider fails. Written <code>model (reasoning) -&gt; fallback</code>.",
     ),
     (
+        "Tool calls",
+        "How many times the model went and looked something up before "
+        "answering — averaged per attempt. <em>Varied</em> counts cases that "
+        "took a different path on a rerun: same question, same verdict, "
+        "different route to it.",
+    ),
+    (
         "Cost / run",
         "Average spend to run that feature's whole case set once, in USD. "
         "Normalised by repeat, so a 5-sample row is not five times the price of "
@@ -462,6 +469,54 @@ _STYLE = """
     .accuracy-stack { display: grid; gap: 8px; min-width: 130px; }
     .bar { width: 100%; height: 9px; border: 1px solid var(--ink); background: var(--paper-2); overflow: hidden; }
     .bar > span { display: block; height: 100%; }
+    /* Trajectory panel. Collapsed by default: the path a case took is worth
+       seeing on demand, not worth a column of its own on every row. */
+    .expand-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 2px 6px;
+      border: 1px solid var(--line);
+      background: var(--paper-2);
+      color: inherit;
+      font: inherit;
+      font-size: 12.5px;
+      cursor: pointer;
+    }
+    .expand-btn:hover { border-color: var(--ink); background: var(--green); }
+    .expand-btn:focus-visible { outline: 2px solid var(--orange); outline-offset: 1px; }
+    .expand-btn .caret { color: var(--green-dark); font-size: 10px; }
+    tr.traj-row > td { background: rgba(21,25,15,.05); padding: 0 14px 16px; }
+    .traj-panel { display: grid; gap: 14px; padding-top: 4px; }
+    .traj-case { display: grid; gap: 6px; }
+    .traj-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 11px;
+      font-weight: 900;
+      letter-spacing: .04em;
+      overflow-wrap: anywhere;
+    }
+    .traj-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+    .traj-count {
+      min-width: 62px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: .04em;
+    }
+    .node {
+      padding: 3px 8px;
+      border: 1px solid var(--ink);
+      background: var(--paper);
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .node.answer { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+    .node.tool { background: rgba(183,219,82,.4); }
+    .arrow { color: var(--orange); font-size: 11px; }
+    .traj-note { margin: 0; color: var(--muted); font-size: 11.5px; line-height: 1.6; }
     .case-chips { display: flex; flex-wrap: wrap; gap: 6px; max-width: 340px; }
     .chip {
       font-size: 11px;
@@ -535,6 +590,28 @@ function plural(count, word) {
   return `${count} ${word}${count === 1 ? "" : "s"}`;
 }
 
+function fmtToolCalls(value) {
+  return value == null ? "—" : Number(value).toFixed(1);
+}
+
+// null covers two cases that must not read as zero: a feature with no tool
+// loop, and a run recorded before trajectory was captured.
+function trajectorySentence(row) {
+  if (row.avg_tool_calls == null) {
+    return "No tool loop — one call, no lookups";
+  }
+  const parts = [`${fmtToolCalls(row.avg_tool_calls)} lookups per attempt`];
+  if (row.varied_path_count) {
+    parts.push(`${plural(row.varied_path_count, "case")} took a different path on a rerun`);
+  } else {
+    parts.push("same path every time");
+  }
+  if (row.capped_case_count) {
+    parts.push(`${plural(row.capped_case_count, "case")} hit the tool-call ceiling`);
+  }
+  return parts.join(" · ");
+}
+
 function productionCards() {
   return payload.production.map((entry) => {
     const row = entry.row;
@@ -569,6 +646,7 @@ function productionCards() {
       row.flaky_count
         ? ["Flaky", `${plural(row.flaky_count, "case")} passed sometimes, failed others`]
         : ["Flaky", "None — every case landed the same way each time"],
+      ["Tools", trajectorySentence(row)],
       ["Route", escapeHtml(row.routes.join(", ") || "—")],
       [
         "Cost",
@@ -643,14 +721,94 @@ function productionWarnings() {
     .join("")}</div>`;
 }
 
+function pathNodes(path) {
+  const nodes = path.map((name) => `<span class="node tool">${escapeHtml(name)}</span>`);
+  nodes.push('<span class="node answer">reply</span>');
+  return nodes.join('<span class="arrow">&rarr;</span>');
+}
+
+// Cases whose reruns agreed on a path are grouped by that path: eleven
+// identical lines is noise, "9 cases: run_sql -> reply" is the finding.
+function groupSteadyPaths(cases) {
+  const byPath = new Map();
+  for (const item of cases) {
+    const entry = item.tool_path_counts[0];
+    const key = entry.path.join("\u2192");
+    if (!byPath.has(key)) byPath.set(key, { path: entry.path, ids: [] });
+    byPath.get(key).ids.push(item.case_id);
+  }
+  return [...byPath.values()].sort((a, b) => b.ids.length - a.ids.length);
+}
+
+function hasTrajectory(row) {
+  return row.case_rows.some((item) => item.tool_path_counts.length);
+}
+
+function trajectoryPanel(row) {
+  const cases = row.case_rows.filter((item) => item.tool_path_counts.length);
+  if (!cases.length) return "";
+  const varied = cases.filter((item) => item.path_varied);
+  const steady = cases.filter((item) => !item.path_varied);
+  const blocks = varied.map((item) => `
+    <div class="traj-case">
+      <div class="traj-head">
+        ${escapeHtml(item.case_id)}
+        <span class="pill warn">${plural(item.tool_path_counts.length, "path")}</span>
+        <span class="muted">${escapeHtml(item.rate_label)} passing</span>
+      </div>
+      ${item.tool_path_counts.map((entry) => `
+        <div class="traj-line">
+          <span class="traj-count">&times;${entry.count}</span>
+          ${pathNodes(entry.path)}
+        </div>
+      `).join("")}
+    </div>
+  `).join("");
+  const steadyBlock = steady.length
+    ? `<div class="traj-case">
+         <div class="traj-head">Same path on every attempt</div>
+         ${groupSteadyPaths(steady).map((group) => `
+           <div class="traj-line" title="${escapeHtml(group.ids.join(", "))}">
+             <span class="traj-count">${plural(group.ids.length, "case")}</span>
+             ${pathNodes(group.path)}
+           </div>
+         `).join("")}
+       </div>`
+    : "";
+  const capped = row.capped_case_count
+    ? `<p class="traj-note">${plural(row.capped_case_count, "case")} ran out of
+       tool-call budget and was made to answer with what it had.</p>`
+    : "";
+  const hint = `<p class="traj-note">How each case reached its answer.
+    <strong>&times;N</strong> is how many attempts took that exact route.</p>`;
+  return `<div class="traj-panel">${hint}${blocks}${steadyBlock}${capped}</div>`;
+}
+
+// Hover detail for one case: what failed, and — when the reruns disagreed on
+// how to get there — every distinct tool path it took.
+function chipTitle(item) {
+  const lines = [item.failure_names.join(", ")].filter(Boolean);
+  if (item.path_varied && item.tool_paths.length) {
+    lines.push(
+      "Paths taken: " +
+        item.tool_paths.map((path) => (path.length ? path.join(" → ") : "no tools")).join(" | ")
+    );
+  }
+  return lines.join("\\n") || "no recorded failures";
+}
+
 function caseChips(row) {
-  const interesting = row.case_rows.filter((item) => item.outcome !== "pass");
+  // A case that passes every attempt by a different route is still worth
+  // seeing: the score is clean and the behaviour is not settled.
+  const interesting = row.case_rows.filter(
+    (item) => item.outcome !== "pass" || item.path_varied
+  );
   if (!interesting.length) {
     return `<span class="chip pass">all ${row.case_rows.length} passing</span>`;
   }
   return interesting
-    .map((item) => `<span class="chip ${item.outcome}" title="${escapeHtml(item.failure_names.join(", "))}">
-        ${escapeHtml(item.case_id)} ${escapeHtml(item.rate_label)}
+    .map((item) => `<span class="chip ${item.outcome}" title="${escapeHtml(chipTitle(item))}">
+        ${escapeHtml(item.case_id)} ${escapeHtml(item.rate_label)}${item.path_varied ? ` · ${item.tool_path_counts.length} paths` : ""}
       </span>`)
     .join("");
 }
@@ -663,7 +821,10 @@ if (payload.features && payload.features.length) {
     sort: "strict_accuracy",
     flakyOnly: false,
     productionOnly: false,
-    query: ""
+    query: "",
+    // Run ids whose trajectory panel is open. Kept in state so a filter or
+    // sort change does not silently collapse what the reader was reading.
+    expanded: new Set()
   };
 
   app.innerHTML = `
@@ -739,6 +900,7 @@ if (payload.features && payload.features.length) {
                   <th title="How many times each case was run">Repeat</th>
                   <th title="Cases this run covered">Cases</th>
                   <th title="Cases that passed some attempts and failed others">Flaky</th>
+                  <th title="Average lookups per attempt; varied = cases that took a different path on a rerun">Tool calls</th>
                   <th title="Average time for one attempt">Avg Latency</th>
                   <th title="Average spend to run the whole case set once">Cost/run</th>
                   <th title="Commit the run was recorded at">Recorded</th>
@@ -829,7 +991,7 @@ if (payload.features && payload.features.length) {
     els.body.innerHTML = "";
     if (!rows.length) {
       const tr = document.createElement("tr");
-      tr.innerHTML = `<td colspan="10" class="muted">No runs match the current filters.</td>`;
+      tr.innerHTML = `<td colspan="11" class="muted">No runs match the current filters.</td>`;
       els.body.appendChild(tr);
       return;
     }
@@ -837,6 +999,7 @@ if (payload.features && payload.features.length) {
       const tr = document.createElement("tr");
       if (row.is_production) tr.className = "is-production";
       const strict = Number(row.strict_accuracy);
+      const open = state.expanded.has(row.run_id);
       tr.innerHTML = `
         <td>
           <div class="model-cell">
@@ -860,12 +1023,29 @@ if (payload.features && payload.features.length) {
         <td>${row.repeat}</td>
         <td>${row.case_ids.length}</td>
         <td>${row.flaky_count || "—"}</td>
+        <td>
+          ${hasTrajectory(row)
+            ? `<button class="expand-btn" type="button" data-run="${escapeHtml(row.run_id)}"
+                 aria-expanded="${open}" title="Show the tool path each case took">
+                 ${fmtToolCalls(row.avg_tool_calls)}
+                 <span class="caret">${open ? "▾" : "▸"}</span>
+               </button>`
+            : fmtToolCalls(row.avg_tool_calls)}
+          ${row.varied_path_count ? `<br><span class="muted">${row.varied_path_count} varied</span>` : ""}
+          ${row.capped_case_count ? `<br><span class="muted">${row.capped_case_count} capped</span>` : ""}
+        </td>
         <td>${fmtSeconds(row.avg_latency_s)}</td>
         <td>${fmtCost(row.cost_per_repeat)}</td>
         <td class="muted">${escapeHtml(row.recorded_on)}<br>${escapeHtml(row.revision_label)}</td>
         <td><div class="case-chips">${caseChips(row)}</div></td>
       `;
       els.body.appendChild(tr);
+      if (open) {
+        const detail = document.createElement("tr");
+        detail.className = "traj-row";
+        detail.innerHTML = `<td colspan="11">${trajectoryPanel(row)}</td>`;
+        els.body.appendChild(detail);
+      }
     }
   }
 
@@ -917,6 +1097,14 @@ if (payload.features && payload.features.length) {
   els.flakyOnly.addEventListener("change", (event) => { state.flakyOnly = event.target.checked; render(); });
   els.productionOnly.addEventListener("change", (event) => { state.productionOnly = event.target.checked; render(); });
   els.query.addEventListener("input", (event) => { state.query = event.target.value; render(); });
+  els.body.addEventListener("click", (event) => {
+    const button = event.target.closest(".expand-btn");
+    if (!button) return;
+    const runId = button.dataset.run;
+    if (state.expanded.has(runId)) state.expanded.delete(runId);
+    else state.expanded.add(runId);
+    render();
+  });
   refreshDynamicOptions();
   render();
 } else if (app) {

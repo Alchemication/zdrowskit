@@ -203,7 +203,39 @@ def _case_row(row: dict[str, Any]) -> dict[str, Any]:
         if row["scored"]
         else "errored",
         "failure_names": list(row["failure_names"]),
+        "tool_calls_avg": row.get("tool_calls_avg"),
+        "tool_calls_min": row.get("tool_calls_min"),
+        "tool_calls_max": row.get("tool_calls_max"),
+        "tool_paths": [list(path) for path in row.get("tool_paths", [])],
+        "tool_path_counts": _tool_path_counts(row),
+        "path_varied": bool(row.get("path_varied")),
+        "hit_iteration_cap": bool(row.get("hit_iteration_cap")),
     }
+
+
+def _tool_path_counts(row: dict[str, Any]) -> list[dict[str, Any]]:
+    """Count how many attempts took each distinct tool path, commonest first.
+
+    The distinct paths alone say a case wandered; the counts say whether the
+    odd route was one attempt in five or half of them.
+
+    Args:
+        row: One aggregated case row from a run record.
+
+    Returns:
+        `[{"path": [...], "count": n}, ...]`, empty when the feature has no
+        tool loop or the run predates trajectory capture.
+    """
+    if row.get("tool_calls_avg") is None:
+        return []
+    tallies: dict[tuple[str, ...], int] = {}
+    for attempt in row.get("attempts", []):
+        path = tuple(str(name) for name in attempt.get("tool_names", []))
+        tallies[path] = tallies.get(path, 0) + 1
+    return [
+        {"path": list(path), "count": count}
+        for path, count in sorted(tallies.items(), key=lambda item: -item[1])
+    ]
 
 
 def slice_metrics(rows: list[dict[str, Any]], *, repeat: int) -> dict[str, Any]:
@@ -217,6 +249,7 @@ def slice_metrics(rows: list[dict[str, Any]], *, repeat: int) -> dict[str, Any]:
     scored = sum(int(row["scored"]) for row in rows)
     passed = sum(int(row["passes"]) for row in rows)
     stable_pass = sum(1 for row in scored_rows if row["outcome"] == "pass")
+    trajectory_rows = [row for row in rows if row.get("tool_calls_avg") is not None]
     latencies = [
         attempt["latency_s"]
         for row in rows
@@ -251,6 +284,17 @@ def slice_metrics(rows: list[dict[str, Any]], *, repeat: int) -> dict[str, Any]:
         "avg_latency_s": (sum(latencies) / len(latencies)) if latencies else None,
         "total_cost": total_cost,
         "cost_per_repeat": (total_cost / repeat) if total_cost is not None else None,
+        # None, not 0, for a feature with no tool loop and for runs recorded
+        # before trajectory was captured: both mean "unknown", and a zero here
+        # would read as a model that declined to use its tools.
+        "avg_tool_calls": (
+            sum(float(row["tool_calls_avg"]) for row in trajectory_rows)
+            / len(trajectory_rows)
+        )
+        if trajectory_rows
+        else None,
+        "varied_path_count": sum(1 for row in rows if row.get("path_varied")),
+        "capped_case_count": sum(1 for row in rows if row.get("hit_iteration_cap")),
     }
 
 
