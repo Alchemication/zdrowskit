@@ -598,18 +598,31 @@ function fmtToolCalls(value) {
 // loop, and a run recorded before trajectory was captured.
 function trajectorySentence(row) {
   if (row.avg_tool_calls == null) {
-    return "No tool loop — one call, no lookups";
+    return "This feature answers in one call — it has no tools to use.";
   }
-  const parts = [`${fmtToolCalls(row.avg_tool_calls)} lookups per attempt`];
-  if (row.varied_path_count) {
-    parts.push(`${plural(row.varied_path_count, "case")} took a different path on a rerun`);
-  } else {
-    parts.push("same path every time");
+  const used = row.tool_using_case_count;
+  const total = row.case_ids.length;
+  if (!used) {
+    return `Tools were available, but all ${plural(total, "case")} answered without
+            looking anything up.`;
   }
+  const span = row.tool_calls_min === row.tool_calls_max
+    ? `${plural(row.tool_calls_min, "call")} each`
+    : row.tool_calls_min === 0
+      // A case that used a tool on one attempt and not on another. "0–2 calls"
+      // invites the reader to wonder how a tool-using case made none.
+      ? `up to ${plural(row.tool_calls_max, "call")}`
+      : `${row.tool_calls_min}–${row.tool_calls_max} calls each`;
+  const lines = [`${used} of ${plural(total, "case")} used a tool (${span}).`];
+  lines.push(
+    row.varied_path_count
+      ? `${row.varied_path_count} took a different route when rerun.`
+      : "Every case took the same route each time."
+  );
   if (row.capped_case_count) {
-    parts.push(`${plural(row.capped_case_count, "case")} hit the tool-call ceiling`);
+    lines.push(`${plural(row.capped_case_count, "case")} ran out of tool-call budget.`);
   }
-  return parts.join(" · ");
+  return lines.join(" ");
 }
 
 function productionCards() {
@@ -738,6 +751,18 @@ function groupSteadyPaths(cases) {
     byPath.get(key).ids.push(item.case_id);
   }
   return [...byPath.values()].sort((a, b) => b.ids.length - a.ids.length);
+}
+
+// The route line repeats the model name on almost every row, so it earns its
+// place only when it says something the title does not: a fallback answered,
+// or the model that ran is not the one that was asked for.
+function routeFootnote(row) {
+  const route = row.routes.join(", ");
+  const expected = row.reasoning_effort
+    ? `${row.model_display} (${row.reasoning_effort})`
+    : row.model_display;
+  if (!route || route === expected) return "";
+  return `<span class="muted">answered by ${escapeHtml(route)}</span>`;
 }
 
 function hasTrajectory(row) {
@@ -1005,11 +1030,11 @@ if (payload.features && payload.features.length) {
           <div class="model-cell">
             <strong>${escapeHtml(row.model_display)}</strong>
             <span class="muted">
-              ${escapeHtml(displayReasoning(row.reasoning_effort))}
+              ${escapeHtml(displayReasoning(row.reasoning_effort))} reasoning
               · ${escapeHtml(row.created_at.slice(0, 16).replace("T", " "))}
-              ${row.is_production ? '<span class="pill prod">production</span>' : ""}
             </span>
-            <span class="muted">${escapeHtml(row.routes.join(", "))}</span>
+            ${row.is_production ? '<span class="pill prod">ships today</span>' : ""}
+            ${routeFootnote(row)}
           </div>
         </td>
         <td>

@@ -159,9 +159,13 @@ def _variation_row(run: dict[str, Any], feature: str) -> dict[str, Any]:
         "feature": feature,
         "created_at": run["created_at"],
         "requested_model": run.get("requested_model"),
-        "model_display": format_requested_model(run.get("requested_model")),
+        # Always the model that actually answered. A run without --model asks
+        # each feature's configured route, and naming that "production routes"
+        # told the reader nothing: this table is already scoped to one feature,
+        # so the route resolves to a model that can simply be named.
+        "model_display": _model_display(run.get("requested_model"), rows),
         "is_production": bool(run.get("is_production")),
-        "reasoning_effort": run.get("reasoning_effort"),
+        "reasoning_effort": _resolved_reasoning(run, rows),
         "repeat": int(run.get("repeat", 1)),
         "route_set_id": run.get("route_set_id"),
         "routes": sorted(
@@ -295,6 +299,21 @@ def slice_metrics(rows: list[dict[str, Any]], *, repeat: int) -> dict[str, Any]:
         else None,
         "varied_path_count": sum(1 for row in rows if row.get("path_varied")),
         "capped_case_count": sum(1 for row in rows if row.get("hit_iteration_cap")),
+        # An average alone is a poor description of a feature: chat mixes cases
+        # that answer straight from context with cases that run three queries,
+        # and "0.8" describes neither. The count of cases that looked anything
+        # up, and the spread when they did, describes both.
+        "tool_using_case_count": sum(
+            1 for row in trajectory_rows if (row.get("tool_calls_max") or 0) > 0
+        ),
+        "tool_calls_min": min(
+            (row["tool_calls_min"] for row in trajectory_rows if row["tool_calls_max"]),
+            default=None,
+        ),
+        "tool_calls_max": max(
+            (row["tool_calls_max"] for row in trajectory_rows if row["tool_calls_max"]),
+            default=None,
+        ),
     }
 
 
@@ -308,16 +327,47 @@ def _newest_first(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(runs, key=lambda run: str(run.get("created_at", "")), reverse=True)
 
 
-def format_requested_model(requested_model: str | None) -> str:
-    """Render the requested model, or say the shipped route answered.
+def _model_display(requested_model: str | None, rows: list[dict[str, Any]]) -> str:
+    """Name the model behind a row.
 
-    A run without an explicit --model asks each feature's own configured
-    route, so there is no single model to name. The row's `routes` field names
-    the model that actually answered.
+    Args:
+        requested_model: Explicit `--model`, or None when the run asked each
+            feature for its configured route.
+        rows: The run's case rows for this feature, carrying the resolved route.
+
+    Returns:
+        The short model name. Falls back to the routed model when no model was
+        requested, and to "unknown" only when a row carries neither.
     """
-    if not requested_model:
-        return "Shipped route"
-    return requested_model.split("/")[-1]
+    if requested_model:
+        return requested_model.split("/")[-1]
+    routed = sorted(
+        {
+            str(
+                (row.get("route") or {}).get("primary") or row.get("model") or ""
+            ).split("/")[-1]
+            for row in rows
+        }
+        - {""}
+    )
+    return ", ".join(routed) or "unknown"
+
+
+def _resolved_reasoning(run: dict[str, Any], rows: list[dict[str, Any]]) -> str | None:
+    """Return the reasoning level a row actually ran at.
+
+    A production run stores the literal "production" because no single level
+    was requested. Each feature's route carries its own, and this table is
+    scoped to one feature, so the real level can be read off the route instead
+    of publishing a word that is not a reasoning level.
+    """
+    stored = run.get("reasoning_effort")
+    if stored != "production":
+        return stored
+    efforts = {(row.get("route") or {}).get("reasoning_effort") for row in rows}
+    if len(efforts) == 1:
+        return next(iter(efforts))
+    return "mixed"
 
 
 def format_revision(run: dict[str, Any]) -> str:
@@ -330,12 +380,10 @@ def format_revision(run: dict[str, Any]) -> str:
 def display_reasoning_effort(value: str | None) -> str:
     """Render a stored reasoning effort for leaderboard display.
 
-    A production run records the literal string "production" here, because no
-    single effort was requested — each feature used its own. Naming it as a
-    reasoning level reads as one, so it is spelled out instead.
+    Rows resolve "production" to the level the route actually ran at before
+    this sees it, so the only remaining absence is a model that takes no
+    reasoning knob.
     """
-    if value == "production":
-        return "as configured"
     return value or "none"
 
 
