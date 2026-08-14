@@ -116,44 +116,78 @@ def _older_than(timestamp: str, seconds: float) -> bool:
     return datetime.now(timezone.utc) - parsed > timedelta(seconds=seconds)
 
 
-def _recovery_message(alerted: object, newest_data_date: str | None) -> str | None:
+def _format_date_ranges(days: list[date]) -> str:
+    """Format sorted dates as compact contiguous ranges.
+
+    Args:
+        days: Sorted missing dates.
+
+    Returns:
+        Comma-separated ISO dates or inclusive ranges.
+    """
+    ranges: list[tuple[date, date]] = []
+    for day in days:
+        if ranges and day == ranges[-1][1] + timedelta(days=1):
+            ranges[-1] = (ranges[-1][0], day)
+        else:
+            ranges.append((day, day))
+    return ", ".join(
+        start.isoformat()
+        if start == end
+        else f"{start.isoformat()} to {end.isoformat()}"
+        for start, end in ranges
+    )
+
+
+def _recovery_message(
+    alerted: object, present_metric_dates: set[str] | None
+) -> str | None:
     """Compose the notice that a reported ingest fault has cleared.
 
     A recovery that cost the user nothing is not news. Auto Export backfills the
     days it missed, so most stale alerts end with every missing day present and
     nothing to act on — announcing that only doubles the message count for the
-    fault. What earns a message is a gap that stayed a gap: those days are gone
-    for good, and the user should hear it once while the reports that will omit
-    them are still to come.
+    fault. What earns a message is a gap that stayed a gap: those dates remain
+    absent, and reports covering them may be incomplete even though newer data
+    is importing again.
 
     A stalled pipe is different. The user was told to go fix something, so the
     confirmation that it worked is the answer to an action they took.
 
     Args:
         alerted: The recorded ``data_health_alert`` state entry.
-        newest_data_date: Newest ISO date now holding a stored metric.
+        present_metric_dates: Metric-bearing dates from the alerted range. None
+            for pipe faults that did not record a missing range.
 
     Returns:
         The message to send, or None when the recovery is not worth one.
     """
+    missing_from = alerted.get("missing_from") if isinstance(alerted, dict) else None
     missing_to = alerted.get("missing_to") if isinstance(alerted, dict) else None
-    if not isinstance(missing_to, str):
+    if not isinstance(missing_from, str) or not isinstance(missing_to, str):
         return "✅ **Sync is working again** — health data is importing normally."
 
-    if newest_data_date is not None and newest_data_date >= missing_to:
+    try:
+        first = date.fromisoformat(missing_from)
+        last = date.fromisoformat(missing_to)
+    except ValueError:
+        return "✅ **Sync is working again** — health data is importing normally."
+    if last < first:
+        return "✅ **Sync is working again** — health data is importing normally."
+    present = present_metric_dates or set()
+    missing = [
+        first + timedelta(days=offset)
+        for offset in range((last - first).days + 1)
+        if (first + timedelta(days=offset)).isoformat() not in present
+    ]
+    if not missing:
         return None
 
-    missing_from = alerted.get("missing_from") if isinstance(alerted, dict) else None
-    first_lost = missing_from if isinstance(missing_from, str) else missing_to
-    if newest_data_date is not None and newest_data_date >= first_lost:
-        first_lost = (
-            date.fromisoformat(newest_data_date) + timedelta(days=1)
-        ).isoformat()
-    lost = first_lost if first_lost == missing_to else f"{first_lost} to {missing_to}"
+    still_missing = _format_date_ranges(missing)
     return (
-        "✅ **Sync is working again** — health data is importing normally.\n\n"
-        f"{lost} never arrived and can no longer be recovered from the phone, so "
-        "reports covering those days will be missing them."
+        "✅ **Sync is working again** — daily metrics are importing normally.\n\n"
+        f"Daily metrics for {still_missing} are still missing, so reports "
+        "covering those days may be incomplete."
     )
 
 
@@ -1151,23 +1185,39 @@ class ProfileRuntime:
 
         self._check_ingest_health(prefs)
 
-    def _newest_data_date(self) -> str | None:
-        """Return the newest stored date carrying a metric, or None.
+    def _newest_data_date(self, *, through: str) -> str | None:
+        """Return the newest stored metric date through a completed day.
+
+        Args:
+            through: Latest completed ISO date eligible for freshness.
 
         Returns:
-            An ISO date string, or None when the database holds no metric or
-            cannot be opened. An unreadable database is reported as "no data",
-            which the freshness check treats as a fault rather than as health.
+            An ISO date string, or None when the database holds no eligible
+            metric.
         """
         from store import latest_metric_date, open_db
 
+        conn = open_db(self.db)
         try:
-            conn = open_db(self.db)
-        except sqlite3.Error:
-            logger.exception("Could not open %s to check data freshness", self.db)
-            return None
+            return latest_metric_date(conn, through=through)
+        finally:
+            conn.close()
+
+    def _metric_dates(self, *, start: str, end: str) -> set[str]:
+        """Return metric-bearing dates in an inclusive recovery range.
+
+        Args:
+            start: Inclusive first ISO date.
+            end: Inclusive last ISO date.
+
+        Returns:
+            Stored metric-bearing dates in the range.
+        """
+        from store import metric_dates_in_range, open_db
+
+        conn = open_db(self.db)
         try:
-            return latest_metric_date(conn)
+            return metric_dates_in_range(conn, start=start, end=end)
         finally:
             conn.close()
 
@@ -1182,7 +1232,7 @@ class ProfileRuntime:
         Args:
             prefs: Raw notification preferences for this profile.
         """
-        from http_ingest import assess_ingest_health
+        from http_ingest import assess_ingest_health, newest_expected_day
         from notification_prefs import (
             effective_notification_prefs,
             evaluate_data_health_delivery,
@@ -1192,22 +1242,26 @@ class ProfileRuntime:
             return
 
         settings = effective_notification_prefs(prefs)["data_health"]
+        assessment_now = datetime.now(timezone.utc)
         try:
-            newest_data_date = self._newest_data_date()
+            newest_data_date = self._newest_data_date(
+                through=newest_expected_day(assessment_now).isoformat()
+            )
             health = assess_ingest_health(
                 self.profile,
                 newest_data_date=newest_data_date,
                 stale_after_days=settings["stale_after_days"],
                 split_after_h=settings["split_after_h"],
                 pair_window_s=HTTP_INGEST_PAIR_WINDOW_S,
+                now=assessment_now,
             )
-        except OSError:
+        except (OSError, sqlite3.Error):
             logger.exception("Could not assess ingest health for %s", self.profile.name)
             return
 
         # One local now for every delivery decision below: quiet-hours gating is
         # wall-clock, so the recovery ping and the alert must agree on the time.
-        now = datetime.now(timezone.utc).astimezone()
+        now = assessment_now.astimezone()
 
         alerted = self._state.get("data_health_alert")
         if not health.is_alerting:
@@ -1219,9 +1273,32 @@ class ProfileRuntime:
                     # fault that clears overnight still gets its morning notice.
                     # A suppressed one is dropped below, as the user asked for.
                     return
+                message = None
+                if recovery["status"] == "allowed":
+                    missing_from = (
+                        alerted.get("missing_from")
+                        if isinstance(alerted, dict)
+                        else None
+                    )
+                    missing_to = (
+                        alerted.get("missing_to") if isinstance(alerted, dict) else None
+                    )
+                    present_metric_dates = None
+                    if isinstance(missing_from, str) and isinstance(missing_to, str):
+                        try:
+                            present_metric_dates = self._metric_dates(
+                                start=missing_from,
+                                end=missing_to,
+                            )
+                        except (OSError, sqlite3.Error):
+                            logger.exception(
+                                "Could not check recovered metric dates for %s",
+                                self.profile.name,
+                            )
+                            return
+                    message = _recovery_message(alerted, present_metric_dates)
                 self._state.pop("data_health_alert", None)
                 self._save_state()
-                message = _recovery_message(alerted, newest_data_date)
                 if recovery["status"] == "allowed" and message:
                     self._poller.send_reply(message)
             return
@@ -1269,8 +1346,13 @@ class ProfileRuntime:
                 decision.get("reason", "unknown"),
             )
             return
+        heading = (
+            "Daily health metrics are missing"
+            if health.status == "stale"
+            else "Health data isn't syncing"
+        )
         self._poller.send_reply(
-            f"⚠️ **Health data isn't syncing**\n\n{health.detail}\n\n"
+            f"⚠️ **{heading}**\n\n{health.detail}\n\n"
             "Say _mute sync alerts for a week_ to silence this."
         )
 

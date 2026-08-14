@@ -97,8 +97,8 @@ returns promptly on a flaky network. A timeout reports "unknown", never
 """
 DATA_HEALTH_REALERT_S: int = 24 * 60 * 60
 """How long before an unresolved ingest problem is reported again."""
-DATA_HEALTH_STALE_AFTER_DAYS: int = 1
-"""Complete days missing health data before the profile is warned.
+DATA_HEALTH_STALE_AFTER_DAYS: int = 2
+"""Complete days missing daily metrics before the profile is warned.
 
 Deliberately counts days of *stored data*, not hours since the last upload. Auto
 Export arrives in bursts: measured over twelve days of one real profile the gap
@@ -108,19 +108,26 @@ tail of normal operation — and a long gap that lands as a complete backfill ha
 cost the user nothing worth a message. What matters is whether a day is actually
 missing, which stays true no matter how the uploads were batched.
 
-One day rather than two because the ~48h Auto Export window bounds the response:
-past it the missing days can no longer be recovered by fixing the phone, so a
-second day of grace spends most of the time available to act. The same profile
-carried 2775 daily rows over seven years with exactly one metric-less day, so at
-this threshold a healthy setup is warned roughly once a year.
+Two days because the retained HTTP history showed that a healthy Metrics upload
+first arrived after 10:00 on two of eight observed days, as late as 20:03. A
+one-day threshold would have repeated the false alert this check replaces. The
+Metrics payload itself carried a rolling 7–8 days in that sample, so two days of
+grace still leaves several days in which a delayed export can backfill the gap.
 """
-MORNING_SYNC_CUTOFF_HOUR: int = 10
-"""Hour by which the overnight Auto Export batch is expected to have landed.
+DATA_HEALTH_STALE_CUTOFF_HOUR: int = 10
+"""Hour at which another completed metric day becomes owed.
 
-Before it, yesterday having no data means the phone has not uploaded yet; after
-it, yesterday having no data is a real gap. Used to hold both the sync alert and
-the "sleep pending vs not tracked" call to the same definition of morning, so
-the two cannot disagree about whether last night is late or missing.
+The two-day staleness threshold absorbs the observed same-day arrival variance;
+this cutoff only decides when the calendar advances for that count. It is kept
+independent from sleep classification because a completed Metrics export and a
+single sleep night have different arrival behavior.
+"""
+SLEEP_SYNC_CUTOFF_HOUR: int = 10
+"""Hour after which yesterday's absent sleep is considered not tracked.
+
+Ten is the existing product boundary between an overnight sync still being
+plausibly pending and a night the reports should treat as absent. It is separate
+from data-health staleness so either policy can change without moving the other.
 """
 DATA_HEALTH_SPLIT_AFTER_H: float = 6
 """Hours of uploads arriving without importing before the profile is warned.
@@ -139,14 +146,13 @@ not dropped — it fires at DATA_HEALTH_QUIET_END_HHMM. Paired with the end time
 this brackets a 22:00-08:00 do-not-disturb window.
 
 Staleness alerts cannot reach this window on their own, since they only become
-true after MORNING_SYNC_CUTOFF_HOUR. It still guards the hours-based split and
-error conditions, which can turn true at any time of night."""
+true after DATA_HEALTH_STALE_CUTOFF_HOUR. It still guards the hours-based split
+and error conditions, which can turn true at any time of night."""
 DATA_HEALTH_QUIET_END_HHMM: str = "08:00"
 """Local time at which a held ingest-health alert is released.
 
-Set to a normal waking hour so an overnight fault surfaces first thing, in time
-to act well inside the ~48h Auto Export window (see DATA_HEALTH_STALE_AFTER_DAYS)
-before the missed days can no longer be recovered."""
+Set to a normal waking hour so an overnight pipe fault surfaces first thing,
+while the phone can still resend its rolling export window."""
 BASELINE_MIN_SAMPLES: int = 5
 """Observations required before a rolling window is reported as an average.
 

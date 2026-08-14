@@ -19,7 +19,7 @@ from http import HTTPStatus
 from pathlib import Path
 from typing import Any, Callable
 
-from config import MORNING_SYNC_CUTOFF_HOUR
+from config import DATA_HEALTH_STALE_CUTOFF_HOUR
 from parsers.metrics import parse_metrics_payload
 from parsers.workouts import parse_workouts_payload
 from profiles import Profile
@@ -508,7 +508,7 @@ def newest_expected_day(now: datetime) -> date:
         The newest local date whose data is legitimately owed.
     """
     local = now.astimezone()
-    behind = 1 if local.hour >= MORNING_SYNC_CUTOFF_HOUR else 2
+    behind = 1 if local.hour >= DATA_HEALTH_STALE_CUTOFF_HOUR else 2
     return local.date() - timedelta(days=behind)
 
 
@@ -534,8 +534,9 @@ def _assess_data_freshness(
         return IngestHealth(
             status="stale",
             detail=(
-                "Uploads are arriving and importing, but no health data has ever "
-                "been stored from them. Check the daemon log for parser errors."
+                "Uploads are arriving and importing, but no daily health metrics "
+                "have ever been stored from them. Check the daemon log for parser "
+                "errors."
             ),
         )
 
@@ -544,7 +545,7 @@ def _assess_data_freshness(
     if days_behind < stale_after_days:
         return IngestHealth(
             status="ok",
-            detail=f"Health data is current through {newest_data_date}.",
+            detail=f"Daily health metrics are current through {newest_data_date}.",
         )
 
     first_missing = newest + timedelta(days=1)
@@ -558,9 +559,10 @@ def _assess_data_freshness(
     return IngestHealth(
         status="stale",
         detail=(
-            f"No health data has arrived {gap}. Check that Auto Export is still "
-            "running on the phone and that its automations are enabled. Data "
-            "older than about 48h can no longer be recovered by fixing it."
+            f"No daily health metrics have arrived {gap}. Check that Auto Export "
+            "is still running on the phone and that its automations are enabled. "
+            "The rolling Metrics export may still backfill the gap once sync "
+            "resumes."
         ),
         since=newest_data_date,
         missing_from=first_missing.isoformat(),

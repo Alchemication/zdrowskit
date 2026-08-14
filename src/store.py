@@ -485,8 +485,8 @@ def load_date_range(conn: sqlite3.Connection) -> tuple[str, str] | None:
     return row[0], row[1]
 
 
-def latest_metric_date(conn: sqlite3.Connection) -> str | None:
-    """Return the most recent date that carries at least one real metric.
+def latest_metric_date(conn: sqlite3.Connection, *, through: str) -> str | None:
+    """Return the newest metric-bearing date on or before ``through``.
 
     Deliberately not ``MAX(date)``: an import creates a ``daily`` row as soon as
     it sees the date, so a day Auto Export has not actually reported yet still
@@ -494,20 +494,43 @@ def latest_metric_date(conn: sqlite3.Connection) -> str | None:
     as data would report a pipeline as healthy at the exact moment it stopped
     delivering.
 
-    Only the newest edge is reported, so an interior hole — a single missing day
-    with fresher days on both sides — is invisible here. That is intentional:
-    such a gap is already past the ~48h window in which Auto Export could refill
-    it, so raising it would be news the user can do nothing about.
+    Dates after ``through`` are excluded because today is still in progress. A
+    partial metric for today must not make a missing completed day look current.
 
     Args:
         conn: Open database connection returned by open_db().
+        through: Latest completed ISO date eligible for the freshness check.
 
     Returns:
         An ISO date string, or None when no day holds a metric.
     """
     condition = " OR ".join(f"{column} IS NOT NULL" for column in _DAILY_METRIC_COLUMNS)
-    row = conn.execute(f"SELECT MAX(date) FROM daily WHERE {condition}").fetchone()
+    row = conn.execute(
+        f"SELECT MAX(date) FROM daily WHERE date <= ? AND ({condition})",
+        (through,),
+    ).fetchone()
     return row[0] if row else None
+
+
+def metric_dates_in_range(
+    conn: sqlite3.Connection, *, start: str, end: str
+) -> set[str]:
+    """Return metric-bearing ISO dates in an inclusive range.
+
+    Args:
+        conn: Open database connection returned by open_db().
+        start: Inclusive first ISO date.
+        end: Inclusive last ISO date.
+
+    Returns:
+        Dates whose daily row contains at least one real metric.
+    """
+    condition = " OR ".join(f"{column} IS NOT NULL" for column in _DAILY_METRIC_COLUMNS)
+    rows = conn.execute(
+        f"SELECT date FROM daily WHERE date BETWEEN ? AND ? AND ({condition})",
+        (start, end),
+    ).fetchall()
+    return {row[0] for row in rows}
 
 
 def log_llm_call(

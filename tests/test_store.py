@@ -17,6 +17,7 @@ from store import (
     load_date_range,
     load_feedback_entries,
     latest_metric_date,
+    metric_dates_in_range,
     load_feedback_for_call,
     load_snapshots,
     log_feedback,
@@ -590,7 +591,7 @@ class TestLatestMetricDate:
     def test_returns_none_when_nothing_is_stored(
         self, in_memory_db: sqlite3.Connection
     ) -> None:
-        assert latest_metric_date(in_memory_db) is None
+        assert latest_metric_date(in_memory_db, through="2026-08-13") is None
 
     def test_returns_the_newest_day_holding_a_metric(
         self, in_memory_db: sqlite3.Connection
@@ -603,7 +604,7 @@ class TestLatestMetricDate:
             ],
         )
 
-        assert latest_metric_date(in_memory_db) == "2026-08-12"
+        assert latest_metric_date(in_memory_db, through="2026-08-13") == "2026-08-12"
 
     def test_a_row_without_metrics_does_not_count_as_data(
         self, in_memory_db: sqlite3.Connection
@@ -616,7 +617,7 @@ class TestLatestMetricDate:
             "INSERT INTO daily (date, imported_at) VALUES ('2026-08-13', '2026-08-13')"
         )
 
-        assert latest_metric_date(in_memory_db) == "2026-08-12"
+        assert latest_metric_date(in_memory_db, through="2026-08-13") == "2026-08-12"
 
     def test_any_single_metric_is_enough_to_count(
         self, in_memory_db: sqlite3.Connection
@@ -629,7 +630,41 @@ class TestLatestMetricDate:
             ],
         )
 
-        assert latest_metric_date(in_memory_db) == "2026-08-13"
+        assert latest_metric_date(in_memory_db, through="2026-08-13") == "2026-08-13"
+
+    def test_a_partial_metric_today_cannot_mask_a_missing_completed_day(
+        self, in_memory_db: sqlite3.Connection
+    ) -> None:
+        store_snapshots(
+            in_memory_db,
+            [
+                DailySnapshot(date="2026-08-12", steps=5416),
+                DailySnapshot(date="2026-08-14", steps=1200),
+            ],
+        )
+
+        assert latest_metric_date(in_memory_db, through="2026-08-13") == "2026-08-12"
+
+
+class TestMetricDatesInRange:
+    def test_returns_actual_dates_without_inferring_continuity(
+        self, in_memory_db: sqlite3.Connection
+    ) -> None:
+        store_snapshots(
+            in_memory_db,
+            [
+                DailySnapshot(date="2026-08-10", steps=5416),
+                DailySnapshot(date="2026-08-12"),
+                DailySnapshot(date="2026-08-13", sleep_total_h=7.4),
+                DailySnapshot(date="2026-08-14", steps=1200),
+            ],
+        )
+
+        assert metric_dates_in_range(
+            in_memory_db,
+            start="2026-08-10",
+            end="2026-08-13",
+        ) == {"2026-08-10", "2026-08-13"}
 
 
 class TestLogLlmCall:

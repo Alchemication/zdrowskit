@@ -2990,6 +2990,11 @@ class TestIngestHealthAlerts:
             runtime._check_ingest_health(prefs)
         with (
             patch.object(runtime, "_newest_data_date", return_value="2026-08-14"),
+            patch.object(
+                runtime,
+                "_metric_dates",
+                return_value={"2026-08-13"},
+            ),
             patch("http_ingest.assess_ingest_health", return_value=self._health("ok")),
         ):
             runtime._check_ingest_health(prefs)
@@ -2998,6 +3003,7 @@ class TestIngestHealthAlerts:
         # recovery is not news — announcing it just doubles the message count.
         messages = [call.args[0] for call in runtime._poller.send_reply.call_args_list]
         assert len(messages) == 1
+        assert "Daily health metrics are missing" in messages[0]
         assert "data_health_alert" not in runtime._state
 
     def test_a_stale_gap_that_stayed_a_gap_names_the_lost_days(
@@ -3016,15 +3022,20 @@ class TestIngestHealthAlerts:
             runtime._check_ingest_health(prefs)
         # Uploads resumed and only the last of the three days came back.
         with (
-            patch.object(runtime, "_newest_data_date", return_value="2026-08-12"),
+            patch.object(runtime, "_newest_data_date", return_value="2026-08-14"),
+            patch.object(
+                runtime,
+                "_metric_dates",
+                return_value={"2026-08-13"},
+            ),
             patch("http_ingest.assess_ingest_health", return_value=self._health("ok")),
         ):
             runtime._check_ingest_health(prefs)
 
         messages = [call.args[0] for call in runtime._poller.send_reply.call_args_list]
         assert len(messages) == 2
-        assert "2026-08-13" in messages[1]
-        assert "no longer be recovered" in messages[1]
+        assert "2026-08-11 to 2026-08-12" in messages[1]
+        assert "still missing" in messages[1]
 
     def test_a_partially_backfilled_gap_reports_only_what_is_missing(
         self, tmp_path: Path
@@ -3041,15 +3052,22 @@ class TestIngestHealthAlerts:
         ):
             runtime._check_ingest_health(prefs)
         with (
-            patch.object(runtime, "_newest_data_date", return_value="2026-08-11"),
+            patch.object(runtime, "_newest_data_date", return_value="2026-08-14"),
+            patch.object(
+                runtime,
+                "_metric_dates",
+                return_value={"2026-08-10", "2026-08-12"},
+            ),
             patch("http_ingest.assess_ingest_health", return_value=self._health("ok")),
         ):
             runtime._check_ingest_health(prefs)
 
-        # The 10th and 11th came back; naming them as lost would be wrong.
+        # Exact presence wins over a newer maximum: the missing dates need not
+        # form one trailing range.
         messages = [call.args[0] for call in runtime._poller.send_reply.call_args_list]
-        assert "2026-08-12 to 2026-08-13" in messages[1]
+        assert "2026-08-11, 2026-08-13" in messages[1]
         assert "2026-08-10" not in messages[1]
+        assert "2026-08-12" not in messages[1]
 
     def test_a_healthy_profile_is_never_messaged(self, tmp_path: Path) -> None:
         runtime = self._runtime(tmp_path, self._health("ok"))

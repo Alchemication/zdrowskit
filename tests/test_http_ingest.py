@@ -660,7 +660,7 @@ class TestIngestHealth:
         assert "(3 days)" in health.detail
         assert health.missing_to == newest_expected_day(_NOW).isoformat()
 
-    def test_a_raised_threshold_tolerates_a_single_missing_day(
+    def test_the_two_day_threshold_tolerates_a_single_missing_day(
         self, tmp_path: Path
     ) -> None:
         profile = _profile(tmp_path)
@@ -751,7 +751,7 @@ class TestIngestHealth:
         health = self._assess(profile, newest_data_date=None)
 
         assert health.status == "stale"
-        assert "no health data has ever been stored" in health.detail
+        assert "no daily health metrics have ever been stored" in health.detail
 
     def test_halves_outside_the_window_are_blamed_on_the_schedules(
         self, tmp_path: Path

@@ -208,7 +208,7 @@ class TestNotificationPrefs:
             now=datetime.fromisoformat("2026-04-05T10:00:00+00:00"),
         )
 
-        assert "missing data 1d" in text
+        assert "missing data 2d" in text
 
     def test_staleness_threshold_can_be_raised(self) -> None:
         changes = validate_notification_changes(
