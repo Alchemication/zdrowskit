@@ -77,9 +77,10 @@ def write_memory(
 ) -> str | None:
     """Extract this week's memory block from the finished report.
 
-    Failure here is deliberately non-fatal. The report has already been saved
-    and sent by the time this runs, so an exception must not take it down —
-    the cost of a missing memory entry is one week of thinner continuity.
+    Failure here is deliberately non-fatal, and the guard is load-bearing: this
+    runs after the report text is final but *before* it is saved and sent, so an
+    uncaught exception here would destroy a finished report on its way to the
+    user. Swallowing it costs one week of thinner continuity instead.
 
     Args:
         report: The final visible report, post-verification.

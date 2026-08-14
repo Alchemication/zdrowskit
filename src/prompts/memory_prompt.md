@@ -1,7 +1,8 @@
 # Weekly Memory
 
-The weekly report for {week_label} has been written and sent. Your only job is
-to decide what, if anything, should be carried forward from it.
+The weekly report for {week_label} is finished and is going to the user exactly
+as written below. Your only job is to decide what, if anything, should be
+carried forward from it.
 
 What you write here is replayed into every later prompt — reports, coaching
 reviews, nudges — for weeks. The user never sees it, so nobody will catch a
