@@ -1,23 +1,20 @@
 """Shared paths, limits, model routing, and daemon configuration.
 
-This module is the central place for runtime knobs. Most model and verification
-settings can be overridden with environment variables; see README.md for the
-user-facing list.
+Every operational tunable lives here: thresholds, intervals, windows, size and
+count limits, model routes, and the paths under the app home. Nothing is
+inlined at its point of use, so this file is the one place to look for what a
+value is and why it is that value.
 
-Public groups:
-    Paths: AUTOEXPORT_DATA_DIR, CONTEXT_DIR, NOTIFICATION_PREFS_PATH,
-        GOOGLE_DRIVE_DATA_DIR, HTTP_INGEST_TOKEN_FILE, PROMPTS_DIR, REPORTS_DIR,
-        NUDGES_DIR.
-    Prompt/context limits: MAX_HISTORY_ENTRIES, MAX_LOG_ENTRIES,
-        MAX_COACH_FEEDBACK_ENTRIES, MAX_CONVERSATION_MESSAGES,
-        MAX_TOOL_ITERATIONS*, MAX_TOKENS*.
-    Model routing: DEEPSEEK_*_MODEL, ANTHROPIC_*_MODEL, PRIMARY_*_MODEL,
-        FALLBACK_*_MODEL, DEFAULT_*_MODEL, FALLBACK_MODEL.
-    Verification: ENABLE_LLM_VERIFICATION, VERIFY_*, VERIFICATION_MODEL,
-        VERIFICATION_REWRITE_MODEL, MAX_VERIFICATION_REVISIONS.
-    Daemon: LOG_FILE, LOCK_FILE, debounce windows, nudge limits,
-        report cadence, Google Drive polling, and suppression timing.
-    Helpers: resolve_data_dir, resolve_google_drive_data_dir.
+Constants are grouped by subsystem in file order — paths, HTTP ingest, ingest
+health, baselines, context and prompt limits, token budgets, location lookup,
+evals, verification, model routes, daemon timing — and each carries a docstring
+covering how it was chosen. Where a value came from a measurement, that
+docstring records the measurement, because nothing else does.
+
+Most values accept a ``ZDROWSKIT_*`` environment override, read once at import.
+Model routing has a second, authoritative layer: a profile's saved
+``model_prefs.json`` wins over anything set here. Prefer ``main.py models`` for
+routing changes.
 
 Example:
     from config import CONTEXT_DIR, resolve_data_dir
@@ -33,6 +30,31 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+
+def _env_bool(name: str, default: bool) -> bool:
+    """Return a bool from an environment variable."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_int(name: str, default: int) -> int:
+    """Return an int from an environment variable."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return int(raw.strip())
+
+
+def _env_float(name: str, default: float) -> float:
+    """Return a float from an environment variable."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return float(raw.strip())
+
+
 APP_HOME: Path = Path(
     os.environ.get("ZDROWSKIT_HOME", "~/Documents/zdrowskit")
 ).expanduser()
@@ -45,17 +67,17 @@ AUTOEXPORT_DATA_DIR: Path = (
 """iCloud path where Auto Export app exports land."""
 GOOGLE_DRIVE_DATA_DIR: Path = APP_HOME / "Imports" / "google-drive"
 """Default local cache for Google Drive Auto Export files."""
-IMPORT_SOURCE: str = os.environ.get("ZDROWSKIT_IMPORT_SOURCE", "local").strip()
-"""Health import transport: ``http``, ``local``, or ``google-drive``."""
 GOOGLE_DRIVE_SERVICE_ACCOUNT: str | None = os.environ.get(
     "ZDROWSKIT_GOOGLE_DRIVE_SERVICE_ACCOUNT"
 )
-GOOGLE_DRIVE_METRICS_FOLDER_ID: str | None = os.environ.get(
-    "ZDROWSKIT_GOOGLE_DRIVE_METRICS_FOLDER_ID"
-)
-GOOGLE_DRIVE_WORKOUTS_FOLDER_ID: str | None = os.environ.get(
-    "ZDROWSKIT_GOOGLE_DRIVE_WORKOUTS_FOLDER_ID"
-)
+"""Shared service-account key path. Per-profile folder IDs live in the roster.
+
+The legacy ``ZDROWSKIT_IMPORT_SOURCE`` and per-folder variables are deliberately
+absent: import source and folder IDs are per-profile roster fields now, and
+``profiles.adopt`` reads the old variables directly when migrating a legacy
+install. A module-level copy here would be read at import time and would shadow
+the roster with a stale answer.
+"""
 CONTEXT_DIR: Path = APP_HOME / "ContextFiles"
 NOTIFICATION_PREFS_PATH: Path = APP_HOME / "notification_prefs.json"
 MODEL_PREFS_PATH: Path = APP_HOME / "model_prefs.json"
@@ -237,30 +259,6 @@ holding three days of data reports a twelve-week average built from three days
 Requiring most of the window to be present makes the average mean what its
 label says.
 """
-
-
-def _env_bool(name: str, default: bool) -> bool:
-    """Return a bool from an environment variable."""
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    return raw.strip().lower() in {"1", "true", "yes", "on"}
-
-
-def _env_int(name: str, default: int) -> int:
-    """Return an int from an environment variable."""
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    return int(raw.strip())
-
-
-def _env_float(name: str, default: float) -> float:
-    """Return a float from an environment variable."""
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    return float(raw.strip())
 
 
 MAX_HISTORY_ENTRIES: int = 8
