@@ -264,8 +264,21 @@ label says.
 MAX_HISTORY_ENTRIES: int = 8
 """Maximum number of entries to retain in history.md."""
 
-MAX_LOG_ENTRIES: int = 5
-"""Maximum number of entries to inject from log.md into LLM prompts."""
+MAX_LOG_ENTRIES: int = 20
+"""Maximum number of entries to inject from log.md into LLM prompts.
+
+Raised from 5 when the limit was first made to work at all: log.md is a flat
+list of dated bullets, and the trimmer applied to it split on ``## `` headings,
+so it matched nothing and every prompt received the entire journal. Five was
+therefore never a tested value — it was a number no call had ever run under.
+
+Twenty because the journal's value is the durable life context a metric cannot
+show: indefinite solo parenting, a bereavement trip, an illness that explains a
+missing week. Measured against a real 54-entry log, five entries reached about
+two weeks back and dropped all of that; twenty reaches roughly two months and
+keeps it, for around 600 tokens against 150. That difference is noise beside the
+report budgets, and losing the reason a training block collapsed is not.
+"""
 
 MAX_COACH_FEEDBACK_ENTRIES: int = 8
 """Maximum strategy/coach feedback entries to inject into prompts."""

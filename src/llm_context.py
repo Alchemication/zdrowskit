@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 CONTEXT_FILES = ["me", "strategy", "log", "history", "coach_feedback"]
 
 UNFILLED_CONTEXT = "(not filled in yet — the user has not told you this)"
+_LOG_ENTRY_RE = re.compile(r"^- \d{4}-\d{2}-\d{2}\b")
 
 _HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 
@@ -83,6 +84,38 @@ def _recent_history(content: str, n: int) -> str:
     if len(entries) <= n:
         return content
     return "\n\n".join(entries[-n:]) + "\n"
+
+
+def _recent_log(content: str, n: int) -> str:
+    """Return only the last n dated entries from log.md content.
+
+    ``log.md`` is a flat list of ``- YYYY-MM-DD`` bullets, not the ``## ``
+    sections that ``history.md`` and ``coach_feedback.md`` use, so it needs its
+    own splitter. Reusing the heading-based one silently matched nothing and
+    returned the whole file.
+
+    Any preamble above the first dated bullet — the ``# Weekly Log`` title — is
+    preserved, so a trimmed file still reads as the same document.
+
+    Args:
+        content: Full log.md text with ``- YYYY-MM-DD`` delimited entries.
+        n: Number of most recent entries to keep. ``0`` or negative means
+            "do not trim".
+
+    Returns:
+        The preamble plus the last n entries, or the original if fewer than n.
+    """
+    if n <= 0:
+        return content
+
+    parts = re.split(r"(?m)(?=^- \d{4}-\d{2}-\d{2}\b)", content)
+    preamble = parts[0] if parts and not _LOG_ENTRY_RE.match(parts[0]) else ""
+    entries = [p.strip() for p in parts if _LOG_ENTRY_RE.match(p.strip())]
+    if len(entries) <= n:
+        return content
+
+    kept = "\n\n".join(entries[-n:]) + "\n"
+    return f"{preamble.strip()}\n\n{kept}" if preamble.strip() else kept
 
 
 def _strip_guidance(content: str) -> str:
@@ -259,7 +292,7 @@ def load_context(
             elif name == "coach_feedback":
                 content = _recent_coach_feedback(content, MAX_COACH_FEEDBACK_ENTRIES)
             elif name == "log":
-                content = _recent_history(content, log_limit)
+                content = _recent_log(content, log_limit)
             result[name] = content
             logger.debug("Loaded context: %s", path)
         else:

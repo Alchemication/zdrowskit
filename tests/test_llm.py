@@ -47,6 +47,7 @@ from llm_context import (
     UNFILLED_CONTEXT,
     _is_unfilled,
     _recent_history,
+    _recent_log,
     append_history,
     build_messages,
     load_default_soul,
@@ -121,6 +122,45 @@ class TestRecentHistory:
 
     def test_empty_string(self) -> None:
         assert _recent_history("", 5) == ""
+
+
+class TestRecentLog:
+    """log.md uses dated bullets, not '## ' sections, and needs its own trimmer."""
+
+    @staticmethod
+    def _log(n: int) -> str:
+        bullets = "\n\n".join(
+            f"- 2026-03-{i:02d} [session {i}] — note {i}" for i in range(1, n + 1)
+        )
+        return f"# Weekly Log\n\n{bullets}\n"
+
+    def test_trims_to_n(self) -> None:
+        result = _recent_log(self._log(10), 3)
+        assert "2026-03-10" in result
+        assert "2026-03-08" in result
+        assert "2026-03-07" not in result
+        assert "2026-03-01" not in result
+
+    def test_preserves_the_title(self) -> None:
+        result = _recent_log(self._log(10), 3)
+        assert result.startswith("# Weekly Log")
+
+    def test_fewer_than_n_returns_original(self) -> None:
+        content = self._log(2)
+        assert _recent_log(content, 5) == content
+
+    def test_zero_means_no_trim(self) -> None:
+        content = self._log(10)
+        assert _recent_log(content, 0) == content
+
+    def test_empty_string(self) -> None:
+        assert _recent_log("", 5) == ""
+
+    def test_heading_splitter_would_not_have_trimmed_this(self) -> None:
+        """The bug this replaces: '## ' splitting is a no-op on dated bullets."""
+        content = self._log(10)
+        assert _recent_history(content, 3) == content
+        assert _recent_log(content, 3) != content
 
 
 class TestLoadContext:
@@ -227,25 +267,46 @@ class TestLoadContext:
         assert "## 2026-03-12" in ctx["history"]
         assert "## 2026-03-01" not in ctx["history"]
 
+    @staticmethod
+    def _write_log(tmp_path: Path, count: int = 11) -> None:
+        """Write a log.md in the real format: dated bullets, not '## ' sections."""
+        entries = "\n\n".join(
+            f"- 2026-03-{i:02d} [session {i}] — log {i}" for i in range(1, count + 1)
+        )
+        (tmp_path / "log.md").write_text(f"# Weekly Log\n\n{entries}\n")
+
     def test_log_trimmed(self, tmp_path: Path) -> None:
         (tmp_path / "conduct.md").write_text("Be exact.")
         (tmp_path / "insights_prompt.md").write_text("template")
-        entries = "\n\n".join(f"## 2026-03-{i:02d}\n\nLog {i}" for i in range(1, 12))
-        (tmp_path / "log.md").write_text(entries)
+        self._write_log(tmp_path)
+        ctx = load_context(tmp_path, prompts_dir=tmp_path, max_log=5)
+        assert "2026-03-11" in ctx["log"]
+        assert "2026-03-07" in ctx["log"]
+        assert "2026-03-06" not in ctx["log"]
+
+    def test_log_trimming_uses_the_configured_default(self, tmp_path: Path) -> None:
+        """Without an override the limit must be MAX_LOG_ENTRIES, not 'no trim'."""
+        from config import MAX_LOG_ENTRIES
+
+        (tmp_path / "conduct.md").write_text("Be exact.")
+        (tmp_path / "insights_prompt.md").write_text("template")
+        self._write_log(tmp_path, count=MAX_LOG_ENTRIES + 3)
         ctx = load_context(tmp_path, prompts_dir=tmp_path)
-        # MAX_LOG_ENTRIES = 5, so only last 5 should remain
-        assert "## 2026-03-11" in ctx["log"]
-        assert "## 2026-03-07" in ctx["log"]
-        assert "## 2026-03-06" not in ctx["log"]
+        kept = [
+            line
+            for line in ctx["log"].splitlines()
+            if line.strip().startswith("- 2026-")
+        ]
+        assert len(kept) == MAX_LOG_ENTRIES
+        assert "2026-03-01" not in ctx["log"]
 
     def test_max_log_zero_disables_trimming(self, tmp_path: Path) -> None:
         (tmp_path / "conduct.md").write_text("Be exact.")
         (tmp_path / "insights_prompt.md").write_text("template")
-        entries = "\n\n".join(f"## 2026-03-{i:02d}\n\nLog {i}" for i in range(1, 12))
-        (tmp_path / "log.md").write_text(entries)
+        self._write_log(tmp_path)
         ctx = load_context(tmp_path, prompts_dir=tmp_path, max_log=0)
-        assert "## 2026-03-11" in ctx["log"]
-        assert "## 2026-03-01" in ctx["log"]
+        assert "2026-03-11" in ctx["log"]
+        assert "2026-03-01" in ctx["log"]
 
     def test_coach_feedback_trimmed(self, tmp_path: Path) -> None:
         (tmp_path / "conduct.md").write_text("Be exact.")
