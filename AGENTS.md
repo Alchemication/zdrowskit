@@ -25,6 +25,10 @@ value was chosen. Never inline them at the point of use, and never bury one in a
 defaults dict. Validation bounds may stay beside the code that enforces them
 (see `MIN_NUDGES_PER_DAY`), but the default itself belongs in `config.py`.
 
+Work on `main` and push straight to it — no feature branches, no PRs. Single
+developer for now; revisit when more join. Still commit only when asked, and
+only with lint and tests green.
+
 ## Collaboration Style
 
 Challenge my ideas early. If an approach is over-engineered, fragile, or has a simpler alternative — say so directly with reasoning. Flag knowledge gaps, hidden trade-offs, or narrowed thinking. Be pragmatic; save me from wasting time on something that could be done better.
