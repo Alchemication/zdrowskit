@@ -1956,14 +1956,8 @@ class TestAppendHistory:
         assert "Last week review" in content
         assert "Current week progress" in content
 
-    def test_grows_unbounded_without_trimming(self, tmp_path: Path) -> None:
-        """BUG: append_history does not trim despite its docstring claiming it does.
-
-        The file grows without bound — trimming only happens at read time
-        via _recent_history() in load_context(). This test documents the
-        current behavior; if trimming is added to append_history, update
-        this test to assert heading_count == MAX_HISTORY_ENTRIES.
-        """
+    def test_trims_to_max_entries_dropping_oldest(self, tmp_path: Path) -> None:
+        """The file stays bounded: appending past the cap drops the oldest entry."""
         from config import MAX_HISTORY_ENTRIES
 
         entries = "\n\n".join(
@@ -1974,11 +1968,44 @@ class TestAppendHistory:
 
         append_history(tmp_path, "Brand new entry")
         content = (tmp_path / "history.md").read_text()
-        heading_count = content.count("## ")
-        # Currently does NOT trim — grows to MAX + 1
-        assert heading_count == MAX_HISTORY_ENTRIES + 1
+
+        assert content.count("## ") == MAX_HISTORY_ENTRIES
         assert "Brand new entry" in content
-        # Oldest entry is still present (not trimmed)
+        assert "Old entry 1" not in content
+        assert "Old entry 2" in content
+
+    def test_trim_drops_every_entry_past_the_cap_at_once(self, tmp_path: Path) -> None:
+        """A file already over the cap converges in one append, not one per week."""
+        from config import MAX_HISTORY_ENTRIES
+
+        overflow = MAX_HISTORY_ENTRIES + 5
+        entries = "\n\n".join(
+            f"## 2026-03-{i:02d}\n\nOld entry {i}" for i in range(1, overflow + 1)
+        )
+        (tmp_path / "history.md").write_text(entries)
+
+        append_history(tmp_path, "Newest entry")
+        content = (tmp_path / "history.md").read_text()
+
+        assert content.count("## ") == MAX_HISTORY_ENTRIES
+        assert "Newest entry" in content
+        assert f"Old entry {overflow}" in content
+
+    def test_replacing_an_existing_week_does_not_trim(self, tmp_path: Path) -> None:
+        """Re-running the same week must not silently cost the oldest entry."""
+        from config import MAX_HISTORY_ENTRIES
+
+        entries = "\n\n".join(
+            f"## 2026-W{i:02d}\n\nOld entry {i}"
+            for i in range(1, MAX_HISTORY_ENTRIES + 1)
+        )
+        (tmp_path / "history.md").write_text(entries)
+
+        append_history(tmp_path, "Rewritten", week_label="2026-W05")
+        content = (tmp_path / "history.md").read_text()
+
+        assert content.count("## ") == MAX_HISTORY_ENTRIES
+        assert "Rewritten" in content
         assert "Old entry 1" in content
 
 

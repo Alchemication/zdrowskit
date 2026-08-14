@@ -354,8 +354,14 @@ def append_history(
 ) -> None:
     """Append a memory entry to history.md, keyed by ISO week label.
 
-    Splits the file on '## ' headings, appends the new entry, and trims
-    to the most recent MAX_HISTORY_ENTRIES entries so the file stays bounded.
+    Splits the file on '## ' headings, appends the new entry, and trims to the
+    most recent MAX_HISTORY_ENTRIES entries so the file stays bounded.
+
+    Trimming here is deliberate even though ``load_context`` already limits what
+    reaches a prompt. Read-time limiting bounds the prompt; it does not bound the
+    file, and an entry that can never be read again is only a place for a stale
+    figure or a superseded plan to survive. Dropping it keeps the file equal to
+    what the system actually uses.
 
     Args:
         context_dir: Directory containing history.md.
@@ -386,6 +392,11 @@ def append_history(
             break
     if not replaced:
         entries.append(new_entry)
+
+    if len(entries) > MAX_HISTORY_ENTRIES:
+        dropped = len(entries) - MAX_HISTORY_ENTRIES
+        entries = entries[-MAX_HISTORY_ENTRIES:]
+        logger.info("Trimmed %d oldest entries from %s", dropped, history_path)
 
     history_path.write_text("\n\n".join(entries) + "\n", encoding="utf-8")
     logger.info("History %s now has %d entries", history_path, len(entries))
