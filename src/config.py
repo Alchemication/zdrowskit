@@ -261,23 +261,35 @@ label says.
 """
 
 
-MAX_HISTORY_ENTRIES: int = 8
-"""Maximum number of entries to retain in history.md."""
+MAX_HISTORY_ENTRIES: int = 10
+"""Weekly memory entries retained in history.md and injected into prompts.
 
-MAX_LOG_ENTRIES: int = 20
+One entry per week, so this is a window in weeks: ten covers roughly a training
+quarter, long enough for a season's worth of threads — a recurring injury, a
+drought in one session type, a behavioural pattern like training always landing
+late in the week — to still be visible when they matter.
+
+Kept deliberately modest because each entry is at most two bullets by contract
+and the older ones age into noise: a thread that has been open for ten weeks is
+either resolved or is being carried by the newer entries anyway. This bounds
+both the prompt and, since ``append_history`` trims to it, the file.
+"""
+
+MAX_LOG_ENTRIES: int = 10
 """Maximum number of entries to inject from log.md into LLM prompts.
 
-Raised from 5 when the limit was first made to work at all: log.md is a flat
-list of dated bullets, and the trimmer applied to it split on ``## `` headings,
-so it matched nothing and every prompt received the entire journal. Five was
-therefore never a tested value — it was a number no call had ever run under.
+The limit went unenforced for a long time — log.md is a flat list of dated
+bullets, and the trimmer applied to it split on ``## `` headings, so it matched
+nothing and every prompt received the whole journal. Any value predating
+``_recent_log`` was therefore never actually exercised.
 
-Twenty because the journal's value is the durable life context a metric cannot
-show: indefinite solo parenting, a bereavement trip, an illness that explains a
-missing week. Measured against a real 54-entry log, five entries reached about
-two weeks back and dropped all of that; twenty reaches roughly two months and
-keeps it, for around 600 tokens against 150. That difference is noise beside the
-report budgets, and losing the reason a training block collapsed is not.
+Ten because the two files divide the work. log.md carries recent day-to-day
+detail, which at the observed cadence is about five weeks; history.md carries
+the durable threads, so the context that has to survive months — an indefinite
+caring arrangement, a bereavement, an illness explaining a missing week — is
+already held there and does not need the log to reach back for it. Entries are
+also single-line and token-dense by contract, so ten of them is roughly 300
+tokens: cheap enough that the ceiling is set by usefulness, not budget.
 """
 
 MAX_COACH_FEEDBACK_ENTRIES: int = 8

@@ -257,14 +257,19 @@ class TestLoadContext:
         assert _is_unfilled(content) is True
 
     def test_history_trimmed(self, tmp_path: Path) -> None:
+        from config import MAX_HISTORY_ENTRIES
+
         (tmp_path / "conduct.md").write_text("Be exact.")
         (tmp_path / "insights_prompt.md").write_text("template")
-        entries = "\n\n".join(f"## 2026-03-{i:02d}\n\nEntry {i}" for i in range(1, 20))
+        count = MAX_HISTORY_ENTRIES + 5
+        entries = "\n\n".join(
+            f"## 2026-03-{i:02d}\n\nEntry {i}" for i in range(1, count + 1)
+        )
         (tmp_path / "history.md").write_text(entries)
         ctx = load_context(tmp_path, prompts_dir=tmp_path)
-        # MAX_HISTORY_ENTRIES = 8, so only last 8 should remain
-        assert "## 2026-03-19" in ctx["history"]
-        assert "## 2026-03-12" in ctx["history"]
+        kept = [line for line in ctx["history"].splitlines() if line.startswith("## ")]
+        assert len(kept) == MAX_HISTORY_ENTRIES
+        assert f"## 2026-03-{count:02d}" in ctx["history"]
         assert "## 2026-03-01" not in ctx["history"]
 
     @staticmethod
@@ -2030,10 +2035,12 @@ class TestAppendHistory:
         append_history(tmp_path, "Brand new entry")
         content = (tmp_path / "history.md").read_text()
 
+        # Assert on the zero-padded headings: "Old entry 1" is a substring of
+        # "Old entry 10", which is legitimately retained at a cap of ten.
         assert content.count("## ") == MAX_HISTORY_ENTRIES
         assert "Brand new entry" in content
-        assert "Old entry 1" not in content
-        assert "Old entry 2" in content
+        assert "## 2026-03-01" not in content
+        assert "## 2026-03-02" in content
 
     def test_trim_drops_every_entry_past_the_cap_at_once(self, tmp_path: Path) -> None:
         """A file already over the cap converges in one append, not one per week."""
@@ -2050,7 +2057,8 @@ class TestAppendHistory:
 
         assert content.count("## ") == MAX_HISTORY_ENTRIES
         assert "Newest entry" in content
-        assert f"Old entry {overflow}" in content
+        assert f"## 2026-03-{overflow:02d}" in content
+        assert "## 2026-03-01" not in content
 
     def test_replacing_an_existing_week_does_not_trim(self, tmp_path: Path) -> None:
         """Re-running the same week must not silently cost the oldest entry."""
@@ -2067,7 +2075,7 @@ class TestAppendHistory:
 
         assert content.count("## ") == MAX_HISTORY_ENTRIES
         assert "Rewritten" in content
-        assert "Old entry 1" in content
+        assert "## 2026-W01" in content
 
 
 class TestBuildLlmData:
