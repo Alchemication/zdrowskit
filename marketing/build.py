@@ -424,6 +424,16 @@ def build_docs(out: Path, base_css: str) -> list[Doc]:
     return docs
 
 
+def _case_files_on_disk() -> str:
+    """Return the eval case count read from the case files themselves.
+
+    Used only when no run has been recorded yet. Counting the directory keeps
+    the fallback honest: a literal here would be the hard-coded figure this
+    whole mechanism exists to avoid.
+    """
+    return str(len(list((REPO_ROOT / "evals" / "cases").glob("*.json"))))
+
+
 def landing_placeholders() -> dict[str, str]:
     """Resolve `{{...}}` tokens in the landing page from recorded eval history.
 
@@ -436,7 +446,7 @@ def landing_placeholders() -> dict[str, str]:
     """
     runs = REPO_ROOT / "evals" / "leaderboard" / "runs.jsonl"
     if not runs.exists():
-        return {"EVAL_CASE_COUNT": "30", "EVAL_UPDATED": "recently"}
+        return {"EVAL_CASE_COUNT": _case_files_on_disk(), "EVAL_UPDATED": "recently"}
 
     records = [
         json.loads(line)
@@ -444,7 +454,7 @@ def landing_placeholders() -> dict[str, str]:
         if line.strip()
     ]
     if not records:
-        return {"EVAL_CASE_COUNT": "30", "EVAL_UPDATED": "recently"}
+        return {"EVAL_CASE_COUNT": _case_files_on_disk(), "EVAL_UPDATED": "recently"}
 
     latest = max(records, key=lambda r: str(r.get("created_at", "")))
     case_ids: set[str] = set()

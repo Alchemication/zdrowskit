@@ -246,9 +246,9 @@ shape changes, update the renderers and tests with it.
 The leaderboard is published at
 <https://alchemication.github.io/zdrowskit/evals/> by `marketing/build.py`,
 which re-renders it from `runs.jsonl` rather than copying the committed
-snapshot, so the published page is never the stale one. Pushes to `main` that
-touch `evals/leaderboard/runs.jsonl`, `docs/` or `marketing/` redeploy it;
-enable it once with **Settings → Pages → Source: GitHub Actions**.
+snapshot, so the published page is never the stale one. A push to `main` that
+touches any of the paths listed in `.github/workflows/pages.yml` redeploys it;
+enable publishing once with **Settings → Pages → Source: GitHub Actions**.
 
 The landing page cites the current case count and the date of the latest
 recorded run, both substituted at build time from the same `runs.jsonl` — see
