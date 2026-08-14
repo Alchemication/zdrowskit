@@ -16,6 +16,7 @@ from store import (
     delete_feedback,
     load_date_range,
     load_feedback_entries,
+    latest_metric_date,
     load_feedback_for_call,
     load_snapshots,
     log_feedback,
@@ -583,6 +584,52 @@ class TestLoadDateRange:
         store_snapshots(in_memory_db, days)
         result = load_date_range(in_memory_db)
         assert result == ("2026-03-09", "2026-03-15")
+
+
+class TestLatestMetricDate:
+    def test_returns_none_when_nothing_is_stored(
+        self, in_memory_db: sqlite3.Connection
+    ) -> None:
+        assert latest_metric_date(in_memory_db) is None
+
+    def test_returns_the_newest_day_holding_a_metric(
+        self, in_memory_db: sqlite3.Connection
+    ) -> None:
+        store_snapshots(
+            in_memory_db,
+            [
+                DailySnapshot(date="2026-08-11", steps=8000),
+                DailySnapshot(date="2026-08-12", steps=5416),
+            ],
+        )
+
+        assert latest_metric_date(in_memory_db) == "2026-08-12"
+
+    def test_a_row_without_metrics_does_not_count_as_data(
+        self, in_memory_db: sqlite3.Connection
+    ) -> None:
+        store_snapshots(in_memory_db, [DailySnapshot(date="2026-08-12", steps=5416)])
+        # An import creates the row as soon as it sees the date, so a day Auto
+        # Export has not actually reported yet still lands in the table empty.
+        # Counting it would report the pipeline healthy exactly when it stopped.
+        in_memory_db.execute(
+            "INSERT INTO daily (date, imported_at) VALUES ('2026-08-13', '2026-08-13')"
+        )
+
+        assert latest_metric_date(in_memory_db) == "2026-08-12"
+
+    def test_any_single_metric_is_enough_to_count(
+        self, in_memory_db: sqlite3.Connection
+    ) -> None:
+        store_snapshots(
+            in_memory_db,
+            [
+                DailySnapshot(date="2026-08-12", steps=5416),
+                DailySnapshot(date="2026-08-13", sleep_total_h=7.4),
+            ],
+        )
+
+        assert latest_metric_date(in_memory_db) == "2026-08-13"
 
 
 class TestLogLlmCall:

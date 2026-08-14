@@ -21,6 +21,7 @@ from http_ingest import (
     assess_ingest_health,
     IngestError,
     TokenRegistry,
+    newest_expected_day,
     validate_upload,
 )
 from http_ingest_server import HttpIngestServer
@@ -504,6 +505,9 @@ class TestPayloadArchive:
 _PAIR_WINDOW_S = 60 * 60
 """Production pairing window, so health messages are asserted against it."""
 
+_NOW = datetime.now(timezone.utc)
+"""Reference moment for deriving stored-data dates relative to today."""
+
 
 class TestIngestHealth:
     def _state(self, profile: Profile, payload: dict) -> None:
@@ -516,16 +520,49 @@ class TestIngestHealth:
         """Return an ISO timestamp *hours_ago* in the past."""
         return (datetime.now(timezone.utc) - timedelta(hours=hours_ago)).isoformat()
 
+    def _current(self, days_behind: int = 0) -> str:
+        """Return a stored-data date *days_behind* the newest day owed."""
+        return (newest_expected_day(_NOW) - timedelta(days=days_behind)).isoformat()
+
+    def _assess(self, profile: Profile, **kwargs):
+        """Assess a profile, defaulting every knob the case does not exercise."""
+        kwargs.setdefault("newest_data_date", self._current())
+        kwargs.setdefault("stale_after_days", 1)
+        kwargs.setdefault("split_after_h", 6)
+        kwargs.setdefault("pair_window_s", _PAIR_WINDOW_S)
+        return assess_ingest_health(profile, **kwargs)
+
     def test_a_profile_that_never_uploaded_is_not_nagged(self, tmp_path: Path) -> None:
         profile = _profile(tmp_path)
         self._state(profile, {"uploads": {}, "receipts": []})
 
-        health = assess_ingest_health(
-            profile, silent_after_h=24, split_after_h=6, pair_window_s=_PAIR_WINDOW_S
+        # Mid-setup, not broken — and no stored data yet, which must not read as
+        # a fault while onboarding is still in progress.
+        health = self._assess(profile, newest_data_date=None)
+
+        assert health.is_alerting is False
+
+    def test_a_first_upload_awaiting_its_first_import_is_not_nagged(
+        self, tmp_path: Path
+    ) -> None:
+        profile = _profile(tmp_path)
+        self._state(
+            profile,
+            {
+                "uploads": {
+                    "metrics": {
+                        "received_at": self._at(0.05),
+                        "first_seen_at": self._at(0.05),
+                    }
+                }
+            },
         )
 
-        # Mid-setup, not broken.
-        assert health.is_alerting is False
+        # Minutes into onboarding: an upload has landed, no pair has completed a
+        # cycle, and nothing is stored yet. Reporting "no health data has ever
+        # been stored" here would greet a new user with a fault. Waiting past the
+        # split threshold is a real fault, and that check owns the call.
+        assert self._assess(profile, newest_data_date=None).is_alerting is False
 
     def test_recent_import_is_healthy(self, tmp_path: Path) -> None:
         profile = _profile(tmp_path)
@@ -540,39 +577,28 @@ class TestIngestHealth:
             },
         )
 
-        assert (
-            assess_ingest_health(
-                profile,
-                silent_after_h=24,
-                split_after_h=6,
-                pair_window_s=_PAIR_WINDOW_S,
-            ).is_alerting
-            is False
-        )
+        assert self._assess(profile).is_alerting is False
 
-    def test_overnight_silence_is_not_an_alert(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize("hours_quiet", [9, 16, 24, 35])
+    def test_silence_with_current_data_is_never_an_alert(
+        self, tmp_path: Path, hours_quiet: float
+    ) -> None:
         profile = _profile(tmp_path)
         self._state(
             profile,
             {
                 "uploads": {
-                    "metrics": {"received_at": self._at(9)},
-                    "workouts": {"received_at": self._at(9)},
+                    "metrics": {"received_at": self._at(hours_quiet)},
+                    "workouts": {"received_at": self._at(hours_quiet)},
                 },
-                "last_imported_at": self._at(9),
+                "last_imported_at": self._at(hours_quiet),
             },
         )
 
-        # A locked phone overnight must never look like a broken one.
-        assert (
-            assess_ingest_health(
-                profile,
-                silent_after_h=24,
-                split_after_h=6,
-                pair_window_s=_PAIR_WINDOW_S,
-            ).status
-            == "silent"
-        ) is False
+        # Auto Export batches unpredictably: measured over twelve days the gap
+        # between imports hit 34.9h without ever losing a day. Hours of quiet
+        # are not evidence of anything while the days themselves are all here.
+        assert self._assess(profile).is_alerting is False
 
     @pytest.mark.parametrize("hours_quiet", [7, 12, 23])
     def test_quiet_after_a_clean_import_is_never_blamed_on_pairing(
@@ -590,34 +616,142 @@ class TestIngestHealth:
             },
         )
 
-        health = assess_ingest_health(
-            profile, silent_after_h=24, split_after_h=6, pair_window_s=_PAIR_WINDOW_S
-        )
-
         # Everything that arrived did import. Telling someone to realign two
-        # automations that fired simultaneously sends them chasing a non-bug;
-        # sustained quiet is the silence threshold's job, not pairing's.
-        assert health.is_alerting is False
+        # automations that fired simultaneously sends them chasing a non-bug.
+        assert self._assess(profile).is_alerting is False
 
-    def test_total_silence_past_the_threshold_alerts(self, tmp_path: Path) -> None:
+    def test_a_missing_day_alerts_even_though_uploads_look_fine(
+        self, tmp_path: Path
+    ) -> None:
         profile = _profile(tmp_path)
         self._state(
             profile,
             {
                 "uploads": {
-                    "metrics": {"received_at": self._at(30)},
-                    "workouts": {"received_at": self._at(30)},
+                    "metrics": {"received_at": self._at(0.2)},
+                    "workouts": {"received_at": self._at(0.2)},
                 },
-                "last_imported_at": self._at(30),
+                "last_imported_at": self._at(0.2),
             },
         )
 
-        health = assess_ingest_health(
-            profile, silent_after_h=24, split_after_h=6, pair_window_s=_PAIR_WINDOW_S
+        # The exact case the old hours-based check reported as healthy: uploads
+        # arriving and importing on schedule, carrying nothing for yesterday.
+        health = self._assess(profile, newest_data_date=self._current(1))
+
+        assert health.status == "stale"
+        assert "Auto Export" in health.detail
+        assert health.missing_from == newest_expected_day(_NOW).isoformat()
+        assert health.missing_to == newest_expected_day(_NOW).isoformat()
+
+    def test_a_multi_day_gap_names_its_range(self, tmp_path: Path) -> None:
+        profile = _profile(tmp_path)
+        self._state(
+            profile,
+            {
+                "uploads": {"metrics": {"received_at": self._at(0.2)}},
+                "last_imported_at": self._at(0.1),
+            },
         )
 
-        assert health.status == "silent"
-        assert "Auto Export" in health.detail
+        health = self._assess(profile, newest_data_date=self._current(3))
+
+        assert health.status == "stale"
+        assert "(3 days)" in health.detail
+        assert health.missing_to == newest_expected_day(_NOW).isoformat()
+
+    def test_a_raised_threshold_tolerates_a_single_missing_day(
+        self, tmp_path: Path
+    ) -> None:
+        profile = _profile(tmp_path)
+        self._state(
+            profile,
+            {
+                "uploads": {"metrics": {"received_at": self._at(0.2)}},
+                "last_imported_at": self._at(0.1),
+            },
+        )
+
+        assert (
+            self._assess(
+                profile, newest_data_date=self._current(1), stale_after_days=2
+            ).is_alerting
+            is False
+        )
+
+    @pytest.mark.parametrize(
+        ("hour", "alerting"),
+        [(9, False), (11, True)],
+    )
+    def test_yesterday_is_only_owed_once_the_morning_window_closes(
+        self, tmp_path: Path, hour: int, alerting: bool
+    ) -> None:
+        profile = _profile(tmp_path)
+        self._state(
+            profile,
+            {
+                "uploads": {"metrics": {"received_at": self._at(0.2)}},
+                "last_imported_at": self._at(0.1),
+            },
+        )
+        now = datetime(2026, 8, 14, hour, 0).astimezone()
+
+        # Data runs through the 12th. Before the cutoff the 13th is merely late.
+        health = assess_ingest_health(
+            profile,
+            newest_data_date="2026-08-12",
+            stale_after_days=1,
+            split_after_h=6,
+            pair_window_s=_PAIR_WINDOW_S,
+            now=now,
+        )
+
+        assert health.is_alerting is alerting
+
+    def test_today_is_never_counted_as_missing(self, tmp_path: Path) -> None:
+        profile = _profile(tmp_path)
+        self._state(
+            profile,
+            {
+                "uploads": {"metrics": {"received_at": self._at(0.2)}},
+                "last_imported_at": self._at(0.1),
+            },
+        )
+        now = datetime(2026, 8, 14, 23, 0).astimezone()
+
+        # A day still in progress owes nothing, even late in the evening.
+        health = assess_ingest_health(
+            profile,
+            newest_data_date="2026-08-13",
+            stale_after_days=1,
+            split_after_h=6,
+            pair_window_s=_PAIR_WINDOW_S,
+            now=now,
+        )
+
+        assert health.is_alerting is False
+
+    def test_importing_uploads_that_store_nothing_is_a_fault(
+        self, tmp_path: Path
+    ) -> None:
+        profile = _profile(tmp_path)
+        self._state(
+            profile,
+            {
+                "uploads": {
+                    "metrics": {"received_at": self._at(0.2)},
+                    "workouts": {"received_at": self._at(0.2)},
+                },
+                "last_imported_at": self._at(0.1),
+            },
+        )
+
+        # Pairs import cleanly and the database stays empty: a parser problem
+        # the old check could not see, because it only watched the pipe.
+        health = self._assess(profile, newest_data_date=None)
+
+        assert health.status == "stale"
+        assert "no health data has ever been stored" in health.detail
 
     def test_halves_outside_the_window_are_blamed_on_the_schedules(
         self, tmp_path: Path
@@ -634,12 +768,7 @@ class TestIngestHealth:
             },
         )
 
-        health = assess_ingest_health(
-            profile,
-            silent_after_h=24,
-            split_after_h=6,
-            pair_window_s=_PAIR_WINDOW_S,
-        )
+        health = self._assess(profile)
 
         assert health.status == "split"
         assert "same schedule" in health.detail
@@ -659,18 +788,35 @@ class TestIngestHealth:
             },
         )
 
-        health = assess_ingest_health(
-            profile,
-            silent_after_h=24,
-            split_after_h=6,
-            pair_window_s=_PAIR_WINDOW_S,
-        )
+        health = self._assess(profile)
 
         # 21m apart inside a 60m window pairs fine. Sending someone to realign
         # automations that are already aligned is how this alert wasted a day.
         assert health.status == "split"
         assert "same schedule" not in health.detail
         assert "the import on this end is stuck" in health.detail
+
+    def test_a_stalled_pipe_outranks_the_staleness_it_causes(
+        self, tmp_path: Path
+    ) -> None:
+        profile = _profile(tmp_path)
+        self._state(
+            profile,
+            {
+                "uploads": {
+                    "metrics": {"received_at": self._at(0.1)},
+                    "workouts": {"received_at": self._at(1.8)},
+                },
+                "last_imported_at": self._at(30),
+            },
+        )
+
+        # Both are true, but only one names the fix. "Set both automations to
+        # the same schedule" beats "days are missing" when the schedules are
+        # demonstrably why they are missing.
+        health = self._assess(profile, newest_data_date=self._current(2))
+
+        assert health.status == "split"
 
     def test_one_half_never_configured_is_reported_as_split(
         self, tmp_path: Path
@@ -691,9 +837,7 @@ class TestIngestHealth:
             },
         )
 
-        health = assess_ingest_health(
-            profile, silent_after_h=24, split_after_h=6, pair_window_s=_PAIR_WINDOW_S
-        )
+        health = self._assess(profile)
 
         assert health.status == "split"
         assert "Workouts" in health.detail
@@ -717,9 +861,7 @@ class TestIngestHealth:
             },
         )
 
-        health = assess_ingest_health(
-            profile, silent_after_h=24, split_after_h=6, pair_window_s=_PAIR_WINDOW_S
-        )
+        health = self._assess(profile)
 
         assert health.status == "error"
         assert "parser rejected the payload" in health.detail
@@ -730,12 +872,24 @@ class TestIngestHealth:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("{ not json", encoding="utf-8")
 
-        health = assess_ingest_health(
-            profile, silent_after_h=24, split_after_h=6, pair_window_s=_PAIR_WINDOW_S
-        )
+        health = self._assess(profile)
 
         assert health.status == "error"
         assert str(path) in health.detail
+
+
+class TestNewestExpectedDay:
+    def test_before_the_morning_cutoff_yesterday_is_still_allowed_to_arrive(
+        self,
+    ) -> None:
+        now = datetime(2026, 8, 14, 7, 30).astimezone()
+
+        assert newest_expected_day(now).isoformat() == "2026-08-12"
+
+    def test_after_the_morning_cutoff_yesterday_is_owed(self) -> None:
+        now = datetime(2026, 8, 14, 10, 0).astimezone()
+
+        assert newest_expected_day(now).isoformat() == "2026-08-13"
 
 
 class TestPairStatus:

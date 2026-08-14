@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
+import pytest
+
 from notification_prefs import (
     DEFAULT_NOTIFICATION_PREFS,
     apply_notification_changes,
@@ -14,6 +16,7 @@ from notification_prefs import (
     format_notification_summary,
     load_notification_prefs,
     scheduled_report_due,
+    validate_notification_changes,
 )
 
 
@@ -198,6 +201,51 @@ class TestNotificationPrefs:
         )
 
         assert "Max nudges per day: 2" in text
+
+    def test_summary_shows_the_staleness_threshold_in_days(self) -> None:
+        text = format_notification_summary(
+            DEFAULT_NOTIFICATION_PREFS,
+            now=datetime.fromisoformat("2026-04-05T10:00:00+00:00"),
+        )
+
+        assert "missing data 1d" in text
+
+    def test_staleness_threshold_can_be_raised(self) -> None:
+        changes = validate_notification_changes(
+            [{"action": "set", "path": "data_health.stale_after_days", "value": 3}]
+        )
+        updated = apply_notification_changes(DEFAULT_NOTIFICATION_PREFS, changes)
+
+        effective = effective_notification_prefs(updated)
+        assert effective["data_health"]["stale_after_days"] == 3
+
+    def test_out_of_range_staleness_is_rejected_rather_than_silently_dropped(
+        self,
+    ) -> None:
+        # _normalise_overrides discards what it cannot use, so without an
+        # explicit bound the user is told this applied and then it evaporates.
+        with pytest.raises(ValueError, match="between 1 and 14 days"):
+            validate_notification_changes(
+                [{"action": "set", "path": "data_health.stale_after_days", "value": 90}]
+            )
+
+    def test_fractional_staleness_is_rejected(self) -> None:
+        with pytest.raises(ValueError, match="whole number of days"):
+            validate_notification_changes(
+                [
+                    {
+                        "action": "set",
+                        "path": "data_health.stale_after_days",
+                        "value": 1.5,
+                    }
+                ]
+            )
+
+    def test_out_of_range_split_threshold_is_rejected(self) -> None:
+        with pytest.raises(ValueError, match="between 1 and 168 hours"):
+            validate_notification_changes(
+                [{"action": "set", "path": "data_health.split_after_h", "value": 0}]
+            )
 
     def test_invalid_nudge_cap_is_rejected(self) -> None:
         from notification_prefs import validate_notification_changes

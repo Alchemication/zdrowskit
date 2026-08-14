@@ -2915,10 +2915,14 @@ class TestIngestHealthAlerts:
         runtime._chat._poller = MagicMock()
         return runtime
 
-    def _health(self, status: str):
+    def _health(self, status: str, **kwargs):
         from http_ingest import IngestHealth
 
-        return IngestHealth(status=status, detail=f"{status} detail")
+        return IngestHealth(status=status, detail=f"{status} detail", **kwargs)
+
+    def _stale(self, missing_from: str, missing_to: str):
+        """Return a stale condition covering a known range of missing days."""
+        return self._health("stale", missing_from=missing_from, missing_to=missing_to)
 
     def test_alerts_once_then_stays_quiet_until_the_realert_window(
         self, tmp_path: Path
@@ -2947,18 +2951,18 @@ class TestIngestHealthAlerts:
         ):
             runtime._check_ingest_health(prefs)
         with patch(
-            "http_ingest.assess_ingest_health", return_value=self._health("silent")
+            "http_ingest.assess_ingest_health", return_value=self._health("error")
         ):
             runtime._check_ingest_health(prefs)
 
         assert runtime._poller.send_reply.call_count == 2
 
-    def test_recovery_clears_state_and_says_so_once(self, tmp_path: Path) -> None:
-        runtime = self._runtime(tmp_path, self._health("silent"))
+    def test_a_stalled_pipe_recovery_is_confirmed(self, tmp_path: Path) -> None:
+        runtime = self._runtime(tmp_path, self._health("split"))
         prefs = load_notification_prefs(runtime._notification_prefs_path)
 
         with patch(
-            "http_ingest.assess_ingest_health", return_value=self._health("silent")
+            "http_ingest.assess_ingest_health", return_value=self._health("split")
         ):
             runtime._check_ingest_health(prefs)
         with patch("http_ingest.assess_ingest_health", return_value=self._health("ok")):
@@ -2966,9 +2970,86 @@ class TestIngestHealthAlerts:
             runtime._check_ingest_health(prefs)
 
         messages = [call.args[0] for call in runtime._poller.send_reply.call_args_list]
+        # The user was told to go fix something, so the all-clear answers an
+        # action they took.
         assert len(messages) == 2
         assert "working again" in messages[1]
         assert "data_health_alert" not in runtime._state
+
+    def test_a_stale_gap_that_backfilled_says_nothing(self, tmp_path: Path) -> None:
+        runtime = self._runtime(tmp_path, self._health("stale"))
+        prefs = load_notification_prefs(runtime._notification_prefs_path)
+
+        with (
+            patch.object(runtime, "_newest_data_date", return_value="2026-08-12"),
+            patch(
+                "http_ingest.assess_ingest_health",
+                return_value=self._stale("2026-08-13", "2026-08-13"),
+            ),
+        ):
+            runtime._check_ingest_health(prefs)
+        with (
+            patch.object(runtime, "_newest_data_date", return_value="2026-08-14"),
+            patch("http_ingest.assess_ingest_health", return_value=self._health("ok")),
+        ):
+            runtime._check_ingest_health(prefs)
+
+        # Auto Export caught up on the day it missed. Nothing was lost, so the
+        # recovery is not news — announcing it just doubles the message count.
+        messages = [call.args[0] for call in runtime._poller.send_reply.call_args_list]
+        assert len(messages) == 1
+        assert "data_health_alert" not in runtime._state
+
+    def test_a_stale_gap_that_stayed_a_gap_names_the_lost_days(
+        self, tmp_path: Path
+    ) -> None:
+        runtime = self._runtime(tmp_path, self._health("stale"))
+        prefs = load_notification_prefs(runtime._notification_prefs_path)
+
+        with (
+            patch.object(runtime, "_newest_data_date", return_value="2026-08-10"),
+            patch(
+                "http_ingest.assess_ingest_health",
+                return_value=self._stale("2026-08-11", "2026-08-13"),
+            ),
+        ):
+            runtime._check_ingest_health(prefs)
+        # Uploads resumed and only the last of the three days came back.
+        with (
+            patch.object(runtime, "_newest_data_date", return_value="2026-08-12"),
+            patch("http_ingest.assess_ingest_health", return_value=self._health("ok")),
+        ):
+            runtime._check_ingest_health(prefs)
+
+        messages = [call.args[0] for call in runtime._poller.send_reply.call_args_list]
+        assert len(messages) == 2
+        assert "2026-08-13" in messages[1]
+        assert "no longer be recovered" in messages[1]
+
+    def test_a_partially_backfilled_gap_reports_only_what_is_missing(
+        self, tmp_path: Path
+    ) -> None:
+        runtime = self._runtime(tmp_path, self._health("stale"))
+        prefs = load_notification_prefs(runtime._notification_prefs_path)
+
+        with (
+            patch.object(runtime, "_newest_data_date", return_value="2026-08-09"),
+            patch(
+                "http_ingest.assess_ingest_health",
+                return_value=self._stale("2026-08-10", "2026-08-13"),
+            ),
+        ):
+            runtime._check_ingest_health(prefs)
+        with (
+            patch.object(runtime, "_newest_data_date", return_value="2026-08-11"),
+            patch("http_ingest.assess_ingest_health", return_value=self._health("ok")),
+        ):
+            runtime._check_ingest_health(prefs)
+
+        # The 10th and 11th came back; naming them as lost would be wrong.
+        messages = [call.args[0] for call in runtime._poller.send_reply.call_args_list]
+        assert "2026-08-12 to 2026-08-13" in messages[1]
+        assert "2026-08-10" not in messages[1]
 
     def test_a_healthy_profile_is_never_messaged(self, tmp_path: Path) -> None:
         runtime = self._runtime(tmp_path, self._health("ok"))

@@ -23,8 +23,8 @@ from typing import Any
 from config import (
     DATA_HEALTH_QUIET_END_HHMM,
     DATA_HEALTH_QUIET_START_HHMM,
-    DATA_HEALTH_SILENT_AFTER_H,
     DATA_HEALTH_SPLIT_AFTER_H,
+    DATA_HEALTH_STALE_AFTER_DAYS,
     NOTIFICATION_PREFS_PATH,
 )
 
@@ -48,7 +48,7 @@ SETTABLE_PATHS = {
     "weekly_insights.weekday",
     "weekly_insights.time",
     "data_health.enabled",
-    "data_health.silent_after_h",
+    "data_health.stale_after_days",
     "data_health.split_after_h",
 }
 RESETTABLE_PATHS = SETTABLE_PATHS | {
@@ -62,6 +62,8 @@ MIN_NUDGES_PER_DAY = 1
 MAX_REASONABLE_NUDGES_PER_DAY = 6
 MIN_DATA_HEALTH_HOURS = 1
 MAX_DATA_HEALTH_HOURS = 24 * 7
+MIN_DATA_HEALTH_STALE_DAYS = 1
+MAX_DATA_HEALTH_STALE_DAYS = 14
 
 DEFAULT_NOTIFICATION_PREFS: dict[str, Any] = {
     "version": PREFS_VERSION,
@@ -82,7 +84,7 @@ _DEFAULT_EFFECTIVE: dict[str, dict[str, Any]] = {
     },
     "data_health": {
         "enabled": True,
-        "silent_after_h": DATA_HEALTH_SILENT_AFTER_H,
+        "stale_after_days": DATA_HEALTH_STALE_AFTER_DAYS,
         "split_after_h": DATA_HEALTH_SPLIT_AFTER_H,
     },
 }
@@ -169,6 +171,14 @@ def _normalise_overrides(overrides: object) -> dict[str, dict[str, Any]]:
                 # a broken phone goes unnoticed long enough to lose the data.
                 if not isinstance(value, bool) and (
                     MIN_DATA_HEALTH_HOURS <= value <= MAX_DATA_HEALTH_HOURS
+                ):
+                    clean_section[key] = value
+            elif path.endswith("_after_days") and isinstance(value, int):
+                # Zero would fire on today, which is still in progress and never
+                # complete; a fortnight outlasts any window in which the missing
+                # days could still be recovered from the phone.
+                if not isinstance(value, bool) and (
+                    MIN_DATA_HEALTH_STALE_DAYS <= value <= MAX_DATA_HEALTH_STALE_DAYS
                 ):
                     clean_section[key] = value
         if clean_section:
@@ -462,6 +472,27 @@ def validate_notification_changes(changes: object) -> list[dict[str, Any]]:
                         f"{path} must be between {MIN_NUDGES_PER_DAY} and "
                         f"{MAX_REASONABLE_NUDGES_PER_DAY}"
                     )
+            # Bounds are enforced here as well as in _normalise_overrides, which
+            # drops what it cannot use. Without this an out-of-range value is
+            # reported back as applied and then silently discarded on next load.
+            if path.endswith("_after_h"):
+                if isinstance(value, bool) or not isinstance(value, int | float):
+                    raise ValueError(f"{path} requires a number of hours")
+                if not (MIN_DATA_HEALTH_HOURS <= value <= MAX_DATA_HEALTH_HOURS):
+                    raise ValueError(
+                        f"{path} must be between {MIN_DATA_HEALTH_HOURS} and "
+                        f"{MAX_DATA_HEALTH_HOURS} hours"
+                    )
+            if path.endswith("_after_days"):
+                if isinstance(value, bool) or not isinstance(value, int):
+                    raise ValueError(f"{path} requires a whole number of days")
+                if not (
+                    MIN_DATA_HEALTH_STALE_DAYS <= value <= MAX_DATA_HEALTH_STALE_DAYS
+                ):
+                    raise ValueError(
+                        f"{path} must be between {MIN_DATA_HEALTH_STALE_DAYS} and "
+                        f"{MAX_DATA_HEALTH_STALE_DAYS} days"
+                    )
             if path.endswith(".weekday") and value not in DAY_NAMES:
                 raise ValueError(f"{path} requires a weekday name")
             if path.endswith(".time") or path.endswith(".earliest_time"):
@@ -578,7 +609,7 @@ def format_notification_summary(
         (
             "- Sync alerts: "
             f"{'on' if effective['data_health']['enabled'] else 'off'}"
-            f" (silence {effective['data_health']['silent_after_h']}h, "
+            f" (missing data {effective['data_health']['stale_after_days']}d, "
             f"not importing {effective['data_health']['split_after_h']}h)"
         ),
     ]

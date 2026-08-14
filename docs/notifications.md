@@ -8,7 +8,7 @@ Each notification type is a distinct LLM call with its own prompt, context, tool
 | **Memory** | Decides what carries forward from the report | After each weekly report | 1x/week | ≤ 2 bullets | none | `<memory>` block appended to `history.md`; never sent to the user |
 | **Coach** | Weekly strategy review, only when proposals exist | After insights, silent on no-change weeks | 1x/week | ~300 words | `run_sql`, `update_context` for `strategy` only | `SKIP` if no changes warranted; bundled message with inline Accept/Reject buttons per edit |
 | **Nudge** | Short reactive next-action nudge | Data sync, file edit | Up to 2/day by default | 80 words | `run_sql` | `SKIP` if nothing changes; text only, no chart |
-| **Sync alerts** | Tells you when health data has stopped arriving | Sustained ingest failure, checked on the scheduler tick | At most 1/day per condition | 2 lines | none | Recovery notice when it resolves |
+| **Sync alerts** | Tells you when health data has stopped arriving | A missing day of data, or a stalled import, checked on the scheduler tick | At most 1/day per condition | 2 lines | none | Recovery notice when it cost you days |
 | **Chat** | Interactive conversation: answer the current message, ask anything, get charts | Your Telegram message | On demand | 150 words | `run_sql` up to 5/turn, `update_context` any file | Optional `<chart>`; at most one `update_context` |
 
 ## Notification Preferences Via Telegram
@@ -90,20 +90,56 @@ just stop, or stop pairing, and the only trace is a line in the daemon log. For
 the operator that is survivable. For a hosted profile it is fatal — their data
 quietly goes stale and they conclude the product is dead.
 
-Three conditions are reported, with different thresholds because they carry
-different confidence:
+Three conditions are reported, checked in order of how specific they are about
+the cause:
 
 | Condition | Default | Meaning |
 |-----------|---------|---------|
-| `silent` | 16h | Nothing has arrived at all. Long enough to clear a night's sleep — an overnight gap runs about 9–10h — and short enough to fire well inside the ~48h Auto Export window, after which missed days can no longer be recovered by fixing the phone. |
-| `split` | 6h | Uploads *are* arriving but nothing imports. Far stronger signal — the phone is demonstrably reachable. The message distinguishes the two causes: halves further apart than the one-hour pairing window means two automations whose schedules have drifted, and anything closer than that means the phone is fine and the import on this end is stuck. |
-| `error` | 6h | The last import failed and none has succeeded since. |
+| `error` | 6h | The last import failed and none has succeeded since, or the ingest state file is unreadable. |
+| `split` | 6h | Uploads *are* arriving but nothing imports. A strong signal — the phone is demonstrably reachable. The message distinguishes the two causes: halves further apart than the one-hour pairing window means two automations whose schedules have drifted, and anything closer than that means the phone is fine and the import on this end is stuck. |
+| `stale` | 1 day | The pipe looks fine and a day of data is missing anyway. The catch-all: phone off, token revoked, Funnel down, app deleted, parser rejecting every payload. |
 
 A profile that has never uploaded is never alerted: it is mid-setup, not broken.
 
+### Why staleness is counted in days of data, not hours of silence
+
+Auto Export uploads in unpredictable bursts. Measured over twelve days of one
+real profile, the gap between imports ran a 1.7h median, a 10.1h p90 and a 34.9h
+maximum — so any hours-based silence threshold low enough to catch a dead phone
+also fires on the tail of ordinary operation. Worse, a long gap that lands as a
+complete backfill has cost you nothing worth a message, while a short gap that
+skips a day has cost you a day.
+
+So the check asks the database, not the upload log: what is the newest date that
+actually holds a metric? A `daily` row is created as soon as an import sees the
+date, so rows alone prove nothing — the query ignores any row whose metrics are
+all null. The same profile carried 2775 daily rows across seven years with
+exactly one metric-less day, so at the one-day default a healthy setup expects an
+alert roughly once a year.
+
+Only the newest edge is checked. An interior hole — one missing day with fresher
+days either side — is deliberately ignored, because it is already past the ~48h
+window in which Auto Export could refill it and there is nothing left to do.
+
+Today never counts as missing, since it is still in progress. Yesterday only
+counts once past 10:00 local (`MORNING_SYNC_CUTOFF_HOUR`), which gives the
+overnight batch time to land — the same cutoff that decides whether a night's
+sleep is "pending sync" or "not tracked", so the two cannot disagree about
+whether last night is late or lost.
+
+### Recovery notices
+
 Each condition is reported once and then not again for 24 hours while it
-persists, and a one-line recovery notice is sent when it clears — an alert you
-cannot tell has resolved is one you learn to ignore.
+persists. What is sent when it clears depends on what the outage cost:
+
+- **A stalled pipe** (`split`, `error`) always gets its all-clear. You were told
+  to go fix something; the confirmation answers an action you took.
+- **A stale gap that backfilled** sends nothing. Auto Export catching up on the
+  days it missed is the normal ending, and announcing it only doubles the
+  message count for the fault.
+- **A stale gap that stayed a gap** names the days that never arrived. They are
+  gone for good, and you should hear it once while the reports that will omit
+  them are still to come.
 
 Sync alerts are held during quiet hours (22:00–08:00 local) and released at
 08:00, rather than waking anyone at 2am. A stalled import is never fixable while

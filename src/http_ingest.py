@@ -14,11 +14,12 @@ import secrets
 import shutil
 import threading
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from http import HTTPStatus
 from pathlib import Path
 from typing import Any, Callable
 
+from config import MORNING_SYNC_CUTOFF_HOUR
 from parsers.metrics import parse_metrics_payload
 from parsers.workouts import parse_workouts_payload
 from profiles import Profile
@@ -71,6 +72,8 @@ class IngestHealth:
     status: str
     detail: str
     since: str | None = None
+    missing_from: str | None = None
+    missing_to: str | None = None
 
     @property
     def is_alerting(self) -> bool:
@@ -491,32 +494,111 @@ def _parse_iso(value: Any) -> datetime | None:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
+def newest_expected_day(now: datetime) -> date:
+    """Return the most recent day that should already hold a full day of data.
+
+    Today never qualifies: it is still happening, so an absence of data says
+    nothing. Yesterday only qualifies once the morning sync window has closed,
+    because until then a missing night is late rather than lost.
+
+    Args:
+        now: The current moment, in any timezone.
+
+    Returns:
+        The newest local date whose data is legitimately owed.
+    """
+    local = now.astimezone()
+    behind = 1 if local.hour >= MORNING_SYNC_CUTOFF_HOUR else 2
+    return local.date() - timedelta(days=behind)
+
+
+def _assess_data_freshness(
+    newest_data_date: str | None,
+    *,
+    stale_after_days: int,
+    now: datetime,
+) -> IngestHealth:
+    """Judge whether stored data has kept up, given a healthy-looking pipe.
+
+    Args:
+        newest_data_date: Newest ISO date holding a metric, or None when the
+            profile has stored none at all.
+        stale_after_days: Owed days that may go missing before reporting.
+        now: The current moment.
+
+    Returns:
+        Either ``ok`` or ``stale``.
+    """
+    expected = newest_expected_day(now)
+    if newest_data_date is None:
+        return IngestHealth(
+            status="stale",
+            detail=(
+                "Uploads are arriving and importing, but no health data has ever "
+                "been stored from them. Check the daemon log for parser errors."
+            ),
+        )
+
+    newest = date.fromisoformat(newest_data_date)
+    days_behind = (expected - newest).days
+    if days_behind < stale_after_days:
+        return IngestHealth(
+            status="ok",
+            detail=f"Health data is current through {newest_data_date}.",
+        )
+
+    first_missing = newest + timedelta(days=1)
+    if days_behind == 1:
+        gap = f"for {first_missing.isoformat()}"
+    else:
+        gap = (
+            f"for {first_missing.isoformat()} to {expected.isoformat()} "
+            f"({days_behind} days)"
+        )
+    return IngestHealth(
+        status="stale",
+        detail=(
+            f"No health data has arrived {gap}. Check that Auto Export is still "
+            "running on the phone and that its automations are enabled. Data "
+            "older than about 48h can no longer be recovered by fixing it."
+        ),
+        since=newest_data_date,
+        missing_from=first_missing.isoformat(),
+        missing_to=expected.isoformat(),
+    )
+
+
 def assess_ingest_health(
     profile: Profile,
     *,
-    silent_after_h: float,
+    newest_data_date: str | None,
+    stale_after_days: int,
     split_after_h: float,
     pair_window_s: float,
     now: datetime | None = None,
 ) -> IngestHealth:
     """Judge whether a profile's phone is still successfully feeding the system.
 
-    Three conditions are worth a message, and they need different thresholds
-    because they carry different confidence:
+    Three conditions are worth a message, and they are checked in order of how
+    specific they are about the cause:
 
-    ``silent``
-        Nothing has arrived at all. Cause-agnostic — phone off, token revoked,
-        Funnel down, app deleted. The threshold has to clear a normal night's
-        sleep, so it is measured in a day rather than hours.
+    ``error``
+        The last import failed and none has succeeded since, or the state file
+        itself is unreadable.
     ``split``
-        Uploads *are* arriving but no pair has imported. Much stronger signal,
-        because the phone is demonstrably talking to us, so this is detected
-        far sooner. Usually two Auto Export automations on schedules that have
+        Uploads *are* arriving but no pair has imported. A strong signal,
+        because the phone is demonstrably talking to us, so it is detected in
+        hours. Usually two Auto Export automations on schedules that have
         drifted apart — but only when the arrival gap actually exceeds the
         pairing window, which is why that window has to be passed in. Inside
         it, the phone is doing its job and the fault is on this side.
-    ``error``
-        The last import failed and none has succeeded since.
+    ``stale``
+        The pipe looks fine and days of data are missing anyway. The catch-all,
+        and the only one measured against stored data rather than upload
+        timing: Auto Export batches unpredictably, so hours of silence prove
+        nothing, while a day that never arrived is a fault however it was
+        scheduled. Cause-agnostic — phone off, token revoked, Funnel down, app
+        deleted, parser rejecting every payload.
 
     A profile that has never uploaded is reported as ``ok``: it is mid-setup,
     not broken, and nagging someone who has not finished onboarding is worse
@@ -524,7 +606,10 @@ def assess_ingest_health(
 
     Args:
         profile: Profile whose ingest state should be examined.
-        silent_after_h: Hours of total silence before reporting ``silent``.
+        newest_data_date: Newest ISO date holding a stored metric, from
+            ``store.latest_metric_date``, or None when there is none.
+        stale_after_days: Owed days that may go missing before reporting
+            ``stale``.
         split_after_h: Hours without a successful import, while uploads keep
             arriving, before reporting ``split``.
         pair_window_s: Arrival gap the importer tolerates, so a stall can be
@@ -563,25 +648,62 @@ def assess_ingest_health(
         return IngestHealth(status="ok", detail="No upload has ever arrived.")
 
     last_upload = max(arrivals.values())
-    silent_for = (now - last_upload).total_seconds() / 3600
-    if silent_for >= silent_after_h:
-        return IngestHealth(
-            status="silent",
-            detail=(
-                f"No health data has arrived for {_format_gap(silent_for * 3600)}. "
-                "Check that Auto Export is still running on the phone and that "
-                "its automations are enabled."
-            ),
-            since=last_upload.isoformat(),
-        )
-
     last_import = _parse_iso(state.get("last_imported_at"))
-    if last_import is not None and last_upload <= last_import:
-        # Everything that arrived has imported. The phone has simply gone quiet,
-        # which is only meaningful once it outlasts the silence threshold — so
-        # leave it to that check rather than blaming the pairing window.
-        return IngestHealth(status="ok", detail="Everything received has imported.")
+    everything_imported = last_import is not None and last_upload <= last_import
 
+    if not everything_imported:
+        pipe = _assess_pipe_fault(
+            state,
+            uploads=uploads,
+            arrivals=arrivals,
+            last_import=last_import,
+            split_after_h=split_after_h,
+            pair_window_s=pair_window_s,
+            now=now,
+        )
+        if pipe is not None:
+            return pipe
+
+    if last_import is None:
+        # An upload has landed but no pair has completed a cycle yet, so there is
+        # nothing stored and nothing wrong with that: this is the first minutes
+        # of onboarding. Waiting past the split threshold is a fault, and the
+        # check above already owns that call.
+        return IngestHealth(status="ok", detail="No pair has imported yet.")
+
+    # The uploads that arrived have been consumed, so the mechanism is sound and
+    # the only remaining question is whether they carried the days they owed.
+    return _assess_data_freshness(
+        newest_data_date,
+        stale_after_days=stale_after_days,
+        now=now,
+    )
+
+
+def _assess_pipe_fault(
+    state: dict[str, Any],
+    *,
+    uploads: dict[str, Any],
+    arrivals: dict[str, datetime],
+    last_import: datetime | None,
+    split_after_h: float,
+    pair_window_s: float,
+    now: datetime,
+) -> IngestHealth | None:
+    """Report an upload that arrived and never imported, if one has stalled.
+
+    Args:
+        state: Parsed ingest state file.
+        uploads: Raw per-kind upload records.
+        arrivals: Parsed arrival times per kind.
+        last_import: Time of the last successful import, if any.
+        split_after_h: Hours a stall must persist before it is reported.
+        pair_window_s: Arrival gap the importer tolerates.
+        now: The current moment.
+
+    Returns:
+        The fault, or None when nothing has stalled long enough to report.
+    """
     if last_import is not None:
         stalled_for = (now - last_import).total_seconds() / 3600
     else:
@@ -596,7 +718,7 @@ def assess_ingest_health(
         started = min(first_seen) if first_seen else min(arrivals.values())
         stalled_for = (now - started).total_seconds() / 3600
     if stalled_for < split_after_h:
-        return IngestHealth(status="ok", detail="Imports are current.")
+        return None
 
     last_error = state.get("last_error")
     if isinstance(last_error, dict):

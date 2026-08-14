@@ -66,7 +66,7 @@ again.
 - `nudges.max_per_day`
 - `weekly_insights.weekday`
 - `weekly_insights.time`
-- `data_health.silent_after_h`
+- `data_health.stale_after_days`
 - `data_health.split_after_h`
 
 ## Change schema
@@ -78,7 +78,7 @@ Each item in `changes` must be one of:
 - `{{"action":"set","path":"weekly_insights.weekday","value":"tuesday"}}`
 - `{{"action":"set","path":"weekly_insights.time","value":"08:00"}}`
 - `{{"action":"set","path":"data_health.enabled","value":false}}`
-- `{{"action":"set","path":"data_health.silent_after_h","value":48}}`
+- `{{"action":"set","path":"data_health.stale_after_days","value":2}}`
 - `{{"action":"set","path":"data_health.split_after_h","value":12}}`
 - `{{"action":"reset","path":"nudges"}}`
 - `{{"action":"reset","path":"weekly_insights"}}`

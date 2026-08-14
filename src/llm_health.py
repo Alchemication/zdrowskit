@@ -14,14 +14,11 @@ import sqlite3
 from datetime import date, datetime, timedelta
 
 from aggregator import summarise
+from config import MORNING_SYNC_CUTOFF_HOUR
 from report import group_by_week, to_dict
 from store import load_date_range, load_snapshots
 
 logger = logging.getLogger(__name__)
-
-# Before this hour, yesterday's null sleep is marked "sync_pending" instead of
-# "not_tracked" — the data likely hasn't synced from the watch yet.
-SLEEP_SYNC_CUTOFF_HOUR = 10
 
 _SLEEP_KEYS = frozenset(
     {
@@ -982,7 +979,7 @@ def _classify_sleep_status(days: list[dict], today: date) -> tuple[int, int, lis
     """
     today_iso = today.isoformat()
     yesterday_iso = (today - timedelta(days=1)).isoformat()
-    before_sync_cutoff = datetime.now().hour < SLEEP_SYNC_CUTOFF_HOUR
+    before_sync_cutoff = datetime.now().hour < MORNING_SYNC_CUTOFF_HOUR
 
     tracked = 0
     eligible = 0

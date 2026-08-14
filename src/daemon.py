@@ -25,7 +25,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Iterator
 
@@ -114,6 +114,47 @@ def _older_than(timestamp: str, seconds: float) -> bool:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return datetime.now(timezone.utc) - parsed > timedelta(seconds=seconds)
+
+
+def _recovery_message(alerted: object, newest_data_date: str | None) -> str | None:
+    """Compose the notice that a reported ingest fault has cleared.
+
+    A recovery that cost the user nothing is not news. Auto Export backfills the
+    days it missed, so most stale alerts end with every missing day present and
+    nothing to act on — announcing that only doubles the message count for the
+    fault. What earns a message is a gap that stayed a gap: those days are gone
+    for good, and the user should hear it once while the reports that will omit
+    them are still to come.
+
+    A stalled pipe is different. The user was told to go fix something, so the
+    confirmation that it worked is the answer to an action they took.
+
+    Args:
+        alerted: The recorded ``data_health_alert`` state entry.
+        newest_data_date: Newest ISO date now holding a stored metric.
+
+    Returns:
+        The message to send, or None when the recovery is not worth one.
+    """
+    missing_to = alerted.get("missing_to") if isinstance(alerted, dict) else None
+    if not isinstance(missing_to, str):
+        return "✅ **Sync is working again** — health data is importing normally."
+
+    if newest_data_date is not None and newest_data_date >= missing_to:
+        return None
+
+    missing_from = alerted.get("missing_from") if isinstance(alerted, dict) else None
+    first_lost = missing_from if isinstance(missing_from, str) else missing_to
+    if newest_data_date is not None and newest_data_date >= first_lost:
+        first_lost = (
+            date.fromisoformat(newest_data_date) + timedelta(days=1)
+        ).isoformat()
+    lost = first_lost if first_lost == missing_to else f"{first_lost} to {missing_to}"
+    return (
+        "✅ **Sync is working again** — health data is importing normally.\n\n"
+        f"{lost} never arrived and can no longer be recovered from the phone, so "
+        "reports covering those days will be missing them."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1110,6 +1151,26 @@ class ProfileRuntime:
 
         self._check_ingest_health(prefs)
 
+    def _newest_data_date(self) -> str | None:
+        """Return the newest stored date carrying a metric, or None.
+
+        Returns:
+            An ISO date string, or None when the database holds no metric or
+            cannot be opened. An unreadable database is reported as "no data",
+            which the freshness check treats as a fault rather than as health.
+        """
+        from store import latest_metric_date, open_db
+
+        try:
+            conn = open_db(self.db)
+        except sqlite3.Error:
+            logger.exception("Could not open %s to check data freshness", self.db)
+            return None
+        try:
+            return latest_metric_date(conn)
+        finally:
+            conn.close()
+
     def _check_ingest_health(self, prefs: dict) -> None:
         """Report a sustained ingest failure once, and its recovery once.
 
@@ -1132,9 +1193,11 @@ class ProfileRuntime:
 
         settings = effective_notification_prefs(prefs)["data_health"]
         try:
+            newest_data_date = self._newest_data_date()
             health = assess_ingest_health(
                 self.profile,
-                silent_after_h=settings["silent_after_h"],
+                newest_data_date=newest_data_date,
+                stale_after_days=settings["stale_after_days"],
                 split_after_h=settings["split_after_h"],
                 pair_window_s=HTTP_INGEST_PAIR_WINDOW_S,
             )
@@ -1158,11 +1221,9 @@ class ProfileRuntime:
                     return
                 self._state.pop("data_health_alert", None)
                 self._save_state()
-                if recovery["status"] == "allowed":
-                    self._poller.send_reply(
-                        "✅ **Sync is working again** — health data is importing "
-                        "normally."
-                    )
+                message = _recovery_message(alerted, newest_data_date)
+                if recovery["status"] == "allowed" and message:
+                    self._poller.send_reply(message)
             return
 
         now_iso = now.astimezone(timezone.utc).isoformat()
@@ -1185,8 +1246,15 @@ class ProfileRuntime:
             return
 
         # Record before sending: a delivery failure must not cause a retry storm
-        # on the next tick, and the log still carries the detail either way.
-        self._state["data_health_alert"] = {"status": health.status, "sent_at": now_iso}
+        # on the next tick, and the log still carries the detail either way. The
+        # missing range is recorded too, so the recovery notice can say which of
+        # those days actually came back.
+        self._state["data_health_alert"] = {
+            "status": health.status,
+            "sent_at": now_iso,
+            "missing_from": health.missing_from,
+            "missing_to": health.missing_to,
+        }
         self._save_state()
         logger.warning(
             "Ingest health for %s is %s: %s",

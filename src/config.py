@@ -97,18 +97,38 @@ returns promptly on a flaky network. A timeout reports "unknown", never
 """
 DATA_HEALTH_REALERT_S: int = 24 * 60 * 60
 """How long before an unresolved ingest problem is reported again."""
-DATA_HEALTH_SILENT_AFTER_H: float = 16
-"""Hours of total ingest silence before the profile is warned.
+DATA_HEALTH_STALE_AFTER_DAYS: int = 1
+"""Complete days missing health data before the profile is warned.
 
-Long enough to clear a night's sleep — an overnight gap runs about 9-10h — and
-short enough to fire well inside the ~48h Auto Export window, after which the
-missed days can no longer be recovered by simply fixing the phone.
+Deliberately counts days of *stored data*, not hours since the last upload. Auto
+Export arrives in bursts: measured over twelve days of one real profile the gap
+between imports ran a 1.7h median, a 10.1h p90 and a 34.9h maximum, so any
+hours-based silence threshold low enough to catch a dead phone also fires on the
+tail of normal operation — and a long gap that lands as a complete backfill has
+cost the user nothing worth a message. What matters is whether a day is actually
+missing, which stays true no matter how the uploads were batched.
+
+One day rather than two because the ~48h Auto Export window bounds the response:
+past it the missing days can no longer be recovered by fixing the phone, so a
+second day of grace spends most of the time available to act. The same profile
+carried 2775 daily rows over seven years with exactly one metric-less day, so at
+this threshold a healthy setup is warned roughly once a year.
+"""
+MORNING_SYNC_CUTOFF_HOUR: int = 10
+"""Hour by which the overnight Auto Export batch is expected to have landed.
+
+Before it, yesterday having no data means the phone has not uploaded yet; after
+it, yesterday having no data is a real gap. Used to hold both the sync alert and
+the "sleep pending vs not tracked" call to the same definition of morning, so
+the two cannot disagree about whether last night is late or missing.
 """
 DATA_HEALTH_SPLIT_AFTER_H: float = 6
 """Hours of uploads arriving without importing before the profile is warned.
 
-Far shorter than the silence threshold: uploads still arriving prove the phone
-is reachable, so a stalled import is a real fault rather than a quiet evening.
+Measured in hours rather than days, unlike the staleness threshold: uploads
+still arriving prove the phone is reachable, so a stalled import is a definite
+fault on this end rather than a quiet evening, and waiting a day to say so
+wastes the window in which the pairing can still be fixed.
 """
 DATA_HEALTH_QUIET_START_HHMM: str = "22:00"
 """Local time after which ingest-health alerts are held until morning.
@@ -116,12 +136,16 @@ DATA_HEALTH_QUIET_START_HHMM: str = "22:00"
 A stalled import is never fixable while the operator is asleep, so waking them
 is pure noise: the fault persists until they act either way. The alert is held,
 not dropped — it fires at DATA_HEALTH_QUIET_END_HHMM. Paired with the end time
-this brackets a 22:00-08:00 do-not-disturb window."""
+this brackets a 22:00-08:00 do-not-disturb window.
+
+Staleness alerts cannot reach this window on their own, since they only become
+true after MORNING_SYNC_CUTOFF_HOUR. It still guards the hours-based split and
+error conditions, which can turn true at any time of night."""
 DATA_HEALTH_QUIET_END_HHMM: str = "08:00"
 """Local time at which a held ingest-health alert is released.
 
 Set to a normal waking hour so an overnight fault surfaces first thing, in time
-to act well inside the ~48h Auto Export window (see DATA_HEALTH_SILENT_AFTER_H)
+to act well inside the ~48h Auto Export window (see DATA_HEALTH_STALE_AFTER_DAYS)
 before the missed days can no longer be recovered."""
 BASELINE_MIN_SAMPLES: int = 5
 """Observations required before a rolling window is reported as an average.
