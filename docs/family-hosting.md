@@ -101,10 +101,15 @@ default-denied. Authorization uses Telegram's numeric user ID, never username.
 ## Operations
 
 - Pause: set `enabled = false`, then restart.
-- Rename: stop the daemon, rename `profiles/<old>`, edit the TOML key, restart.
-- Back up: copy `profiles.toml` and the relevant `profiles/<name>/` directory.
-- Delete: stop the daemon, remove the roster section and profile directory,
-  restart.
+- Rename: there is no rename command. Stop the daemon, rename the profile
+  directory, edit the TOML key, issue a new HTTP token for the new name, update
+  both phone automations, then restart.
+- Back up one profile: copy `profiles.toml`, the relevant
+  `profiles/<name>/` directory, and `ingest_tokens.json`. A complete host backup
+  also needs `.env` and any Drive service-account key.
+- Delete: stop the daemon, take a backup, then remove the roster section and
+  profile directory and restart. Remove or rotate any associated external
+  credentials separately.
 - Check migrations: `uv run python main.py db status --all`.
 - Apply migrations eagerly: `uv run python main.py db migrate --all`.
 

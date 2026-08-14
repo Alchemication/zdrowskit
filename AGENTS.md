@@ -35,7 +35,20 @@ Challenge my ideas early. If an approach is over-engineered, fragile, or has a s
 
 **Prose:** terse, no pleasantries / hedging / filler. Fragments fine. Full sentences only for warnings, destructive-op confirmations, and commit/PR messages.
 
-**Verification:** After cross-cutting changes (multiple modules, interface changes, file moves), verify before reporting done. Grep for stale references, check callers of changed functions, confirm imports, run lint + tests, and fix what you find — don't wait to be asked. Check whether `README.md`, `CLAUDE.md`, or `docs/` reference values you changed (defaults, limits, paths, flags) and update them in the same commit.
+**Verification:** After cross-cutting changes (multiple modules, interface changes, file moves), verify before reporting done. Grep for stale references, check callers of changed functions, confirm imports, run lint + tests, and fix what you find — don't wait to be asked.
+
+## Documentation
+
+Any change to user-visible behavior, commands, defaults, limits, paths, model
+routing, storage, authorization, or workflows must audit and update the relevant
+`README.md` and `docs/*.md` in the same commit, even when the code change is
+small.
+
+Docs describe current behavior, not implementation history or future plans.
+Keep them clear and concise; verify claims against the code, `src/config.py`,
+and current `--help` output.
+
+Keep `AGENTS.md` and `CLAUDE.md` identical. When editing either, update both.
 
 ## Code Style
 

@@ -1,15 +1,13 @@
 # Apple Health Data Export
 
-Apple's built-in health export dumps everything into a single massive XML file. On any non-trivial data size, this crashes or overheats the iPhone, so it is not a real solution for this project.
+zdrowskit imports the JSON produced by
+[Auto Export](https://apps.apple.com/app/myhealth-export-to-icloud/id6737380982),
+not Apple's built-in all-data XML export. Auto Export can post JSON directly to
+the HTTP receiver or write the same data to iCloud or Google Drive.
 
-The workaround is a third-party iOS app that reads HealthKit directly and
-exports structured JSON. zdrowskit uses [Auto Export](https://apps.apple.com/app/myhealth-export-to-icloud/id6737380982).
-It can post directly to the zdrowskit HTTP receiver or write to cloud storage.
-It works on iOS 26, while some alternatives do not yet. The Basic tier unlocks
-Shortcut actions; Premium (a one-time purchase, still cheap) is needed for
-scheduled Automations.
-
-One universal constraint: iOS requires the phone to be unlocked for any health data export. Automations silently skip when the phone is locked.
+Scheduled exporting is opportunistic rather than real time. iOS decides when a
+background automation may run, and HealthKit data often arrives in batches.
+Use a rolling date range so the next successful export can refill a missed run.
 
 ## Choosing a Transport
 
@@ -23,7 +21,7 @@ switched off.
 | Delivery | Push, on export | File watch + 3 min debounce | Poll, up to 5 min |
 | Host requirement | Tailscale-capable | Mac on the same Apple ID | Any macOS or Linux |
 | Survives host downtime | No | Yes | Yes |
-| Historical backfill | No | Yes | Yes |
+| Historical backfill | Small/manual only; request limits apply | Yes | Yes |
 | Credentials to manage | Per-profile token | None | Service-account key |
 
 ### HTTP via Tailscale Funnel (default)
@@ -34,8 +32,6 @@ switched off.
   between.
 - The only transport that serves several people from one endpoint, routed by
   per-profile bearer token. Rotation is one command and needs no daemon restart.
-- Most reliable in practice: nothing sits between the phone and the host that
-  can silently stall.
 - Payloads are validated at the door, so a misconfigured automation gets an
   actionable `422` on the phone instead of quietly importing wrong data.
 - Metrics and Workouts import as a complete pair, so a nudge reacts to a whole
@@ -45,11 +41,11 @@ switched off.
 
 **Cons**
 
-- **An upload is lost if the host is down.** iCloud and Drive queue the file
-  until the daemon catches up; a failed POST has nothing behind it. This is the
-  real cost of push delivery, and the reason to keep the daemon on `KeepAlive`.
-- Depends on Tailscale Funnel, still a Tailscale beta, plus the macOS user being
-  logged in and Tailscale running.
+- **There is no server-side queue while the host is down.** iCloud and Drive
+  retain files until the daemon catches up; HTTP depends on a later rolling
+  export or manual resend to refill the missed window.
+- Depends on Tailscale Funnel, plus the macOS user being logged in and
+  Tailscale running.
 - Bounded by per-metric and per-workout entry caps, so a large historical
   backfill still needs a different transport.
 - Both automations must arrive within an hour of each other to pair.
@@ -113,7 +109,7 @@ For direct delivery, follow [HTTP ingest](http-ingest.md). For iCloud, use
 `Metrics` and `Workouts` as folder names. Google Drive setup is documented in
 [Google Drive import](google-drive.md).
 
-The app writes weekly JSON files:
+For iCloud and Google Drive, the app writes JSON files under two folders:
 
 ```text
 Metrics/HealthAutoExport-YYYY-WW.json
@@ -144,16 +140,18 @@ How to backfill:
 2. Scroll to the bottom and tap **Manual Export**.
 3. Set a custom date range, such as the whole of 2024. The app splits it into weekly files automatically.
 4. For HTTP, send both manual exports and check `uv run python main.py ingest
-   status`; the receiver imports the matching pair. For iCloud/Drive, wait for
-   the files and run `uv run python main.py import`.
+   status`; the receiver imports the matching pair if both payloads remain
+   within the receiver limits. For a large backfill, export to iCloud/Drive and
+   run `uv run python main.py import` instead.
 
 Do this once per automation: Metrics and Workouts. The import is idempotent, so re-running it will not duplicate data.
 
 ## Recommended Workflow
 
-1. Set up the two Default-range HTTP automations described above.
-2. Backfill historical data using Manual Export from each automation.
-3. With HTTP, send both exports and confirm the completed pair:
+1. Set up the rolling HTTP automations described above.
+2. Backfill historical data with Manual Export from each automation, preferably
+   through iCloud or Drive for large ranges.
+3. For an HTTP backfill, send both exports and confirm the completed pair:
 
    ```bash
    uv run python main.py ingest status

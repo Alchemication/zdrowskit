@@ -3,7 +3,7 @@
 Always use `uv run`. Run any command with `--help` for the full flag list.
 
 ```bash
-uv run python main.py import              # import a local/iCloud or Drive source
+uv run python main.py import              # import the selected profile source
 uv run python main.py status              # DB row counts + date range
 uv run python main.py report              # current week: summary + daily
 uv run python main.py insights            # personalised weekly report via LLM
@@ -27,7 +27,7 @@ uv run python main.py ingest setup        # tokens + Auto Export configuration
 uv run python main.py ingest setup --funnel # same, plus start Funnel when CLI is ready
 uv run python main.py ingest status       # receiver and upload state
 uv run python main.py ingest token NAME --rotate         # replace a lost token
-uv run python src/daemon.py --foreground # run daemon directly on macOS/Linux
+uv run python src/daemon.py --foreground  # run daemon directly on macOS/Linux
 ```
 
 Useful examples:
@@ -35,7 +35,8 @@ Useful examples:
 ```bash
 uv run python main.py insights --telegram
 uv run python main.py nudge --trigger log_update
-uv run python main.py llm-log --id 42 --feedback
+uv run python main.py llm-log --id 42
+uv run python main.py llm-log --feedback
 uv run python main.py llm-log --trace 7
 uv run python main.py events --since 3d --category nudge
 uv run python main.py events --usage --since 30d
@@ -97,7 +98,10 @@ later person.
 
 ## Data Directory Override
 
-Override the default iCloud data directory with `--data-dir` or the `HEALTH_DATA_DIR` environment variable.
+`--data-dir PATH` overrides the selected source's cache for one command.
+`HEALTH_DATA_DIR` changes the default local/iCloud directory. Prefer profile
+configuration for normal operation; these overrides are for imports and
+experiments.
 
 ## Google Drive Import
 

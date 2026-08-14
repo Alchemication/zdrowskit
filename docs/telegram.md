@@ -64,13 +64,13 @@ validated and dispatched through the same profile route.
 
 - Ask analytical questions; the LLM queries your database with SQL and charts the results.
 - Reply to a nudge or report; the bot knows which message you are replying to.
-- Share updates naturally, such as "my weight is 76kg now"; the LLM proposes context file edits with Accept/Reject buttons.
+- Share updates naturally, such as "my weight is 76kg now"; by default the LLM proposes context-file edits with Accept/Reject buttons.
 - Thumbs down a bad output, pick a category, optionally reply with more detail, and undo it if you tapped it during testing or a demo.
 - Conversation buffer: last 20 messages in memory, resets on daemon restart.
 
 ## Commands
 
-Telegram commands include:
+The visible Telegram command menu contains:
 
 ```text
 /add
@@ -85,6 +85,10 @@ Telegram commands include:
 the Telegram menu: `/notify`, `/review`, `/coach [current|last]`,
 `/models`, `/context [name]`, `/events [N] [category]`,
 `/llm_log [N|id ID|trace ID]`, and `/tutorial`.
+
+`/review` takes no arguments and always reports the last completed week.
+`/coach` defaults to last week and also accepts `current` for a provisional
+review of this week so far.
 
 Use `/events usage [N]` to inspect privacy-safe Telegram usage metrics over
 the last `N` days (default 30). It records command names and normalized inline

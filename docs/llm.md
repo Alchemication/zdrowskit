@@ -1,178 +1,105 @@
 # LLM Setup
 
-zdrowskit relies on capable models. The coach writes personalised reports, decides when to stay quiet, generates SQL queries against your data, and produces chart code.
+zdrowskit uses separate LLM routes for separate jobs. Chat, weekly reports,
+coach reviews, nudges, preference parsing, workout cloning, memory, verification,
+and verification rewrites can each use a different primary and fallback model.
 
-Default: GPT-5.6 Luna for the async judgement surfaces — reports, coach reviews and nudges — with high reasoning and temperature omitted, falling back to DeepSeek V4 Flash. Verification runs on Flash. No surface is on a premium model by default any more.
+This separation is deliberate. A model that is good enough to parse a `/notify`
+request is not automatically a good choice for an evidence-heavy weekly report,
+and an interactive chat route has a different latency budget from a background
+verifier.
 
-Minimum: Claude Sonnet 4.6 or equivalent. Anything below that and the reports get generic, the queries get unreliable, and the charts break.
+## Built-in routes
 
-Any model provider works through [litellm](https://github.com/BerriAI/litellm), so you can swap in OpenAI, Google, or any compatible API.
+These are the defaults returned by `model_prefs.default_model_prefs()`:
 
-## Model Defaults and Fallback Policy
+| Feature | Primary | Fallback | Reasoning |
+| --- | --- | --- | --- |
+| Reports (`insights`) | `openai/gpt-5.6-luna` | `deepseek/deepseek-v4-flash` | high |
+| Coach | `openai/gpt-5.6-luna` | `deepseek/deepseek-v4-flash` | high |
+| Nudges | `openai/gpt-5.6-luna` | `deepseek/deepseek-v4-flash` | high |
+| Chat | `openai/gpt-5.6-luna` | `anthropic/claude-haiku-4-5` | high |
+| Verification | `deepseek/deepseek-v4-flash` | `openai/gpt-5.6-luna` | high |
+| `/notify` parser | `deepseek/deepseek-v4-flash` | `anthropic/claude-haiku-4-5` | off |
+| `/add` workout clone | `deepseek/deepseek-v4-flash` | `anthropic/claude-haiku-4-5` | high |
+| Weekly memory | `openai/gpt-5.6-luna` | `anthropic/claude-haiku-4-5` | off |
+| Verification rewrite | `deepseek/deepseek-v4-flash` | `anthropic/claude-haiku-4-5` | high |
 
-Model routing is managed in:
+Temperature is omitted for the built-in routes. `reasoning_effort` is the one
+reasoning control: Anthropic receives it directly; DeepSeek translates
+`high`/`max` into thinking mode and treats the other values as thinking off.
+
+The defaults are current routing decisions, not permanent recommendations.
+Model quality, latency, and pricing move. The [LLM evals](evals.md) and their
+[published leaderboard](https://alchemication.github.io/zdrowskit/evals/) are
+the evidence used to compare routes.
+
+## Configure a profile
+
+Effective routes are stored per health profile:
 
 ```text
 ~/Documents/zdrowskit/profiles/<name>/model_prefs.json
 ```
 
-You can change routing with:
+Inspect them with:
 
 ```bash
 uv run python main.py models
 uv run python main.py models --profile anna
+uv run python main.py models --profile anna doctor
 ```
 
-or through Telegram `/models`. Telegram always uses the sender's routed
-profile. CLI commands default to the operator profile.
-
-The Telegram panel groups features as Chat / Reports / Coach / Nudges / Utilities and tags every model button with its capability tier: premium / pro / flash / lite. Chat exposes Reasoning and Temperature controls. `reasoning_effort` is the single reasoning knob: Anthropic gets it natively, and on DeepSeek, `high`/`max` translate into thinking mode (`extra_body={"thinking": {"type": "enabled"}}`) while `low`/`medium`/`none` leave thinking off.
-
-A `Reset all` button on the main panel and `uv run python main.py models reset --all` restore everything to built-in defaults. Picking the `Auto` fallback, or `--fallback auto` from the CLI, defers to the profile's fallback so future profile changes propagate.
-
-Coach and insights default to `openai/gpt-5.6-luna` with `reasoning_effort=high`, temperature omitted, and `deepseek/deepseek-v4-flash` fallback. Chat and nudges default to `openai/gpt-5.6-luna` with `reasoning_effort=high` and temperature omitted — chat falling back to `anthropic/claude-haiku-4-5`, nudges to `deepseek/deepseek-v4-flash`.
-
-Lightweight utility surfaces, including `/notify` interpretation and `/add` workout clone selection, default to `deepseek/deepseek-v4-flash` with `anthropic/claude-haiku-4-5` fallback. `/add` and verifier rewrites use `reasoning_effort=high` with temperature omitted; `/notify` stays plain Flash. Weekly memory routes to `openai/gpt-5.6-luna` with reasoning off.
-
-Weekly memory is a call of its own rather than a `<memory>` section of the report. Splitting it shortened the insights prompt, made the block scorable as an eval feature on its own, and moved it off the premium model — deciding which two lines to carry forward from a finished 1024-character report is a much smaller job than writing the report. It runs on Luna with reasoning off, in about 200 tokens against a 1024 budget. DeepSeek Flash cannot do this job at all: it emits a reasoning trace whether or not thinking is requested, and exhausted the whole budget returning empty text at 1024, at 4096, and once at 8192 — and an empty block is indistinguishable from a week worth carrying nothing.
-
-Logged LLM calls record the effective model, and fallback calls include `requested_model` and `fallback_used` in params/metadata.
-
-## Cost Projection
-
-Providers bill in USD per million tokens. Logged call costs use LiteLLM's pricing data, with provider-reported cost as a fallback. Consult [DeepSeek pricing](https://api-docs.deepseek.com/quick_start/pricing/) and [Anthropic pricing](https://www.anthropic.com/pricing) for current rates; the projections below use recent logged token sizes from this app.
-
-Current default routes:
-
-| Feature | Primary | Normal cadence |
-|---|---|---:|
-| Weekly report | `openai/gpt-5.6-luna` | 1/week |
-| Coach review | `openai/gpt-5.6-luna` | 1/week |
-| Nudges | `openai/gpt-5.6-luna` | up to 2/day |
-| Verification | `deepseek/deepseek-v4-flash` | reports, coach, nudges; Luna fallback |
-| Verification rewrites | `deepseek/deepseek-v4-flash` | only when verifier asks |
-| Weekly memory | `openai/gpt-5.6-luna` | 1/week, after the report is sent |
-| Chat | `openai/gpt-5.6-luna` | on demand |
-
-Six weeks of this app's own logged traffic (2026-06-29 to 2026-08-09), repriced
-at the routes above and with the removed mid-week report cycles excluded, lands
-around **$0.85 a month** — between $0.15 and $0.25 in a given week:
-
-| Workload | Unit cost | Share of spend |
-|---|---:|---:|
-| Weekly report cycle: writer, verifier, rewriter, memory | ~$0.023/run | 12% |
-| Coach review | ~$0.004/run | 1% |
-| Nudge, including verification | ~$0.0039/nudge | 59% |
-| Chat | ~$0.0034/turn | 29% |
-| **Total** | | **~$0.20/week** |
-
-A bottom-up estimate lands a little lower: one report, one coach review, two
-nudges a day, fifteen chat turns and a few logs a week comes to ~$0.13/week. The
-gap is nudge volume — see the note below.
-
-Two things move that number more than the model prices do. **Usage intensity:**
-chat is user-driven, and the bottom-up span from light to heavy use is $0.07 to
-$0.22 a week. **Which models you configure:** every async surface now runs on a budget
-tier, so nothing dominates any more — the largest single line is chat, which is
-whatever you make it. Point any surface at a premium model and that one line will
-outweigh all the others combined; the coach on Opus 5 was 25% of spend on its own
-until 2026-08-09.
-
-### Routing policy
-
-The routing is meant to move. New models arrive and prices fall faster than any
-fixed choice stays right, so a route is a current measurement rather than a
-decision — every candidate is scored against the same cases, and a surface moves
-when the numbers justify it. On the evidence so far that trend runs one way:
-this app's cost fell roughly 28x over a handful of routing changes without a
-rewrite.
-
-What it does not promise is that every move is a straight win. Reports got
-cheaper and measurably less accurate at the same time (86.7% attempt-weighted
-to 73.3%), and coach moved with no measurement at all. Both are recorded here
-and on the leaderboard rather than smoothed over. The commitment is that the
-trade is written down, not that there is never one.
-
-### What the routing is worth
-
-Per-task routing exists to make the previous table small. Repricing exactly the
-same six weeks of calls — same prompts, same token counts — as if every surface
-ran on a frontier model. Opus 5 is the stand-in below because it is the tier
-this app actually measured; another frontier model such as GPT-Sol prices
-close enough that the conclusion does not move.
-
-| | Per-task routing | Everything on Opus 5 |
-|---|---:|---:|
-| 6 weeks | $1.20 | $33.42 |
-| Per week | $0.20 | $5.57 |
-| Per month | $0.87 | $24.14 |
-| Per year | **$10.42** | **$289.68** |
-
-**About 28x.** Per surface:
-
-| Surface | Current | On Opus 5 | Ratio |
-|---|---:|---:|---:|
-| Nudges | $0.5731 | $13.37 | 23x |
-| Chat | $0.3435 | $8.36 | 24x |
-| Verification (nudge) | $0.1268 | $6.60 | 52x |
-| Reports | $0.0960 | $2.26 | 24x |
-| Verification (report) | $0.0299 | $1.58 | 53x |
-| Coach | $0.0168 | $0.39 | 23x |
-
-The spread is the interesting part. Surfaces on Luna land near 23-25x, because
-Opus 5 costs 25x Luna on input and about 21x on output, and real traffic is
-mostly input — a week of health data as context. The verification surfaces run
-on Flash and land near 52x, because Flash is cheaper still. Verification is a
-third of the all-Opus bill and 13% of the routed one: checking the output is
-only affordable at all because the checker is not the expensive model.
-
-Two honest caveats. This holds token counts fixed, which is an approximation —
-a different model writes a different number of tokens, so the real figure would
-drift. And it is not a quality claim: reports measurably lost accuracy moving
-off Opus 5 (86.7% attempt-weighted to 73.3%), and coach moved with no
-measurement at all.
-
-Individual surfaces have been quoted at 50-80x elsewhere in this document — for
-instance Opus 5 at $0.098 a nudge against Luna, roughly 80x. Those come from
-eval runs, which are output-heavier than production traffic and sometimes
-compare against Flash rather than Luna. Both figures are real; 28x is the one
-that describes a month of actual use.
-
-Note that nudge *calls* ran at about 4.3/day against `MAX_NUDGES_PER_DAY = 2`.
-The cap governs delivered nudges; a trigger that the coach evaluates and then
-decides to stay quiet about still costs a call. Estimating nudges from the cap
-alone understates them roughly twofold.
-
-Verification normally succeeds on DeepSeek Flash with thinking engaged (via
-`reasoning_effort=high`) and rewrite calls remain rare. Verification falls back
-to Luna with the same `reasoning_effort=high` and omitted temperature.
-
-Nudges moved off Opus 5 on 2026-08-08. Measured across the nudge eval cases at five runs per model, Luna took 80% while DeepSeek Flash, DeepSeek Pro and Opus 5 all sat at 40%; Luna also swept the week-totals case 5/5 and answered in 4.6 s against 13-28 s. Opus 5 cost $0.098 a nudge — 80x Luna — for no measured gain, which is why the fallback is not the profile's premium default. It moved from DeepSeek Pro to DeepSeek Flash on 2026-08-09 — in `model_prefs` and, more importantly, in `_fallback_chain`, which had no OpenAI branch and sent every Luna call to `DEFAULT_MODEL` (DeepSeek Pro) regardless of what the route configured: all three scored the same 40%, and Luna's observed failure is `max_output_tokens` — it spends the output budget on reasoning and emits nothing — so a reasoning model inheriting the same effort and ceiling is the tier most likely to repeat it. Note that no model passes the invented-metric case reliably (best 3/5): that is a prompt defect, not a routing one.
-
-Chat is separate because it is user-driven. Chat routes to GPT-5.6 Luna at about $0.0014 a turn. DeepSeek Flash is cheaper still, but measured against the chat eval suite it failed three of eleven cases, twice by claiming an action it never took — reporting a plan as updated with no `update_context` call, and citing a figure with no chart block. Chat has no verifier, so nothing catches that.
-
-Note that the run which picked Luna over Flash did not actually measure Luna: chat sends tools every turn, and until litellm 1.95.0 a tool-carrying Luna request was rejected outright and scored the fallback. Measured properly on 2026-08-08 at three runs per case, Luna scores 27 of 33 with one 0/3 and two flaky cases. Luna stays for now, but the Luna-versus-Flash comparison is owed a rerun on equal footing.
-
-Inspect actual spend from your local DB:
+Set or reset one route:
 
 ```bash
-uv run python main.py llm-log --stats
-uv run python main.py llm-log --profile anna --stats
+uv run python main.py models set chat openai/gpt-5.6-luna \
+  --fallback anthropic/claude-haiku-4-5 \
+  --reasoning high \
+  --temperature omit
+
+uv run python main.py models reset chat
+uv run python main.py models reset --all
 ```
 
-LLM call IDs are local to each profile database. Always select the profile
-before investigating another person's call ID.
+`--fallback auto` removes the feature-specific fallback and uses its `pro` or
+`flash` profile fallback. The profile defaults themselves can also be changed:
 
-## Environment Overrides
+```bash
+uv run python main.py models profile flash \
+  --primary deepseek/deepseek-v4-flash \
+  --fallback anthropic/claude-haiku-4-5
+```
 
-The defaults live in `src/config.py` and can be overridden from `.env`:
+Add `--profile NAME` before the models subcommand when changing another
+profile. Telegram `/models` exposes the same feature routes as buttons and
+always changes the sender's own profile.
+
+## API keys
+
+The built-in routes need all three keys in `.env`:
+
+```env
+OPENAI_API_KEY=sk-...
+DEEPSEEK_API_KEY=sk-...
+ANTHROPIC_API_KEY=sk-ant-...
+```
+
+Routes are sent through
+[LiteLLM](https://github.com/BerriAI/litellm). If you choose another provider,
+add the credential that provider's LiteLLM integration expects.
+
+## Environment defaults
+
+Environment variables seed the built-in route configuration. A saved
+`model_prefs.json` feature override remains authoritative until it is reset.
+The most useful model variables are:
 
 ```env
 ZDROWSKIT_PRIMARY_PRO_MODEL=deepseek/deepseek-v4-pro
 ZDROWSKIT_FALLBACK_PRO_MODEL=anthropic/claude-opus-5
 ZDROWSKIT_PRIMARY_FLASH_MODEL=deepseek/deepseek-v4-flash
 ZDROWSKIT_FALLBACK_FLASH_MODEL=anthropic/claude-haiku-4-5
-ZDROWSKIT_ANTHROPIC_OPUS_MODEL=anthropic/claude-opus-5
 
 ZDROWSKIT_INSIGHTS_MODEL=openai/gpt-5.6-luna
 ZDROWSKIT_COACH_MODEL=openai/gpt-5.6-luna
@@ -181,64 +108,59 @@ ZDROWSKIT_CHAT_MODEL=openai/gpt-5.6-luna
 ZDROWSKIT_NOTIFY_MODEL=deepseek/deepseek-v4-flash
 ZDROWSKIT_ADD_CLONE_MODEL=deepseek/deepseek-v4-flash
 ZDROWSKIT_MEMORY_MODEL=openai/gpt-5.6-luna
-
-ZDROWSKIT_MAX_TOKENS_DEFAULT=4096
-ZDROWSKIT_MAX_TOKENS_INSIGHTS=8192
-ZDROWSKIT_MAX_TOKENS_COACH=8192
-ZDROWSKIT_MAX_TOKENS_CHAT=4096
-ZDROWSKIT_MAX_TOKENS_NUDGE=4096
-ZDROWSKIT_MAX_TOKENS_NOTIFY=512
-ZDROWSKIT_MAX_TOKENS_ADD_CLONE=512
-ZDROWSKIT_MAX_TOKENS_MEMORY=1024
-ZDROWSKIT_MAX_TOKENS_VERIFICATION=16384
-ZDROWSKIT_MAX_TOKENS_VERIFICATION_REWRITE=16384
+ZDROWSKIT_VERIFICATION_MODEL=deepseek/deepseek-v4-flash
+ZDROWSKIT_VERIFICATION_REWRITE_MODEL=deepseek/deepseek-v4-flash
 ```
 
-## API Keys
-
-The default configuration expects DeepSeek, Anthropic, and OpenAI keys:
-
-```env
-DEEPSEEK_API_KEY=sk-...
-ANTHROPIC_API_KEY=sk-ant-...
-OPENAI_API_KEY=sk-...
-```
-
-Set additional provider keys as needed for your chosen litellm model strings.
+Token-budget and verification overrides are documented in the repository's
+`.env_example`; `src/config.py` is the executable source of truth.
 
 ## Verification
 
-Post-generation verification runs by default for async LLM outputs: reports, coach reviews, and nudges. This adds a separate verifier call and, when the issue is fixable, one bounded rewrite call before the output is saved or sent.
+Reports, coach reviews, and nudges are verified before they are saved or sent.
+The verifier returns one of three outcomes:
 
-Chat remains unverified because it is interactive and latency-sensitive.
+- `pass` — deliver the draft;
+- `revise` — run one bounded rewrite by default, then apply deterministic
+  output guards;
+- `fail` — suppress the output.
 
-The default verifier uses `deepseek/deepseek-v4-pro` with `reasoning_effort=high` (engages DeepSeek thinking) and falls back to Opus 5 with the same effort sent natively, no temperature. Bounded rewrites stay on Flash by default, also with `reasoning_effort=high` and no temperature — DeepSeek translates `high` into thinking mode via `extra_body` while Anthropic uses it natively, so the same per-feature setting works across both providers.
+Chat is not verified because it is interactive and latency-sensitive. Weekly
+memory is a separate call after report generation, not a hidden section written
+by the report model. Sync alerts do not use an LLM at all.
 
-A rewrite reproduces the entire draft and applies corrections to it, so its
-token budget is derived as twice the largest writer budget rather than set on
-its own. When it was a fixed 4096 against an 8192 writer, full-length reports
-could not fit before corrections: the rewriter exhausted its budget, returned
-nothing, and a fixable `revise` verdict became a suppressed report.
+Verification can be disabled globally or per async surface:
 
 ```env
-# Optional overrides:
 ZDROWSKIT_ENABLE_LLM_VERIFICATION=0
-ZDROWSKIT_VERIFICATION_MODEL=deepseek/deepseek-v4-pro
-ZDROWSKIT_VERIFICATION_REWRITE_MODEL=deepseek/deepseek-v4-flash
-ZDROWSKIT_MAX_TOKENS_VERIFICATION=16384
-ZDROWSKIT_MAX_TOKENS_VERIFICATION_REWRITE=16384
+ZDROWSKIT_VERIFY_INSIGHTS=0
+ZDROWSKIT_VERIFY_COACH=0
+ZDROWSKIT_VERIFY_NUDGE=0
 ZDROWSKIT_MAX_VERIFICATION_REVISIONS=1
-ZDROWSKIT_VERIFY_INSIGHTS=1
-ZDROWSKIT_VERIFY_COACH=1
-ZDROWSKIT_VERIFY_NUDGE=1
 ```
 
-Each product operation creates an `llm_trace` row. Related provider calls share the same trace: tool-loop iterations, final synthesis retries, verification, and rewrites. `uv run python main.py llm-log --id N` shows the selected call plus its trace; `uv run python main.py llm-log --trace N` shows the trace call list directly.
+The rewrite budget is derived from the writer budgets so a full draft still
+fits while corrections are applied.
 
-Verification calls are logged as `insights_verify`, `insights_rewrite`, `coach_verify`, `coach_rewrite`, `nudge_verify`, and `nudge_rewrite`. The original source call metadata also records the verifier verdict, issue counts, issue details, and verifier/rewrite call IDs.
+## Traces, failures, and cost
 
-Reports left Opus 5 on 2026-08-09, on price rather than on a measured quality win. Over the three insights eval cases at five runs per model, Opus took 86.7% attempt-weighted against Luna's 73.3% and DeepSeek Flash's 66.7% — but cost $0.5852 per covered run against $0.0117 and $0.0076, roughly 60x. Luna and Flash tied on strict accuracy and swapped places between two consecutive runs of the same config, so three cases could not separate them; Luna took it on latency (20 s against 56 s) and because Flash once returned only SQL tool calls with no report body at all. Treat this as provisional: the comparison is under-powered, and it should be redone once insights has more than three cases. Coach followed on 2026-08-09, but on a different basis. It has no eval coverage at all — the harness has no coach runner, so `feature: "coach"` is not a case kind that can be run — which means there was never a result showing Opus 5 earned 23x Luna's price here ($0.0956 against $0.0041 a review). Keeping it was as unfounded as moving it, only dearer. Coach output is verified, which is the net under an unmeasured change. Treat any report of worse proposals after this date as a candidate regression.
+One product operation creates one LLM trace. Writer tool calls, forced final
+synthesis, verification, and rewrites are separate call rows linked by that
+trace.
 
-The verifier moved from DeepSeek Pro to DeepSeek Flash on 2026-08-09, on accuracy rather than price. Over the seven `verification_judge` cases at five runs each, Flash took 85.7% strict against Pro's 57.1% and Luna's 57.1%, catching every seeded defect while still passing both sound-draft controls — and it largely fixed the unsupported-VO2max-recency case that Pro missed 0/5. Flash is not the cheap option on this workload: it emitted 2.5x Pro's output tokens, costing $0.00341 a call against $0.00315 and running 63 s against 50 s. The verifier is the trust backstop, so accuracy wins over both.
+```bash
+uv run python main.py llm-log --id 42
+uv run python main.py llm-log --trace 7
+uv run python main.py llm-log --feedback
+uv run python main.py llm-log --stats
+uv run python main.py llm-log --profile anna --stats
+```
 
-The fallback moved off Opus 5 in the same change: its billing ceiling errored thirteen verifier attempts in a single run, which is the failure mode a fallback exists to prevent. Luna takes it, with a known weakness — it rejected a sound draft four times in five, so while Flash is down the verifier over-suppresses rather than under-catches. That is the safer direction for a backstop, but it is not free: suppressed content reaches nobody and collects no feedback.
+Call IDs and trace IDs are local to a profile database. Always select the
+profile before investigating another person's ID.
+
+There is intentionally no fixed cost forecast here. Spend depends on chat
+volume, how many nudge attempts return `SKIP`, verifier rewrites, fallback use,
+and the routes saved for each profile. `llm-log --stats` reports the usage and
+cost actually recorded in that database; the eval leaderboard reports measured
+quality, latency, and cost for controlled comparisons.

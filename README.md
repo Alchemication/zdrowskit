@@ -5,11 +5,11 @@
 Your watch collects thousands of data points a week. Apple shows you rings. zdrowskit gives you a coach.
 
 - **Personalised weekly reports** - not generic summaries, but analysis that knows your goals, your plan, your injuries, your journal, and how this season compares to prior years
-- **Coaching proposals** - every Monday after the weekly report, the coach reviews the completed week and proposes concrete changes to your training plan or goals, with diff-first Approve/Reject buttons in Telegram
+- **Coaching proposals** - after the scheduled weekly report (Monday by default), the coach reviews the completed week and proposes concrete changes to your training plan or goals, with diff-first Approve/Reject buttons in Telegram
 - **Reactive nudges** - new data synced or context changed? The coach notices and says something useful, or stays quiet if there is nothing to say
 - **Remembers you week to week** - a freeform journal captures why things happened, and the coach appends its own memory after each report
 - **Ask anything about your data** - "What's my fastest 1km pace?", "How's my HRV trending since January?", "Do I sleep worse after evening runs?" If the data exists, it will find the answer and chart it
-- **Host a small family roster** - one daemon and bot route each private chat to an isolated database, context directory, preferences, and runtime state, for roughly 1-10 people you personally know
+- **Host a small family roster** - one daemon and bot route each private chat to an isolated database, context directory, preferences, and runtime state
 - **Ask a coding agent about the repo** - the operator can route `/codex` or `/claude` questions to the local Codex / Claude Code CLI in workspace-edit mode
 
 It is a Telegram conversation, not a dashboard: reply to a report, update your goals mid-chat, get a chart on demand.
@@ -35,7 +35,7 @@ Three loops run continuously:
 - Apple Watch + iPhone
 - [Auto Export](https://apps.apple.com/app/myhealth-export-to-icloud/id6737380982) for scheduled Apple Health JSON export
 - A macOS or Linux machine that runs Python
-- [Tailscale](https://tailscale.com/docs/install/mac) on the host; HTTP + Funnel is the default transport
+- [Tailscale](https://tailscale.com/docs/install/mac) on the host when using the default HTTP transport
 - Python 3.12+ and [uv](https://github.com/astral-sh/uv)
 - A capable LLM provider API key
 - A dedicated Telegram bot token for notifications and chat. One bot serves
@@ -46,11 +46,12 @@ Three loops run continuously:
 
 zdrowskit is a family-and-friends tool: one machine, one daemon, one
 exclusively polled bot,
-serving roughly 1-10 people the operator knows personally. That assumption is
-deliberate and shows up everywhere — profiles are added by hand-editing a TOML
-roster and restarting, there is no self-service signup or web admin, and the
-host operator can read every hosted person's database. Trust between operator
-and users replaces the access controls a real multi-tenant service would need.
+serving a small roster the operator knows personally. That assumption is
+deliberate and shows up everywhere — profiles are created by the operator and
+the roster is reloaded only on restart, there is no self-service signup or web
+admin, and the host operator can read every hosted person's database. Trust
+between operator and users replaces the access controls a real multi-tenant
+service would need.
 
 If you want the mental model in one line: it is a household appliance, not a
 service. Scale it past a handful of people and the missing pieces stop being
@@ -75,10 +76,10 @@ uv sync
 uv run python main.py setup
 uv run python main.py profile add me --telegram-id YOUR_NUMERIC_ID --operator
 uv run python main.py ingest setup
-uv run python main.py doctor
 uv run python main.py daemon-install
 curl http://127.0.0.1:8787/healthz
 tailscale funnel --bg --https=443 http://127.0.0.1:8787
+uv run python main.py doctor
 # Send the Metrics + Workouts automations from Auto Export
 uv run python main.py ingest status
 uv run python main.py status
@@ -90,7 +91,7 @@ For the full first-run flow, see [Setup](docs/setup.md).
 ## Common Commands
 
 ```bash
-uv run python main.py import              # import a local/iCloud or Drive backfill
+uv run python main.py import              # import the selected profile source
 uv run python main.py ingest status       # inspect direct HTTP uploads and imports
 uv run python main.py status              # DB row counts + date range
 uv run python main.py report              # current week: summary + daily
@@ -103,7 +104,6 @@ uv run python main.py telegram-setup      # register Telegram bot commands
 uv run python main.py daemon-install      # install the launchd daemon
 uv run python main.py daemon-restart      # restart the background daemon
 uv run python main.py profile add anna --telegram-id ID # add an isolated profile
-uv run python main.py ingest status      # receiver and per-profile upload state
 uv run python main.py db status --all     # check every profile database
 ```
 
@@ -118,6 +118,7 @@ Run any command with `--help` for the full flag list. See [Commands](docs/comman
 | [HTTP ingest](docs/http-ingest.md) | Direct Auto Export uploads, Tailscale Funnel, tokens, validation, retention |
 | [Google Drive import](docs/google-drive.md) | Portable API fetch, service-account setup, multiple profiles |
 | [Family hosting](docs/family-hosting.md) | Profile roster, account linking, adoption, isolation, backup |
+| [Multi-profile architecture](docs/multi-profile.md) | Implemented routing, storage boundaries, authorization, migrations |
 | [Commands](docs/commands.md) | CLI commands, useful flags, data directory override |
 | [Daemon](docs/daemon.md) | HTTP receiving, Drive polling, iCloud watching, service operation and logs |
 | [Telegram](docs/telegram.md) | Bot configuration, chat, commands, `/models`, `/notify` |
@@ -127,6 +128,7 @@ Run any command with `--help` for the full flag list. See [Commands](docs/comman
 | [Limitations](docs/limitations.md) | Platform assumptions, export constraints, local/LLM privacy boundary |
 | [Testing](docs/testing.md) | pytest, ruff, fixtures, coverage |
 | [LLM evals](docs/evals.md) | Feedback-derived eval workflow and leaderboard |
+| [User flows](docs/user-flow.md) | End-to-end diagrams for setup, import, notifications, reports, chat, and controls |
 
 ## Development
 

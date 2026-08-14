@@ -10,7 +10,7 @@ independent copy; `--profile NAME` selects it in the CLI.
 | `me.md` | you or chat | Your profile: age, body, injuries, what you already do |
 | `strategy.md` | you, chat, or coach | Goals + weekly training schedule + diet + sleep targets, all in one file |
 | `log.md` | you or chat | Freeform weekly journal: why things happened, such as travel, illness, or life |
-| `baselines.md` | auto | Rolling + seasonal baselines computed from DB, updated on each `insights` run |
+| `baselines.md` | auto | Rolling + seasonal baselines computed from the DB by `insights` and `coach` |
 | `history.md` | auto | LLM's own memory, appended after each weekly report |
 | `coach_feedback.md` | auto | Accept/reject history for coach and chat suggestions, including optional rejection reasons |
 

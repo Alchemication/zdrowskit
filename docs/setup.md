@@ -10,10 +10,10 @@ routing, see [LLM setup](llm.md). To migrate an existing installation, use
 
 - Python 3.12+
 - [uv](https://github.com/astral-sh/uv)
-- [Tailscale](https://tailscale.com/docs/install/mac) on the host, with its CLI integration and launch-at-login enabled
+- [Tailscale](https://tailscale.com/docs/install/mac) on the host when using the default HTTP transport
 - Apple Health data exported by [Auto Export](https://apps.apple.com/app/myhealth-export-to-icloud/id6737380982)
-- LLM API keys for the providers you want to use
-- A dedicated Telegram bot token if you want notifications and chat
+- LLM API keys for the routes you want to use
+- A Telegram bot token if you want notifications and chat
 
 Direct HTTP delivery through Tailscale is recommended for new installations.
 The local/iCloud and Google Drive sources remain available, particularly for
@@ -58,11 +58,12 @@ uv run python main.py setup
 # Create the operator profile and isolated context/database tree
 uv run python main.py profile add me --telegram-id YOUR_NUMERIC_ID --operator
 
+# Fill in the profile and plan before asking the coach to reason about them
+# ~/Documents/zdrowskit/profiles/me/ContextFiles/me.md
+# ~/Documents/zdrowskit/profiles/me/ContextFiles/strategy.md
+
 # Create the upload token and show the iPhone settings; keep this output open
 uv run python main.py ingest setup
-
-# Check paths, credentials, roster, and profile files
-uv run python main.py doctor
 
 # Install the daemon/receiver
 uv run python main.py daemon-install
@@ -71,6 +72,9 @@ uv run python main.py daemon-install
 curl http://127.0.0.1:8787/healthz
 tailscale funnel --bg --https=443 http://127.0.0.1:8787
 tailscale funnel status
+
+# Check the complete local setup, running receiver, and public DNS
+uv run python main.py doctor
 
 # Configure and send Metrics + Workouts from Auto Export, then verify the pair
 uv run python main.py ingest status
@@ -89,11 +93,13 @@ uv run python main.py report
 uv run python src/daemon.py --foreground
 ```
 
-Normal CLI usage auto-applies pending SQLite migrations when the database is opened. Use `uv run python main.py db status` when you want to inspect schema state explicitly.
+Normal CLI usage auto-applies pending SQLite migrations when the database is
+opened. Use `uv run python main.py db status` when you want to inspect schema
+state explicitly.
 
-`setup` still creates root-level context templates for legacy compatibility.
-Once `profiles.toml` exists, active files live only under
-`profiles/<name>/`; `profile add` creates that profile tree.
+`setup` creates the shared app home and copies `.env_example` to `.env` when
+`.env` does not already exist. It does not create a database or context files;
+`profile add` creates the isolated profile tree.
 
 The first profile must use `--operator`; HTTP is the default source. Use
 `--source local` for the host's iCloud directory. For Google Drive, pass
@@ -132,7 +138,9 @@ After the first run above, to enable personalised LLM-generated reports:
 1. Edit `me.md` and `strategy.md` under
    `~/Documents/zdrowskit/profiles/<name>/ContextFiles/`.
 
-2. Add your API keys to `.env`. Defaults call DeepSeek with Anthropic as the cross-provider fallback — see [LLM setup](llm.md#api-keys) for keys and overrides.
+2. Add the OpenAI, DeepSeek, and Anthropic keys used by the built-in primary and
+   fallback routes. See [LLM setup](llm.md#api-keys) before omitting a provider
+   or changing those routes.
 
 3. Generate your first report:
 

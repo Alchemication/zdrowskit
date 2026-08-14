@@ -140,15 +140,15 @@ flowchart TD
     addProfile --> roster
     addProfile --> tree
     tree --> editContext
-    env --> doctor
-    editContext --> doctor
-    doctor -- no --> fixConfig
-    fixConfig --> doctor
-    doctor -- yes --> ingestSetup
+    editContext --> ingestSetup
     ingestSetup --> daemonInstall
     daemonInstall --> localHealth
     tailscale --> funnel
     localHealth --> funnel
+    funnel --> doctor
+    doctor -- no --> fixConfig
+    fixConfig --> doctor
+    doctor -- yes --> autoExport
     apple --> autoExport
     autoExport --> funnel
     funnel --> receiver
@@ -229,6 +229,11 @@ flowchart TD
     send --> eventLog
 ```
 
+HTTP sync alerts follow a separate deterministic scheduler path: assess the
+ingest state and newest completed metric date, apply sync-alert preferences and
+quiet hours, then send an alert or recovery message without calling an LLM.
+See [Notifications](notifications.md#sync-alerts).
+
 ## Reports And Coaching
 
 ```mermaid
@@ -241,12 +246,15 @@ flowchart TD
     prefs{"Report prefs allow send?"}
     already{"Already ran or skipped today?"}
     insights["Run insights LLM"]
-    verify{"Verifier passes?"}
+    verify["Verify draft"]
+    verdict{"Pass, revise, or fail?"}
+    rewrite["Bounded rewrite + deterministic guards"]
     sendReport["Send report to Telegram"]
     weeklyPath{"Scheduled weekly report path?"}
-    memory["Append memory to history.md"]
+    memory["Extract memory; append it to history.md when non-empty"]
     feedback["Attach feedback button"]
-    coach["Run coach LLM after weekly report or /coach"]
+    coachImport["Manual /coach imports latest data"]
+    coach["Run and verify coach LLM"]
     coachSkip{"Coach returns SKIP?"}
     bundle["Send narrative + per-edit buttons"]
     decision{"Accept / Reject / Diff"}
@@ -274,16 +282,21 @@ flowchart TD
     insights --> context
     insights --> llm
     insights --> verify
-    verify -- no --> fail
-    verify -- yes --> sendReport
+    verify --> verdict
+    verdict -- fail --> fail
+    verdict -- revise --> rewrite
+    rewrite --> memory
+    verdict -- pass --> memory
+    memory --> sendReport
     sendReport --> telegram
     sendReport --> feedback
-    sendReport --> memory
     sendReport --> weeklyPath
     memory --> context
     weeklyPath -- yes --> coach
     weeklyPath -- no --> eventLog
-    coachCmd --> coach
+    coachCmd --> coachImport
+    coachImport --> db
+    coachImport --> coach
     coach --> db
     coach --> context
     coach --> llm
@@ -311,7 +324,7 @@ flowchart TD
     inject["Inject quoted report/nudge context"]
     agentMode{"Codex or Claude mode active?"}
     chat["Health chat LLM"]
-    tools["Tools: run_sql, chart, update_context"]
+    tools["Tools: run_sql and update_context"]
     answer["Answer in Telegram"]
     chart{"Chart requested or emitted?"}
     sendChart["Render and send chart image"]

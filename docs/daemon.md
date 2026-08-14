@@ -54,7 +54,10 @@ For local/iCloud imports, watchdog observes the data directory and retains the
 three-minute debounce that collapses a burst of filesystem events into one
 import.
 
-The checked-in plist under `launchd/` is a placeholder template. `daemon-install` generates the real plist with your checkout path, `uv` path, `HOME`, `PATH`, log location, and resolved Codex / Claude CLI paths if `codex` and/or `claude` are available. It currently installs one daemon instance for the current macOS user.
+`daemon-install` generates `~/Library/LaunchAgents/com.zdrowskit.daemon.plist`
+with the current checkout path, `uv` path, `HOME`, `PATH`, log location, and
+resolved Codex / Claude CLI paths when available. It installs one daemon
+instance for the current macOS user.
 
 ## Files
 
@@ -80,7 +83,7 @@ Logs:
 ~/Library/Logs/zdrowskit.daemon.log
 ```
 
-Logs rotate for 7 days.
+The log rotates at midnight and keeps seven backup files.
 
 ## Operations
 
@@ -114,14 +117,13 @@ Restart rules:
 | Add, pause, rename, or edit a profile in `profiles.toml` | `uv run python main.py daemon-restart` |
 | PATH or CLI location changes, such as installing Codex or Claude under Homebrew | `uv run python main.py daemon-install` |
 | Stop for testing in foreground | `uv run python main.py daemon-stop` |
-| Change to the `.plist` itself | See below |
 | Context file changes (`*.md`) | No restart needed; read at trigger time |
-| State file reset | No restart needed; read on every trigger |
+| Reset `daemon_state.json` | Stop the daemon first, remove or edit the file, then restart; state is loaded at startup |
 | `notification_prefs.json` edit/reset | No restart needed; read on every trigger |
 
-Updating the plist requires a full reload after editing `launchd/com.zdrowskit.daemon.plist`:
+Do not maintain a second hand-edited plist. Re-run `daemon-install` when its
+generated values need to change; it writes the user LaunchAgent and reloads it:
 
 ```bash
-launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.zdrowskit.daemon.plist
 uv run python main.py daemon-install
 ```

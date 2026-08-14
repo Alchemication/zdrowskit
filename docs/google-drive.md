@@ -13,12 +13,17 @@ shared in `.env`.
 
 ## Auto Export Setup
 
-Create separate Google Drive automations for Metrics and Workouts. Use:
+Create separate Google Drive automations for Metrics and Workouts. The parser
+needs:
 
-- Export Format: JSON
-- Date Range: Week
-- Aggregation: Day
-- Folder Name: `Metrics` and `Workouts`
+- JSON output for both automations;
+- summarized daily data for Metrics;
+- Workouts with any route and metadata fields you want to retain;
+- separate destination folders named `Metrics` and `Workouts`.
+
+Use a rolling window for scheduled exports and Manual Export for historical
+backfills. The exact date-range label in Auto Export is a delivery choice, not a
+parser requirement.
 
 Each person exports into their own Google account and shares their own
 `Health Auto Export` root with the shared service account.
@@ -68,6 +73,7 @@ Put profile folder IDs in `profiles.toml`:
 ```toml
 [profiles.anna]
 telegram_id = 222222222
+import_source = "google-drive"
 drive_metrics_folder_id = "METRICS_FOLDER_ID"
 drive_workouts_folder_id = "WORKOUTS_FOLDER_ID"
 ```
@@ -130,12 +136,17 @@ uv run python scripts/drive_fetch.py \
   --service-account ~/Documents/zdrowskit/secrets/service-account.json \
   --metrics-folder-id METRICS_FOLDER_ID \
   --workouts-folder-id WORKOUTS_FOLDER_ID \
-  --data-dir ~/Documents/zdrowskit/Imports/adam \
+  --data-dir /tmp/zdrowskit-drive-probe \
   --dry-run --verbose
 ```
 
 Remove `--dry-run` to download. The resulting directory can also be imported
-explicitly with `uv run python main.py import --source local --data-dir PATH`.
+into an existing profile database:
+
+```bash
+uv run python main.py import --profile anna \
+  --source local --data-dir /tmp/zdrowskit-drive-probe
+```
 
 ## Multiple People
 

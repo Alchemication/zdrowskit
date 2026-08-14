@@ -37,9 +37,10 @@ configure an exit node or subnet router for zdrowskit.
 
 ## Install Tailscale on the Host
 
-These are the recommended macOS steps. Tailscale currently recommends its
-[Standalone macOS variant](https://tailscale.com/docs/install/mac); it also
-provides the smoothest CLI setup for zdrowskit.
+Follow Tailscale's current
+[macOS installation guide](https://tailscale.com/docs/install/mac). zdrowskit
+needs the desktop app to connect at login and a working `tailscale` command in
+Terminal.
 
 1. Install the Standalone app and complete the macOS VPN/network-extension
    approval prompts.
@@ -59,22 +60,9 @@ provides the smoothest CLI setup for zdrowskit.
    tailscale status
    ```
 
-For the Standalone app on macOS Ventura 13 or later, CLI Integration installs a
-launcher at `/usr/local/bin/tailscale`. If the command is still missing, repeat
-**Settings -> CLI integration -> Show me how**. See the official
-[macOS CLI instructions](https://tailscale.com/docs/reference/tailscale-cli?tab=macos).
-
-If the Mac App Store variant is already installed, its CLI lives inside the
-application:
-
-```bash
-/Applications/Tailscale.app/Contents/MacOS/Tailscale version
-/Applications/Tailscale.app/Contents/MacOS/Tailscale status
-```
-
-You can use that full path for manual commands. The integrated `ingest setup
---funnel` helper expects a `tailscale` executable on `PATH`, so the Standalone
-variant with CLI Integration is the least surprising setup.
+If the command is missing, use the app's CLI Integration instructions. The
+`ingest setup --funnel` helper expects the executable to be on `PATH`; a full
+application-bundle path can work for manual commands but not for that helper.
 
 `tailscale status` should show this Mac as connected with a `100.x.y.z` address.
 If it reports that preferences cannot be loaded, open the Tailscale app, finish
@@ -121,10 +109,8 @@ tailscale funnel --bg --https=443 http://127.0.0.1:8787
 ```
 
 The first Funnel command may open a browser for tailnet approval. Approve it as
-the tailnet owner/admin. Tailscale then enables the required MagicDNS, HTTPS
-certificate, and Funnel policy settings. Funnel is available on all Tailscale
-plans but remains a beta feature; its public HTTPS ports are restricted to 443,
-8443, and 10000. zdrowskit uses 443. See the official
+the tailnet owner/admin. Tailscale then enables the required DNS, certificate,
+and Funnel policy settings. zdrowskit uses public HTTPS on port 443. See the official
 [Funnel requirements](https://tailscale.com/docs/features/tailscale-funnel).
 
 The command prints the public URL:
@@ -277,6 +263,10 @@ A crash after HTTP `202` leaves the latest pair on disk; daemon startup detects
 and imports it. Parser failures keep the latest pair and a short error record
 for diagnosis.
 
+The scheduler also checks HTTP import health and stored daily-metric freshness.
+See [Sync alerts](notifications.md#sync-alerts) for its thresholds, quiet hours,
+and recovery behavior. Local/iCloud and Drive profiles do not run that check.
+
 ## Raw Payload Archive
 
 The bounded cache above is overwritten by every upload, so it cannot answer
@@ -359,19 +349,17 @@ triggering an automation is the fastest way to diagnose a family member's phone.
 ### Stop or Recreate the Funnel
 
 ```bash
-# Stop public access, removing the serve configuration.
+# Warning: reset removes this host's complete Serve/Funnel configuration.
 tailscale funnel reset
 
 # Re-enable the same persistent mapping and URL.
 tailscale funnel --bg --https=443 http://127.0.0.1:8787
 ```
 
-Older Tailscale releases accepted `tailscale funnel --https=443 off` as a
-toggle. On 1.98 that form is gone: `off` is parsed as a proxy target, so the
-command fails with `non-localhost target "off" must include a scheme` — and a
-preceding `off` may already have wiped the serve config. Check `tailscale
-funnel status` after any change; `No serve config` means public access is down
-and the mapping must be recreated with the command above.
+Check `tailscale funnel status` after any change. `No serve config` means public
+access is down and the mapping must be recreated with the command above. CLI
+syntax changes across Tailscale releases, so use the current official command
+rather than an older `... off` example.
 
 Recreating the Funnel also republishes the public DNS record, which is the fix
 when the hostname stops resolving outside the tailnet. Give it a few minutes
