@@ -1,15 +1,17 @@
 # Notifications
 
-Each notification type is a distinct LLM call with its own prompt, context, tools, and purpose. They complement each other instead of repeating each other.
+Insights, memory, coach, nudges, and chat are separate LLM calls with their own
+prompts, context, tools, and purposes. Sync alerts are deterministic checks and
+do not call an LLM.
 
 | Channel | Purpose | Trigger | Frequency | Length | Tools | Special output |
 |---------|---------|---------|-----------|--------|-------|----------------|
-| **Insights** | Full weekly report | Scheduled, default Monday 10am, or manual `/review` | 1x/week | ≤ 1024 chars | `run_sql` | Exactly 1 `<chart>`, skipped when it would mislead |
-| **Memory** | Decides what carries forward from the report | After each weekly report | 1x/week | ≤ 2 bullets | none | `<memory>` block appended to `history.md`; never sent to the user |
-| **Coach** | Weekly strategy review, only when proposals exist | After insights, silent on no-change weeks | 1x/week | ~300 words | `run_sql`, `update_context` for `strategy` only | `SKIP` if no changes warranted; bundled message with inline Accept/Reject buttons per edit |
+| **Insights** | Full weekly report | Scheduled, default Monday 10:00, or manual `/review` | Weekly when scheduled; manual on demand | ≤ 1024 chars | `run_sql` | Exactly 1 `<chart>`, skipped when it would mislead |
+| **Memory** | Decides what carries forward from an insights report | After every scheduled or manual insights report | Same as insights | ≤ 2 bullets | none | Extracted bullets stored under the week in `history.md`; never sent to the user |
+| **Coach** | Strategy review, only when proposals exist | After scheduled insights, or manual `/coach` | Weekly when scheduled; manual on demand | ≤ 300 words | `run_sql`, `update_context` for `strategy` only | `SKIP` if no changes warranted; bundled message with inline Accept/Reject buttons per edit |
 | **Nudge** | Short reactive next-action nudge | Data sync, file edit | Up to 2/day by default | 80 words | `run_sql` | `SKIP` if nothing changes; text only, no chart |
-| **Sync alerts** | Tells you when health data has stopped arriving | Two missing days of daily metrics, or a stalled import, checked on the scheduler tick | At most 1/day per condition | 2 lines | none | Recovery notice when alerted dates remain missing |
-| **Chat** | Interactive conversation: answer the current message, ask anything, get charts | Your Telegram message | On demand | 150 words | `run_sql` up to 5/turn, `update_context` any file | Optional `<chart>`; at most one `update_context` |
+| **Sync alerts** | Warns when an HTTP profile's metrics stop updating or its imports stall | Checked every 30 minutes | At most 1/day per unchanged condition | Short deterministic message | none | Pipe-fault all-clear; unresolved dates named after stale recovery |
+| **Chat** | Interactive conversation: answer the current message, ask anything, get charts | Your Telegram message | On demand | < 150 words unless you ask for detail | `run_sql`, `update_context` for `me`, `strategy`, or `log` | Optional `<chart>`; context edits require confirmation by default |
 
 ## Notification Preferences Via Telegram
 
@@ -39,10 +41,12 @@ How it works:
 
 - A small LLM interprets the request into a strict structured proposal.
 - The bot shows the interpreted change back to you with `Accept` / `Reject`.
-- Nothing is saved until you tap `Accept`.
+- Telegram changes are not saved until you tap `Accept`. CLI resets write
+  immediately.
 - If the request is ambiguous, the bot asks a short clarification question.
-- Preferences live in
-  `~/Documents/zdrowskit/profiles/<name>/notification_prefs.json`.
+- By default, preferences live in
+  `~/Documents/zdrowskit/profiles/<name>/notification_prefs.json`. Setting
+  `ZDROWSKIT_HOME` changes that root.
 - CLI commands default to the operator profile; use `--profile NAME` for
   another person.
 
@@ -50,60 +54,77 @@ What can be changed:
 
 - nudges on/off
 - nudge earliest send time
+- maximum nudges per day (1–6)
 - weekly insights on/off, weekday, and time
+- sync alerts on/off, missing-metric days, and stalled-import hours
 - temporary mutes for all notifications or one notification type
 - reset one setting or everything back to built-in defaults
 
-## What Triggers Nudges
+## What Triggers Nudge Attempts
+
+Each event below can start a nudge LLM call. Delivery preferences, report
+suppression, rate limits, and the LLM's own `SKIP` decision can still prevent a
+message from being sent.
 
 | Event | Debounce | What it does |
 |-------|----------|-------------|
-| Metrics + Workouts received over HTTP | Wait for the matching pair | One data observation + suggestion for today/tomorrow |
-| Health data fetched from Google Drive | Poll interval (5 min default) | One data observation + suggestion for today/tomorrow |
-| Health data synced via iCloud | 3 min debounce | One data observation + suggestion for today/tomorrow |
-| `log.md` / `strategy.md` / `me.md` edited | 60 sec | Responds to the change: acknowledges, flags tension, or confirms |
-| Monday 8-9 AM | scheduled | Full weekly report, then coaching review |
+| Metrics + Workouts received over HTTP | Wait for the matching pair | Reacts to the imported data |
+| Health data fetched from Google Drive | Poll interval (5 min default) | Reacts when changed files are parsed |
+| Health data synced via iCloud | 3 min debounce | Imports the settled files, then reacts |
+| `log.md` / `strategy.md` / `me.md` edited | 60 sec | Acknowledges the change, flags tension, or confirms it |
 
 ## Cross-Message Awareness
 
-Each channel sees what the others recently said so the LLM avoids redundancy:
+The coaching and content LLMs share enough recent output to avoid redundancy:
 
+- **Insights, Coach, Nudge, and Chat** read the rolling `history.md` memory.
+- **Memory** reads the existing history so it does not store the same thread
+  twice.
 - **Coach** sees recent nudges sent.
 - **Nudge** sees last 3 nudges + last coach review summary.
 - **Chat** sees last 3 nudges + last coach review summary.
-- **Insights** is independent and has its own `history.md` memory.
+- **Insights** does not see the transient nudge or coach-summary state; it uses
+  `history.md` for continuity.
 
 ## Suppression and Rate Limiting
 
 - **Earliest nudge time:** nudges are deferred until the configured earliest send time. Triggers queue and drain as one consolidated nudge once the window opens.
-- **Temporary mute / disable:** when a notification type is muted or disabled, the daemon skips the notification LLM call entirely.
+- **Temporary mute / disable:** for LLM notifications, the daemon skips the LLM
+  call entirely. A suppressed sync condition is still assessed and logged but
+  is not delivered.
 - **Report suppression:** nudges are suppressed +/- 1 hour around scheduled reports because the report already covers the big picture.
 - **Rate limits:** max 2 nudges/day by default, min 3 hours apart.
 - **LLM SKIP:** the nudge LLM can respond `SKIP` if there is nothing genuinely new to say.
-- **Coach:** runs at most once per calendar day.
+- **Coach:** the scheduled path runs at most once per calendar day. Manual
+  `/coach` calls can rerun it on demand.
 - **No replay after mute:** skipped nudges/reports are not replayed after a temporary mute expires.
 
 ## Sync Alerts
 
-A phone that stops feeding the system is otherwise completely silent: uploads
-just stop, or stop pairing, and the only trace is a line in the daemon log. For
-the operator that is survivable. For a hosted profile it is fatal — their data
-quietly goes stale and they conclude the product is dead.
+Sync alerts currently monitor profiles whose import source is HTTP. A phone that
+stops feeding an HTTP profile is otherwise completely silent: uploads just stop,
+or stop pairing, and the only trace is a line in the daemon log. For the operator
+that is survivable. For a hosted profile it is fatal — their data quietly goes
+stale and they conclude the product is dead. Local iCloud and Google Drive
+profiles do not currently run these health checks.
 
 Three conditions are reported, checked in order of how specific they are about
 the cause:
 
 | Condition | Default | Meaning |
 |-----------|---------|---------|
-| `error` | 6h | The last import failed and none has succeeded since, or the ingest state file is unreadable. |
+| `error` | 6h stalled; immediate for unreadable state | The last import failed and none has succeeded while the pipe is stalled, or the ingest state file cannot be read. |
 | `split` | 6h | Uploads *are* arriving but nothing imports. A strong signal — the phone is demonstrably reachable. The message distinguishes the two causes: halves further apart than the one-hour pairing window means two automations whose schedules have drifted, and anything closer than that means the phone is fine and the import on this end is stuck. |
 | `stale` | 2 days | The pipe looks fine but two completed days of daily metrics are missing. The catch-all: phone off, token revoked, Funnel down, app deleted, parser rejecting every payload. |
 
 A profile that has never uploaded is never alerted: it is mid-setup, not broken.
+Once a pair has imported, a profile for which no daily metrics have ever been
+stored alerts on the next scheduler check instead of waiting two days, because
+that points to a parser or payload problem rather than ordinary delivery lag.
 
 ### Why staleness is counted in days of data, not hours of silence
 
-Auto Export uploads in unpredictable bursts. Measured over eleven days of one
+Auto Export uploads in unpredictable bursts. In the retained sample from one
 real HTTP profile, 70 complete pairs had a 1.7h median gap, a 10.1h p90 and a
 34.9h maximum — so an hours-based silence threshold low enough to catch a dead
 phone also fires on the tail of ordinary operation. A long gap can still land as
