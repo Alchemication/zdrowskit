@@ -6,12 +6,16 @@ do not call an LLM.
 
 | Channel | Purpose | Trigger | Frequency | Length | Tools | Special output |
 |---------|---------|---------|-----------|--------|-------|----------------|
-| **Insights** | Full weekly report | Scheduled, default Monday 10:00, or manual `/review` | Weekly when scheduled; manual on demand | ≤ 1024 chars | `run_sql` | Exactly 1 `<chart>`, skipped when it would mislead |
-| **Memory** | Decides what carries forward from an insights report | After every scheduled or manual insights report | Same as insights | ≤ 2 bullets | none | Extracted bullets stored under the week in `history.md`; never sent to the user |
-| **Coach** | Strategy review, only when proposals exist | After scheduled insights, or manual `/coach` | Weekly when scheduled; manual on demand | ≤ 300 words | `run_sql`, `update_context` for `strategy` only | `SKIP` if no changes warranted; bundled message with inline Accept/Reject buttons per edit |
-| **Nudge** | Short reactive next-action nudge | Data sync, file edit | Up to 2/day by default | 80 words | `run_sql` | `SKIP` if nothing changes; text only, no chart |
-| **Sync alerts** | Warns when an HTTP profile's metrics stop updating or its imports stall | Checked every 30 minutes | At most 1/day per unchanged condition | Short deterministic message | none | Pipe-fault all-clear; unresolved dates named after stale recovery |
-| **Chat** | Interactive conversation: answer the current message, ask anything, get charts | Your Telegram message | On demand | < 150 words unless you ask for detail | `run_sql`, `update_context` for `me`, `strategy`, or `log` | Optional `<chart>`; context edits require confirmation by default |
+| **Insights** | Full weekly report | Scheduled, default Monday 10:00, or manual `/review` | Weekly when scheduled; manual on demand | A single Telegram message | `run_sql` | Exactly 1 `<chart>`, skipped when it would mislead |
+| **Memory** | Decides what carries forward from an insights report | After every scheduled or manual insights report | Same as insights | A couple of bullets | none | Extracted bullets stored under the week in `history.md`; never sent to the user |
+| **Coach** | Strategy review, only when proposals exist | After scheduled insights, or manual `/coach` | Weekly when scheduled; manual on demand | A few paragraphs | `run_sql`, `update_context` for `strategy` only | `SKIP` if no changes warranted; bundled message with inline Accept/Reject buttons per edit |
+| **Nudge** | Short reactive next-action nudge | Data sync, file edit | Up to 2/day by default | One or two sentences | `run_sql` | `SKIP` if nothing changes; text only, no chart |
+| **Sync alerts** | Warns when an HTTP profile's metrics stop updating or its imports stall | Checked on the scheduler tick | At most 1/day per unchanged condition | Short deterministic message | none | Pipe-fault all-clear; unresolved dates named after stale recovery |
+| **Chat** | Interactive conversation: answer the current message, ask anything, get charts | Your Telegram message | On demand | Brief unless you ask for detail | `run_sql`, `update_context` for `me`, `strategy`, or `log` | Optional `<chart>`; context edits require confirmation by default |
+
+Exact length ceilings live with the thing that enforces them: the visible-report
+limit in `src/config.py`, the per-channel word counts in the prompts under
+`src/prompts/`.
 
 ## Notification Preferences Via Telegram
 
@@ -124,11 +128,11 @@ that points to a parser or payload problem rather than ordinary delivery lag.
 
 ### Why staleness is counted in days of data, not hours of silence
 
-Auto Export uploads in unpredictable bursts. In the retained sample from one
-real HTTP profile, 70 complete pairs had a 1.7h median gap, a 10.1h p90 and a
-34.9h maximum — so an hours-based silence threshold low enough to catch a dead
-phone also fires on the tail of ordinary operation. A long gap can still land as
-a complete backfill, while a short gap can import successfully but omit a day.
+Auto Export uploads in unpredictable bursts, so silence proves nothing: a long
+gap can land as a complete backfill, while a short gap can import successfully
+and still omit a day. Measured upload gaps on a real profile ran from under two
+hours to over a day, which leaves no hours-based threshold that catches a dead
+phone without also firing on ordinary operation.
 
 So the check asks the database, not just the upload log: what is the newest
 completed date that actually holds a daily metric? A `daily` row is created as
@@ -137,25 +141,26 @@ prove nothing — the query ignores any row whose daily metrics are all null.
 Today is excluded even if it already has a partial metric, because an incomplete
 today must not hide a missing yesterday.
 
-The default is two missing days. In the retained eight-day arrival sample, the
-first Metrics upload arrived after 10:00 twice — at 12:40 and 20:03 — and both
-gaps backfilled normally. A one-day default would have reported those routine
-delays. The observed Metrics payloads carried a rolling 7–8 days, so two days of
-grace still leaves several days in which a delayed upload can refill the gap.
-Workouts carried a shorter window, but workout absence is not inferable from a
-day with no workout; stalled or unpaired Workouts uploads are covered by the
-`split` and `error` checks instead.
+The default is two missing days rather than one, because a healthy Metrics
+export was observed arriving late in the day often enough that a one-day
+threshold would report routine delay. Metrics payloads carry a rolling window of
+several days, so two days of grace still leaves room for a late upload to refill
+the gap. Workouts carry a shorter window, but workout absence is not inferable
+from a day with no workout; stalled or unpaired Workouts uploads are covered by
+the `split` and `error` checks instead.
 
 Only the newest completed edge is used for the ongoing alert. Old interior holes
 do not keep producing notifications, but recovery checks every date in the range
 named by the original alert rather than assuming that a newer maximum filled the
 whole gap.
 
-Today never counts as missing, since it is still in progress. At 10:00 local
-(`DATA_HEALTH_STALE_CUTOFF_HOUR`) yesterday joins the completed-day count. The
-two-day threshold absorbs the observed same-day arrival variance. This cutoff is
-independent from `SLEEP_SYNC_CUTOFF_HOUR`: full Metrics payloads and individual
-sleep nights have different arrival behavior and can evolve separately.
+Today never counts as missing, since it is still in progress; a morning cutoff
+decides when yesterday joins the completed-day count. That cutoff is deliberately
+independent from the one that decides when an absent night stops being a pending
+sync, since full Metrics payloads and individual sleep nights arrive differently.
+
+The arrival measurements behind both thresholds, with the sample they came from,
+are in the `DATA_HEALTH_*` docstrings in `src/config.py`.
 
 ### Recovery notices
 

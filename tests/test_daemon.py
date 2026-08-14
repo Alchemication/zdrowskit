@@ -1602,7 +1602,8 @@ class TestTelegramCommands:
         sent = daemon._poller.send_reply.call_args.args[0]
         assert "Menu commands:" in sent
         assert "Advanced commands:" in sent
-        assert "/review [current|last] — Run weekly report (default: last)" in sent
+        assert "/review — Run weekly report (always last week)" in sent
+        assert "/coach [current|last] — Suggest plan changes (default: last)" in sent
         assert "/context [name] — View context files" in sent
         assert "/events [N|usage N] [category] — Recent system events" in sent
         assert "/llm_log [N|id ID|trace ID] — Recent LLM traces" in sent

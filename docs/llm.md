@@ -11,26 +11,37 @@ verifier.
 
 ## Built-in routes
 
-These are the defaults returned by `model_prefs.default_model_prefs()`:
+Every feature resolves to a primary model, a fallback, and a reasoning setting.
+Two shared tiers exist so routes do not each repeat a provider pair:
 
-| Feature | Primary | Fallback | Reasoning |
-| --- | --- | --- | --- |
-| Reports (`insights`) | `openai/gpt-5.6-luna` | `deepseek/deepseek-v4-flash` | high |
-| Coach | `openai/gpt-5.6-luna` | `deepseek/deepseek-v4-flash` | high |
-| Nudges | `openai/gpt-5.6-luna` | `deepseek/deepseek-v4-flash` | high |
-| Chat | `openai/gpt-5.6-luna` | `anthropic/claude-haiku-4-5` | high |
-| Verification | `deepseek/deepseek-v4-flash` | `openai/gpt-5.6-luna` | high |
-| `/notify` parser | `deepseek/deepseek-v4-flash` | `anthropic/claude-haiku-4-5` | off |
-| `/add` workout clone | `deepseek/deepseek-v4-flash` | `anthropic/claude-haiku-4-5` | high |
-| Weekly memory | `openai/gpt-5.6-luna` | `anthropic/claude-haiku-4-5` | off |
-| Verification rewrite | `deepseek/deepseek-v4-flash` | `anthropic/claude-haiku-4-5` | high |
+- **`pro`** — the high-capability pair, for long evidence-heavy generation.
+- **`flash`** — the cheap, fast pair, for the high-volume surfaces.
 
-Temperature is omitted for the built-in routes. `reasoning_effort` is the one
-reasoning control: Anthropic receives it directly; DeepSeek translates
-`high`/`max` into thinking mode and treats the other values as thinking off.
+A feature takes its tier's fallback unless it names one of its own, which
+several do where an eval found the tier default was the wrong safety net. So
+tier membership does not tell you the effective fallback; only the resolved
+route does.
 
-The defaults are current routing decisions, not permanent recommendations.
-Model quality, latency, and pricing move. The [LLM evals](evals.md) and their
+`reasoning_effort` is the one reasoning control: Anthropic receives it
+directly; DeepSeek translates `high`/`max` into thinking mode and treats the
+other values as thinking off. It is on for every judgment surface — reports,
+coach, nudges, chat, verification, rewrites, `/add` — and off for the two
+extraction jobs, `/notify` parsing and weekly memory, where selecting a
+structured answer against a stated rule list is the whole task. Temperature is
+omitted throughout.
+
+This document does not list which model each feature currently uses. Those
+choices change whenever an eval says they should, and a copy here goes stale
+without anything failing. Print the live routes instead:
+
+```bash
+uv run python main.py models
+uv run python main.py models --profile anna
+```
+
+`src/config.py` holds every default alongside the measurement that justified
+it — the `DEFAULT_*_MODEL` docstrings are the reasoning behind the current
+routing, not just its values. The [LLM evals](evals.md) and their
 [published leaderboard](https://alchemication.github.io/zdrowskit/evals/) are
 the evidence used to compare routes.
 
@@ -53,8 +64,8 @@ uv run python main.py models --profile anna doctor
 Set or reset one route:
 
 ```bash
-uv run python main.py models set chat openai/gpt-5.6-luna \
-  --fallback anthropic/claude-haiku-4-5 \
+uv run python main.py models set chat PROVIDER/MODEL \
+  --fallback PROVIDER/MODEL \
   --reasoning high \
   --temperature omit
 
@@ -62,13 +73,16 @@ uv run python main.py models reset chat
 uv run python main.py models reset --all
 ```
 
+Model identifiers are LiteLLM route strings, `provider/model`. Run
+`main.py models` to see the ones in use.
+
 `--fallback auto` removes the feature-specific fallback and uses its `pro` or
-`flash` profile fallback. The profile defaults themselves can also be changed:
+`flash` profile fallback. The tier defaults themselves can also be changed:
 
 ```bash
 uv run python main.py models profile flash \
-  --primary deepseek/deepseek-v4-flash \
-  --fallback anthropic/claude-haiku-4-5
+  --primary PROVIDER/MODEL \
+  --fallback PROVIDER/MODEL
 ```
 
 Add `--profile NAME` before the models subcommand when changing another
@@ -89,31 +103,30 @@ Routes are sent through
 [LiteLLM](https://github.com/BerriAI/litellm). If you choose another provider,
 add the credential that provider's LiteLLM integration expects.
 
+`uv run python main.py models doctor` reports keys missing for the models a
+profile actually routes to, which is the check to run after changing a route or
+dropping a provider.
+
 ## Environment defaults
 
-Environment variables seed the built-in route configuration. A saved
-`model_prefs.json` feature override remains authoritative until it is reset.
-The most useful model variables are:
+Environment variables seed the built-in route configuration at import time. A
+saved `model_prefs.json` feature override remains authoritative until it is
+reset, so `.env` is the wrong tool for a routing change you want to keep — use
+`models set`, which persists per profile.
+
+Both tiers are settable:
 
 ```env
-ZDROWSKIT_PRIMARY_PRO_MODEL=deepseek/deepseek-v4-pro
-ZDROWSKIT_FALLBACK_PRO_MODEL=anthropic/claude-opus-5
-ZDROWSKIT_PRIMARY_FLASH_MODEL=deepseek/deepseek-v4-flash
-ZDROWSKIT_FALLBACK_FLASH_MODEL=anthropic/claude-haiku-4-5
-
-ZDROWSKIT_INSIGHTS_MODEL=openai/gpt-5.6-luna
-ZDROWSKIT_COACH_MODEL=openai/gpt-5.6-luna
-ZDROWSKIT_NUDGE_MODEL=openai/gpt-5.6-luna
-ZDROWSKIT_CHAT_MODEL=openai/gpt-5.6-luna
-ZDROWSKIT_NOTIFY_MODEL=deepseek/deepseek-v4-flash
-ZDROWSKIT_ADD_CLONE_MODEL=deepseek/deepseek-v4-flash
-ZDROWSKIT_MEMORY_MODEL=openai/gpt-5.6-luna
-ZDROWSKIT_VERIFICATION_MODEL=deepseek/deepseek-v4-flash
-ZDROWSKIT_VERIFICATION_REWRITE_MODEL=deepseek/deepseek-v4-flash
+ZDROWSKIT_PRIMARY_PRO_MODEL=
+ZDROWSKIT_FALLBACK_PRO_MODEL=
+ZDROWSKIT_PRIMARY_FLASH_MODEL=
+ZDROWSKIT_FALLBACK_FLASH_MODEL=
 ```
 
-Token-budget and verification overrides are documented in the repository's
-`.env_example`; `src/config.py` is the executable source of truth.
+Each feature also has its own `ZDROWSKIT_<FEATURE>_MODEL` variable, and there
+are token-budget and verification overrides besides. They are not listed here
+with their values: `src/config.py` declares every one of them next to the
+measurement that set it, and is the only copy that cannot drift from the code.
 
 ## Verification
 

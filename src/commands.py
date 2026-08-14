@@ -427,7 +427,14 @@ def cmd_setup(args: argparse.Namespace) -> None:
 
 
 def cmd_doctor(args: argparse.Namespace) -> None:  # noqa: ARG001
-    """Print a local readiness checklist without calling external services."""
+    """Print a readiness checklist for the local install and its public path.
+
+    Most checks are local file and roster inspection. When the roster has an
+    enabled HTTP profile, two probes reach outward: the loopback receiver, and
+    the Funnel hostname resolved through a public DNS-over-HTTPS resolver. A
+    resolver that cannot be reached reports "unknown" and is not counted as a
+    failure, so an offline machine does not look broken.
+    """
     checks: list[tuple[str, bool, str, bool]] = []
     checks.append(
         ("Python 3.12+", sys.version_info >= (3, 12), platform.python_version(), True)
@@ -612,9 +619,14 @@ def cmd_doctor(args: argparse.Namespace) -> None:  # noqa: ARG001
         print(f"  [{marker}] {label:22} {detail}")
 
     if failed:
-        print("\nSome checks need attention. Run `uv run python main.py setup` first.")
+        print(
+            "\nSome checks need attention. Missing app home or .env: run "
+            "`uv run python main.py setup`. Missing roster or profile files: run "
+            "`uv run python main.py profile add`. Receiver or public DNS: see "
+            "docs/http-ingest.md."
+        )
         sys.exit(1)
-    print("\nAll local checks passed.")
+    print("\nAll checks passed.")
 
 
 def _render_launchd_plist(

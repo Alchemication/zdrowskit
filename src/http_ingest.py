@@ -19,7 +19,16 @@ from http import HTTPStatus
 from pathlib import Path
 from typing import Any, Callable
 
-from config import DATA_HEALTH_STALE_CUTOFF_HOUR
+from config import (
+    DATA_HEALTH_STALE_CUTOFF_HOUR,
+    HTTP_INGEST_MAX_JSON_DEPTH,
+    HTTP_INGEST_MAX_JSON_NODES,
+    HTTP_INGEST_MAX_METRIC_ENTRIES,
+    HTTP_INGEST_MAX_METRICS,
+    HTTP_INGEST_MAX_RECEIPTS,
+    HTTP_INGEST_MAX_ROUTE_POINTS,
+    HTTP_INGEST_MAX_WORKOUTS,
+)
 from parsers.metrics import parse_metrics_payload
 from parsers.workouts import parse_workouts_payload
 from profiles import Profile
@@ -30,13 +39,6 @@ UPLOAD_PATH = "/v1/auto-export"
 HEALTH_PATH = "/healthz"
 TOKEN_VERSION = 1
 STATE_VERSION = 1
-MAX_METRICS = 200
-MAX_METRIC_ENTRIES = 400
-MAX_WORKOUTS = 500
-MAX_ROUTE_POINTS = 250_000
-MAX_JSON_DEPTH = 16
-MAX_JSON_NODES = 1_000_000
-MAX_RECEIPTS = 100
 _TOKEN_RE = re.compile(r"^zdr_([a-f0-9]{16})_([A-Za-z0-9_-]{32,64})$")
 _UUID_RE = re.compile(
     r"^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-"
@@ -250,12 +252,12 @@ def _strict_json_loads(body: bytes) -> dict[str, Any]:
 def _validate_tree(value: Any, *, depth: int = 0, counter: list[int]) -> None:
     """Reject pathological nesting, excessive nodes, and non-finite numbers."""
     counter[0] += 1
-    if counter[0] > MAX_JSON_NODES:
+    if counter[0] > HTTP_INGEST_MAX_JSON_NODES:
         raise IngestError(
             HTTPStatus.UNPROCESSABLE_ENTITY,
             "JSON payload contains too many values.",
         )
-    if depth > MAX_JSON_DEPTH:
+    if depth > HTTP_INGEST_MAX_JSON_DEPTH:
         raise IngestError(
             HTTPStatus.UNPROCESSABLE_ENTITY,
             "JSON payload is nested too deeply.",
@@ -284,10 +286,10 @@ def _require_apple_date(value: Any, field: str) -> None:
 
 def _validate_metrics(items: list[Any]) -> None:
     """Validate the daily-summary Metrics envelope."""
-    if len(items) > MAX_METRICS:
+    if len(items) > HTTP_INGEST_MAX_METRICS:
         raise IngestError(
             HTTPStatus.UNPROCESSABLE_ENTITY,
-            f"Metrics payload exceeds the {MAX_METRICS}-metric limit.",
+            f"Metrics payload exceeds the {HTTP_INGEST_MAX_METRICS}-metric limit.",
         )
     for index, metric in enumerate(items):
         if not isinstance(metric, dict):
@@ -306,10 +308,10 @@ def _validate_metrics(items: list[Any]) -> None:
                 HTTPStatus.UNPROCESSABLE_ENTITY,
                 f"metrics[{index}].data must be an array.",
             )
-        if len(entries) > MAX_METRIC_ENTRIES:
+        if len(entries) > HTTP_INGEST_MAX_METRIC_ENTRIES:
             raise IngestError(
                 HTTPStatus.UNPROCESSABLE_ENTITY,
-                f"metrics[{index}] carries more than {MAX_METRIC_ENTRIES} daily "
+                f"metrics[{index}] carries more than {HTTP_INGEST_MAX_METRIC_ENTRIES} daily "
                 "entries. Use local or Google Drive import for a backfill this "
                 "large.",
             )
@@ -327,10 +329,10 @@ def _validate_metrics(items: list[Any]) -> None:
 
 def _validate_workouts(items: list[Any]) -> None:
     """Validate workout summaries and route coordinates."""
-    if len(items) > MAX_WORKOUTS:
+    if len(items) > HTTP_INGEST_MAX_WORKOUTS:
         raise IngestError(
             HTTPStatus.UNPROCESSABLE_ENTITY,
-            f"Workouts payload exceeds the {MAX_WORKOUTS}-workout limit.",
+            f"Workouts payload exceeds the {HTTP_INGEST_MAX_WORKOUTS}-workout limit.",
         )
     for index, workout in enumerate(items):
         if not isinstance(workout, dict):
@@ -358,10 +360,10 @@ def _validate_workouts(items: list[Any]) -> None:
                 HTTPStatus.UNPROCESSABLE_ENTITY,
                 f"workouts[{index}].route must be an array.",
             )
-        if len(route) > MAX_ROUTE_POINTS:
+        if len(route) > HTTP_INGEST_MAX_ROUTE_POINTS:
             raise IngestError(
                 HTTPStatus.UNPROCESSABLE_ENTITY,
-                f"A workout route exceeds the {MAX_ROUTE_POINTS}-point limit.",
+                f"A workout route exceeds the {HTTP_INGEST_MAX_ROUTE_POINTS}-point limit.",
             )
         for point_index, point in enumerate(route):
             if not isinstance(point, dict):
@@ -1108,7 +1110,7 @@ class HttpIngestManager:
                 state["last_error"] = None
                 receipts = state["receipts"]
                 receipts.append({"pair": pair_digest, "imported_at": now})
-                state["receipts"] = receipts[-MAX_RECEIPTS:]
+                state["receipts"] = receipts[-HTTP_INGEST_MAX_RECEIPTS:]
             else:
                 state["last_error"] = {
                     "pair": pair_digest,

@@ -676,14 +676,15 @@ def doctor_findings(
     for route in routes:
         if route.primary == ANTHROPIC_OPUS_MODEL and route.temperature is not None:
             findings.append(
-                f"{FEATURE_LABELS[route.feature]} Opus 4.8 should omit temperature."
+                f"{FEATURE_LABELS[route.feature]} on {route.primary} should omit "
+                "temperature."
             )
         if (
             route.feature == "chat"
             and route.primary == ANTHROPIC_OPUS_MODEL
             and route.reasoning_effort is not None
         ):
-            findings.append("Chat Opus 4.8 should run with reasoning off.")
+            findings.append(f"Chat on {route.primary} should run with reasoning off.")
     return findings
 
 

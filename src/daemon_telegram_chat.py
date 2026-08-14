@@ -180,7 +180,7 @@ def _format_telegram_command(command: dict[str, str]) -> str:
     name = command["command"]
     description = command["description"]
     if name == "review":
-        return f"/review [current|last] — {description} (default: last)"
+        return f"/review — {description} (always last week)"
     if name == "coach":
         return f"/coach [current|last] — {description} (default: last)"
     if name == "context":

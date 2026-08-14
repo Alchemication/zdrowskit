@@ -64,7 +64,7 @@ class TestDoctorImportSource:
         assert "[ok] profile roster" in output
         assert "[ok] Drive service account" in output
         assert "[--] adam Drive cache" in output
-        assert "All local checks passed" in output
+        assert "All checks passed" in output
 
     def test_http_receiver_check_fails_when_the_daemon_is_not_answering(
         self,
@@ -110,7 +110,7 @@ class TestDoctorImportSource:
         output = capsys.readouterr().out
         assert "[!!] HTTP receiver" in output
         assert "is the daemon running?" in output
-        assert "All local checks passed" not in output
+        assert "All checks passed" not in output
 
     def test_a_funnel_that_stopped_resolving_publicly_fails_doctor(
         self,
@@ -168,7 +168,7 @@ class TestDoctorImportSource:
         assert "[ok] adam HTTP token" in output
         assert output.count("[!!]") == 1
         assert "[!!] Funnel public DNS" in output
-        assert "All local checks passed" not in output
+        assert "All checks passed" not in output
 
     def test_an_unreachable_resolver_does_not_fail_doctor(
         self,
@@ -220,4 +220,4 @@ class TestDoctorImportSource:
         # A laptop on a plane is not a broken Funnel. Reporting this as a
         # failure would train the operator to ignore the check that matters.
         assert "[--] Funnel public DNS" in output
-        assert "All local checks passed" in output
+        assert "All checks passed" in output

@@ -41,12 +41,20 @@ Challenge my ideas early. If an approach is over-engineered, fragile, or has a s
 
 Any change to user-visible behavior, commands, defaults, limits, paths, model
 routing, storage, authorization, or workflows must audit and update the relevant
-`README.md` and `docs/*.md` in the same commit, even when the code change is
-small.
+`README.md`, `docs/*.md`, and `.env_example` in the same commit, even when the
+code change is small.
 
 Docs describe current behavior, not implementation history or future plans.
 Keep them clear and concise; verify claims against the code, `src/config.py`,
 and current `--help` output.
+
+Docs name the knob and the command that prints its value; code owns the value.
+Model IDs, per-feature env-var listings, prompt-derived word limits, and
+measurement narratives belong in `src/config.py`, `src/model_prefs.py`, or the
+prompt that enforces them — not restated in prose, where nothing fails when they
+drift. Point at `main.py models`, `notify show`, or `--help` instead. A literal
+value earns a place in the docs only when it is a user-facing default someone
+configures against, and then it appears once.
 
 Keep `AGENTS.md` and `CLAUDE.md` identical. When editing either, update both.
 

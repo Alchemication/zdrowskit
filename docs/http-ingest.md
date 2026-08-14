@@ -219,9 +219,9 @@ the first and last workout in the paired Workouts payload, so the extra Metrics
 days never touch older workout history. Before that rule existed, this
 combination deleted every workout in the gap on every import.
 
-The entry caps (`MAX_METRIC_ENTRIES`, `MAX_WORKOUTS`) reject a genuinely
-oversized export with an actionable message, so an over-wide window fails
-closed rather than silently.
+The entry caps in `src/config.py` (`HTTP_INGEST_MAX_METRIC_ENTRIES`,
+`HTTP_INGEST_MAX_WORKOUTS`) reject a genuinely oversized export with an
+actionable message, so an over-wide window fails closed rather than silently.
 
 Auto Export supplies `automation-name`, `automation-id`, `automation-period`,
 `automation-aggregation`, and `session-id` headers automatically. Do not add a

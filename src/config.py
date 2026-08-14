@@ -79,6 +79,55 @@ missed pair costs a delayed import rather than lost data. An hour is wide
 enough to absorb a slow multi-megabyte route upload while an hour-old Workouts
 payload still describes today.
 """
+HTTP_INGEST_MAX_METRICS: int = 200
+"""Distinct metric types accepted in one Metrics payload.
+
+Auto Export offers well under a hundred metric types even with everything
+switched on, so this is roughly double the widest real export. It bounds the
+per-payload work without ever rejecting a legitimate phone.
+"""
+HTTP_INGEST_MAX_METRIC_ENTRIES: int = 400
+"""Daily entries accepted for a single metric type in one payload.
+
+A rolling export carries days, not years: 400 covers well over a year of daily
+values for one metric, which no scheduled automation should ever send. A
+historical backfill that needs more belongs on the iCloud or Drive transport,
+which has no request ceiling.
+"""
+HTTP_INGEST_MAX_WORKOUTS: int = 500
+"""Workouts accepted in one payload.
+
+Sized for a wide manual backfill rather than a scheduled export, which carries
+a handful. Beyond this the request is large enough that the file transports are
+the better tool.
+"""
+HTTP_INGEST_MAX_ROUTE_POINTS: int = 250_000
+"""GPS route points accepted for a single workout.
+
+At one sample per second this is roughly 69 hours of continuous recording, so
+it cannot reject a real activity, including an ultra. It exists because route
+arrays dominate payload size and a corrupt one should fail at the door rather
+than during parsing.
+"""
+HTTP_INGEST_MAX_JSON_DEPTH: int = 16
+"""Maximum nesting depth accepted in an upload body.
+
+Auto Export payloads nest about five levels deep. The ceiling is a guard
+against hostile or corrupt JSON exhausting the stack during traversal, not a
+format constraint.
+"""
+HTTP_INGEST_MAX_JSON_NODES: int = 1_000_000
+"""Maximum total JSON nodes traversed while validating an upload body.
+
+Bounds validation cost for a body that is within the byte limit but pathological
+in shape — millions of tiny values rather than a few large ones.
+"""
+HTTP_INGEST_MAX_RECEIPTS: int = 100
+"""Upload receipts retained in a profile's ingest state file.
+
+Enough history for ``ingest status`` to show a meaningful recent picture while
+keeping the state file small, since it is rewritten on every upload.
+"""
 PUBLIC_DNS_RESOLVER_URL: str = "https://cloudflare-dns.com/dns-query"
 """DNS-over-HTTPS endpoint used to resolve the Funnel hostname from outside.
 
@@ -101,18 +150,20 @@ DATA_HEALTH_STALE_AFTER_DAYS: int = 2
 """Complete days missing daily metrics before the profile is warned.
 
 Deliberately counts days of *stored data*, not hours since the last upload. Auto
-Export arrives in bursts: measured over twelve days of one real profile the gap
-between imports ran a 1.7h median, a 10.1h p90 and a 34.9h maximum, so any
-hours-based silence threshold low enough to catch a dead phone also fires on the
-tail of normal operation — and a long gap that lands as a complete backfill has
-cost the user nothing worth a message. What matters is whether a day is actually
-missing, which stays true no matter how the uploads were batched.
+Export arrives in bursts: across 70 complete pairs over twelve days of one real
+profile, the gap between imports ran a 1.7h median, a 10.1h p90 and a 34.9h
+maximum, so any hours-based silence threshold low enough to catch a dead phone
+also fires on the tail of normal operation — and a long gap that lands as a
+complete backfill has cost the user nothing worth a message. What matters is
+whether a day is actually missing, which stays true no matter how the uploads
+were batched.
 
-Two days because the retained HTTP history showed that a healthy Metrics upload
-first arrived after 10:00 on two of eight observed days, as late as 20:03. A
-one-day threshold would have repeated the false alert this check replaces. The
-Metrics payload itself carried a rolling 7–8 days in that sample, so two days of
-grace still leaves several days in which a delayed export can backfill the gap.
+Two days rather than one because of a second, narrower sample: over the eight
+days whose per-day arrival times were retained, a healthy Metrics upload first
+arrived after 10:00 twice, at 12:40 and as late as 20:03. A one-day threshold
+would have repeated the false alert this check replaces. The Metrics payload
+itself carried a rolling 7-8 days there, so two days of grace still leaves
+several days in which a delayed export can backfill the gap.
 """
 DATA_HEALTH_STALE_CUTOFF_HOUR: int = 10
 """Hour at which another completed metric day becomes owed.
