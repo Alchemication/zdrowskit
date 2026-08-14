@@ -7,7 +7,7 @@ Your watch collects thousands of data points a week. Apple shows you rings. zdro
 - **Personalised weekly reports** - not generic summaries, but analysis that knows your goals, your plan, your injuries, your journal, and how this season compares to prior years
 - **Coaching proposals** - after the scheduled weekly report (Monday by default), the coach reviews the completed week and proposes concrete changes to your training plan or goals, with diff-first Approve/Reject buttons in Telegram
 - **Reactive nudges** - new data synced or context changed? The coach notices and says something useful, or stays quiet if there is nothing to say
-- **Remembers you week to week** - a freeform journal captures why things happened, and the coach appends its own memory after each report
+- **Remembers you week to week** - a freeform journal captures why things happened, and after each weekly report a separate pass decides what is worth carrying forward, so later reports, nudges, and chat all build on it
 - **Ask anything about your data** - "What's my fastest 1km pace?", "How's my HRV trending since January?", "Do I sleep worse after evening runs?" If the data exists, it will find the answer and chart it
 - **Host a small family roster** - one daemon and bot route each private chat to an isolated database, context directory, preferences, and runtime state
 - **Ask a coding agent about the repo** - the operator can route `/codex` or `/claude` questions to the local Codex / Claude Code CLI in workspace-edit mode

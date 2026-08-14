@@ -11,7 +11,7 @@ independent copy; `--profile NAME` selects it in the CLI.
 | `strategy.md` | you, chat, or coach | Goals + weekly training schedule + diet + sleep targets, all in one file |
 | `log.md` | you or chat | Freeform weekly journal: why things happened, such as travel, illness, or life |
 | `baselines.md` | auto | Rolling + seasonal baselines computed from the DB by `insights` and `coach` |
-| `history.md` | auto | LLM's own memory, appended after each weekly report |
+| `history.md` | auto | Rolling memory: what a separate call after each weekly report chose to carry forward |
 | `coach_feedback.md` | auto | Accept/reject history for coach and chat suggestions, including optional rejection reasons |
 
 A worked example of filled-in context is in `examples/context/`.
