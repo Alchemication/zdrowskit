@@ -5,7 +5,9 @@ from __future__ import annotations
 import http.client
 import json
 import argparse
+import base64
 import gzip
+import hashlib
 import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -15,6 +17,7 @@ import pytest
 
 import http_ingest
 from commands import cmd_import
+from config import HTTP_INGEST_BATCH_CAPTURE_MAX_FILES
 from daemon import ProfileRuntime
 from http_ingest import (
     HttpIngestManager,
@@ -1150,3 +1153,139 @@ class TestHttpIngestServer:
 
         assert response.status == 401
         assert not profile.http_cache.exists()
+
+
+class TestBatchCaptureEndpoint:
+    """The batch path stores raw requests and imports nothing."""
+
+    def _serve(self, tmp_path: Path):
+        """Start a receiver and return (server, profile, token)."""
+        profile = _profile(tmp_path)
+        registry = TokenRegistry(tmp_path / "ingest_tokens.json")
+        token = registry.create_token("adam")
+        manager = HttpIngestManager(
+            {"adam": profile},
+            pair_window_s=600,
+            on_pair_ready=lambda _name, _digest: None,
+        )
+        server = HttpIngestServer(
+            "127.0.0.1",
+            0,
+            registry=registry,
+            manager=manager,
+            max_bytes=1024 * 1024,
+        )
+        server.start()
+        return server, profile, token
+
+    def _post(self, server, token: str, body: bytes, headers: dict | None = None):
+        """POST one request to the batch capture path."""
+        host, port = server.address
+        connection = http.client.HTTPConnection(host, port, timeout=5)
+        connection.request(
+            "POST",
+            "/v1/auto-export-batch",
+            body=body,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+                **(headers or {}),
+            },
+        )
+        response = connection.getresponse()
+        payload = response.read()
+        connection.close()
+        return response.status, payload
+
+    def test_captures_body_verbatim_without_importing(self, tmp_path: Path) -> None:
+        """An arbitrary body is stored and nothing is staged for import."""
+        server, profile, token = self._serve(tmp_path)
+        # Deliberately not a valid Auto Export payload: the endpoint must not
+        # care, since its whole purpose is capturing an unknown format.
+        body = b'{"batch": 3, "of": 12, "data": {"metrics": []}}'
+        try:
+            status, raw = self._post(server, token, body)
+        finally:
+            server.stop()
+
+        assert status == 200
+        result = json.loads(raw)
+        assert result["captured"] is True
+        assert result["bytes"] == len(body)
+
+        captures = list(profile.batch_capture.glob("*.json"))
+        assert len(captures) == 1
+        record = json.loads(captures[0].read_text())
+        assert base64.b64decode(record["body_base64"]) == body
+        assert record["sha256"] == hashlib.sha256(body).hexdigest()
+        # Nothing entered the import pipeline.
+        assert not profile.http_cache.exists()
+        assert not profile.import_archive.exists()
+
+    def test_authorization_header_is_not_written_to_disk(self, tmp_path: Path) -> None:
+        """The capture file is a plain-text artefact and must not hold the token."""
+        server, profile, token = self._serve(tmp_path)
+        try:
+            self._post(server, token, b'{"a": 1}', {"Automation-Name": "Metrics"})
+        finally:
+            server.stop()
+
+        record = json.loads(next(profile.batch_capture.glob("*.json")).read_text())
+        assert "authorization" not in record["headers"]
+        assert token not in json.dumps(record)
+        # Non-secret headers are kept, since they are what we came to inspect.
+        assert record["headers"]["automation-name"] == "Metrics"
+
+    def test_multiple_requests_are_each_kept(self, tmp_path: Path) -> None:
+        """Batch mode sends many requests; none may overwrite another."""
+        server, profile, token = self._serve(tmp_path)
+        try:
+            for index in range(5):
+                status, _ = self._post(
+                    server, token, json.dumps({"batch": index}).encode()
+                )
+                assert status == 200
+        finally:
+            server.stop()
+
+        assert len(list(profile.batch_capture.glob("*.json"))) == 5
+
+    def test_rejects_invalid_token_before_writing(self, tmp_path: Path) -> None:
+        """Auth runs before any disk write, as on the real upload path."""
+        server, profile, _token = self._serve(tmp_path)
+        host, port = server.address
+        try:
+            connection = http.client.HTTPConnection(host, port, timeout=5)
+            connection.request(
+                "POST",
+                "/v1/auto-export-batch",
+                body=b'{"a": 1}',
+                headers={
+                    "Authorization": "Bearer wrong",
+                    "Content-Type": "application/json",
+                },
+            )
+            response = connection.getresponse()
+            response.read()
+            connection.close()
+        finally:
+            server.stop()
+
+        assert response.status == 401
+        assert not profile.batch_capture.exists()
+
+    def test_prunes_to_the_retention_ceiling(self, tmp_path: Path) -> None:
+        """The directory is bounded so a stray automation cannot fill the disk."""
+        profile = _profile(tmp_path)
+        manager = HttpIngestManager(
+            {"adam": profile},
+            pair_window_s=600,
+            on_pair_ready=lambda _name, _digest: None,
+        )
+        for index in range(HTTP_INGEST_BATCH_CAPTURE_MAX_FILES + 5):
+            manager.capture_batch(
+                "adam", {"automation-name": "Metrics"}, f'{{"n":{index}}}'.encode()
+            )
+
+        kept = list(profile.batch_capture.glob("*.json"))
+        assert len(kept) == HTTP_INGEST_BATCH_CAPTURE_MAX_FILES

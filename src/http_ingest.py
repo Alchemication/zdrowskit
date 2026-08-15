@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import gzip
 import hashlib
 import hmac
@@ -21,6 +22,7 @@ from typing import Any, Callable
 
 from config import (
     DATA_HEALTH_STALE_CUTOFF_HOUR,
+    HTTP_INGEST_BATCH_CAPTURE_MAX_FILES,
     HTTP_INGEST_MAX_JSON_DEPTH,
     HTTP_INGEST_MAX_JSON_NODES,
     HTTP_INGEST_MAX_METRIC_ENTRIES,
@@ -36,6 +38,7 @@ from profiles import Profile
 logger = logging.getLogger(__name__)
 
 UPLOAD_PATH = "/v1/auto-export"
+BATCH_CAPTURE_PATH = "/v1/auto-export-batch"
 HEALTH_PATH = "/healthz"
 TOKEN_VERSION = 1
 STATE_VERSION = 1
@@ -1125,6 +1128,77 @@ class HttpIngestManager:
             staging_root = profile.http_cache / ".staging"
             if staging_root.exists() and not any(staging_root.iterdir()):
                 staging_root.rmdir()
+
+    def capture_batch(
+        self,
+        profile_name: str,
+        headers: dict[str, str],
+        body: bytes,
+    ) -> dict[str, Any]:
+        """Store one raw batch request verbatim without importing anything.
+
+        A deliberate dead end. Nothing here is validated, staged, paired, or
+        parsed, and no database is touched: the endpoint exists only to learn
+        what Auto Export puts on the wire once batch export is switched on, so
+        the real receiver can be built against an observed format rather than an
+        assumed one.
+
+        Headers and body are written as one JSON file per request, named by
+        arrival order and time so a multi-request batch can be replayed in the
+        order the phone sent it. The body is stored base64-encoded so a
+        malformed or non-UTF-8 payload is captured exactly as received rather
+        than being lost to a decode error — the whole point is to see what
+        actually arrived.
+
+        Args:
+            profile_name: Authenticated profile the request arrived for.
+            headers: Lowercased request headers.
+            body: Raw request body.
+
+        Returns:
+            A dict describing what was captured, for the response and the log.
+        """
+        profile = self.profiles[profile_name]
+        directory = profile.batch_capture
+        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+
+        received_at = _utc_now()
+        stamp = received_at.replace(":", "").replace("-", "")
+        digest = hashlib.sha256(body).hexdigest()
+        record = {
+            "received_at": received_at,
+            "profile": profile_name,
+            # Authorization is dropped rather than captured: it is the bearer
+            # token, and this file is a plain-text inspection artefact.
+            "headers": {k: v for k, v in headers.items() if k != "authorization"},
+            "bytes": len(body),
+            "sha256": digest,
+            "body_base64": base64.b64encode(body).decode("ascii"),
+        }
+        path = directory / f"{stamp}_{digest[:12]}.json"
+        _atomic_write(path, json.dumps(record, indent=2).encode())
+
+        # Bound the directory so a misconfigured automation cannot fill the disk.
+        existing = sorted(directory.glob("*.json"))
+        for stale in existing[:-HTTP_INGEST_BATCH_CAPTURE_MAX_FILES]:
+            try:
+                stale.unlink()
+            except OSError:
+                logger.warning("Could not remove old batch capture %s", stale)
+
+        logger.info(
+            "Captured batch request for %s (%d bytes) at %s — inspection only, "
+            "nothing imported",
+            profile_name,
+            len(body),
+            path,
+        )
+        return {
+            "captured": True,
+            "bytes": len(body),
+            "sha256": digest,
+            "stored_files": min(len(existing), HTTP_INGEST_BATCH_CAPTURE_MAX_FILES),
+        }
 
     def status(self) -> dict[str, dict[str, Any]]:
         """Return secret-free upload and import state for every HTTP profile."""

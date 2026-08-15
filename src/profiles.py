@@ -87,6 +87,17 @@ class Profile:
         return self.root / "Imports" / "archive"
 
     @property
+    def batch_capture(self) -> Path:
+        """Return this profile's raw batch-capture directory.
+
+        Holds verbatim requests posted to the batch inspection endpoint, which
+        never imports anything. Kept apart from :attr:`import_archive` because
+        nothing here has been validated or parsed — it exists to discover what
+        Auto Export actually sends with batch export switched on.
+        """
+        return self.root / "Imports" / "batch_capture"
+
+    @property
     def state(self) -> Path:
         """Return this profile's daemon state path."""
         return self.root / "daemon_state.json"

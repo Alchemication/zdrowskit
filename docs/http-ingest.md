@@ -296,6 +296,34 @@ Measured against real traffic this costs a few tens of MB per profile per
 year, dominated by workout GPS routes. There is no pruning; revisit that only
 if the directory ever actually grows enough to matter.
 
+## Batch Capture Endpoint (inspection only)
+
+`POST /v1/auto-export-batch` is a deliberate dead end. It authenticates with the
+same profile token as the real upload path and enforces the same content-type
+and byte ceiling, then writes the request verbatim and returns `200`. It never
+validates, stages, pairs, parses, or imports anything, and it cannot alter a
+database.
+
+It exists because the ingest pipeline was built and documented with Auto
+Export's **Batch export** switch off, and turning it on changes what the phone
+puts on the wire. Rather than guess at that format, point a throwaway automation
+at this path, run a small export with batching on, and read what actually
+arrived.
+
+```text
+Imports/batch_capture/20260815T104500Z_9f2c1ab34d55.json
+```
+
+Each file holds the arrival time, the request headers, the byte count, a SHA-256
+of the body, and the body itself base64-encoded — so a malformed or non-UTF-8
+payload is preserved exactly rather than lost to a decode error. The
+`Authorization` header is dropped, since the file is a plain-text artefact and
+that header is the bearer token. The directory is capped at
+`HTTP_INGEST_BATCH_CAPTURE_MAX_FILES` requests, oldest pruned first.
+
+Point a **copy** of an automation at this path rather than repointing the real
+one: while an automation posts here, its data is being discarded, not imported.
+
 ## Operations
 
 ```bash

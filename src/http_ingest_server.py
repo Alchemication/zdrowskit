@@ -11,6 +11,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 from http_ingest import (
+    BATCH_CAPTURE_PATH,
     HEALTH_PATH,
     UPLOAD_PATH,
     HttpIngestManager,
@@ -113,7 +114,7 @@ class _IngestHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         """Authenticate, validate, and durably stage an Auto Export payload."""
-        if self.path != UPLOAD_PATH:
+        if self.path not in (UPLOAD_PATH, BATCH_CAPTURE_PATH):
             self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
             return
         authorization = self.headers.get("Authorization", "")
@@ -175,6 +176,23 @@ class _IngestHandler(BaseHTTPRequestHandler):
             )
             return
         headers = {key.lower(): value for key, value in self.headers.items()}
+        if self.path == BATCH_CAPTURE_PATH:
+            # Inspection-only dead end: no validation, no staging, no import.
+            # Deliberately placed after the auth, content-type, and byte-ceiling
+            # checks above so an unauthenticated caller cannot write to disk.
+            try:
+                captured = self.server.manager.capture_batch(
+                    profile.name, headers, body
+                )
+            except OSError:
+                logger.exception("Batch capture failed for profile %s", profile.name)
+                self._send_json(
+                    HTTPStatus.INTERNAL_SERVER_ERROR,
+                    {"error": "Receiver could not store the capture"},
+                )
+                return
+            self._send_json(HTTPStatus.OK, captured)
+            return
         try:
             upload = validate_upload(headers, body)
             accepted = self.server.manager.accept(profile.name, upload, body)

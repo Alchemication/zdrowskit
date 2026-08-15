@@ -150,6 +150,15 @@ HTTP_INGEST_MAX_RECEIPTS: int = 100
 Enough history for ``ingest status`` to show a meaningful recent picture while
 keeping the state file small, since it is rewritten on every upload.
 """
+HTTP_INGEST_BATCH_CAPTURE_MAX_FILES: int = 200
+"""Captured batch requests retained per profile before the oldest are dropped.
+
+The batch endpoint exists to observe what Auto Export sends when batch export is
+switched on, so the useful unit is one whole export run. A three-month run is
+expected to arrive as tens of requests, not hundreds; two hundred holds several
+such runs for comparison while keeping the directory inspectable by hand and
+bounding what an accidentally-scheduled automation can leave on disk.
+"""
 PUBLIC_DNS_RESOLVER_URL: str = "https://cloudflare-dns.com/dns-query"
 """DNS-over-HTTPS endpoint used to resolve the Funnel hostname from outside.
 
