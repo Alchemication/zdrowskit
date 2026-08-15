@@ -4,6 +4,7 @@
 
 - Activity: `steps`, `distance_km`, `active_energy_kj`, `exercise_min`, `stand_hours`, `flights_climbed`
 - Cardiac: `resting_hr`, `hrv_ms`, `walking_hr_avg`, `hr_day_min`, `hr_day_max`, `vo2max`, `recovery_index`
+- Overnight recovery: `respiratory_rate` (breaths/min), `sleeping_wrist_temp_c` (°C) — each the mean across one night, stored under the **night-start date** like the sleep columns, so they line up with `sleep_total_h` for the same night. Both are absolute values whose useful signal is the deviation from that person's own recent norm, not the raw number; neither has a computed baseline, so derive the comparison window in SQL before drawing any conclusion from a single night.
 - Mobility: `walking_speed_kmh`, `walking_step_length_cm`, `walking_asymmetry_pct`, `walking_double_support_pct`, `stair_speed_up_ms`, `stair_speed_down_ms`, `running_stride_length_m`, `running_power_w`, `running_speed_kmh`
 - Note: `daily.running_speed_kmh` is a day-level Apple mobility metric. It is useful for broad daily movement context, but for run-session pace, distance, elevation, or running trends, prefer `workout_all`.
 
@@ -17,12 +18,16 @@
 - Pace tip: `duration_min / gpx_distance_km` = min/km when `gpx_distance_km IS NOT NULL`
 - Use `workout_all` as the canonical source for workout questions: runs, pace, splits/proxies, distance, elevation, workout HR, location/travel context, and session trends.
 
-**workout_split** — one row per completed 1 km split for imported route-based runs
+**workout_split** — one row per completed 1 km split for imported route-based runs, walks, hikes, and rides
 
 - Key: (`start_utc`, `km_index`) where `km_index` is 1-based within the workout
-- Columns: `pace_min_km`, `avg_speed_ms`, `elevation_gain_m`, `elevation_loss_m`
+- Columns: `pace_min_km`, `avg_speed_ms`, `elevation_gain_m`, `elevation_loss_m`, `hr_avg`, `hr_max`, `hr_coverage`, `cadence_spm`, `cadence_coverage`
+- `hr_avg` and `hr_max` are the heart rate for that kilometre alone, not the session average. `hr_coverage` is the fraction of the kilometre that carried heart-rate samples; when it is too low to average honestly, `hr_avg` and `hr_max` are NULL while `hr_coverage` still reports how thin the sampling was. Never treat a NULL `hr_avg` as a low heart rate, and filter on `hr_avg IS NOT NULL` when averaging across splits.
+- `cadence_spm` is steps per minute for that kilometre, withheld as NULL on the same coverage terms via its own `cadence_coverage` — the two series drop out independently, so one being NULL says nothing about the other.
+- Stride length in metres is not stored because it is exactly `1000 / (cadence_spm * pace_min_km)`. Compute it that way when asked; cadence and stride answer different questions, since a pace change at constant cadence is a stride change.
 - Join tip: join `workout_split.start_utc` to imported sessions in `workout` (or to `workout_all` on `start_utc`, noting that manual workouts will not have split rows)
 - Use `workout_split` for within-run pacing: late-run fade, fastest contiguous 5 km / 10 km segments, and elevation-adjusted pacing checks.
+- Use `hr_avg` against `pace_min_km` across a session for cardiac drift — heart rate climbing while pace holds is the decoupling signal that a single session-average heart rate hides entirely.
 
 **sleep_all** — sleep rows keyed by `date`, with `source` (`'import'` or `'manual'`)
 

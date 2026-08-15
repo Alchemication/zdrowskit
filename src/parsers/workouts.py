@@ -22,23 +22,35 @@ Example:
 from __future__ import annotations
 import json
 import math
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from config import WORKOUT_SPLIT_MIN_SAMPLE_COVERAGE
 from models import WorkoutSnapshot, WorkoutSplit
 
 
-# Maps workout name → category
+# Maps workout name → category. Auto Export writes Apple's own activity names,
+# which are gerunds for some types ("Outdoor Cycling") and not others ("Outdoor
+# Run"); the older Shortcuts format wrote the shorter "Outdoor Cycle". Both
+# spellings are listed because a name that misses lands in "other", where it is
+# silently excluded from every category-filtered query rather than erroring.
 _CATEGORY_MAP: dict[str, str] = {
     "outdoor run": "run",
     "indoor run": "run",
+    "run": "run",
     "treadmill running": "run",
     "traditional strength training": "lift",
     "functional strength training": "lift",
     "outdoor walk": "walk",
     "indoor walk": "walk",
+    # Hiking is outdoor ambulatory activity with usable route data. Walks feed
+    # only walk_count and no baseline, so folding hikes in adds them to volume
+    # and earns them splits without skewing a pace norm.
+    "hiking": "walk",
     "outdoor cycle": "cycle",
     "indoor cycle": "cycle",
+    "outdoor cycling": "cycle",
+    "indoor cycling": "cycle",
 }
 
 _MIN_WORKOUT_DURATION_MIN = 1.0
@@ -48,15 +60,28 @@ _SPLIT_DISTANCE_EPSILON_M = 1e-3
 
 # Max plausible per-segment speed (m/s) before treating a trackpoint pair as a
 # GPS glitch. Running world-record 1500 m pace is ~7.3 m/s; 10 m/s covers every
-# real human run split. Cycling leaves headroom for descents.
-_MAX_SEGMENT_SPEED_MS: dict[str, float] = {"run": 10.0, "cycle": 25.0}
+# real human run split. Cycling leaves headroom for descents. Walks are capped
+# above a run-shaped burst rather than at walking pace, since an "Outdoor Walk"
+# routinely contains jogged crossings and hikes contain scrambles.
+_MAX_SEGMENT_SPEED_MS: dict[str, float] = {"run": 10.0, "cycle": 25.0, "walk": 6.0}
 
 # Max plausible per-segment distance (m). Apple samples GPS at 1–5 s during
 # activity, so even fast cycling yields sub-100 m segments. A single segment
 # above this cap indicates a GPS dropout where sampling resumed far away; its
 # proportional time split produces phantom sub-elite paces. Caps are generous
 # to stay well above any legitimate observed segment.
-_MAX_SEGMENT_DISTANCE_M: dict[str, float] = {"run": 1200.0, "cycle": 3000.0}
+_MAX_SEGMENT_DISTANCE_M: dict[str, float] = {
+    "run": 1200.0,
+    "cycle": 3000.0,
+    "walk": 1200.0,
+}
+
+# Nominal span of one Apple per-minute workout bin (heart rate, step count).
+# The export stamps each bin at its start with no end time, spaced exactly 60 s
+# apart in observed data. A bin is treated as covering at most this long so a
+# sampling dropout reads as an uncovered gap rather than one reading smeared
+# across the minutes it was absent for.
+_BIN_SECONDS = 60.0
 
 
 def _category(name: str) -> str:
@@ -230,6 +255,163 @@ def _parse_route_timestamp(raw: object) -> datetime | None:
         return None
 
 
+def _extract_bins(
+    w: dict,
+    key: str,
+    value_field: str,
+    max_field: str | None = None,
+) -> list[tuple[datetime, datetime, float, float | None]]:
+    """Build sorted, non-overlapping one-minute bins from a workout series.
+
+    Auto Export ships several per-minute series in the same shape — heart rate
+    as ``heartRateData`` with {Min, Avg, Max}, step count as ``stepCount`` with
+    ``qty``. Each entry carries a start ``date`` but no end time, so a bin is
+    closed at the earlier of the next bin's start and ``_BIN_SECONDS`` after its
+    own: consecutive bins tile the workout, while a sampling dropout leaves a
+    real hole instead of stretching one reading over it.
+
+    Args:
+        w: Raw workout dict from the JSON.
+        key: Workout field holding the series, e.g. "heartRateData".
+        value_field: Entry field holding the primary value, e.g. "Avg".
+        max_field: Entry field holding a per-bin maximum, if the series has one.
+
+    Returns:
+        A list of (start, end, value, max_value) tuples ordered by start. Entries
+        without a usable timestamp or a positive value are dropped; max_value is
+        None when the series has no maximum or the export omits it.
+    """
+    raw = w.get(key)
+    if not isinstance(raw, list):
+        return []
+
+    parsed: list[tuple[datetime, float, float | None]] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        start = _parse_route_timestamp(entry.get("date"))
+        value = _finite_float(entry.get(value_field))
+        if start is None or value is None or value <= 0:
+            continue
+        max_value = _finite_float(entry.get(max_field)) if max_field else None
+        parsed.append((start, value, max_value))
+
+    parsed.sort(key=lambda item: item[0])
+
+    bins: list[tuple[datetime, datetime, float, float | None]] = []
+    for index, (start, value, max_value) in enumerate(parsed):
+        end = start + timedelta(seconds=_BIN_SECONDS)
+        if index + 1 < len(parsed):
+            end = min(end, parsed[index + 1][0])
+        if end > start:
+            bins.append((start, end, value, max_value))
+    return bins
+
+
+def _hr_for_window(
+    bins: list[tuple[datetime, datetime, float, float | None]],
+    window_start: datetime | None,
+    window_end: datetime | None,
+) -> tuple[float | None, int | None, float | None]:
+    """Summarise heart rate over one split's wall-clock window.
+
+    The average is weighted by how long each bin overlaps the window, so a bin
+    straddling a kilometre boundary contributes to both splits in proportion.
+
+    Args:
+        bins: Heart-rate bins from ``_extract_bins``.
+        window_start: Wall-clock start of the split.
+        window_end: Wall-clock end of the split.
+
+    Returns:
+        A (hr_avg, hr_max, coverage) tuple. Coverage is the fraction of the
+        window backed by samples, reported whenever the window is valid. hr_avg
+        and hr_max are None when coverage is below
+        ``WORKOUT_SPLIT_MIN_SAMPLE_COVERAGE``, so a thinly sampled kilometre
+        reads as unknown rather than as a confident number drawn from part of it.
+    """
+    if window_start is None or window_end is None:
+        return None, None, None
+
+    window_s = (window_end - window_start).total_seconds()
+    if window_s <= 0:
+        return None, None, None
+
+    weighted_sum = 0.0
+    covered_s = 0.0
+    peak_bpm: float | None = None
+    for bin_start, bin_end, avg_bpm, max_bpm in bins:
+        overlap_s = (
+            min(window_end, bin_end) - max(window_start, bin_start)
+        ).total_seconds()
+        if overlap_s <= 0:
+            continue
+        weighted_sum += avg_bpm * overlap_s
+        covered_s += overlap_s
+        candidate = max_bpm if max_bpm is not None else avg_bpm
+        if peak_bpm is None or candidate > peak_bpm:
+            peak_bpm = candidate
+
+    coverage = round(min(1.0, covered_s / window_s), 4)
+    if covered_s <= 0 or coverage < WORKOUT_SPLIT_MIN_SAMPLE_COVERAGE:
+        return None, None, coverage
+
+    return (
+        round(weighted_sum / covered_s, 1),
+        int(round(peak_bpm)) if peak_bpm is not None else None,
+        coverage,
+    )
+
+
+def _cadence_for_window(
+    bins: list[tuple[datetime, datetime, float, float | None]],
+    window_start: datetime | None,
+    window_end: datetime | None,
+) -> tuple[float | None, float | None]:
+    """Summarise step cadence over one split's wall-clock window.
+
+    Unlike heart rate, a step-count bin holds a total rather than a rate, so an
+    overlapping bin contributes the share of its steps matching the share of its
+    span inside the window. Cadence is then those steps over the time actually
+    sampled, which keeps it a true rate even when part of the split is missing —
+    the coverage floor decides separately whether that rate may stand in for the
+    whole kilometre.
+
+    Args:
+        bins: Step-count bins from ``_extract_bins``.
+        window_start: Wall-clock start of the split.
+        window_end: Wall-clock end of the split.
+
+    Returns:
+        A (cadence_spm, coverage) tuple in steps per minute. cadence_spm is None
+        when coverage is below ``WORKOUT_SPLIT_MIN_SAMPLE_COVERAGE``.
+    """
+    if window_start is None or window_end is None:
+        return None, None
+
+    window_s = (window_end - window_start).total_seconds()
+    if window_s <= 0:
+        return None, None
+
+    steps = 0.0
+    covered_s = 0.0
+    for bin_start, bin_end, bin_steps, _ in bins:
+        overlap_s = (
+            min(window_end, bin_end) - max(window_start, bin_start)
+        ).total_seconds()
+        if overlap_s <= 0:
+            continue
+        bin_span_s = (bin_end - bin_start).total_seconds()
+        steps += bin_steps * (overlap_s / bin_span_s)
+        covered_s += overlap_s
+
+    coverage = round(min(1.0, covered_s / window_s), 4)
+    if covered_s <= 0 or coverage < WORKOUT_SPLIT_MIN_SAMPLE_COVERAGE:
+        return None, coverage
+
+    return round(steps / (covered_s / 60.0), 1), coverage
+
+
 def _haversine_m(
     lat1: float,
     lon1: float,
@@ -265,8 +447,13 @@ def _extract_splits(
 
     Segments implying an implausible speed for the category (GPS teleports) are
     skipped so a single bad trackpoint cannot produce a phantom PR split. Only
-    ``run`` and ``cycle`` categories produce splits — swims, paddles, and other
-    activities have unreliable route data.
+    ``run``, ``walk``, and ``cycle`` categories produce splits — swims, paddles,
+    and other activities have unreliable route data.
+
+    Heart rate is attached per split by time-weighting the workout's one-minute
+    bins across the split's wall-clock window, with the resulting coverage
+    recorded so a partially sampled kilometre is not passed off as a measured
+    one.
 
     When ``session_elevation_gain_m`` is available, per-split elevation gain
     and loss are rescaled so the per-split gains sum to Apple's authoritative
@@ -291,6 +478,9 @@ def _extract_splits(
     if not isinstance(route, list) or len(route) < 2:
         return []
 
+    hr_bins = _extract_bins(w, "heartRateData", "Avg", max_field="Max")
+    step_bins = _extract_bins(w, "stepCount", "qty")
+
     km_index = 1
     split_distance_m = 0.0
     split_elapsed_s = 0.0
@@ -299,6 +489,11 @@ def _extract_splits(
     split_elevation_gain_m = 0.0
     split_elevation_loss_m = 0.0
     split_has_elevation = False
+    # Wall-clock cursor tracking the position reached inside the route. Splits
+    # fall part-way through a segment, so boundary times are interpolated rather
+    # than taken from a trackpoint.
+    split_start_ts: datetime | None = None
+    cursor_ts: datetime | None = None
     splits: list[WorkoutSplit] = []
 
     def add_piece(
@@ -316,11 +511,15 @@ def _extract_splits(
         nonlocal split_elevation_gain_m
         nonlocal split_elevation_loss_m
         nonlocal split_has_elevation
+        nonlocal cursor_ts
 
         piece_distance_m = distance_m * fraction
         piece_elapsed_s = elapsed_s * fraction
         split_distance_m += piece_distance_m
         split_elapsed_s += piece_elapsed_s
+
+        if cursor_ts is not None:
+            cursor_ts += timedelta(seconds=piece_elapsed_s)
 
         if segment_speed_ms is not None and piece_elapsed_s > 0:
             split_speed_weighted += segment_speed_ms * piece_elapsed_s
@@ -344,6 +543,7 @@ def _extract_splits(
         nonlocal split_elevation_gain_m
         nonlocal split_elevation_loss_m
         nonlocal split_has_elevation
+        nonlocal split_start_ts
 
         if split_elapsed_s <= 0:
             return
@@ -358,6 +558,11 @@ def _extract_splits(
             elevation_gain_m = round(split_elevation_gain_m, 2)
             elevation_loss_m = round(split_elevation_loss_m, 2)
 
+        hr_avg, hr_max, hr_coverage = _hr_for_window(hr_bins, split_start_ts, cursor_ts)
+        cadence_spm, cadence_coverage = _cadence_for_window(
+            step_bins, split_start_ts, cursor_ts
+        )
+
         splits.append(
             WorkoutSplit(
                 km_index=km_index,
@@ -365,8 +570,15 @@ def _extract_splits(
                 avg_speed_ms=avg_speed_ms,
                 elevation_gain_m=elevation_gain_m,
                 elevation_loss_m=elevation_loss_m,
+                hr_avg=hr_avg,
+                hr_max=hr_max,
+                hr_coverage=hr_coverage,
+                cadence_spm=cadence_spm,
+                cadence_coverage=cadence_coverage,
             )
         )
+
+        split_start_ts = cursor_ts
 
         km_index += 1
         split_distance_m = 0.0
@@ -403,6 +615,13 @@ def _extract_splits(
             or distance_m / elapsed_s > speed_cap_ms
         ):
             continue
+
+        # Re-anchor the cursor to this segment's real start time. Skipped
+        # glitch segments never advance it, so interpolating forward without a
+        # resync would drift; the first accepted segment also opens split 1.
+        if cursor_ts is None:
+            split_start_ts = prev_ts
+        cursor_ts = prev_ts
 
         prev_altitude = _finite_float(prev_point.get("altitude"))
         altitude = _finite_float(point.get("altitude"))

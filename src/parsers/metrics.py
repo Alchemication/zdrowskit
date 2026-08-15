@@ -56,7 +56,26 @@ METRIC_MAP: dict[str, str] = {
     "walking_double_support_percentage": "walking_double_support_pct",
     "walking_speed": "walking_speed_kmh",
     "walking_step_length": "walking_step_length_cm",
+    # overnight recovery metrics — see _NIGHT_ATTRIBUTED_METRICS
+    "respiratory_rate": "respiratory_rate",
+    "apple_sleeping_wrist_temperature": "sleeping_wrist_temp_c",
 }
+
+# Metrics sampled while asleep, which Apple stamps in local clock time. A single
+# night straddles midnight — observed respiratory-rate samples run 22:00 to
+# 07:00 — so filing them by calendar date splits one night across two rows and
+# lands the evening samples and the morning samples on different days. These are
+# attributed to the night-start date instead, the same rule sleep_analysis uses,
+# so a night's sleep, respiratory rate, and wrist temperature share one row and
+# can be read together.
+#
+# They are also averaged across the night rather than taking the last reading of
+# the date, which is what the generic qty path does. A night's mean is the
+# meaningful figure for both, and with samples on both sides of midnight
+# last-wins would otherwise pick a different point in the night for each metric.
+_NIGHT_ATTRIBUTED_METRICS: frozenset[str] = frozenset(
+    {"respiratory_rate", "apple_sleeping_wrist_temperature"}
+)
 
 
 def _parse_date(raw: str) -> str:
@@ -69,6 +88,26 @@ def _parse_date(raw: str) -> str:
         The YYYY-MM-DD portion, e.g. '2026-03-13'.
     """
     return raw.split(" ")[0]
+
+
+def _night_start_date(raw: str) -> str | None:
+    """Return the date of the night a timestamp belongs to.
+
+    Shifts back twelve hours before taking the date, so an evening reading and
+    the following pre-dawn readings land on the same night — the same rule
+    ``sleep_analysis`` uses for its nightly totals.
+
+    Args:
+        raw: Date string in the form '2026-03-13 23:00:00 +0000'.
+
+    Returns:
+        The night-start date as YYYY-MM-DD, or None if the string is unparseable.
+    """
+    try:
+        parsed = datetime.strptime(raw[:19], "%Y-%m-%d %H:%M:%S")
+    except (ValueError, TypeError):
+        return None
+    return (parsed - timedelta(hours=12)).date().isoformat()
 
 
 def parse_metrics_file(path: Path) -> dict[str, dict[str, float]]:
@@ -99,6 +138,8 @@ def parse_metrics_payload(data: dict) -> dict[str, dict[str, float]]:
         A dict mapping ISO date strings to a flat dict of field name → value.
     """
     result: dict[str, dict[str, float]] = {}
+    # (night_date, field) -> readings, averaged once the file is fully read.
+    night_readings: dict[tuple[str, str], list[float]] = {}
 
     for metric in data["data"]["metrics"]:
         name = metric["name"]
@@ -147,12 +188,29 @@ def parse_metrics_payload(data: dict) -> dict[str, dict[str, float]]:
         if field is None:
             continue  # unknown metric — ignore
 
+        if name in _NIGHT_ATTRIBUTED_METRICS:
+            for entry in metric.get("data", []):
+                if "qty" not in entry:
+                    continue
+                night_date = _night_start_date(entry["date"])
+                if night_date is None:
+                    continue
+                night_readings.setdefault((night_date, field), []).append(
+                    float(entry["qty"])
+                )
+            continue
+
         for entry in metric.get("data", []):
             if "qty" not in entry:
                 continue
             date = _parse_date(entry["date"])
             day = result.setdefault(date, {})
             day[field] = float(entry["qty"])
+
+    for (night_date, field), readings in night_readings.items():
+        result.setdefault(night_date, {})[field] = round(
+            sum(readings) / len(readings), 2
+        )
 
     return result
 

@@ -27,6 +27,19 @@ class WorkoutSplit:
         avg_speed_ms: Average speed in m/s across the split.
         elevation_gain_m: Positive elevation gain in metres inside the split.
         elevation_loss_m: Negative elevation loss in metres inside the split.
+        hr_avg: Time-weighted mean heart rate (bpm) across the split, or None
+            when hr_coverage falls below WORKOUT_SPLIT_MIN_SAMPLE_COVERAGE.
+        hr_max: Peak heart rate (bpm) sampled inside the split, on the same
+            coverage condition as hr_avg.
+        hr_coverage: Fraction of the split's elapsed time backed by heart-rate
+            samples. Populated even when hr_avg and hr_max are None, so an
+            unmeasured split is distinguishable from a poorly measured one.
+        cadence_spm: Mean step cadence in steps per minute across the split, or
+            None when cadence_coverage falls below
+            WORKOUT_SPLIT_MIN_SAMPLE_COVERAGE. Stride length in metres is
+            1000 / (cadence_spm * pace_min_km) and is deliberately not stored.
+        cadence_coverage: Fraction of the split's elapsed time backed by
+            step-count samples, on the same terms as hr_coverage.
     """
 
     km_index: int
@@ -34,6 +47,11 @@ class WorkoutSplit:
     avg_speed_ms: float | None = None
     elevation_gain_m: float | None = None
     elevation_loss_m: float | None = None
+    hr_avg: float | None = None
+    hr_max: int | None = None
+    hr_coverage: float | None = None
+    cadence_spm: float | None = None
+    cadence_coverage: float | None = None
 
 
 @dataclass
@@ -70,7 +88,7 @@ class WorkoutSnapshot:
     """
 
     type: str  # "Outdoor Run", "Traditional Strength Training", etc.
-    category: str  # "run" | "lift" | "walk" | "other"
+    category: str  # "run" | "lift" | "walk" | "cycle" | "other"
     start_utc: str  # ISO datetime string
     duration_min: float
     counts_as_lift: bool | None = None
@@ -127,6 +145,10 @@ class DailySnapshot:
         hr_day_min: Minimum heart rate recorded that day (bpm).
         hr_day_max: Maximum heart rate recorded that day (bpm).
         vo2max: VO2 max estimate (ml/kg/min); sparse — only recorded on run days.
+        respiratory_rate: Mean overnight breathing rate (breaths/min), stored
+            under the night-start date alongside the sleep columns.
+        sleeping_wrist_temp_c: Mean overnight wrist temperature in Celsius,
+            stored under the night-start date alongside the sleep columns.
         walking_speed_kmh: Average walking speed in km/h.
         walking_step_length_cm: Average walking step length in cm.
         walking_asymmetry_pct: Walking asymmetry percentage.
@@ -162,6 +184,9 @@ class DailySnapshot:
     hr_day_min: int | None = None
     hr_day_max: int | None = None
     vo2max: float | None = None  # sparse — run days only
+    # Overnight recovery — stored under the night-start date, like sleep
+    respiratory_rate: float | None = None
+    sleeping_wrist_temp_c: float | None = None
     # Mobility (daily averages from Apple)
     walking_speed_kmh: float | None = None
     walking_step_length_cm: float | None = None

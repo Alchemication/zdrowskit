@@ -68,6 +68,117 @@ class TestParseMetricsFile:
         assert result["2026-03-10"]["steps"] == 5000.0
 
 
+class TestOvernightMetrics:
+    """Respiratory rate and wrist temperature attach to the night, not the date."""
+
+    def _parse(self, tmp_path: Path, metrics: list[dict]) -> dict:
+        import json
+
+        path = tmp_path / "overnight.json"
+        path.write_text(json.dumps({"data": {"metrics": metrics}}))
+        return parse_metrics_file(path)
+
+    def test_samples_either_side_of_midnight_share_one_night(
+        self, tmp_path: Path
+    ) -> None:
+        """A 23:00 and an 06:00 reading belong to the same night-start date."""
+        result = self._parse(
+            tmp_path,
+            [
+                {
+                    "name": "respiratory_rate",
+                    "units": "count/min",
+                    "data": [
+                        {"date": "2026-03-09 23:00:00 +0000", "qty": 15.0},
+                        {"date": "2026-03-10 06:00:00 +0000", "qty": 17.0},
+                    ],
+                }
+            ],
+        )
+
+        assert result["2026-03-09"]["respiratory_rate"] == 16.0
+        assert "2026-03-10" not in result
+
+    def test_night_readings_are_averaged_not_last_wins(self, tmp_path: Path) -> None:
+        """The stored value is the night's mean, unlike the generic qty path."""
+        result = self._parse(
+            tmp_path,
+            [
+                {
+                    "name": "apple_sleeping_wrist_temperature",
+                    "units": "degC",
+                    "data": [
+                        {"date": "2026-03-10 01:00:00 +0000", "qty": 36.0},
+                        {"date": "2026-03-10 02:00:00 +0000", "qty": 36.5},
+                        {"date": "2026-03-10 03:00:00 +0000", "qty": 37.0},
+                    ],
+                }
+            ],
+        )
+
+        assert result["2026-03-09"]["sleeping_wrist_temp_c"] == 36.5
+
+    def test_aligns_with_sleep_night_attribution(self, tmp_path: Path) -> None:
+        """Sleep and the overnight metrics land on the same row for one night."""
+        result = self._parse(
+            tmp_path,
+            [
+                {
+                    "name": "sleep_analysis",
+                    "units": "hr",
+                    "data": [
+                        {
+                            "date": "2026-03-10 07:00:00 +0000",
+                            "sleepStart": "2026-03-09 23:30:00 +0000",
+                            "sleepEnd": "2026-03-10 07:00:00 +0000",
+                            "totalSleep": 7.0,
+                            "deep": 1.0,
+                            "core": 4.0,
+                            "rem": 2.0,
+                            "awake": 0.5,
+                        }
+                    ],
+                },
+                {
+                    "name": "respiratory_rate",
+                    "units": "count/min",
+                    "data": [
+                        {"date": "2026-03-09 23:45:00 +0000", "qty": 14.0},
+                        {"date": "2026-03-10 05:00:00 +0000", "qty": 16.0},
+                    ],
+                },
+                {
+                    "name": "apple_sleeping_wrist_temperature",
+                    "units": "degC",
+                    "data": [{"date": "2026-03-10 02:00:00 +0000", "qty": 36.4}],
+                },
+            ],
+        )
+
+        night = result["2026-03-09"]
+        assert night["sleep_total_h"] == 7.0
+        assert night["respiratory_rate"] == 15.0
+        assert night["sleeping_wrist_temp_c"] == 36.4
+
+    def test_unparseable_date_is_dropped(self, tmp_path: Path) -> None:
+        """A malformed timestamp drops that reading rather than raising."""
+        result = self._parse(
+            tmp_path,
+            [
+                {
+                    "name": "respiratory_rate",
+                    "units": "count/min",
+                    "data": [
+                        {"date": "not-a-date", "qty": 99.0},
+                        {"date": "2026-03-10 02:00:00 +0000", "qty": 15.0},
+                    ],
+                }
+            ],
+        )
+
+        assert result["2026-03-09"]["respiratory_rate"] == 15.0
+
+
 class TestParseAllMetrics:
     def _metrics_dir(self, fixtures_dir: Path, tmp_path: Path) -> Path:
         """Copy only the metrics JSON files into a temp directory."""

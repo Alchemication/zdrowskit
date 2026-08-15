@@ -150,4 +150,4 @@ After the first run above, to enable personalised LLM-generated reports:
 
 The LLM reads your profile, goals, training plan, and weekly journal alongside your health data. Once a report is written, a separate short call decides what is worth carrying forward and appends it to `history.md`, so later runs build on earlier weeks.
 
-Reports and coach reviews also include auto-computed seasonal baselines, lifetime milestones, and split-derived run pacing when route data is available.
+Reports and coach reviews also include auto-computed seasonal baselines, lifetime milestones, and split-derived run pacing and heart rate when route data is available.

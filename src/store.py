@@ -75,6 +75,8 @@ _DAILY_METRIC_COLUMNS = (
     "hr_day_min",
     "hr_day_max",
     "vo2max",
+    "respiratory_rate",
+    "sleeping_wrist_temp_c",
     "walking_speed_kmh",
     "walking_step_length_cm",
     "walking_asymmetry_pct",
@@ -265,8 +267,10 @@ def store_snapshots(conn: sqlite3.Connection, snapshots: list[DailySnapshot]) ->
                         """
                         INSERT INTO workout_split (
                             start_utc, km_index, pace_min_km, avg_speed_ms,
-                            elevation_gain_m, elevation_loss_m
-                        ) VALUES (?, ?, ?, ?, ?, ?)
+                            elevation_gain_m, elevation_loss_m,
+                            hr_avg, hr_max, hr_coverage,
+                            cadence_spm, cadence_coverage
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         [
                             (
@@ -276,6 +280,11 @@ def store_snapshots(conn: sqlite3.Connection, snapshots: list[DailySnapshot]) ->
                                 split.avg_speed_ms,
                                 split.elevation_gain_m,
                                 split.elevation_loss_m,
+                                split.hr_avg,
+                                split.hr_max,
+                                split.hr_coverage,
+                                split.cadence_spm,
+                                split.cadence_coverage,
                             )
                             for split in w.splits
                         ],
@@ -380,6 +389,11 @@ def load_snapshots(
                     avg_speed_ms=row["avg_speed_ms"],
                     elevation_gain_m=row["elevation_gain_m"],
                     elevation_loss_m=row["elevation_loss_m"],
+                    hr_avg=row["hr_avg"],
+                    hr_max=row["hr_max"],
+                    hr_coverage=row["hr_coverage"],
+                    cadence_spm=row["cadence_spm"],
+                    cadence_coverage=row["cadence_coverage"],
                 )
             )
 
@@ -446,6 +460,8 @@ def load_snapshots(
                 hr_day_min=row["hr_day_min"],
                 hr_day_max=row["hr_day_max"],
                 vo2max=row["vo2max"],
+                respiratory_rate=row["respiratory_rate"],
+                sleeping_wrist_temp_c=row["sleeping_wrist_temp_c"],
                 walking_speed_kmh=row["walking_speed_kmh"],
                 walking_step_length_cm=row["walking_step_length_cm"],
                 walking_asymmetry_pct=row["walking_asymmetry_pct"],

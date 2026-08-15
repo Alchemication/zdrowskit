@@ -259,6 +259,28 @@ holding three days of data reports a twelve-week average built from three days
 Requiring most of the window to be present makes the average mean what its
 label says.
 """
+WORKOUT_SPLIT_MIN_SAMPLE_COVERAGE: float = 0.6
+"""Fraction of a kilometre split that must carry samples to report a value for it.
+
+Governs every per-minute series attached to a split — heart rate and step
+cadence — because both arrive as the same one-minute bins from the same watch
+and fail the same way: sampling routinely starts after the workout begins or
+drops out mid-session. One knob rather than one per series, since the physical
+reason for the floor is identical.
+
+Measured over 1640 route-bearing runs and walks on 2026-08-15: 68.1% of workouts
+have at least 95% of their elapsed time covered by heart-rate bins, 6.5% fall
+between 50% and 80%, and 13.1% sit under 50% — one 30-minute run recorded
+nothing for its first 12 minutes. The distribution is bimodal, so the cut lands
+in the sparse middle rather than splitting a dense region.
+
+Six-tenths keeps splits where most of the kilometre was actually measured. At a
+5-6 min/km pace a split spans 5-6 bins, so this needs roughly 4 of them; below
+that the value is drawn from a minority of the split and can miss an entire
+surge or recovery while still reading as a normal number. Splits under the floor
+store their coverage and a null value, so a partial kilometre is visibly unknown
+rather than confidently wrong.
+"""
 
 
 MAX_HISTORY_ENTRIES: int = 10

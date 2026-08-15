@@ -125,7 +125,9 @@ Default iCloud data path:
 Notes:
 
 - Sleep data is pre-aggregated nightly totals, with no per-segment breakdown.
-- Workout routes are embedded as `route` arrays with latitude, longitude, altitude, speed, and timestamp. zdrowskit derives per-km splits from these when present.
+- Workout routes are embedded as `route` arrays with latitude, longitude, altitude, speed, and timestamp. zdrowskit derives per-km splits from these when present, for runs, walks, hikes, and cycles.
+- Each split also carries a heart rate and a step cadence, derived from the workout's one-minute `heartRateData` and `stepCount` bins across that kilometre. The watch often starts sampling late or drops out mid-session, so each series records the fraction of the split it actually covered; below the coverage floor the split keeps its pace and reports no value rather than averaging a partial kilometre. The two series drop out independently and are gated independently. See `WORKOUT_SPLIT_MIN_SAMPLE_COVERAGE` in `src/config.py` for the floor and how it was chosen.
+- Overnight respiratory rate and sleeping wrist temperature are stored per night as the mean of that night's readings, under the night-start date so they line up with the sleep columns. Apple samples both across midnight, so filing them by calendar date would split one night over two rows.
 - Route workouts are also reverse-geocoded during import into locality-level locations (for example Crosshaven, Warsaw, Malaga). Full route coordinates are not stored in SQLite. Set `ZDROWSKIT_LOCATION_GEOCODER=off` to disable the external lookup; the default provider is Nominatim and results are looked up/cached by coarse start coordinate.
 
 ## Historical Backfill

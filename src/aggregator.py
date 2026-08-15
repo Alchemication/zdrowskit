@@ -235,6 +235,11 @@ def _merge_run_session(workouts: list[WorkoutSnapshot]) -> WorkoutSnapshot:
                 avg_speed_ms=split.avg_speed_ms,
                 elevation_gain_m=split.elevation_gain_m,
                 elevation_loss_m=split.elevation_loss_m,
+                hr_avg=split.hr_avg,
+                hr_max=split.hr_max,
+                hr_coverage=split.hr_coverage,
+                cadence_spm=split.cadence_spm,
+                cadence_coverage=split.cadence_coverage,
             )
             for index, split in enumerate(
                 [split for workout in workouts for split in workout.splits],
