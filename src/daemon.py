@@ -1519,21 +1519,24 @@ class ProfileRuntime:
             "stale": "Daily health metrics are missing",
             # Named for the cause, not the symptom: this one is not the user's
             # to fix and the message exists so they stop looking.
-            "funnel": "Uploads are blocked upstream",
+            "funnel": "Your phone can't upload right now",
         }
         heading = headings.get(health.status, "Health data isn't syncing")
         if escalating:
-            heading = "Uploads have been blocked for two days"
+            heading = "Your phone hasn't been able to upload for two days"
         body = health.detail
         if escalating:
             body += (
-                " This one has run longer than any before it, so it is no "
+                " This one has lasted longer than any before it, so it is no "
                 "longer the usual pattern and is worth raising with Tailscale."
             )
         elif healed:
+            # Says what happened, not what the code called it. "Re-asserted the
+            # Funnel mapping" is the command's vocabulary and means nothing to
+            # someone reading a notification on their phone.
             body += (
-                " The Funnel mapping has been re-asserted, which sometimes "
-                "brings the record back within about fifteen minutes."
+                " I have asked Tailscale to publish it again, which has "
+                "sometimes worked within about fifteen minutes."
             )
         self._poller.send_reply(
             f"⚠️ **{heading}**\n\n{body}\n\n"

@@ -146,11 +146,15 @@ class TestPublicDnsHealth:
         ok, detail = public_dns_health("host.ts.net")
 
         assert ok is False
-        assert "no public DNS record" in detail
-        # The record is published by Tailscale, not by this host. Saying so is
-        # what stops the reader chasing a local repair, which is how the false
-        # fix reached the docs the first time.
-        assert "not this host" in detail
+        # Plain language: this is read on a phone, not in a terminal. Naming
+        # Tailscale as the party that stopped publishing is what stops the
+        # reader chasing a local repair, which is how the false fix reached the
+        # docs the first time.
+        assert "Tailscale has stopped publishing" in detail
+        assert "rather than anything on this Mac" in detail
+        # Jargon check: the operator should never meet the code's vocabulary.
+        for jargon in ("Funnel mapping", "re-assert", "DNS record", "receiver"):
+            assert jargon not in detail, f"jargon leaked into the alert: {jargon}"
         # A status line is skimmed, not read. Keep it short enough that the
         # last clause still lands; the detail belongs in the docs.
         assert len(detail) < 260, f"status detail too long to be read: {detail}"

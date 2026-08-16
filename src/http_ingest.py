@@ -645,9 +645,10 @@ def public_dns_health(dns_name: str) -> tuple[bool | None, str]:
     if unknown is not None:
         return None, unknown
     return False, (
-        f"The Funnel hostname {dns_name} has no public DNS record, so no phone "
-        "can reach the receiver. Tailscale publishes that record, not this "
-        "host, and past outages cleared on their own within about 36 hours."
+        f"Tailscale has stopped publishing the address your phone uploads to "
+        f"({dns_name}), so exports cannot get through. This is Tailscale's "
+        "side rather than anything on this Mac, and past outages have fixed "
+        "themselves within about 36 hours."
     )
 
 
