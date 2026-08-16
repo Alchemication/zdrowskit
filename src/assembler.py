@@ -136,6 +136,8 @@ def _build_snapshots(
             hr_day_min=int(round(hr_min_raw)) if hr_min_raw is not None else None,
             hr_day_max=int(round(hr_max_raw)) if hr_max_raw is not None else None,
             vo2max=_safe_float(m.get("vo2max")),
+            respiratory_rate=_safe_float(m.get("respiratory_rate")),
+            sleeping_wrist_temp_c=_safe_float(m.get("sleeping_wrist_temp_c")),
             walking_speed_kmh=_safe_float(m.get("walking_speed_kmh")),
             walking_step_length_cm=_safe_float(m.get("walking_step_length_cm")),
             walking_asymmetry_pct=_safe_float(m.get("walking_asymmetry_pct")),

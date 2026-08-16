@@ -178,3 +178,39 @@ class TestAssemble:
         )
         result = assemble(tmp_path)
         assert result[0].recovery_index is None
+
+
+class TestAssemblerCoversEveryStoredColumn:
+    """Guard the parser -> assembler -> store seam.
+
+    ``_build_snapshots`` constructs DailySnapshot from an explicit field list, so
+    a metric can be mapped in METRIC_MAP and have a database column while the
+    assembler quietly drops it in between. That happened to respiratory_rate and
+    sleeping_wrist_temp_c: both parsed, both stored, both silently NULL after a
+    full backfill. This test fails whenever a new stored column is added without
+    wiring it through the assembler.
+    """
+
+    def test_every_daily_column_survives_the_assembler(self) -> None:
+        from assembler import _build_snapshots
+        from store import _DAILY_METRIC_COLUMNS
+
+        # recovery_index is derived from hrv_ms and resting_hr rather than read
+        # from a parsed field, so it is driven by its inputs instead.
+        derived = {"recovery_index"}
+        parsed = {
+            column: 1.0 for column in _DAILY_METRIC_COLUMNS if column not in derived
+        }
+
+        snapshots = _build_snapshots({"2026-03-10": parsed}, [])
+
+        assert len(snapshots) == 1
+        missing = [
+            column
+            for column in _DAILY_METRIC_COLUMNS
+            if getattr(snapshots[0], column) is None
+        ]
+        assert missing == [], (
+            f"columns dropped by _build_snapshots: {missing}. Add them to the "
+            f"DailySnapshot(...) call in assembler._build_snapshots."
+        )
