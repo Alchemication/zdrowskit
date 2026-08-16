@@ -199,6 +199,12 @@ def public_dns_health(dns_name: str) -> tuple[bool | None, str]:
     record disappeared the loss stayed invisible for a day and the sync alert
     blamed the phone instead.
 
+    The failure is not locally repairable. Both ``tailscale funnel`` and a full
+    ``tailscale funnel reset`` plus re-enable were measured against a live
+    occurrence on 2026-08-16 and neither republished the record, so this check
+    reports how to diagnose rather than offering a command that looks like a
+    fix and is not.
+
     Args:
         dns_name: Tailscale DNS name serving the Funnel.
 
@@ -227,10 +233,18 @@ def public_dns_health(dns_name: str) -> tuple[bool | None, str]:
     if addresses:
         return True, f"resolves to {', '.join(addresses)}"
     return False, (
-        f"{dns_name} does not resolve outside the tailnet, so Auto Export "
-        "cannot reach it no matter how healthy the receiver looks here. "
-        "Re-publish the record with: tailscale funnel --bg --https=443 "
-        "http://127.0.0.1:8787"
+        f"{dns_name} has no public DNS record, so Auto Export cannot reach it "
+        "no matter how healthy the receiver looks here. Re-running "
+        "'tailscale funnel' does not fix this: measured on 2026-08-16 against "
+        "this exact failure, both re-asserting the config and a full "
+        "'tailscale funnel reset' plus re-enable left the record absent after "
+        "several minutes, while 'tailscale funnel status' reported Funnel on "
+        "throughout. The record is published by Tailscale's control plane, not "
+        "by this machine. Check DNS -> HTTPS Certificates in the Tailscale "
+        "admin console, which gates public .ts.net names; if that is enabled "
+        "and the record is still missing, it is a Tailscale-side fault worth "
+        "raising with them. Verify from outside the tailnet with: "
+        f"dig @1.1.1.1 {dns_name} A +short"
     )
 
 

@@ -136,7 +136,7 @@ class TestPublicDnsHealth:
         assert ok is True
         assert "176.58.88.82" in detail
 
-    def test_a_missing_record_is_reported_with_the_fix(
+    def test_a_missing_record_points_at_diagnosis_not_a_false_fix(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         # NXDOMAIN: MagicDNS still answers on this machine, so nothing local
@@ -146,8 +146,14 @@ class TestPublicDnsHealth:
         ok, detail = public_dns_health("host.ts.net")
 
         assert ok is False
-        assert "does not resolve outside the tailnet" in detail
-        assert "tailscale funnel --bg --https=443" in detail
+        assert "no public DNS record" in detail
+        # Re-running the Funnel command was measured against a live occurrence
+        # and did not republish the record. Recommending it reads as a fix and
+        # wastes the reader's time, so the message must route to the control
+        # plane and to an external verification instead.
+        assert "does not fix this" in detail
+        assert "HTTPS Certificates" in detail
+        assert "dig @1.1.1.1 host.ts.net" in detail
 
     def test_a_cname_without_an_address_is_not_treated_as_reachable(
         self, monkeypatch: pytest.MonkeyPatch
