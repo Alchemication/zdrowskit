@@ -201,9 +201,11 @@ def public_dns_health(dns_name: str) -> tuple[bool | None, str]:
 
     The failure is not locally repairable. Both ``tailscale funnel`` and a full
     ``tailscale funnel reset`` plus re-enable were measured against a live
-    occurrence on 2026-08-16 and neither republished the record, so this check
-    reports how to diagnose rather than offering a command that looks like a
-    fix and is not.
+    occurrence on 2026-08-16 and neither republished the record. Four observed
+    occurrences all cleared on their own within 26-35 hours, so the useful
+    message is short and terminal: it is broken, it is not yours to fix, it
+    will come back. The detail lives in ``docs/http-ingest.md`` rather than in
+    a status line nobody reads to the end.
 
     Args:
         dns_name: Tailscale DNS name serving the Funnel.
@@ -233,18 +235,9 @@ def public_dns_health(dns_name: str) -> tuple[bool | None, str]:
     if addresses:
         return True, f"resolves to {', '.join(addresses)}"
     return False, (
-        f"{dns_name} has no public DNS record, so Auto Export cannot reach it "
-        "no matter how healthy the receiver looks here. Re-running "
-        "'tailscale funnel' does not fix this: measured on 2026-08-16 against "
-        "this exact failure, both re-asserting the config and a full "
-        "'tailscale funnel reset' plus re-enable left the record absent after "
-        "several minutes, while 'tailscale funnel status' reported Funnel on "
-        "throughout. The record is published by Tailscale's control plane, not "
-        "by this machine. Check DNS -> HTTPS Certificates in the Tailscale "
-        "admin console, which gates public .ts.net names; if that is enabled "
-        "and the record is still missing, it is a Tailscale-side fault worth "
-        "raising with them. Verify from outside the tailnet with: "
-        f"dig @1.1.1.1 {dns_name} A +short"
+        f"no public DNS record for {dns_name} — uploads are down. "
+        "Tailscale-side; recreating the Funnel does not help. "
+        "Usually clears itself within ~36h. See docs/http-ingest.md"
     )
 
 

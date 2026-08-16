@@ -399,11 +399,26 @@ node was online with a key valid for months, and the `funnel` and
 Tailscale's control plane, not by this host, so no local command is known to
 restore it.
 
-When the hostname stops resolving outside the tailnet, diagnose rather than
-re-run commands: check **DNS -> HTTPS Certificates** in the Tailscale admin
-console, which gates public `.ts.net` names. If that is enabled and the record
-is still absent, it is a Tailscale-side fault; the useful evidence is Funnel on
-locally plus authoritative NXDOMAIN on both A and AAAA.
+Observed behaviour across four occurrences between 2026-08-02 and 2026-08-16:
+each lasted **26-35 hours and then cleared with no intervention**, twice
+resuming at ~06:10 when the first scheduled export of the day succeeded. Earlier
+recoveries were credited to whatever command had been run last, which is how the
+"recreate the Funnel" advice got into this document in the first place. Starts
+were roughly six days apart.
+
+So when the hostname stops resolving, the practical answer is to confirm it and
+wait. Confirm with `dig @1.1.1.1 <name> A +short` — blank means gone. Nothing is
+permanently lost: Metrics exports carry a rolling multi-day window and Workouts
+a two-day one, so the backlog re-sends once the record returns.
+
+If it has not cleared in ~48h, check **DNS -> HTTPS Certificates** in the
+Tailscale admin console, which gates public `.ts.net` names. If that is enabled
+and the record is still absent it is a Tailscale-side fault; the useful evidence
+is Funnel on locally, authoritative NXDOMAIN on both A and AAAA, and reset
+proven ineffective. `tailscale cert <name>` returning
+`500 failed to create DNS record` is the signature of
+[tailscale#18652](https://github.com/tailscale/tailscale/issues/18652), which
+reports these exact symptoms on macOS and was closed without a fix.
 
 After a genuine first-time setup, do give it a few minutes: initial DNS
 propagation and the ingress certificate both lag the command, and until the

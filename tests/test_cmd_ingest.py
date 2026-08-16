@@ -149,11 +149,12 @@ class TestPublicDnsHealth:
         assert "no public DNS record" in detail
         # Re-running the Funnel command was measured against a live occurrence
         # and did not republish the record. Recommending it reads as a fix and
-        # wastes the reader's time, so the message must route to the control
-        # plane and to an external verification instead.
-        assert "does not fix this" in detail
-        assert "HTTPS Certificates" in detail
-        assert "dig @1.1.1.1 host.ts.net" in detail
+        # sends the reader chasing it, so the line must say plainly that it is
+        # not theirs to fix.
+        assert "does not help" in detail
+        # A status line is skimmed, not read. Keep it short enough that the
+        # last clause still lands; the detail belongs in the docs.
+        assert len(detail) < 220, f"status detail too long to be read: {detail}"
 
     def test_a_cname_without_an_address_is_not_treated_as_reachable(
         self, monkeypatch: pytest.MonkeyPatch
