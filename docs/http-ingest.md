@@ -411,6 +411,11 @@ recoveries were credited to whatever command had been run last, which is how the
 "recreate the Funnel" advice got into this document in the first place. Starts
 were roughly six days apart.
 
+The daemon watches for this. After a few hours of upload silence it checks the
+public record, re-asserts the Funnel mapping once, and messages the operator —
+see [sync alerts](notifications.md#sync-alerts). Hosted profiles are not told,
+because one Funnel serves the whole host and none of them can act on it.
+
 So when the hostname stops resolving, the practical answer is to confirm it and
 wait. Confirm with `dig @1.1.1.1 <name> A +short` — blank means gone. Nothing is
 permanently lost: Metrics exports carry a rolling multi-day window and Workouts
