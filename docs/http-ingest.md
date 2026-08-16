@@ -389,47 +389,6 @@ access is down and the mapping must be recreated with the command above. CLI
 syntax changes across Tailscale releases, so use the current official command
 rather than an older `... off` example.
 
-Re-asserting the Funnel mapping does **not** republish the public DNS record.
-Measured against a live occurrence on 2026-08-16: with the hostname returning
-NXDOMAIN from two independent public resolvers, running `tailscale funnel`
-again changed nothing over several minutes. Throughout, `tailscale funnel
-status` reported Funnel on, the node was online with a key valid for months,
-and the `funnel` and `funnel-ports` capabilities were both granted.
-
-Whether a full `reset` plus re-enable helps is **unresolved**. That outage
-ended about fifteen minutes after a reset — but it was 28 hours old by then,
-already inside the 26-35 hour band that four observed occurrences cleared in
-with no intervention at all. One sample cannot separate the two, and assuming
-it can is exactly the mistake that put the original "recreate the Funnel is the
-fix" advice in this document. If you try a reset, note that public access is
-already down, so it costs little; just do not record it as the cure.
-
-Observed behaviour across four occurrences between 2026-08-02 and 2026-08-16:
-each lasted **26-35 hours and then cleared with no intervention**, twice
-resuming at ~06:10 when the first scheduled export of the day succeeded. Earlier
-recoveries were credited to whatever command had been run last, which is how the
-"recreate the Funnel" advice got into this document in the first place. Starts
-were roughly six days apart.
-
-The daemon watches for this. After a few hours of upload silence it checks the
-public record, re-asserts the Funnel mapping once, and messages the operator —
-see [sync alerts](notifications.md#sync-alerts). Hosted profiles are not told,
-because one Funnel serves the whole host and none of them can act on it.
-
-So when the hostname stops resolving, the practical answer is to confirm it and
-wait. Confirm with `dig @1.1.1.1 <name> A +short` — blank means gone. Nothing is
-permanently lost: Metrics exports carry a rolling multi-day window and Workouts
-a two-day one, so the backlog re-sends once the record returns.
-
-If it has not cleared in ~48h, check **DNS -> HTTPS Certificates** in the
-Tailscale admin console, which gates public `.ts.net` names. If that is enabled
-and the record is still absent it is a Tailscale-side fault; the useful evidence
-is Funnel on locally, authoritative NXDOMAIN on both A and AAAA, and reset
-proven ineffective. `tailscale cert <name>` returning
-`500 failed to create DNS record` is the signature of
-[tailscale#18652](https://github.com/tailscale/tailscale/issues/18652), which
-reports these exact symptoms on macOS and was closed without a fix.
-
 After a genuine first-time setup, do give it a few minutes: initial DNS
 propagation and the ingress certificate both lag the command, and until the
 certificate is issued the TLS handshake fails even though DNS already resolves.
@@ -437,6 +396,46 @@ certificate is issued the TLS handshake fails even though DNS already resolves.
 Stopping Funnel does not stop the zdrowskit daemon, Telegram, reports, or local
 database access. It only prevents new iPhone HTTP uploads from reaching the
 receiver.
+
+### Funnel DNS outages
+
+Roughly every six days, Tailscale stops publishing the public DNS record for the
+Funnel hostname. Uploads stop dead while every local signal stays green:
+`tailscale funnel status` reports Funnel on, the node is online, and MagicDNS
+still resolves the name on this host.
+
+**Confirm it, then wait.** Four occurrences between 2026-08-02 and 2026-08-16
+each lasted 26-35 hours and cleared with no intervention. Nothing is permanently
+lost — both exports carry rolling windows, so the backlog re-sends once the
+record returns.
+
+```bash
+dig @1.1.1.1 <name> A +short     # blank means gone; check AAAA too
+```
+
+The daemon already watches for this. After a few hours of upload silence it
+checks the record, asks Tailscale to publish it again, and messages the operator
+only — see [sync alerts](notifications.md#sync-alerts).
+
+Re-running `tailscale funnel` does **not** reliably fix it. Measured against a
+live occurrence: with the hostname returning NXDOMAIN from two public resolvers,
+re-asserting the mapping changed nothing over several minutes. Whether a full
+`reset` plus re-enable helps is unresolved — one outage ended fifteen minutes
+after a reset, but at 28 hours old it was already inside the band the others
+cleared in unaided. Earlier recoveries were credited to whichever command had
+been run last, which is how "recreate the Funnel is the fix" got into this
+document despite never having been shown to work.
+
+**If it has not cleared in ~48h** it is no longer the usual pattern. Check
+**DNS -> HTTPS Certificates** in the Tailscale admin console, which gates public
+`.ts.net` names. If that is enabled and the record is still absent, it is a
+Tailscale-side fault worth raising with them; the evidence is Funnel on locally
+plus authoritative NXDOMAIN on both A and AAAA. `tailscale cert <name>`
+returning `500 failed to create DNS record` is the signature of
+[tailscale#18652](https://github.com/tailscale/tailscale/issues/18652), which
+reports the same symptoms on macOS and was closed without a fix. Note that
+`tailscale cert` returns a cached certificate without touching that code path
+unless forced with `--min-validity`.
 
 ## Troubleshooting
 
