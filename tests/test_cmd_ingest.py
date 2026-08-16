@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from cmd_ingest import cmd_ingest_setup, cmd_ingest_token, public_dns_health
-from http_ingest import TokenRegistry
+from cmd_ingest import cmd_ingest_setup, cmd_ingest_token
+from http_ingest import TokenRegistry, public_dns_health
 from profiles import Profile, ProfileConfigError
 
 
@@ -121,7 +121,7 @@ class TestPublicDnsHealth:
                 raise payload
             return _FakeResolverResponse(payload)
 
-        monkeypatch.setattr("cmd_ingest.urllib.request.urlopen", fake_urlopen)
+        monkeypatch.setattr("http_ingest.urllib.request.urlopen", fake_urlopen)
 
     def test_a_published_record_is_reachable(
         self, monkeypatch: pytest.MonkeyPatch
@@ -151,7 +151,7 @@ class TestPublicDnsHealth:
         # and did not republish the record. Recommending it reads as a fix and
         # sends the reader chasing it, so the line must say plainly that it is
         # not theirs to fix.
-        assert "does not help" in detail
+        assert "not repairable from here" in detail
         # A status line is skimmed, not read. Keep it short enough that the
         # last clause still lands; the detail belongs in the docs.
         assert len(detail) < 220, f"status detail too long to be read: {detail}"
@@ -183,4 +183,51 @@ class TestPublicDnsHealth:
     ) -> None:
         self._resolver(monkeypatch, ValueError("not json"))
 
+        assert public_dns_health("host.ts.net")[0] is None
+
+
+class TestPublicDnsRecordTypes:
+    """A negative answer for one record type must not declare an outage."""
+
+    def test_aaaa_alone_counts_as_reachable(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Observed 2026-08-16: minutes after the record was republished,
+        # Cloudflare still returned NXDOMAIN for A while answering AAAA, and the
+        # phone was uploading the whole time. Reporting that as an outage would
+        # alert against a working pipe.
+        def fake_urlopen(request: object, timeout: float = 0) -> object:
+            url = request.full_url  # type: ignore[attr-defined]
+            if "type=AAAA" in url:
+                return _FakeResolverResponse(
+                    {"Status": 0, "Answer": [{"type": 28, "data": "2a00:dd80:3a::131"}]}
+                )
+            return _FakeResolverResponse({"Status": 3})
+
+        monkeypatch.setattr("http_ingest.urllib.request.urlopen", fake_urlopen)
+
+        ok, detail = public_dns_health("host.ts.net")
+
+        assert ok is True
+        assert "2a00:dd80:3a::131" in detail
+
+    def test_both_types_missing_is_an_outage(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def fake_urlopen(request: object, timeout: float = 0) -> object:
+            return _FakeResolverResponse({"Status": 3})
+
+        monkeypatch.setattr("http_ingest.urllib.request.urlopen", fake_urlopen)
+
+        assert public_dns_health("host.ts.net")[0] is False
+
+    def test_resolver_failure_on_both_types_is_unknown(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def fake_urlopen(request: object, timeout: float = 0) -> object:
+            raise urllib.error.URLError("offline")
+
+        monkeypatch.setattr("http_ingest.urllib.request.urlopen", fake_urlopen)
+
+        # Still None, not False: an offline host has proved nothing.
         assert public_dns_health("host.ts.net")[0] is None

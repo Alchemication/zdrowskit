@@ -119,6 +119,7 @@ class TestDoctorImportSource:
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         import cmd_ingest as cmd_ingest_module
+        import http_ingest as http_ingest_module
 
         repo = tmp_path / "repo"
         app_home = tmp_path / "app"
@@ -152,7 +153,7 @@ class TestDoctorImportSource:
             cmd_ingest_module, "_tailscale_dns_name", lambda: "host.ts.net"
         )
         monkeypatch.setattr(
-            cmd_ingest_module,
+            http_ingest_module,
             "public_dns_health",
             lambda name: (False, f"{name} does not resolve outside the tailnet"),
         )
@@ -177,6 +178,7 @@ class TestDoctorImportSource:
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         import cmd_ingest as cmd_ingest_module
+        import http_ingest as http_ingest_module
 
         repo = tmp_path / "repo"
         app_home = tmp_path / "app"
@@ -208,7 +210,7 @@ class TestDoctorImportSource:
             cmd_ingest_module, "_tailscale_dns_name", lambda: "host.ts.net"
         )
         monkeypatch.setattr(
-            cmd_ingest_module,
+            http_ingest_module,
             "public_dns_health",
             lambda name: (None, "could not reach the public resolver"),
         )

@@ -389,15 +389,20 @@ access is down and the mapping must be recreated with the command above. CLI
 syntax changes across Tailscale releases, so use the current official command
 rather than an older `... off` example.
 
-Recreating the Funnel does **not** reliably republish the public DNS record.
+Re-asserting the Funnel mapping does **not** republish the public DNS record.
 Measured against a live occurrence on 2026-08-16: with the hostname returning
-NXDOMAIN from two independent public resolvers, re-asserting the mapping did
-nothing, and a full `reset` plus re-enable did nothing either, each given
-several minutes. Throughout, `tailscale funnel status` reported Funnel on, the
-node was online with a key valid for months, and the `funnel` and
-`funnel-ports` capabilities were both granted. The record is published by
-Tailscale's control plane, not by this host, so no local command is known to
-restore it.
+NXDOMAIN from two independent public resolvers, running `tailscale funnel`
+again changed nothing over several minutes. Throughout, `tailscale funnel
+status` reported Funnel on, the node was online with a key valid for months,
+and the `funnel` and `funnel-ports` capabilities were both granted.
+
+Whether a full `reset` plus re-enable helps is **unresolved**. That outage
+ended about fifteen minutes after a reset — but it was 28 hours old by then,
+already inside the 26-35 hour band that four observed occurrences cleared in
+with no intervention at all. One sample cannot separate the two, and assuming
+it can is exactly the mistake that put the original "recreate the Funnel is the
+fix" advice in this document. If you try a reset, note that public access is
+already down, so it costs little; just do not record it as the cure.
 
 Observed behaviour across four occurrences between 2026-08-02 and 2026-08-16:
 each lasted **26-35 hours and then cleared with no intervention**, twice
@@ -437,7 +442,7 @@ receiver.
 | First Funnel command opens a browser | Approve Funnel for the tailnet; this provisions its policy and HTTPS support. |
 | Public URL does not resolve immediately | Initial public DNS propagation can take up to ten minutes. Avoid repeatedly recreating the Funnel/certificate. |
 | Local `/healthz` works, public URL does not | Run `tailscale funnel status`; port 443 must be a Funnel proxy to `http://127.0.0.1:8787`, not a private Tailscale Serve mapping. |
-| Public URL worked before and now does not | Confirm with `dig @1.1.1.1 <name> A +short` — blank means the record is gone. Do **not** test with plain `curl` or `dig` on a tailnet machine: MagicDNS answers locally with a `100.x` address, so both succeed while the phone cannot connect. Recreating the Funnel is not a known fix; see *Stop or Recreate the Funnel* above. |
+| Public URL worked before and now does not | Check **both** record types: `dig @1.1.1.1 <name> A +short` and `... AAAA +short`. Either one answering means the name resolves; a resolver can hold a stale negative answer for one while serving the other, which was observed minutes after a record was republished. Do **not** test with plain `curl` or `dig` on a tailnet machine: MagicDNS answers locally with a `100.x` address, so both succeed while the phone cannot connect. See *Stop or Recreate the Funnel* above. |
 | Auto Export reports "A server with the specified hostname could not be found" | The public DNS record is gone. `main.py ingest status` shows `Public DNS: NOT REACHABLE`. Recreate the Funnel to republish it, then allow a few minutes for DNS and the certificate. |
 | `/` returns `404` | Expected. Production exposes `GET /healthz` and authenticated `POST /v1/auto-export`, not a directory listing. |
 | Auto Export gets `401` | Re-enter the exact `Bearer <token>` authorization value or rotate the profile token. |

@@ -14,6 +14,9 @@ import re
 import secrets
 import shutil
 import threading
+import urllib.error
+import urllib.parse
+import urllib.request
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from http import HTTPStatus
@@ -22,6 +25,7 @@ from typing import Any, Callable
 
 from config import (
     DATA_HEALTH_STALE_CUTOFF_HOUR,
+    FUNNEL_DNS_CHECK_AFTER_H,
     HTTP_INGEST_BATCH_CAPTURE_MAX_FILES,
     HTTP_INGEST_MAX_JSON_DEPTH,
     HTTP_INGEST_MAX_JSON_NODES,
@@ -30,6 +34,8 @@ from config import (
     HTTP_INGEST_MAX_RECEIPTS,
     HTTP_INGEST_MAX_ROUTE_POINTS,
     HTTP_INGEST_MAX_WORKOUTS,
+    PUBLIC_DNS_RESOLVER_URL,
+    PUBLIC_DNS_TIMEOUT_S,
 )
 from parsers.metrics import parse_metrics_payload
 from parsers.workouts import parse_workouts_payload
@@ -575,6 +581,76 @@ def _assess_data_freshness(
     )
 
 
+def public_dns_health(dns_name: str) -> tuple[bool | None, str]:
+    """Check that the Funnel hostname resolves for anything outside the tailnet.
+
+    Every local signal can look perfect while uploads are impossible: the
+    receiver answers on loopback, ``tailscale funnel status`` says the Funnel
+    is on, and MagicDNS resolves the hostname on this machine. None of that
+    involves the public DNS record the phone actually needs, so when that
+    record disappeared the loss stayed invisible for a day and the sync alert
+    blamed the phone instead.
+
+    Re-asserting the Funnel config does not republish the record; that was
+    measured against a live occurrence on 2026-08-16 and changed nothing over
+    several minutes. Whether ``tailscale funnel reset`` plus re-enable helps is
+    genuinely unresolved: that outage ended roughly fifteen minutes after a
+    reset, but at 28 hours old it was already inside the 26-35 hour band the
+    four observed occurrences cleared in on their own. One sample cannot
+    separate the two, so the message promises neither.
+
+    The detail lives in ``docs/http-ingest.md`` rather than in a status line
+    nobody reads to the end.
+
+    Args:
+        dns_name: Tailscale DNS name serving the Funnel.
+
+    Returns:
+        Whether the name resolves publicly and a detail line. The flag is
+        ``None`` when the check could not run at all, which must not be
+        reported as a failure — an offline laptop is not a missing record.
+    """
+    unknown: str | None = None
+    # A then AAAA, because a resolver can hold a stale negative answer for one
+    # while already serving the other. Observed on 2026-08-16: minutes after the
+    # record was republished, Cloudflare still returned NXDOMAIN for A while
+    # answering AAAA, and the phone was uploading throughout. Asking only about
+    # A would have raised an outage alert against a working pipe, which is the
+    # fastest way to teach someone to ignore this check.
+    for record_type, type_code in (("A", 1), ("AAAA", 28)):
+        query = urllib.parse.urlencode({"name": dns_name, "type": record_type})
+        request = urllib.request.Request(
+            f"{PUBLIC_DNS_RESOLVER_URL}?{query}",
+            headers={"accept": "application/dns-json"},
+        )
+        try:
+            with urllib.request.urlopen(
+                request, timeout=PUBLIC_DNS_TIMEOUT_S
+            ) as response:
+                payload = json.loads(response.read())
+        except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
+            unknown = f"could not reach the public resolver ({exc})"
+            continue
+        if not isinstance(payload, dict):
+            unknown = "the public resolver returned an unreadable answer"
+            continue
+        addresses = [
+            answer.get("data")
+            for answer in payload.get("Answer") or []
+            if isinstance(answer, dict) and answer.get("type") == type_code
+        ]
+        if addresses:
+            return True, f"resolves to {', '.join(addresses)}"
+
+    if unknown is not None:
+        return None, unknown
+    return False, (
+        f"no public DNS record for {dns_name} — uploads are down. "
+        "Tailscale-side, and not repairable from here. "
+        "Usually clears itself within ~36h. See docs/http-ingest.md"
+    )
+
+
 def assess_ingest_health(
     profile: Profile,
     *,
@@ -582,11 +658,12 @@ def assess_ingest_health(
     stale_after_days: int,
     split_after_h: float,
     pair_window_s: float,
+    resolve_funnel_dns: Callable[[], tuple[bool | None, str]] | None = None,
     now: datetime | None = None,
 ) -> IngestHealth:
     """Judge whether a profile's phone is still successfully feeding the system.
 
-    Three conditions are worth a message, and they are checked in order of how
+    Four conditions are worth a message, and they are checked in order of how
     specific they are about the cause:
 
     ``error``
@@ -599,6 +676,15 @@ def assess_ingest_health(
         drifted apart — but only when the arrival gap actually exceeds the
         pairing window, which is why that window has to be passed in. Inside
         it, the phone is doing its job and the fault is on this side.
+    ``funnel``
+        Uploads have gone quiet and the Funnel's public DNS record is missing,
+        so the phone cannot reach the receiver however healthy it looks here.
+        Only checked after ``FUNNEL_DNS_CHECK_AFTER_H`` of silence, since an
+        arriving upload has already proved the record resolves. Reported
+        separately from ``stale`` because the cause is known, external, and
+        nobody's to fix: measured occurrences cleared themselves in 26-35
+        hours, and no local command shortened one.
+
     ``stale``
         The pipe looks fine and days of data are missing anyway. The catch-all,
         and the only one measured against stored data rather than upload
@@ -619,6 +705,11 @@ def assess_ingest_health(
             ``stale``.
         split_after_h: Hours without a successful import, while uploads keep
             arriving, before reporting ``split``.
+        resolve_funnel_dns: Returns whether the Funnel hostname resolves
+            publicly, as ``public_dns_health`` does. Injected so this stays a
+            pure function over the state file, and omitted for transports with
+            no Funnel. A ``None`` result means the check could not run and is
+            never treated as a fault.
         pair_window_s: Arrival gap the importer tolerates, so a stall can be
             blamed on drifting schedules only when the halves really missed it.
         now: Override for the current time.
@@ -670,6 +761,20 @@ def assess_ingest_health(
         )
         if pipe is not None:
             return pipe
+
+    # Silence is the only state where the public DNS record can say something
+    # the last upload has not already proved. Checked here, after the local
+    # faults above, because those are repairable by their owner and this is not.
+    if resolve_funnel_dns is not None and (now - last_upload).total_seconds() >= (
+        FUNNEL_DNS_CHECK_AFTER_H * 3600
+    ):
+        resolves, dns_detail = resolve_funnel_dns()
+        if resolves is False:
+            return IngestHealth(
+                status="funnel",
+                detail=dns_detail,
+                since=last_upload.isoformat(),
+            )
 
     if last_import is None:
         # An upload has landed but no pair has completed a cycle yet, so there is

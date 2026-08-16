@@ -587,7 +587,8 @@ def cmd_doctor(args: argparse.Namespace) -> None:  # noqa: ARG001
                     False,
                 )
             )
-        from cmd_ingest import _tailscale_dns_name, public_dns_health, receiver_health
+        from cmd_ingest import _tailscale_dns_name, receiver_health
+        from http_ingest import public_dns_health
 
         receiver_ok, receiver_detail = receiver_health()
         checks.append(("HTTP receiver", receiver_ok, receiver_detail, True))

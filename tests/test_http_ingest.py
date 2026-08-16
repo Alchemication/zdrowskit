@@ -1289,3 +1289,104 @@ class TestBatchCaptureEndpoint:
 
         kept = list(profile.batch_capture.glob("*.json"))
         assert len(kept) == HTTP_INGEST_BATCH_CAPTURE_MAX_FILES
+
+
+class TestFunnelDnsHealth:
+    """Detect the outage where the Funnel's public DNS record disappears.
+
+    Every local signal stays green through this: the receiver answers on
+    loopback, `tailscale funnel status` says the Funnel is on, and MagicDNS
+    resolves the hostname on the host. Four occurrences between 2026-08-02 and
+    2026-08-16 each ran 26-35 hours and were only noticed by hand.
+    """
+
+    def _state(self, profile: Profile, payload: dict) -> None:
+        path = profile.http_cache / ".ingest_state.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"version": 1, **payload}), encoding="utf-8")
+
+    def _quiet_for(self, profile: Profile, hours: float) -> None:
+        """Write a state where the last upload landed and imported *hours* ago."""
+        moment = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+        self._state(
+            profile,
+            {
+                "uploads": {
+                    "metrics": {"received_at": moment, "sha256": "a"},
+                    "workouts": {"received_at": moment, "sha256": "b"},
+                },
+                "last_imported_at": moment,
+                "receipts": [],
+            },
+        )
+
+    def _assess(self, profile: Profile, resolver, **kwargs):
+        kwargs.setdefault("newest_data_date", newest_expected_day(_NOW).isoformat())
+        kwargs.setdefault("stale_after_days", 30)
+        kwargs.setdefault("split_after_h", 6)
+        kwargs.setdefault("pair_window_s", _PAIR_WINDOW_S)
+        return assess_ingest_health(profile, resolve_funnel_dns=resolver, **kwargs)
+
+    def test_silence_plus_a_missing_record_is_reported_as_funnel(
+        self, tmp_path: Path
+    ) -> None:
+        profile = _profile(tmp_path)
+        self._quiet_for(profile, 30)
+
+        health = self._assess(profile, lambda: (False, "no public DNS record for x"))
+
+        assert health.status == "funnel"
+        assert health.is_alerting is True
+        assert "no public DNS record" in health.detail
+        # The alert says when uploads stopped, not when the check noticed.
+        assert health.since is not None
+
+    def test_an_unreachable_resolver_is_never_a_fault(self, tmp_path: Path) -> None:
+        profile = _profile(tmp_path)
+        self._quiet_for(profile, 30)
+
+        # A host that is itself offline cannot distinguish a missing record from
+        # its own broken network. Reporting that as a Funnel outage would train
+        # the owner to ignore the alert on the day it is right.
+        health = self._assess(profile, lambda: (None, "could not reach the resolver"))
+
+        assert health.status != "funnel"
+
+    def test_a_resolving_record_is_not_a_fault(self, tmp_path: Path) -> None:
+        profile = _profile(tmp_path)
+        self._quiet_for(profile, 30)
+
+        health = self._assess(profile, lambda: (True, "resolves to 1.2.3.4"))
+
+        assert health.status != "funnel"
+
+    def test_recent_uploads_skip_the_lookup_entirely(self, tmp_path: Path) -> None:
+        profile = _profile(tmp_path)
+        self._quiet_for(profile, 0.5)
+        calls: list[int] = []
+
+        def resolver() -> tuple[bool | None, str]:
+            calls.append(1)
+            return False, "no public DNS record for x"
+
+        health = self._assess(profile, resolver)
+
+        # An upload that just landed has already proved the record resolves, so
+        # spending a network call to ask again is waste on every healthy cycle.
+        assert calls == []
+        assert health.status != "funnel"
+
+    def test_omitting_the_resolver_disables_the_check(self, tmp_path: Path) -> None:
+        profile = _profile(tmp_path)
+        self._quiet_for(profile, 30)
+
+        # Drive and local transports have no Funnel to be missing.
+        health = assess_ingest_health(
+            profile,
+            newest_data_date=newest_expected_day(_NOW).isoformat(),
+            stale_after_days=30,
+            split_after_h=6,
+            pair_window_s=_PAIR_WINDOW_S,
+        )
+
+        assert health.status != "funnel"

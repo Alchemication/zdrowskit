@@ -1232,7 +1232,12 @@ class ProfileRuntime:
         Args:
             prefs: Raw notification preferences for this profile.
         """
-        from http_ingest import assess_ingest_health, newest_expected_day
+        from cmd_ingest import _tailscale_dns_name
+        from http_ingest import (
+            assess_ingest_health,
+            newest_expected_day,
+            public_dns_health,
+        )
         from notification_prefs import (
             effective_notification_prefs,
             evaluate_data_health_delivery,
@@ -1243,6 +1248,20 @@ class ProfileRuntime:
 
         settings = effective_notification_prefs(prefs)["data_health"]
         assessment_now = datetime.now(timezone.utc)
+
+        def resolve_funnel_dns() -> tuple[bool | None, str]:
+            """Resolve the Funnel hostname from outside the tailnet.
+
+            Only called after a stretch of upload silence, so the cost is a
+            single DoH request on an already-suspicious cycle. An unknown
+            hostname reports None rather than False: a host that cannot name
+            its own Funnel has not proved the record is missing.
+            """
+            dns_name = _tailscale_dns_name()
+            if not dns_name:
+                return None, "the Tailscale DNS name could not be determined"
+            return public_dns_health(dns_name)
+
         try:
             newest_data_date = self._newest_data_date(
                 through=newest_expected_day(assessment_now).isoformat()
@@ -1253,6 +1272,7 @@ class ProfileRuntime:
                 stale_after_days=settings["stale_after_days"],
                 split_after_h=settings["split_after_h"],
                 pair_window_s=HTTP_INGEST_PAIR_WINDOW_S,
+                resolve_funnel_dns=resolve_funnel_dns,
                 now=assessment_now,
             )
         except (OSError, sqlite3.Error):
@@ -1346,11 +1366,13 @@ class ProfileRuntime:
                 decision.get("reason", "unknown"),
             )
             return
-        heading = (
-            "Daily health metrics are missing"
-            if health.status == "stale"
-            else "Health data isn't syncing"
-        )
+        headings = {
+            "stale": "Daily health metrics are missing",
+            # Named for the cause, not the symptom: this one is not the user's
+            # to fix and the message exists so they stop looking.
+            "funnel": "Uploads are blocked upstream",
+        }
+        heading = headings.get(health.status, "Health data isn't syncing")
         self._poller.send_reply(
             f"⚠️ **{heading}**\n\n{health.detail}\n\n"
             "Say _mute sync alerts for a week_ to silence this."

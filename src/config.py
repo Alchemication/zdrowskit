@@ -219,6 +219,20 @@ still arriving prove the phone is reachable, so a stalled import is a definite
 fault on this end rather than a quiet evening, and waiting a day to say so
 wastes the window in which the pairing can still be fixed.
 """
+FUNNEL_DNS_CHECK_AFTER_H: float = 3
+"""Upload silence before the Funnel's public DNS record is checked.
+
+While uploads are arriving the record demonstrably resolves, so checking it is
+a wasted network call on every healthy cycle. Silence is the only state where
+the answer can differ from what the last upload already proved.
+
+Three hours sits below the shortest observed real outage (26h) and above the
+gap between daytime exports, so a genuine outage is caught in its first hours
+while an ordinary lull between automations does not trigger a lookup. Overnight
+quiet does cause a few lookups that return healthy; that costs one DoH request
+each and alerts nobody, which is the right trade against detecting a dead pipe
+a day late.
+"""
 DATA_HEALTH_QUIET_START_HHMM: str = "22:00"
 """Local time after which ingest-health alerts are held until morning.
 

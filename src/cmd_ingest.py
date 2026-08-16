@@ -7,7 +7,6 @@ import json
 import shutil
 import subprocess
 import urllib.error
-import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -16,10 +15,13 @@ from config import (
     HTTP_INGEST_PAIR_WINDOW_S,
     HTTP_INGEST_PORT,
     HTTP_INGEST_TOKEN_FILE,
-    PUBLIC_DNS_RESOLVER_URL,
-    PUBLIC_DNS_TIMEOUT_S,
 )
-from http_ingest import HttpIngestManager, TokenRegistry, UPLOAD_PATH
+from http_ingest import (
+    HttpIngestManager,
+    TokenRegistry,
+    UPLOAD_PATH,
+    public_dns_health,
+)
 from profiles import Profile, ProfileConfigError, load_profiles
 
 PAIR_STATE_LABELS = {
@@ -187,58 +189,6 @@ def receiver_health() -> tuple[bool, str]:
             return response.status == 200, f"HTTP {response.status} at {url}"
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         return False, f"not answering at {url} ({exc}); is the daemon running?"
-
-
-def public_dns_health(dns_name: str) -> tuple[bool | None, str]:
-    """Check that the Funnel hostname resolves for anything outside the tailnet.
-
-    Every local signal can look perfect while uploads are impossible: the
-    receiver answers on loopback, ``tailscale funnel status`` says the Funnel
-    is on, and MagicDNS resolves the hostname on this machine. None of that
-    involves the public DNS record the phone actually needs, so when that
-    record disappeared the loss stayed invisible for a day and the sync alert
-    blamed the phone instead.
-
-    The failure is not locally repairable. Both ``tailscale funnel`` and a full
-    ``tailscale funnel reset`` plus re-enable were measured against a live
-    occurrence on 2026-08-16 and neither republished the record. Four observed
-    occurrences all cleared on their own within 26-35 hours, so the useful
-    message is short and terminal: it is broken, it is not yours to fix, it
-    will come back. The detail lives in ``docs/http-ingest.md`` rather than in
-    a status line nobody reads to the end.
-
-    Args:
-        dns_name: Tailscale DNS name serving the Funnel.
-
-    Returns:
-        Whether the name resolves publicly and a detail line. The flag is
-        ``None`` when the check could not run at all, which must not be
-        reported as a failure — an offline laptop is not a missing record.
-    """
-    query = urllib.parse.urlencode({"name": dns_name, "type": "A"})
-    request = urllib.request.Request(
-        f"{PUBLIC_DNS_RESOLVER_URL}?{query}",
-        headers={"accept": "application/dns-json"},
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=PUBLIC_DNS_TIMEOUT_S) as response:
-            payload = json.loads(response.read())
-    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
-        return None, f"could not reach the public resolver ({exc})"
-    if not isinstance(payload, dict):
-        return None, "the public resolver returned an unreadable answer"
-    addresses = [
-        answer.get("data")
-        for answer in payload.get("Answer") or []
-        if isinstance(answer, dict) and answer.get("type") == 1
-    ]
-    if addresses:
-        return True, f"resolves to {', '.join(addresses)}"
-    return False, (
-        f"no public DNS record for {dns_name} — uploads are down. "
-        "Tailscale-side; recreating the Funnel does not help. "
-        "Usually clears itself within ~36h. See docs/http-ingest.md"
-    )
 
 
 def cmd_ingest_status(args: argparse.Namespace) -> None:  # noqa: ARG001
