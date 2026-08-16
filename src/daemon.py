@@ -20,6 +20,7 @@ import logging
 import os
 import logging.handlers
 import sqlite3
+import subprocess
 import sys
 import threading
 import time
@@ -32,13 +33,19 @@ from typing import TYPE_CHECKING, Iterator
 from config import (
     CONTEXT_DEBOUNCE_S,
     DATA_HEALTH_REALERT_S,
+    FUNNEL_HEAL_TIMEOUT_S,
+    FUNNEL_HTTPS_PORT,
+    FUNNEL_OUTAGE_ESCALATE_AFTER_H,
     GOOGLE_DRIVE_POLL_INTERVAL_S,
     GOOGLE_DRIVE_SERVICE_ACCOUNT,
     HEALTH_DEBOUNCE_S,
+    HTTP_INGEST_HOST,
     HTTP_INGEST_PAIR_WINDOW_S,
+    HTTP_INGEST_PORT,
     LOCK_FILE,
     LOG_FILE,
     SCHEDULED_CHECK_INTERVAL_S,
+    TAILSCALE_BINARY,
     resolve_data_dir,
     resolve_google_drive_data_dir,
 )
@@ -137,6 +144,27 @@ def _format_date_ranges(days: list[date]) -> str:
         else f"{start.isoformat()} to {end.isoformat()}"
         for start, end in ranges
     )
+
+
+def _hours_since(moment: str | None, *, now: datetime) -> float | None:
+    """Return how many hours have passed since an ISO timestamp.
+
+    Args:
+        moment: ISO 8601 timestamp, or None when the caller has no marker.
+        now: Current time to measure against.
+
+    Returns:
+        Elapsed hours, or None when the timestamp is missing or unparseable.
+    """
+    if not isinstance(moment, str):
+        return None
+    try:
+        started = datetime.fromisoformat(moment)
+    except ValueError:
+        return None
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=timezone.utc)
+    return (now - started).total_seconds() / 3600
 
 
 def _recovery_message(
@@ -1221,6 +1249,78 @@ class ProfileRuntime:
         finally:
             conn.close()
 
+    def _attempt_funnel_heal(self, outage_since: str | None) -> bool:
+        """Re-assert the Funnel mapping once per outage, and record the attempt.
+
+        Whether this helps is unresolved. Re-asserting the config was measured
+        against a live outage and changed nothing over several minutes, while a
+        different occurrence recovered roughly fifteen minutes after the same
+        command — at an age where it may simply have been due to clear anyway.
+        The attempt is cheap and idempotent, so it runs; the outcome is recorded
+        as an event so a few more occurrences settle the question with data
+        rather than with recollection.
+
+        Deliberately not verified inline. Success means the record reappears
+        publicly, which the next health cycle already checks, and a command that
+        exits zero while the record stays missing is exactly how the false fix
+        got into the docs.
+
+        Args:
+            outage_since: Start of the current outage, used so one outage draws
+                one attempt however many cycles it spans.
+
+        Returns:
+            Whether a repair was attempted on this call.
+        """
+        previous = self._state.get("funnel_heal")
+        if isinstance(previous, dict) and previous.get("since") == outage_since:
+            return False
+
+        if not TAILSCALE_BINARY.exists():
+            logger.warning(
+                "Cannot re-assert the Funnel: %s is missing. Set "
+                "ZDROWSKIT_TAILSCALE_BINARY if the CLI lives elsewhere.",
+                TAILSCALE_BINARY,
+            )
+            return False
+
+        command = [
+            str(TAILSCALE_BINARY),
+            "funnel",
+            "--bg",
+            f"--https={FUNNEL_HTTPS_PORT}",
+            f"http://{HTTP_INGEST_HOST}:{HTTP_INGEST_PORT}",
+        ]
+        try:
+            completed = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=FUNNEL_HEAL_TIMEOUT_S,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            logger.warning("Funnel re-assert could not run: %s", exc)
+            self._record_event("ingest", "funnel_heal_failed", str(exc)[:200])
+            return False
+
+        self._state["funnel_heal"] = {
+            "since": outage_since,
+            "attempted_at": datetime.now(timezone.utc).isoformat(),
+        }
+        self._save_state()
+        detail = (completed.stderr or completed.stdout or "").strip()[:200]
+        self._record_event(
+            "ingest",
+            "funnel_heal_attempted",
+            f"Re-asserted the Funnel (exit {completed.returncode}). {detail}".strip(),
+        )
+        logger.info(
+            "Re-asserted the Funnel after a DNS outage (exit %d)",
+            completed.returncode,
+        )
+        return True
+
     def _check_ingest_health(self, prefs: dict) -> None:
         """Report a sustained ingest failure once, and its recovery once.
 
@@ -1262,6 +1362,14 @@ class ProfileRuntime:
                 return None, "the Tailscale DNS name could not be determined"
             return public_dns_health(dns_name)
 
+        # One Funnel serves every profile on this host, so the record is checked
+        # once and reported to the operator alone. Assessing it per profile
+        # would send N people the same alert about one fault that only the
+        # operator can act on, and spend N lookups to do it. A hosted profile
+        # loses nothing by not hearing: the rolling exports re-send the backlog
+        # once the record returns.
+        funnel_resolver = resolve_funnel_dns if self.profile.operator else None
+
         try:
             newest_data_date = self._newest_data_date(
                 through=newest_expected_day(assessment_now).isoformat()
@@ -1272,7 +1380,7 @@ class ProfileRuntime:
                 stale_after_days=settings["stale_after_days"],
                 split_after_h=settings["split_after_h"],
                 pair_window_s=HTTP_INGEST_PAIR_WINDOW_S,
-                resolve_funnel_dns=resolve_funnel_dns,
+                resolve_funnel_dns=funnel_resolver,
                 now=assessment_now,
             )
         except (OSError, sqlite3.Error):
@@ -1317,6 +1425,29 @@ class ProfileRuntime:
                             )
                             return
                     message = _recovery_message(alerted, present_metric_dates)
+                if isinstance(alerted, dict) and alerted.get("status") == "funnel":
+                    # Record how long the outage ran and whether a repair had
+                    # been attempted first. A few of these settle whether
+                    # re-asserting the Funnel does anything, which one
+                    # recollection and one ambiguous occurrence cannot.
+                    attempt = self._state.get("funnel_heal")
+                    attempted_at = (
+                        attempt.get("attempted_at")
+                        if isinstance(attempt, dict)
+                        else None
+                    )
+                    since_attempt = _hours_since(attempted_at, now=assessment_now)
+                    self._record_event(
+                        "ingest",
+                        "funnel_recovered",
+                        "Funnel DNS resolves again"
+                        + (
+                            f"; {since_attempt:.1f}h after the re-assert"
+                            if since_attempt is not None
+                            else "; no repair had been attempted"
+                        ),
+                    )
+                    self._state.pop("funnel_heal", None)
                 self._state.pop("data_health_alert", None)
                 self._save_state()
                 if recovery["status"] == "allowed" and message:
@@ -1324,10 +1455,27 @@ class ProfileRuntime:
             return
 
         now_iso = now.astimezone(timezone.utc).isoformat()
+        healed = False
+        escalating = False
+        if health.status == "funnel":
+            healed = self._attempt_funnel_heal(health.since)
+            outage_h = _hours_since(health.since, now=assessment_now)
+            escalating = (
+                outage_h is not None and outage_h >= FUNNEL_OUTAGE_ESCALATE_AFTER_H
+            )
+
         if isinstance(alerted, dict) and alerted.get("status") == health.status:
-            last_sent = alerted.get("sent_at")
-            if last_sent and not _older_than(last_sent, DATA_HEALTH_REALERT_S):
-                return
+            if health.status == "funnel":
+                # A wait, not a task: repeating it every 24h would train the
+                # operator to swipe away the channel that also carries the
+                # faults they must act on. Only an outage that outlives the
+                # known band earns a second message, and only one.
+                if not escalating or alerted.get("escalated"):
+                    return
+            else:
+                last_sent = alerted.get("sent_at")
+                if last_sent and not _older_than(last_sent, DATA_HEALTH_REALERT_S):
+                    return
 
         decision = evaluate_data_health_delivery(prefs, now=now)
         if decision["status"] == "deferred":
@@ -1351,6 +1499,7 @@ class ProfileRuntime:
             "sent_at": now_iso,
             "missing_from": health.missing_from,
             "missing_to": health.missing_to,
+            "escalated": escalating,
         }
         self._save_state()
         logger.warning(
@@ -1373,8 +1522,21 @@ class ProfileRuntime:
             "funnel": "Uploads are blocked upstream",
         }
         heading = headings.get(health.status, "Health data isn't syncing")
+        if escalating:
+            heading = "Uploads have been blocked for two days"
+        body = health.detail
+        if escalating:
+            body += (
+                " This one has run longer than any before it, so it is no "
+                "longer the usual pattern and is worth raising with Tailscale."
+            )
+        elif healed:
+            body += (
+                " The Funnel mapping has been re-asserted, which sometimes "
+                "brings the record back within about fifteen minutes."
+            )
         self._poller.send_reply(
-            f"⚠️ **{heading}**\n\n{health.detail}\n\n"
+            f"⚠️ **{heading}**\n\n{body}\n\n"
             "Say _mute sync alerts for a week_ to silence this."
         )
 

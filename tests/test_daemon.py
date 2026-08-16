@@ -3164,3 +3164,200 @@ class TestIngestHealthAlerts:
         _tick(9)
         assert "working again" in runtime._poller.send_reply.call_args.args[0]
         assert "data_health_alert" not in runtime._state
+
+
+class TestFunnelOutageAlerts:
+    """A Funnel DNS outage is the operator's to know about and nobody's to fix."""
+
+    @pytest.fixture(autouse=True)
+    def _no_quiet_hours(self):
+        import notification_prefs as notification_prefs_module
+
+        with (
+            patch.object(
+                notification_prefs_module, "DATA_HEALTH_QUIET_START_HHMM", "00:00"
+            ),
+            patch.object(
+                notification_prefs_module, "DATA_HEALTH_QUIET_END_HHMM", "00:00"
+            ),
+        ):
+            yield
+
+    def _runtime(self, tmp_path: Path, *, operator: bool) -> ProfileRuntime:
+        from profiles import Profile
+
+        runtime = _make_daemon(tmp_path)
+        runtime.profile = Profile(
+            name="adam" if operator else "anna",
+            telegram_id=11 if operator else 22,
+            root=tmp_path / "profiles" / ("adam" if operator else "anna"),
+            operator=operator,
+            import_source="http",
+        )
+        runtime._chat._poller = MagicMock()
+        return runtime
+
+    def _funnel(self, hours_ago: float = 5.0):
+        from datetime import datetime, timedelta, timezone
+
+        from http_ingest import IngestHealth
+
+        since = (datetime.now(timezone.utc) - timedelta(hours=hours_ago)).isoformat()
+        return IngestHealth(
+            status="funnel",
+            detail="The Funnel hostname host.ts.net has no public DNS record.",
+            since=since,
+        )
+
+    def test_a_hosted_profile_never_runs_the_dns_check(self, tmp_path: Path) -> None:
+        runtime = self._runtime(tmp_path, operator=False)
+        prefs = load_notification_prefs(runtime._notification_prefs_path)
+
+        with patch("http_ingest.assess_ingest_health") as assess:
+            assess.return_value = self._funnel()
+            runtime._check_ingest_health(prefs)
+
+        # One Funnel serves the whole host, so only the operator's runtime pays
+        # for the lookup. Sending N people one host's fault is noise they cannot
+        # act on.
+        assert assess.call_args.kwargs["resolve_funnel_dns"] is None
+
+    def test_the_operator_runs_the_dns_check(self, tmp_path: Path) -> None:
+        runtime = self._runtime(tmp_path, operator=True)
+        prefs = load_notification_prefs(runtime._notification_prefs_path)
+
+        with patch("http_ingest.assess_ingest_health") as assess:
+            assess.return_value = self._funnel()
+            runtime._check_ingest_health(prefs)
+
+        assert assess.call_args.kwargs["resolve_funnel_dns"] is not None
+
+    def test_one_outage_draws_one_repair_attempt(self, tmp_path: Path) -> None:
+        runtime = self._runtime(tmp_path, operator=True)
+        prefs = load_notification_prefs(runtime._notification_prefs_path)
+        health = self._funnel()
+
+        with (
+            patch("http_ingest.assess_ingest_health", return_value=health),
+            patch.object(runtime, "_attempt_funnel_heal", return_value=True) as heal,
+        ):
+            runtime._check_ingest_health(prefs)
+            runtime._check_ingest_health(prefs)
+            runtime._check_ingest_health(prefs)
+
+        # The health cycle asks on every tick; the once-per-outage guard lives
+        # inside the repair itself, which is covered directly below. What must
+        # hold here is that the operator hears about it exactly once.
+        assert heal.call_count == 3
+        assert runtime._poller.send_reply.call_count == 1
+
+    def test_a_routine_outage_is_not_repeated_at_the_realert_window(
+        self, tmp_path: Path
+    ) -> None:
+        runtime = self._runtime(tmp_path, operator=True)
+        prefs = load_notification_prefs(runtime._notification_prefs_path)
+
+        with (
+            patch("http_ingest.assess_ingest_health", return_value=self._funnel(5)),
+            patch.object(runtime, "_attempt_funnel_heal", return_value=False),
+        ):
+            runtime._check_ingest_health(prefs)
+        # Well past the 24h re-alert window that governs the other conditions,
+        # but still inside the band these outages clear in on their own.
+        from datetime import datetime, timedelta, timezone
+
+        runtime._state["data_health_alert"]["sent_at"] = (
+            datetime.now(timezone.utc) - timedelta(hours=30)
+        ).isoformat()
+        with (
+            patch("http_ingest.assess_ingest_health", return_value=self._funnel(35)),
+            patch.object(runtime, "_attempt_funnel_heal", return_value=False),
+        ):
+            runtime._check_ingest_health(prefs)
+
+        assert runtime._poller.send_reply.call_count == 1
+
+    def test_an_outage_past_the_known_band_escalates_once(self, tmp_path: Path) -> None:
+        runtime = self._runtime(tmp_path, operator=True)
+        prefs = load_notification_prefs(runtime._notification_prefs_path)
+
+        with (
+            patch("http_ingest.assess_ingest_health", return_value=self._funnel(5)),
+            patch.object(runtime, "_attempt_funnel_heal", return_value=False),
+        ):
+            runtime._check_ingest_health(prefs)
+        with (
+            patch("http_ingest.assess_ingest_health", return_value=self._funnel(50)),
+            patch.object(runtime, "_attempt_funnel_heal", return_value=False),
+        ):
+            runtime._check_ingest_health(prefs)
+            runtime._check_ingest_health(prefs)
+
+        messages = [c.args[0] for c in runtime._poller.send_reply.call_args_list]
+        assert len(messages) == 2
+        assert "two days" in messages[1]
+        assert "Tailscale" in messages[1]
+        assert runtime._state["data_health_alert"]["escalated"] is True
+
+    def test_the_repair_runs_once_per_outage(self, tmp_path: Path) -> None:
+        import daemon as daemon_module
+
+        runtime = self._runtime(tmp_path, operator=True)
+        completed = SimpleNamespace(returncode=0, stdout="Funnel started", stderr="")
+        binary = tmp_path / "tailscale"
+        binary.write_text("#!/bin/sh\n", encoding="utf-8")
+
+        with (
+            patch.object(daemon_module, "TAILSCALE_BINARY", binary),
+            patch.object(
+                daemon_module.subprocess, "run", return_value=completed
+            ) as run,
+        ):
+            assert runtime._attempt_funnel_heal("2026-08-16T10:00:00+00:00") is True
+            assert runtime._attempt_funnel_heal("2026-08-16T10:00:00+00:00") is False
+            # A new outage is a new attempt.
+            assert runtime._attempt_funnel_heal("2026-08-20T10:00:00+00:00") is True
+
+        assert run.call_count == 2
+        command = run.call_args.args[0]
+        assert "funnel" in command
+        # Absolute path: the daemon runs under launchd, whose PATH does not
+        # include the directory an interactive shell finds tailscale in.
+        assert command[0].startswith("/")
+
+    def test_a_missing_cli_does_not_crash_the_health_cycle(
+        self, tmp_path: Path
+    ) -> None:
+        import daemon as daemon_module
+
+        runtime = self._runtime(tmp_path, operator=True)
+
+        # A host where the CLI lives elsewhere must degrade to alert-only
+        # rather than take the health cycle down with it.
+        with patch.object(
+            daemon_module, "TAILSCALE_BINARY", tmp_path / "no-such-tailscale"
+        ):
+            assert runtime._attempt_funnel_heal("2026-08-16T10:00:00+00:00") is False
+
+    def test_recovery_sends_the_all_clear(self, tmp_path: Path) -> None:
+        from http_ingest import IngestHealth
+
+        runtime = self._runtime(tmp_path, operator=True)
+        prefs = load_notification_prefs(runtime._notification_prefs_path)
+
+        with (
+            patch("http_ingest.assess_ingest_health", return_value=self._funnel()),
+            patch.object(runtime, "_attempt_funnel_heal", return_value=True),
+        ):
+            runtime._check_ingest_health(prefs)
+        with patch(
+            "http_ingest.assess_ingest_health",
+            return_value=IngestHealth(status="ok", detail="fine"),
+        ):
+            runtime._check_ingest_health(prefs)
+
+        messages = [c.args[0] for c in runtime._poller.send_reply.call_args_list]
+        # Told there was nothing to do, so the message ending the wait is the
+        # only one that closes it.
+        assert "working again" in messages[-1]
+        assert "data_health_alert" not in runtime._state

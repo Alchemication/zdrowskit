@@ -147,14 +147,13 @@ class TestPublicDnsHealth:
 
         assert ok is False
         assert "no public DNS record" in detail
-        # Re-running the Funnel command was measured against a live occurrence
-        # and did not republish the record. Recommending it reads as a fix and
-        # sends the reader chasing it, so the line must say plainly that it is
-        # not theirs to fix.
-        assert "not repairable from here" in detail
+        # The record is published by Tailscale, not by this host. Saying so is
+        # what stops the reader chasing a local repair, which is how the false
+        # fix reached the docs the first time.
+        assert "not this host" in detail
         # A status line is skimmed, not read. Keep it short enough that the
         # last clause still lands; the detail belongs in the docs.
-        assert len(detail) < 220, f"status detail too long to be read: {detail}"
+        assert len(detail) < 260, f"status detail too long to be read: {detail}"
 
     def test_a_cname_without_an_address_is_not_treated_as_reachable(
         self, monkeypatch: pytest.MonkeyPatch

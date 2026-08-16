@@ -645,9 +645,9 @@ def public_dns_health(dns_name: str) -> tuple[bool | None, str]:
     if unknown is not None:
         return None, unknown
     return False, (
-        f"no public DNS record for {dns_name} — uploads are down. "
-        "Tailscale-side, and not repairable from here. "
-        "Usually clears itself within ~36h. See docs/http-ingest.md"
+        f"The Funnel hostname {dns_name} has no public DNS record, so no phone "
+        "can reach the receiver. Tailscale publishes that record, not this "
+        "host, and past outages cleared on their own within about 36 hours."
     )
 
 

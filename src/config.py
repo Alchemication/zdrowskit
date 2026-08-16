@@ -233,6 +233,41 @@ quiet does cause a few lookups that return healthy; that costs one DoH request
 each and alerts nobody, which is the right trade against detecting a dead pipe
 a day late.
 """
+TAILSCALE_BINARY: Path = Path(
+    os.environ.get("ZDROWSKIT_TAILSCALE_BINARY", "/usr/local/bin/tailscale")
+).expanduser()
+"""Absolute path to the Tailscale CLI used to re-assert a lost Funnel.
+
+Absolute rather than resolved from PATH because the daemon runs under launchd,
+whose environment does not include the shell's PATH, so a bare name found in an
+interactive terminal is not found by the daemon.
+"""
+FUNNEL_HTTPS_PORT: int = 443
+"""Public port the Funnel serves on.
+
+Tailscale grants Funnel on 443, 8443, and 10000; 443 is the only one an iPhone
+automation reaches without a port in the URL, so the documented setup uses it
+and the repair must re-assert the same mapping rather than a second one.
+"""
+FUNNEL_HEAL_TIMEOUT_S: float = 30
+"""Seconds allowed for the Funnel re-assert command before giving up.
+
+The command returns in about a second when the daemon is reachable. The ceiling
+exists so a wedged CLI cannot block the health cycle, which also drives the
+alerts this repair is meant to accompany.
+"""
+FUNNEL_OUTAGE_ESCALATE_AFTER_H: float = 48
+"""Age at which a Funnel DNS outage stops being routine and is re-reported.
+
+Four occurrences between 2026-08-02 and 2026-08-16 each cleared on their own
+within 26-35 hours, so anything inside that band is a wait, not a task, and a
+reminder about it is noise that teaches the operator to swipe away the channel
+carrying the actionable faults too.
+
+Forty-eight hours sits clear of that band. Past it the outage is no longer the
+known behaviour, which changes what to do — raise it with Tailscale, or move
+the transport — so it earns exactly one more message.
+"""
 DATA_HEALTH_QUIET_START_HHMM: str = "22:00"
 """Local time after which ingest-health alerts are held until morning.
 

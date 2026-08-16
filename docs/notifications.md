@@ -119,7 +119,7 @@ the cause:
 |-----------|---------|---------|
 | `error` | 6h stalled; immediate for unreadable state | The last import failed and none has succeeded while the pipe is stalled, or the ingest state file cannot be read. |
 | `split` | 6h | Uploads *are* arriving but nothing imports. A strong signal — the phone is demonstrably reachable. The message distinguishes the two causes: halves further apart than the one-hour pairing window means two automations whose schedules have drifted, and anything closer than that means the phone is fine and the import on this end is stuck. |
-| `funnel` | 3h of silence | Uploads have stopped and the Funnel's public DNS record is gone, so no phone can reach the receiver. Checked only after silence, because an arriving upload has already proved the record resolves, and never raised when the resolver itself is unreachable — an offline host has not proved anything. Nothing to do: observed occurrences cleared themselves in 26-35 hours and no local command shortened one. See [HTTP ingest](http-ingest.md). |
+| `funnel` | 3h of silence | Uploads have stopped and the Funnel's public DNS record is gone, so no phone can reach the receiver. Checked only after silence, because an arriving upload has already proved the record resolves, and never raised when the resolver itself is unreachable — an offline host has not proved anything. **Operator only**, since one Funnel serves every profile on the host and nobody else can act on it. Observed occurrences cleared themselves in 26-35 hours. See [HTTP ingest](http-ingest.md). |
 | `stale` | 2 days | The pipe looks fine but two completed days of daily metrics are missing. The catch-all: phone off, token revoked, app deleted, parser rejecting every payload. |
 
 A profile that has never uploaded is never alerted: it is mid-setup, not broken.
@@ -174,6 +174,22 @@ persists. What is sent when it clears depends on what the outage cost:
   were told there was nothing to do, so the message that ends the waiting is
   the only one that closes it. The backlog re-sends on its own, since both
   automations carry rolling windows.
+
+A `funnel` outage is the one condition that is not repeated on the 24-hour
+re-alert cycle. It is a wait rather than a task, and a daily reminder about it
+would only teach the operator to swipe away the channel that also carries
+`split` and `error`. It gets a second message once, if it outlives
+`FUNNEL_OUTAGE_ESCALATE_AFTER_H` — past that it is no longer the known
+behaviour, which does change what to do.
+
+The daemon also re-asserts the Funnel mapping once per outage before alerting,
+and records the attempt and any later recovery as `ingest` events. Whether that
+helps is genuinely unknown: re-asserting was measured against one live outage
+and changed nothing, while another recovered about fifteen minutes after the
+same command at an age where it may have been due to clear anyway. The attempt
+is cheap and idempotent, so it runs, and the events are there so a few more
+occurrences answer the question with data. Nothing claims success until the
+record actually resolves again.
 - **A stale gap that backfilled** sends nothing. Auto Export catching up on the
   days it missed is the normal ending, and announcing it only doubles the
   message count for the fault.
