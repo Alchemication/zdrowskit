@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from parsers.metrics import _parse_date, parse_all_metrics, parse_metrics_file
+from parsers.metrics import (
+    _parse_date,
+    parse_all_metrics,
+    parse_metrics_file,
+    parse_metrics_payload,
+)
 
 
 class TestParseDate:
@@ -204,3 +209,114 @@ class TestParseAllMetrics:
         result = parse_all_metrics(self._metrics_dir(fixtures_dir, tmp_path))
         assert "2026-03-09" in result
         assert "2026-03-10" in result
+
+
+def _payload(name: str, entries: list[dict], units: str = "count") -> dict:
+    """Wrap metric entries in the Auto Export envelope."""
+    return {"data": {"metrics": [{"name": name, "units": units, "data": entries}]}}
+
+
+class TestTimeGroupingIndependence:
+    """A day's value must not depend on Auto Export's Time Grouping setting.
+
+    Regression cover for 2026-08-21: the generic qty path assigned rather than
+    accumulated, so an hourly-grouped export reduced each day to its *last*
+    entry. A day of 9,462 steps was stored as 5, and the import reported
+    success. Daily-grouped exports masked it by sending exactly one entry.
+    """
+
+    def test_hourly_step_count_sums_to_the_day_total(self) -> None:
+        entries = [
+            {"date": f"2026-03-02 {hour:02d}:00:00 +0000", "qty": 100.0}
+            for hour in range(24)
+        ]
+        result = parse_metrics_payload(_payload("step_count", entries))
+        assert result["2026-03-02"]["steps"] == 2400.0
+
+    def test_daily_step_count_is_unchanged(self) -> None:
+        """Summing is identity for a single entry, so Daily grouping still works."""
+        result = parse_metrics_payload(
+            _payload(
+                "step_count", [{"date": "2026-03-02 00:00:00 +0000", "qty": 9462.0}]
+            )
+        )
+        assert result["2026-03-02"]["steps"] == 9462.0
+
+    def test_hourly_and_daily_agree_on_the_same_day(self) -> None:
+        hourly = parse_metrics_payload(
+            _payload(
+                "step_count",
+                [
+                    {"date": "2026-03-02 07:00:00 +0000", "qty": 4000.0},
+                    {"date": "2026-03-02 08:00:00 +0000", "qty": 5462.0},
+                ],
+            )
+        )
+        daily = parse_metrics_payload(
+            _payload(
+                "step_count", [{"date": "2026-03-02 00:00:00 +0000", "qty": 9462.0}]
+            )
+        )
+        assert hourly["2026-03-02"]["steps"] == daily["2026-03-02"]["steps"]
+
+    def test_distance_and_energy_also_sum(self) -> None:
+        """Every running total shares the bug, not just steps."""
+        for name, field in (
+            ("walking_running_distance", "distance_km"),
+            ("active_energy", "active_energy_kj"),
+            ("apple_exercise_time", "exercise_min"),
+            ("flights_climbed", "flights_climbed"),
+        ):
+            result = parse_metrics_payload(
+                _payload(
+                    name,
+                    [
+                        {"date": "2026-03-02 07:00:00 +0000", "qty": 2.0},
+                        {"date": "2026-03-02 08:00:00 +0000", "qty": 3.0},
+                    ],
+                )
+            )
+            assert result["2026-03-02"][field] == 5.0, name
+
+    def test_rates_are_averaged_not_summed(self) -> None:
+        """Resting HR is a level; summing hourly entries would invent 3x the value."""
+        result = parse_metrics_payload(
+            _payload(
+                "resting_heart_rate",
+                [
+                    {"date": "2026-03-02 00:00:00 +0000", "qty": 50.0},
+                    {"date": "2026-03-02 01:00:00 +0000", "qty": 52.0},
+                    {"date": "2026-03-02 02:00:00 +0000", "qty": 54.0},
+                ],
+            )
+        )
+        assert result["2026-03-02"]["resting_hr"] == 52.0
+
+    def test_heart_rate_extremes_span_the_whole_day(self) -> None:
+        """hr_day_max is the day's peak, not the final hour's peak."""
+        result = parse_metrics_payload(
+            _payload(
+                "heart_rate",
+                [
+                    {"date": "2026-03-02 09:00:00 +0000", "Min": 48, "Max": 165},
+                    {"date": "2026-03-02 23:00:00 +0000", "Min": 55, "Max": 70},
+                ],
+            )
+        )
+        day = result["2026-03-02"]
+        assert day["hr_day_min"] == 48.0
+        assert day["hr_day_max"] == 165.0
+
+    def test_overnight_metrics_stay_averaged_across_the_night(self) -> None:
+        """Night attribution must survive the accumulator rewrite."""
+        result = parse_metrics_payload(
+            _payload(
+                "respiratory_rate",
+                [
+                    {"date": "2026-03-02 23:00:00 +0000", "qty": 15.0},
+                    {"date": "2026-03-03 02:00:00 +0000", "qty": 17.0},
+                ],
+            )
+        )
+        assert result["2026-03-02"]["respiratory_rate"] == 16.0
+        assert "2026-03-03" not in result

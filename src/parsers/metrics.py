@@ -77,6 +77,33 @@ _NIGHT_ATTRIBUTED_METRICS: frozenset[str] = frozenset(
     {"respiratory_rate", "apple_sleeping_wrist_temperature"}
 )
 
+# Metrics whose daily figure is the sum of its entries, not one of them.
+#
+# Auto Export's "Time Grouping" decides how many entries a day arrives as: at
+# Daily there is one, at Hourly up to twenty-four. Everything here is a running
+# total over the grouping window, so a day's value is the sum across whatever
+# bins the export happened to use. Summing is correct at every grouping — a
+# single daily entry sums to itself — which is what keeps the parser independent
+# of a setting on someone's phone.
+#
+# Every other qty metric is a rate or a level (resting heart rate, VO2 max,
+# walking speed) and is averaged instead. Averaging is likewise identity for a
+# lone daily entry. The unweighted mean is a deliberate simplification: the
+# payload carries no sample count per bin, and an hourly mean is far closer to
+# the truth than the arbitrary reading last-wins used to pick.
+_SUMMED_METRICS: frozenset[str] = frozenset(
+    {
+        "step_count",
+        "walking_running_distance",
+        "active_energy",
+        "basal_energy_burned",
+        "apple_exercise_time",
+        "apple_stand_time",
+        "apple_stand_hour",
+        "flights_climbed",
+    }
+)
+
 
 def _parse_date(raw: str) -> str:
     """Extract ISO date (YYYY-MM-DD) from an Apple Health date string.
@@ -140,19 +167,30 @@ def parse_metrics_payload(data: dict) -> dict[str, dict[str, float]]:
     result: dict[str, dict[str, float]] = {}
     # (night_date, field) -> readings, averaged once the file is fully read.
     night_readings: dict[tuple[str, str], list[float]] = {}
+    # (date, apple name, field) -> readings, reduced once the file is fully
+    # read. Held per Apple name so the reduction can consult _SUMMED_METRICS.
+    day_readings: dict[tuple[str, str, str], list[float]] = {}
 
     for metric in data["data"]["metrics"]:
         name = metric["name"]
 
         if name == "heart_rate":
-            # Special case: entries have Min, Avg, Max instead of qty
+            # Special case: entries have Min, Avg, Max instead of qty. The
+            # day's extremes are the extremes across its entries — taking the
+            # last entry's would report the final hour's range as the day's.
             for entry in metric.get("data", []):
                 date = _parse_date(entry["date"])
                 day = result.setdefault(date, {})
                 if "Min" in entry:
-                    day["hr_day_min"] = float(entry["Min"])
+                    low = float(entry["Min"])
+                    prev_low = day.get("hr_day_min")
+                    day["hr_day_min"] = low if prev_low is None else min(prev_low, low)
                 if "Max" in entry:
-                    day["hr_day_max"] = float(entry["Max"])
+                    high = float(entry["Max"])
+                    prev_high = day.get("hr_day_max")
+                    day["hr_day_max"] = (
+                        high if prev_high is None else max(prev_high, high)
+                    )
             continue
 
         if name == "sleep_analysis":
@@ -204,8 +242,14 @@ def parse_metrics_payload(data: dict) -> dict[str, dict[str, float]]:
             if "qty" not in entry:
                 continue
             date = _parse_date(entry["date"])
-            day = result.setdefault(date, {})
-            day[field] = float(entry["qty"])
+            day_readings.setdefault((date, name, field), []).append(float(entry["qty"]))
+
+    for (date, name, field), readings in day_readings.items():
+        if name in _SUMMED_METRICS:
+            value = sum(readings)
+        else:
+            value = sum(readings) / len(readings)
+        result.setdefault(date, {})[field] = value
 
     for (night_date, field), readings in night_readings.items():
         result.setdefault(night_date, {})[field] = round(

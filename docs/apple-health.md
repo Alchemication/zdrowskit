@@ -99,15 +99,36 @@ Google Drive on a schedule, with no taps required once configured.
 Setup in the app:
 
 1. Create two automations: one for **Metrics**, one for **Workouts**.
-2. For HTTP, use JSON v2, Metrics aggregation **Days**, and Workouts
+2. For HTTP, use JSON v2, Metrics aggregation **Hours**, and Workouts
    aggregation **Minutes**. Set Metrics to **Last 7 Days** and leave
    Workouts on **Default** — see [choosing date ranges](http-ingest.md#choosing-date-ranges).
+   Both aggregations matter; see [why the aggregation settings
+   matter](#why-the-aggregation-settings-matter).
 3. Select all metrics you care about, such as steps, energy, HR, HRV, VO2max, mobility, resting heart rate, and sleep analysis.
 4. Set the schedule. Every 5 minutes is recommended because shorter intervals catch more unlock windows.
 
 For direct delivery, follow [HTTP ingest](http-ingest.md). For iCloud, use
 `Metrics` and `Workouts` as folder names. Google Drive setup is documented in
 [Google Drive import](google-drive.md).
+
+### Why The Aggregation Settings Matter
+
+**Workouts must be `Minutes`.** Per-kilometre heart rate and cadence are
+computed from the per-minute series inside each workout. A bin is credited with
+at most one minute of a split's elapsed time, so an hourly bin covers a
+sixtieth of what it claims. Every split then falls below the sample-coverage
+floor and stores no heart rate or cadence at all — while the import still
+reports success.
+
+**Metrics must be `Hours`.** Sleeping wrist temperature and respiratory rate are
+filed under the night they belong to, which is the date twelve hours before the
+reading. At `Hours` a reading keeps its real clock time — 23:00 — and lands on
+that night. At `Days` the app zeroes the time to 00:00, and the same reading is
+filed one night early.
+
+Daily totals are unaffected by the choice: the parser sums running totals such
+as steps and distance across whatever bins arrive, and averages rates such as
+resting heart rate, so both settings give the same daily figure.
 
 For iCloud and Google Drive, the app writes JSON files under two folders:
 
