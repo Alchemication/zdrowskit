@@ -131,8 +131,32 @@ class TestValidateUpload:
         headers = _headers("metrics")
         headers["automation-aggregation"] = "Default"
 
-        with pytest.raises(IngestError, match="must be Days"):
+        with pytest.raises(IngestError, match="must be Hours"):
             validate_upload(headers, _body("metrics"))
+
+    @pytest.mark.parametrize("aggregation", ["Hours", "hours", "Days", "days"])
+    def test_metrics_accepts_hours_or_days(self, aggregation: str) -> None:
+        """Hours is the documented setting; Days stays accepted.
+
+        Regression cover for 2026-08-21: the receiver hard-required Days, so
+        following the setup guide's move to Hours made every Metrics upload
+        fail with 422 while Workouts kept succeeding. Days remains valid
+        because it was the documented setting beforehand and every daily total
+        parses identically either way.
+        """
+        headers = _headers("metrics")
+        headers["automation-aggregation"] = aggregation
+
+        assert validate_upload(headers, _body("metrics")).kind == "metrics"
+
+    @pytest.mark.parametrize("aggregation", ["Hours", "Days", "Default"])
+    def test_workouts_still_require_minutes(self, aggregation: str) -> None:
+        """Coarser workout bins silently empty every split's HR and cadence."""
+        headers = _headers("workouts")
+        headers["automation-aggregation"] = aggregation
+
+        with pytest.raises(IngestError, match="must be Minutes"):
+            validate_upload(headers, _body("workouts"))
 
     @pytest.mark.parametrize(
         "period", ["Default", "Last 7 Days", "Last 30 Days", "Previous 7 Days"]

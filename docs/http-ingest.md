@@ -190,7 +190,7 @@ Metrics:
 
 - Automation name: `Metrics`
 - Summarized data: on
-- Aggregation: `Days`
+- Aggregation: `Hours`
 - Date Range: `Last 7 Days`
 
 Workouts:
@@ -199,6 +199,12 @@ Workouts:
 - Aggregation: `Minutes`
 - Include routes and metadata
 - Date Range: `Default`
+
+Both aggregation values are load-bearing — see [why the aggregation settings
+matter](apple-health.md#why-the-aggregation-settings-matter). Over HTTP the
+receiver checks them and rejects a wrong one with `422`, so Auto Export shows
+the automation as failing. The file transports have no such check: there a wrong
+value is accepted and quietly produces empty splits or misdated nights.
 
 ## Choosing Date Ranges
 
@@ -451,6 +457,8 @@ unless forced with `--min-validity`.
 | `/` returns `404` | Expected. Production exposes `GET /healthz` and authenticated `POST /v1/auto-export`, not a directory listing. |
 | Auto Export gets `401` | Re-enter the exact `Bearer <token>` authorization value or rotate the profile token. |
 | Auto Export gets `422` | Read the returned error; normally aggregation, headers, JSON format, or an oversized export. |
+| `Metrics automation aggregation must be Hours (preferred) or Days` | The Metrics automation is set to something else — `Default` and `Minutes` both trigger it. |
+| `Workouts automation aggregation must be Minutes` | The Workouts automation is not on `Minutes`; per-kilometre HR and cadence cannot be computed without it. |
 | `pairing: waiting for the other half` | Only one automation reached the receiver. Check both exist and use the same URL and token. |
 | `pairing: halves arrived too far apart` | Both automations work but run more than an hour apart. Put them on the same schedule. |
 | Works until reboot | Enable **Launch Tailscale at login**, confirm the macOS user logged in, then check `tailscale funnel status` and `main.py ingest status`. |

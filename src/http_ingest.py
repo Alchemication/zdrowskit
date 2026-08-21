@@ -426,15 +426,32 @@ def validate_upload(headers: dict[str, str], body: bytes) -> ValidatedUpload:
             HTTPStatus.UNPROCESSABLE_ENTITY,
             "automation-name must be Metrics or Workouts.",
         )
-    expected_aggregation = "days" if automation_name == "metrics" else "minutes"
-    if (
-        headers.get("automation-aggregation", "").strip().lower()
-        != expected_aggregation
-    ):
-        label = "Days" if automation_name == "metrics" else "Minutes"
+    # Metrics accepts Hours or Days; Workouts must be Minutes.
+    #
+    # Hours is what the setup guide asks for, because sleeping wrist temperature
+    # and respiratory rate are filed under the night twelve hours before the
+    # reading: at Hours a reading keeps its real 23:00 clock time and lands on
+    # the right night, while Days zeroes it to 00:00 and files it a night early.
+    # Days is still accepted rather than rejected — it was the documented
+    # setting until 2026-08-21, every daily total parses identically either way,
+    # and refusing it would strand an existing profile mid-upload over a
+    # one-night skew in two metrics.
+    #
+    # Workouts is not negotiable. Per-kilometre heart rate and cadence come from
+    # the per-minute series inside each workout, and a coarser bin is credited
+    # with at most a minute of a split, so every split silently falls below the
+    # sample-coverage floor and stores nothing.
+    aggregation = headers.get("automation-aggregation", "").strip().lower()
+    if automation_name == "metrics":
+        if aggregation not in {"hours", "days"}:
+            raise IngestError(
+                HTTPStatus.UNPROCESSABLE_ENTITY,
+                "Metrics automation aggregation must be Hours (preferred) or Days.",
+            )
+    elif aggregation != "minutes":
         raise IngestError(
             HTTPStatus.UNPROCESSABLE_ENTITY,
-            f"{automation_name.title()} automation aggregation must be {label}.",
+            "Workouts automation aggregation must be Minutes.",
         )
     # Any Date Range is accepted. A wider Metrics window makes an outage
     # recoverable instead of permanently lost, and the real protection against
