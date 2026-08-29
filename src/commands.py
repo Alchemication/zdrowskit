@@ -589,10 +589,16 @@ def cmd_doctor(args: argparse.Namespace) -> None:  # noqa: ARG001
                 )
             )
         from cmd_ingest import _tailscale_dns_name, receiver_health
-        from http_ingest import public_dns_health
+        from http_ingest import public_dns_health, tailscale_node_health
 
         receiver_ok, receiver_detail = receiver_health()
         checks.append(("HTTP receiver", receiver_ok, receiver_detail, True))
+        # Listed before the public record because a disconnected node is why
+        # that record goes missing, and unlike the record it is repairable here.
+        node_ok, node_detail = tailscale_node_health()
+        checks.append(
+            ("Tailscale connection", bool(node_ok), node_detail, node_ok is not None)
+        )
         dns_name = _tailscale_dns_name()
         if dns_name is None:
             public_ok, public_detail = None, "Tailscale is offline or not connected"

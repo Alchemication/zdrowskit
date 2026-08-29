@@ -13,6 +13,7 @@ import os
 import re
 import secrets
 import shutil
+import subprocess
 import threading
 import urllib.error
 import urllib.parse
@@ -39,6 +40,8 @@ from config import (
     HTTP_INGEST_MAX_WORKOUTS,
     PUBLIC_DNS_RESOLVER_URL,
     PUBLIC_DNS_TIMEOUT_S,
+    TAILSCALE_BINARY,
+    TAILSCALE_STATUS_TIMEOUT_S,
 )
 from parsers.metrics import parse_metrics_payload
 from parsers.workouts import parse_workouts_payload
@@ -627,6 +630,60 @@ def _assess_data_freshness(
     )
 
 
+def tailscale_node_health() -> tuple[bool | None, str]:
+    """Check whether this node still holds its Tailscale control connection.
+
+    The distinction this draws is the one that cost two days of data on
+    2026-08-29. Uploads had stopped and the public DNS record was gone, which
+    looks exactly like the recurring Tailscale-side outage — but this node was
+    reporting ``Online: false`` with no network map, while ``curl`` reached the
+    coordination server from the same machine in two seconds. The control plane
+    does not publish a public address for a node it cannot see, so the missing
+    record was a symptom of a wedged local daemon, not an outage to wait out.
+
+    Reported separately from ``public_dns_health`` because the two have
+    opposite fixes: this one is repairable here in seconds, and the other is
+    nobody's to fix.
+
+    Returns:
+        Whether the node is connected, and a detail line. ``None`` means the
+        question could not be answered — no CLI, a timeout, unreadable output —
+        and must never be reported as a disconnection, because an absent CLI is
+        not a broken tailnet.
+    """
+    if not TAILSCALE_BINARY.exists():
+        return None, f"the Tailscale CLI is not at {TAILSCALE_BINARY}"
+    try:
+        completed = subprocess.run(
+            [str(TAILSCALE_BINARY), "status", "--json"],
+            capture_output=True,
+            text=True,
+            timeout=TAILSCALE_STATUS_TIMEOUT_S,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return None, f"the Tailscale CLI could not be run ({exc})"
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout or "").strip()[:200]
+        return None, f"tailscale status exited {completed.returncode}: {detail}"
+    try:
+        payload = json.loads(completed.stdout)
+    except json.JSONDecodeError:
+        return None, "tailscale status returned unreadable JSON"
+    self_info = payload.get("Self")
+    if not isinstance(self_info, dict) or not isinstance(self_info.get("Online"), bool):
+        return None, "tailscale status did not report this node's state"
+    if self_info["Online"]:
+        return True, "this Mac is connected to Tailscale"
+    warnings = [w for w in payload.get("Health") or [] if isinstance(w, str)]
+    reason = warnings[0] if warnings else "no reason was reported"
+    return False, (
+        "This Mac has lost its connection to Tailscale, so Tailscale has "
+        "stopped publishing the address your phone uploads to and exports "
+        f"cannot get through. Tailscale says: {reason}"
+    )
+
+
 def public_dns_health(dns_name: str) -> tuple[bool | None, str]:
     """Check that the Funnel hostname resolves for anything outside the tailnet.
 
@@ -692,9 +749,9 @@ def public_dns_health(dns_name: str) -> tuple[bool | None, str]:
         return None, unknown
     return False, (
         f"Tailscale has stopped publishing the address your phone uploads to "
-        f"({dns_name}), so exports cannot get through. This is Tailscale's "
-        "side rather than anything on this Mac, and past outages have fixed "
-        "themselves within about 36 hours."
+        f"({dns_name}), so exports cannot get through. This Mac is still "
+        "connected, so this is Tailscale's side and nothing to do here. Past "
+        "outages cleared themselves within about 36 hours."
     )
 
 
@@ -706,23 +763,22 @@ def assess_ingest_health(
     split_after_h: float,
     pair_window_s: float,
     resolve_funnel_dns: Callable[[], tuple[bool | None, str]] | None = None,
+    resolve_node_health: Callable[[], tuple[bool | None, str]] | None = None,
     now: datetime | None = None,
 ) -> IngestHealth:
     """Judge whether a profile's phone is still successfully feeding the system.
 
-    Four conditions are worth a message, and they are checked in order of how
-    specific they are about the cause:
+    Five conditions are worth a message. ``node`` and ``funnel`` are settled
+    first whenever uploads have gone quiet, because silence invalidates the
+    premise the upload-timing conditions rest on; the rest follow in order of
+    how specific they are about the cause:
 
-    ``error``
-        The last import failed and none has succeeded since, or the state file
-        itself is unreadable.
-    ``split``
-        Uploads *are* arriving but no pair has imported. A strong signal,
-        because the phone is demonstrably talking to us, so it is detected in
-        hours. Usually two Auto Export automations on schedules that have
-        drifted apart — but only when the arrival gap actually exceeds the
-        pairing window, which is why that window has to be passed in. Inside
-        it, the phone is doing its job and the fault is on this side.
+    ``node``
+        This Mac has lost its Tailscale control connection. Checked before
+        ``funnel`` because it produces the same missing DNS record from a
+        completely different cause: the control plane does not publish a public
+        address for a node it cannot see. Repairable here in seconds, which is
+        the whole reason it must not be reported as the outage below.
     ``funnel``
         Uploads have gone quiet and the Funnel's public DNS record is missing,
         so the phone cannot reach the receiver however healthy it looks here.
@@ -731,6 +787,15 @@ def assess_ingest_health(
         separately from ``stale`` because the cause is known, external, and
         nobody's to fix: measured occurrences cleared themselves in 26-35
         hours, and no local command shortened one.
+    ``error``
+        The last import failed and none has succeeded since, or the state file
+        itself is unreadable.
+    ``split``
+        Uploads arrived and no pair has imported. A strong signal while the
+        phone is demonstrably talking to us, so it is detected in hours. Since
+        a half now imports on its own once the pairing window lapses, a stall
+        this long is a fault on this end whatever the arrival gap was — the
+        window is still passed in so the message can say which.
 
     ``stale``
         The pipe looks fine and days of data are missing anyway. The catch-all,
@@ -757,6 +822,9 @@ def assess_ingest_health(
             pure function over the state file, and omitted for transports with
             no Funnel. A ``None`` result means the check could not run and is
             never treated as a fault.
+        resolve_node_health: Returns whether this node still holds its Tailscale
+            control connection, as ``tailscale_node_health`` does. Injected and
+            optional on the same terms. A ``None`` result is never a fault.
         pair_window_s: Arrival gap the importer tolerates, so a stall can be
             blamed on drifting schedules only when the halves really missed it.
         now: Override for the current time.
@@ -796,6 +864,40 @@ def assess_ingest_health(
     last_import = _parse_iso(state.get("last_imported_at"))
     everything_imported = last_import is not None and last_upload <= last_import
 
+    # Silence is the only state where the public DNS record can say something
+    # the last upload has not already proved — and it is also the state in which
+    # every upload-timing diagnosis below stops meaning anything, because they
+    # all rest on the phone demonstrably reaching us. Settling the record first
+    # is what keeps a stalled pair from being blamed on the automations while
+    # the real fault is that nothing can arrive at all: an unimportable pair
+    # never clears itself during an outage, so the stall would mask the outage
+    # for as long as the outage lasted. A live pipe still reports its local
+    # faults first, since those are the owner's to repair and this is not.
+    quiet_long_enough = (now - last_upload).total_seconds() >= (
+        FUNNEL_DNS_CHECK_AFTER_H * 3600
+    )
+    if quiet_long_enough:
+        # Asked before the DNS record, because a disconnected node explains a
+        # missing record outright and the two want opposite responses: this one
+        # is repaired here, that one is waited out. Getting the order wrong
+        # tells the owner to wait on something they could have fixed.
+        if resolve_node_health is not None:
+            connected, node_detail = resolve_node_health()
+            if connected is False:
+                return IngestHealth(
+                    status="node",
+                    detail=node_detail,
+                    since=last_upload.isoformat(),
+                )
+        if resolve_funnel_dns is not None:
+            resolves, dns_detail = resolve_funnel_dns()
+            if resolves is False:
+                return IngestHealth(
+                    status="funnel",
+                    detail=dns_detail,
+                    since=last_upload.isoformat(),
+                )
+
     if not everything_imported:
         pipe = _assess_pipe_fault(
             state,
@@ -808,20 +910,6 @@ def assess_ingest_health(
         )
         if pipe is not None:
             return pipe
-
-    # Silence is the only state where the public DNS record can say something
-    # the last upload has not already proved. Checked here, after the local
-    # faults above, because those are repairable by their owner and this is not.
-    if resolve_funnel_dns is not None and (now - last_upload).total_seconds() >= (
-        FUNNEL_DNS_CHECK_AFTER_H * 3600
-    ):
-        resolves, dns_detail = resolve_funnel_dns()
-        if resolves is False:
-            return IngestHealth(
-                status="funnel",
-                detail=dns_detail,
-                since=last_upload.isoformat(),
-            )
 
     if last_import is None:
         # An upload has landed but no pair has completed a cycle yet, so there is
@@ -906,17 +994,20 @@ def _assess_pipe_fault(
 
     gap = abs((arrivals["metrics"] - arrivals["workouts"]).total_seconds())
     stalled = _format_gap(stalled_for * 3600)
+    # Neither branch blames the phone any more. A wide gap used to block the
+    # import outright and was worth telling the user to fix; now it only delays
+    # one by the pairing window, so a stall outlasting that window is this end's
+    # fault either way, and sending someone after their automation schedules
+    # would send them after the one thing that is demonstrably working.
     if gap > pair_window_s:
         detail = (
-            f"Data has been arriving for {stalled} but nothing has imported: "
-            f"Metrics and Workouts are {_format_gap(gap)} apart, outside the "
-            f"{_format_gap(pair_window_s)} window in which they import "
-            "together. Set both Auto Export automations to the same schedule "
-            "so they run at the same time."
+            f"Data has been arriving for {stalled} but nothing has imported. "
+            f"Metrics and Workouts are {_format_gap(gap)} apart, so each half "
+            f"should have imported on its own within {_format_gap(pair_window_s)} "
+            "of arriving. The import on this end is stuck: check the daemon log "
+            "and restart it."
         )
     else:
-        # Telling someone to fix schedules that are already fine sends them
-        # after the one thing that is demonstrably working.
         detail = (
             f"Data has been arriving for {stalled} but nothing has imported. "
             f"Metrics and Workouts are only {_format_gap(gap)} apart, well "
@@ -1031,10 +1122,7 @@ class HttpIngestManager:
         return abs((metrics_time - workouts_time).total_seconds())
 
     def _pair_digest(self, state: dict[str, Any]) -> str | None:
-        """Return a digest when recent Metrics and Workouts uploads form a pair."""
-        gap = self._pair_gap_s(state)
-        if gap is None or gap > self.pair_window_s:
-            return None
+        """Return a digest identifying the currently staged Metrics/Workouts pair."""
         uploads = state["uploads"]
         try:
             material = (
@@ -1043,6 +1131,36 @@ class HttpIngestManager:
         except (KeyError, TypeError):
             return None
         return hashlib.sha256(material).hexdigest()
+
+    def _newest_arrival(self, state: dict[str, Any]) -> datetime | None:
+        """Return when the most recent half of the staged pair arrived."""
+        arrivals = []
+        for kind in ("metrics", "workouts"):
+            upload = state["uploads"].get(kind)
+            if not isinstance(upload, dict):
+                return None
+            try:
+                arrivals.append(datetime.fromisoformat(upload["received_at"]))
+            except (KeyError, TypeError, ValueError):
+                return None
+        return max(arrivals)
+
+    def _pair_due_at(self, state: dict[str, Any]) -> datetime | None:
+        """Return when the staged pair may import, or None when it cannot.
+
+        Halves that arrived within the window are due immediately. Halves that
+        missed each other are due one full window after the later one landed:
+        by then the partner it was waiting for is definitively not coming, and
+        continuing to wait costs the day it carries. The gap therefore delays
+        an import; it never cancels one.
+        """
+        gap = self._pair_gap_s(state)
+        newest = self._newest_arrival(state)
+        if gap is None or newest is None:
+            return None
+        if gap <= self.pair_window_s:
+            return newest
+        return newest + timedelta(seconds=self.pair_window_s)
 
     def _pair_state(
         self,
@@ -1062,15 +1180,17 @@ class HttpIngestManager:
         gap = self._pair_gap_s(state)
         if gap is None:
             return "waiting", "an upload record is unreadable; re-run both automations"
-        if gap > self.pair_window_s:
-            return "split", (
-                f"Metrics and Workouts arrived {_format_gap(gap)} apart, outside the "
-                f"{_format_gap(self.pair_window_s)} pairing window"
-            )
         if self._pair_candidate(state, profile_name=profile_name) is not None:
             return "ready", "both halves staged and queued for import"
         if self._pair_digest(state) == state.get("last_import_pair"):
             return "imported", "both halves already imported"
+        due_at = self._pair_due_at(state)
+        if due_at is not None and datetime.now(timezone.utc) < due_at:
+            return "split", (
+                f"Metrics and Workouts arrived {_format_gap(gap)} apart, outside the "
+                f"{_format_gap(self.pair_window_s)} pairing window; importing anyway "
+                f"at {due_at.isoformat(timespec='seconds')}"
+            )
         # Staged payloads the last receipt does not cover. Reporting these as
         # imported is how a stalled pair stayed invisible in `ingest status`.
         return "pending", (
@@ -1098,6 +1218,7 @@ class HttpIngestManager:
         state: dict[str, Any],
         *,
         profile_name: str,
+        now: datetime | None = None,
     ) -> tuple[str, dict[str, str]] | None:
         """Return a complete pair once at least one half advanced after import.
 
@@ -1107,10 +1228,20 @@ class HttpIngestManager:
         own partner uploaded again. The digest check above already rejects a
         pair that is identical to the last imported one, so re-reading an
         unchanged half is the harmless price of importing the fresh one.
+
+        Args:
+            state: Parsed ingest state file.
+            profile_name: Profile the pair belongs to, for the in-flight check.
+            now: Override for the current time, used to decide whether a pair
+                whose halves missed each other has waited long enough.
         """
+        now = now or datetime.now(timezone.utc)
         pair_digest = self._pair_digest(state)
         markers = self._upload_markers(state)
         if pair_digest is None or markers is None:
+            return None
+        due_at = self._pair_due_at(state)
+        if due_at is None or now < due_at:
             return None
         if pair_digest == state.get("last_import_pair"):
             return None
@@ -1184,9 +1315,9 @@ class HttpIngestManager:
         if pair_ready:
             logger.info("Complete pair staged for %s; queuing import", profile_name)
         elif pair_state == "split":
-            logger.warning(
-                "%s will not import yet: %s. Give both Auto Export automations the "
-                "same schedule, then re-run them together.",
+            logger.info(
+                "%s is waiting out the pairing window: %s. Giving both Auto Export "
+                "automations the same schedule imports it sooner.",
                 profile_name,
                 pair_detail,
             )
@@ -1201,9 +1332,22 @@ class HttpIngestManager:
             pair_ready=pair_ready,
         )
 
-    def pending_pairs(self) -> list[tuple[str, str]]:
-        """Return complete pairs that have not yet imported successfully."""
-        pending: list[tuple[str, str]] = []
+    def due_pairs(self, *, now: datetime | None = None) -> list[tuple[str, str]]:
+        """Return staged pairs that may import now and have not yet done so.
+
+        Called on daemon start to recover work an unclean shutdown left staged,
+        and on a timer thereafter. The timer is what rescues a pair whose halves
+        missed each other: no further upload is coming to re-evaluate it, so
+        nothing but a clock will notice that its wait is over.
+
+        Args:
+            now: Override for the current time.
+
+        Returns:
+            ``(profile name, pair digest)`` for every pair ready to import.
+        """
+        now = now or datetime.now(timezone.utc)
+        due: list[tuple[str, str]] = []
         with self._lock:
             for name, profile in self.profiles.items():
                 try:
@@ -1211,10 +1355,10 @@ class HttpIngestManager:
                 except ValueError:
                     logger.exception("Invalid HTTP ingest state for %s", name)
                     continue
-                candidate = self._pair_candidate(state, profile_name=name)
+                candidate = self._pair_candidate(state, profile_name=name, now=now)
                 if candidate is not None:
-                    pending.append((name, candidate[0]))
-        return pending
+                    due.append((name, candidate[0]))
+        return due
 
     def begin_import(self, profile_name: str, pair_digest: str) -> Path | None:
         """Snapshot the current pair into an immutable import generation."""

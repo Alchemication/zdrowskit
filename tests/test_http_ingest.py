@@ -11,6 +11,7 @@ import hashlib
 import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -25,6 +26,7 @@ from http_ingest import (
     IngestError,
     TokenRegistry,
     newest_expected_day,
+    tailscale_node_health,
     validate_upload,
 )
 from http_ingest_server import HttpIngestServer
@@ -221,7 +223,7 @@ class TestHttpIngestManager:
         assert (generation / "Metrics" / "latest.json").read_bytes() == _body("metrics")
         manager.finish_import("adam", digest, success=True)
         assert generation.exists() is False
-        assert manager.pending_pairs() == []
+        assert manager.due_pairs() == []
         assert manager.status()["adam"]["last_imported_at"] is not None
 
     def test_identical_retry_does_not_reimport_completed_pair(
@@ -313,7 +315,7 @@ class TestHttpIngestManager:
 
         # A new session id over identical bytes is a resend, not new data.
         assert unchanged_pair.pair_ready is False
-        assert manager.pending_pairs() == []
+        assert manager.due_pairs() == []
         assert len(ready) == 2
 
     def test_next_cycle_does_not_reuse_half_of_an_inflight_pair(
@@ -780,9 +782,11 @@ class TestIngestHealth:
         assert health.status == "stale"
         assert "no daily health metrics have ever been stored" in health.detail
 
-    def test_halves_outside_the_window_are_blamed_on_the_schedules(
+    def test_halves_outside_the_window_are_not_blamed_on_the_schedules(
         self, tmp_path: Path
     ) -> None:
+        # A wide gap only delays an import by the pairing window now, so a stall
+        # that outlasted the window is this end's fault whatever the gap was.
         profile = _profile(tmp_path)
         self._state(
             profile,
@@ -798,7 +802,8 @@ class TestIngestHealth:
         health = self._assess(profile)
 
         assert health.status == "split"
-        assert "same schedule" in health.detail
+        assert "same schedule" not in health.detail
+        assert "import on this end is stuck" in health.detail
 
     def test_halves_inside_the_window_are_not_blamed_on_the_schedules(
         self, tmp_path: Path
@@ -958,7 +963,7 @@ class TestPairStatus:
         stale["uploads"]["metrics"]["received_at"] = "2026-08-02T08:00:00+00:00"
         state_path.write_text(json.dumps(stale), encoding="utf-8")
 
-        with caplog.at_level(logging.WARNING, logger="http_ingest"):
+        with caplog.at_level(logging.INFO, logger="http_ingest"):
             accepted = manager.accept(
                 "adam",
                 validate_upload(_headers("workouts"), _body("workouts")),
@@ -970,7 +975,49 @@ class TestPairStatus:
         state = manager.status()["adam"]
         assert state["pair_state"] == "split"
         assert "pairing window" in state["pair_detail"]
-        assert "will not import yet" in caplog.text
+        assert "waiting out the pairing window" in caplog.text
+
+    def test_a_pair_that_missed_the_window_imports_once_the_window_lapses(
+        self, tmp_path: Path
+    ) -> None:
+        # The 2026-08-29 stall: halves 21.3h apart never imported at all, so two
+        # days of Metrics sat on disk until a fresh in-window pair happened to
+        # arrive — which a Funnel outage guaranteed would not happen.
+        profile = _profile(tmp_path)
+        manager = HttpIngestManager(
+            {"adam": profile},
+            pair_window_s=600,
+            on_pair_ready=lambda name, digest: None,
+        )
+        manager.accept(
+            "adam",
+            validate_upload(_headers("metrics"), _body("metrics")),
+            _body("metrics"),
+        )
+        state_path = profile.http_cache / ".ingest_state.json"
+        stale = json.loads(state_path.read_text(encoding="utf-8"))
+        stale["uploads"]["metrics"]["received_at"] = (
+            datetime.now(timezone.utc) - timedelta(hours=21)
+        ).isoformat()
+        state_path.write_text(json.dumps(stale), encoding="utf-8")
+        manager.accept(
+            "adam",
+            validate_upload(_headers("workouts"), _body("workouts")),
+            _body("workouts"),
+        )
+
+        # Workouts has only just landed, so the window it owes Metrics is open.
+        assert manager.due_pairs() == []
+
+        lapsed = json.loads(state_path.read_text(encoding="utf-8"))
+        lapsed["uploads"]["workouts"]["received_at"] = (
+            datetime.now(timezone.utc) - timedelta(seconds=601)
+        ).isoformat()
+        state_path.write_text(json.dumps(lapsed), encoding="utf-8")
+        due = manager.due_pairs()
+
+        assert [name for name, _digest in due] == ["adam"]
+        assert manager.begin_import("adam", due[0][1]) is not None
 
     def _import_one_pair(self, manager: HttpIngestManager) -> None:
         """Drive a first Workouts + Metrics pair all the way through import."""
@@ -980,7 +1027,7 @@ class TestPairStatus:
                 "adam", validate_upload(_headers(kind), body), body
             )
         assert accepted.pair_ready is True
-        digest = manager.pending_pairs()[0][1]
+        digest = manager.due_pairs()[0][1]
         assert manager.begin_import("adam", digest) is not None
         manager.finish_import("adam", digest, success=True)
 
@@ -1036,7 +1083,7 @@ class TestPairStatus:
         for kind in ("workouts", "metrics"):
             body = _body(kind)
             manager.accept("adam", validate_upload(_headers(kind), body), body)
-        digest = manager.pending_pairs()[0][1]
+        digest = manager.due_pairs()[0][1]
         manager.begin_import("adam", digest)
 
         state = manager.status()["adam"]
@@ -1351,6 +1398,41 @@ class TestFunnelDnsHealth:
         kwargs.setdefault("pair_window_s", _PAIR_WINDOW_S)
         return assess_ingest_health(profile, resolve_funnel_dns=resolver, **kwargs)
 
+    def test_a_missing_cli_reports_unknown_not_disconnected(
+        self, tmp_path: Path
+    ) -> None:
+        import config
+
+        with patch.object(config, "TAILSCALE_BINARY", tmp_path / "no-such-tailscale"):
+            with patch("http_ingest.TAILSCALE_BINARY", tmp_path / "no-such-tailscale"):
+                connected, detail = tailscale_node_health()
+
+        assert connected is None
+        assert "not at" in detail
+
+    def test_an_offline_node_names_tailscales_own_reason(self, tmp_path: Path) -> None:
+        binary = tmp_path / "tailscale"
+        binary.write_text("#!/bin/sh\n", encoding="utf-8")
+        payload = json.dumps(
+            {
+                "Self": {"Online": False},
+                "Health": ["Tailscale hasn't received a network map in 2m8s."],
+            }
+        )
+        completed = SimpleNamespace(returncode=0, stdout=payload, stderr="")
+
+        with (
+            patch("http_ingest.TAILSCALE_BINARY", binary),
+            patch("http_ingest.subprocess.run", return_value=completed),
+        ):
+            connected, detail = tailscale_node_health()
+
+        assert connected is False
+        # Quotes Tailscale rather than paraphrasing it: the operator can paste
+        # that sentence into a support thread, and we cannot improve on it.
+        assert "network map" in detail
+        assert "lost its connection to Tailscale" in detail
+
     def test_silence_plus_a_missing_record_is_reported_as_funnel(
         self, tmp_path: Path
     ) -> None:
@@ -1364,6 +1446,97 @@ class TestFunnelDnsHealth:
         assert "no public DNS record" in health.detail
         # The alert says when uploads stopped, not when the check noticed.
         assert health.since is not None
+
+    def test_a_stalled_pair_does_not_mask_the_outage(self, tmp_path: Path) -> None:
+        # The 2026-08-29 failure: two halves arrived 21.3h apart and never
+        # imported, so the pipe check reported `split` and returned before the
+        # DNS lookup ran. That verdict blamed the automation schedules, hid a
+        # live outage, and — because `funnel` gates both the repair attempt and
+        # the 48h escalation — meant neither ever fired. The stall could not
+        # clear on its own during an outage, so the masking was permanent.
+        profile = _profile(tmp_path)
+        stopped = (datetime.now(timezone.utc) - timedelta(hours=44)).isoformat()
+        self._state(
+            profile,
+            {
+                "uploads": {
+                    "metrics": {"received_at": stopped, "sha256": "a"},
+                    "workouts": {
+                        "received_at": (
+                            datetime.now(timezone.utc) - timedelta(hours=65)
+                        ).isoformat(),
+                        "sha256": "b",
+                    },
+                },
+                "last_imported_at": (
+                    datetime.now(timezone.utc) - timedelta(hours=98)
+                ).isoformat(),
+                "receipts": [],
+            },
+        )
+
+        health = self._assess(profile, lambda: (False, "no public DNS record for x"))
+
+        assert health.status == "funnel"
+        assert health.since == stopped
+
+    def test_a_disconnected_node_is_reported_before_the_funnel(
+        self, tmp_path: Path
+    ) -> None:
+        # Both faults present as the same missing DNS record, but one is
+        # repairable here in seconds and the other is a wait. Reporting the
+        # wait when the Mac has simply dropped off Tailscale is what turned a
+        # twelve-second fix into 55 hours of silence on 2026-08-29.
+        profile = _profile(tmp_path)
+        self._quiet_for(profile, 30)
+        dns_calls: list[int] = []
+
+        def dns() -> tuple[bool | None, str]:
+            dns_calls.append(1)
+            return False, "no public DNS record for x"
+
+        health = self._assess(
+            profile,
+            dns,
+            resolve_node_health=lambda: (False, "This Mac has lost its connection"),
+        )
+
+        assert health.status == "node"
+        assert "lost its connection" in health.detail
+        # The record is a symptom here; asking about it adds a network call and
+        # a second explanation for one fault.
+        assert dns_calls == []
+
+    def test_a_connected_node_still_reports_the_funnel_outage(
+        self, tmp_path: Path
+    ) -> None:
+        profile = _profile(tmp_path)
+        self._quiet_for(profile, 30)
+
+        health = self._assess(
+            profile,
+            lambda: (False, "no public DNS record for x"),
+            resolve_node_health=lambda: (True, "connected"),
+        )
+
+        assert health.status == "funnel"
+
+    def test_an_unknown_node_state_is_never_a_disconnection(
+        self, tmp_path: Path
+    ) -> None:
+        # No CLI, a timeout, unreadable output. An absent Tailscale binary is
+        # not a broken tailnet, and restarting an app on that evidence would be
+        # a repair aimed at nothing.
+        profile = _profile(tmp_path)
+        self._quiet_for(profile, 30)
+
+        health = self._assess(
+            profile,
+            lambda: (False, "no public DNS record for x"),
+            resolve_node_health=lambda: (None, "the Tailscale CLI is not installed"),
+        )
+
+        assert health.status == "funnel"
 
     def test_an_unreachable_resolver_is_never_a_fault(self, tmp_path: Path) -> None:
         profile = _profile(tmp_path)

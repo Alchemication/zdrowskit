@@ -33,19 +33,20 @@ from typing import TYPE_CHECKING, Iterator
 from config import (
     CONTEXT_DEBOUNCE_S,
     DATA_HEALTH_REALERT_S,
-    FUNNEL_HEAL_TIMEOUT_S,
-    FUNNEL_HTTPS_PORT,
     FUNNEL_OUTAGE_ESCALATE_AFTER_H,
     GOOGLE_DRIVE_POLL_INTERVAL_S,
     GOOGLE_DRIVE_SERVICE_ACCOUNT,
     HEALTH_DEBOUNCE_S,
-    HTTP_INGEST_HOST,
     HTTP_INGEST_PAIR_WINDOW_S,
-    HTTP_INGEST_PORT,
+    HTTP_INGEST_SWEEP_INTERVAL_S,
+    INSTANCE_NAME,
     LOCK_FILE,
+    NODE_OFFLINE_REPAIR_AFTER_MIN,
     LOG_FILE,
     SCHEDULED_CHECK_INTERVAL_S,
-    TAILSCALE_BINARY,
+    TAILSCALE_APP_NAME,
+    TAILSCALE_RECONNECT_TIMEOUT_S,
+    TAILSCALE_RESTART_TIMEOUT_S,
     resolve_data_dir,
     resolve_google_drive_data_dir,
 )
@@ -1249,84 +1250,137 @@ class ProfileRuntime:
         finally:
             conn.close()
 
-    def _attempt_funnel_heal(self, outage_since: str | None) -> bool:
-        """Re-assert the Funnel mapping once per outage, and record the attempt.
+    def _attempt_node_repair(self, outage_since: str | None) -> str | None:
+        """Restart Tailscale once per outage and verify whether it reconnected.
 
-        Whether this helps is unresolved. Re-asserting the config was measured
-        against a live outage and changed nothing over several minutes, while a
-        different occurrence recovered roughly fifteen minutes after the same
-        command — at an age where it may simply have been due to clear anyway.
-        The attempt is cheap and idempotent, so it runs; the outcome is recorded
-        as an event so a few more occurrences settle the question with data
-        rather than with recollection.
+        This replaces re-asserting the Funnel mapping, which was measured three
+        times against live outages and never changed either the node state or
+        the DNS record. On 2026-08-29 the node was disconnected from the
+        coordination server while the machine's own network was fine, and only
+        restarting the app — which respawns the system network extension
+        holding that connection — brought it back, in about twelve seconds.
+        ``tailscale down`` followed by ``tailscale up`` was tried first and did
+        nothing; it re-runs the login flow rather than the wedged process.
 
-        Deliberately not verified inline. Success means the record reappears
-        publicly, which the next health cycle already checks, and a command that
-        exits zero while the record stays missing is exactly how the false fix
-        got into the docs.
+        The result is verified here rather than left to the next health cycle.
+        A repair whose effect is inferred from what recovered afterwards is how
+        "recreate the Funnel is the fix" entered the docs on no evidence, so
+        this observes the one thing it can actually attribute: whether the node
+        came back online within seconds of the restart it performed.
 
         Args:
-            outage_since: Start of the current outage, used so one outage draws
-                one attempt however many cycles it spans.
+            outage_since: Start of the current outage, so one outage draws one
+                restart however many cycles it spans.
 
         Returns:
-            Whether a repair was attempted on this call.
+            ``"reconnected"`` or ``"failed"`` when a restart ran, or None when
+            none was attempted.
         """
-        from http_ingest import funnel_conflict_reason
+        from http_ingest import tailscale_node_health
 
-        conflict = funnel_conflict_reason()
-        if conflict:
-            logger.info("Not re-asserting the Funnel: %s.", conflict)
-            return False
+        if INSTANCE_NAME:
+            # Tailscale is machine-wide. A lab instance restarting it would drop
+            # the live installation's tailnet to repair a fault it does not own,
+            # which is the same reasoning that stops it re-pointing the Funnel.
+            logger.info(
+                "Not restarting Tailscale: instance %r must not restart a "
+                "machine-wide service the default installation depends on.",
+            )
+            return None
 
-        previous = self._state.get("funnel_heal")
+        previous = self._state.get("node_repair")
         if isinstance(previous, dict) and previous.get("since") == outage_since:
-            return False
+            return None
 
-        if not TAILSCALE_BINARY.exists():
-            logger.warning(
-                "Cannot re-assert the Funnel: %s is missing. Set "
-                "ZDROWSKIT_TAILSCALE_BINARY if the CLI lives elsewhere.",
-                TAILSCALE_BINARY,
-            )
-            return False
+        offline_h = _hours_since(outage_since, now=datetime.now(timezone.utc))
+        if offline_h is not None and offline_h * 60 < NODE_OFFLINE_REPAIR_AFTER_MIN:
+            # Tailscale reconnects on its own after a wake or a network change.
+            # Restarting it during one of those interrupts a tailnet that was
+            # about to recover anyway.
+            return None
 
-        command = [
-            str(TAILSCALE_BINARY),
-            "funnel",
-            "--bg",
-            f"--https={FUNNEL_HTTPS_PORT}",
-            f"http://{HTTP_INGEST_HOST}:{HTTP_INGEST_PORT}",
-        ]
-        try:
-            completed = subprocess.run(
-                command,
-                capture_output=True,
-                text=True,
-                timeout=FUNNEL_HEAL_TIMEOUT_S,
-                check=False,
-            )
-        except (OSError, subprocess.SubprocessError) as exc:
-            logger.warning("Funnel re-assert could not run: %s", exc)
-            self._record_event("ingest", "funnel_heal_failed", str(exc)[:200])
-            return False
-
-        self._state["funnel_heal"] = {
+        self._state["node_repair"] = {
             "since": outage_since,
             "attempted_at": datetime.now(timezone.utc).isoformat(),
         }
         self._save_state()
-        detail = (completed.stderr or completed.stdout or "").strip()[:200]
+
+        logger.warning(
+            "Tailscale has been disconnected for %s; restarting %s to reconnect it.",
+            f"{offline_h:.1f}h" if offline_h is not None else "a while",
+            TAILSCALE_APP_NAME,
+        )
+        try:
+            subprocess.run(
+                ["osascript", "-e", f'quit app "{TAILSCALE_APP_NAME}"'],
+                capture_output=True,
+                text=True,
+                timeout=TAILSCALE_RESTART_TIMEOUT_S,
+                check=False,
+            )
+            completed = subprocess.run(
+                ["open", "-a", TAILSCALE_APP_NAME],
+                capture_output=True,
+                text=True,
+                timeout=TAILSCALE_RESTART_TIMEOUT_S,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            logger.exception("Could not restart %s", TAILSCALE_APP_NAME)
+            self._record_event("ingest", "node_repair_failed", str(exc)[:200])
+            return "failed"
+        if completed.returncode != 0:
+            detail = (completed.stderr or completed.stdout or "").strip()[:200]
+            logger.error(
+                "Could not relaunch %s (exit %d): %s",
+                TAILSCALE_APP_NAME,
+                completed.returncode,
+                detail,
+            )
+            self._record_event(
+                "ingest",
+                "node_repair_failed",
+                f"Relaunching {TAILSCALE_APP_NAME} exited "
+                f"{completed.returncode}. {detail}".strip(),
+            )
+            return "failed"
+
+        deadline = time.monotonic() + TAILSCALE_RECONNECT_TIMEOUT_S
+        connected: bool | None = None
+        while time.monotonic() < deadline:
+            connected, _detail = tailscale_node_health()
+            if connected is True:
+                break
+            if self._stop_event.wait(3):
+                break
+
+        took = TAILSCALE_RECONNECT_TIMEOUT_S - max(deadline - time.monotonic(), 0)
+        if connected is True:
+            self._state["node_repair"]["reconnected_at"] = datetime.now(
+                timezone.utc
+            ).isoformat()
+            self._save_state()
+            logger.info("Tailscale reconnected %.0fs after the restart", took)
+            self._record_event(
+                "ingest",
+                "node_repair_reconnected",
+                f"Restarted {TAILSCALE_APP_NAME}; the node reported online again "
+                f"{took:.0f}s later. The public DNS record follows within about "
+                "ten minutes.",
+            )
+            return "reconnected"
+
+        logger.error(
+            "Tailscale did not reconnect within %.0fs of the restart",
+            TAILSCALE_RECONNECT_TIMEOUT_S,
+        )
         self._record_event(
             "ingest",
-            "funnel_heal_attempted",
-            f"Re-asserted the Funnel (exit {completed.returncode}). {detail}".strip(),
+            "node_repair_failed",
+            f"Restarted {TAILSCALE_APP_NAME}, but the node was still offline "
+            f"{TAILSCALE_RECONNECT_TIMEOUT_S:.0f}s later.",
         )
-        logger.info(
-            "Re-asserted the Funnel after a DNS outage (exit %d)",
-            completed.returncode,
-        )
-        return True
+        return "failed"
 
     def _check_ingest_health(self, prefs: dict) -> None:
         """Report a sustained ingest failure once, and its recovery once.
@@ -1344,6 +1398,7 @@ class ProfileRuntime:
             assess_ingest_health,
             newest_expected_day,
             public_dns_health,
+            tailscale_node_health,
         )
         from notification_prefs import (
             effective_notification_prefs,
@@ -1376,6 +1431,12 @@ class ProfileRuntime:
         # loses nothing by not hearing: the rolling exports re-send the backlog
         # once the record returns.
         funnel_resolver = resolve_funnel_dns if self.profile.operator else None
+        # Same reasoning as the Funnel record, and the same owner: one Mac holds
+        # one Tailscale connection for every profile on it, so asking per
+        # profile would spend N probes on one answer only the operator can act
+        # on. A hosted profile hears nothing and loses nothing — the restart and
+        # the backlog re-send both happen without them.
+        node_resolver = tailscale_node_health if self.profile.operator else None
 
         try:
             newest_data_date = self._newest_data_date(
@@ -1388,6 +1449,7 @@ class ProfileRuntime:
                 split_after_h=settings["split_after_h"],
                 pair_window_s=HTTP_INGEST_PAIR_WINDOW_S,
                 resolve_funnel_dns=funnel_resolver,
+                resolve_node_health=node_resolver,
                 now=assessment_now,
             )
         except (OSError, sqlite3.Error):
@@ -1432,29 +1494,44 @@ class ProfileRuntime:
                             )
                             return
                     message = _recovery_message(alerted, present_metric_dates)
-                if isinstance(alerted, dict) and alerted.get("status") == "funnel":
-                    # Record how long the outage ran and whether a repair had
-                    # been attempted first. A few of these settle whether
-                    # re-asserting the Funnel does anything, which one
-                    # recollection and one ambiguous occurrence cannot.
-                    attempt = self._state.get("funnel_heal")
-                    attempted_at = (
-                        attempt.get("attempted_at")
-                        if isinstance(attempt, dict)
-                        else None
-                    )
-                    since_attempt = _hours_since(attempted_at, now=assessment_now)
+                if isinstance(alerted, dict) and alerted.get("status") in {
+                    "funnel",
+                    "node",
+                }:
+                    # Records what was attempted and what was observed, and
+                    # stops there. The previous version wrote "1.0h after the
+                    # re-assert", which reads as a cause and was wrong: the
+                    # re-assert had done nothing and a hand-run app restart the
+                    # daemon never saw was what reconnected the node. Crediting
+                    # whichever command ran last is exactly how a fix that has
+                    # never worked stayed in the docs for weeks.
+                    attempt = self._state.get("node_repair")
+                    outcome = "no repair was attempted by the daemon"
+                    if isinstance(attempt, dict):
+                        since_attempt = _hours_since(
+                            attempt.get("attempted_at"), now=assessment_now
+                        )
+                        verified = attempt.get("reconnected_at") is not None
+                        outcome = (
+                            "the daemon restarted Tailscale "
+                            + (
+                                f"{since_attempt:.1f}h earlier"
+                                if since_attempt is not None
+                                else "earlier"
+                            )
+                            + (
+                                " and saw the node come back online"
+                                if verified
+                                else " and never saw the node come back online, "
+                                "so this recovery is not attributable to it"
+                            )
+                        )
                     self._record_event(
                         "ingest",
-                        "funnel_recovered",
-                        "Funnel DNS resolves again"
-                        + (
-                            f"; {since_attempt:.1f}h after the re-assert"
-                            if since_attempt is not None
-                            else "; no repair had been attempted"
-                        ),
+                        f"{alerted['status']}_recovered",
+                        f"Uploads can get through again; {outcome}.",
                     )
-                    self._state.pop("funnel_heal", None)
+                    self._state.pop("node_repair", None)
                 self._state.pop("data_health_alert", None)
                 self._save_state()
                 if recovery["status"] == "allowed" and message:
@@ -1462,10 +1539,11 @@ class ProfileRuntime:
             return
 
         now_iso = now.astimezone(timezone.utc).isoformat()
-        healed = False
+        repair: str | None = None
         escalating = False
+        if health.status == "node":
+            repair = self._attempt_node_repair(health.since)
         if health.status == "funnel":
-            healed = self._attempt_funnel_heal(health.since)
             outage_h = _hours_since(health.since, now=assessment_now)
             escalating = (
                 outage_h is not None and outage_h >= FUNNEL_OUTAGE_ESCALATE_AFTER_H
@@ -1524,9 +1602,10 @@ class ProfileRuntime:
             return
         headings = {
             "stale": "Daily health metrics are missing",
-            # Named for the cause, not the symptom: this one is not the user's
-            # to fix and the message exists so they stop looking.
-            "funnel": "Your phone can't upload right now",
+            # Named for the cause, not the symptom: neither of these is the
+            # user's to chase, and the message exists so they stop looking.
+            "funnel": "Your phone can't upload — Tailscale's side",
+            "node": "Your phone can't upload — this Mac dropped off Tailscale",
         }
         heading = headings.get(health.status, "Health data isn't syncing")
         if escalating:
@@ -1537,13 +1616,20 @@ class ProfileRuntime:
                 " This one has lasted longer than any before it, so it is no "
                 "longer the usual pattern and is worth raising with Tailscale."
             )
-        elif healed:
-            # Says what happened, not what the code called it. "Re-asserted the
-            # Funnel mapping" is the command's vocabulary and means nothing to
-            # someone reading a notification on their phone.
+        # Each line says what was done and what was observed. Nothing here
+        # promises a fix the daemon has not watched take effect.
+        elif repair == "reconnected":
             body += (
-                " I have asked Tailscale to publish it again, which has "
-                "sometimes worked within about fifteen minutes."
+                " I restarted Tailscale and this Mac is connected again. "
+                "Uploads should resume within about ten minutes, once the "
+                "address is published again. Nothing is lost meanwhile — your "
+                "phone re-sends the backlog."
+            )
+        elif repair == "failed":
+            body += (
+                " I restarted Tailscale and it did not reconnect, so this one "
+                "needs a look: open the Tailscale app on the Mac and check it "
+                "is signed in."
             )
         self._poller.send_reply(
             f"⚠️ **{heading}**\n\n{body}\n\n"
@@ -1765,8 +1851,9 @@ class Daemon:
             )
 
     def _scheduler_loop(self) -> None:
-        """Queue scheduled and Drive work on each profile's own worker."""
+        """Queue scheduled, HTTP sweep, and Drive work on each profile's worker."""
         next_scheduled = 0.0
+        next_http_sweep = time.monotonic() + HTTP_INGEST_SWEEP_INTERVAL_S
         next_drive = {name: 0.0 for name in self.runtimes}
         drive_initial = set(self.runtimes)
         while not self._stop_event.wait(1):
@@ -1775,6 +1862,10 @@ class Daemon:
                 for runtime in self.runtimes.values():
                     self._submit(runtime, runtime._scheduled_check_once)
                 next_scheduled = now + SCHEDULED_CHECK_INTERVAL_S
+            if now >= next_http_sweep:
+                # ``start`` already swept, hence the offset initial deadline.
+                self._http.sweep()
+                next_http_sweep = now + HTTP_INGEST_SWEEP_INTERVAL_S
             for name, runtime in self.runtimes.items():
                 if runtime.import_source != "google-drive" or now < next_drive[name]:
                     continue

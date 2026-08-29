@@ -179,7 +179,11 @@ class TestPublicDnsHealth:
         # reader chasing a local repair, which is how the false fix reached the
         # docs the first time.
         assert "Tailscale has stopped publishing" in detail
-        assert "rather than anything on this Mac" in detail
+        # States the verified fact rather than a disclaimer: the node's own
+        # connection is checked before this condition is ever reported, because
+        # a disconnected Mac produces an identical missing record from a cause
+        # that *is* repairable here.
+        assert "This Mac is still connected" in detail
         # Jargon check: the operator should never meet the code's vocabulary.
         for jargon in ("Funnel mapping", "re-assert", "DNS record", "receiver"):
             assert jargon not in detail, f"jargon leaked into the alert: {jargon}"

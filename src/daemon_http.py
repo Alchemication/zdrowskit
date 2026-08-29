@@ -92,6 +92,20 @@ class DaemonHttpIngestHandler:
         runtime._save_state()
         runtime._runners._run_nudge("new_data", trigger_context=trigger_context)
 
+    def sweep(self) -> None:
+        """Queue every staged pair that is now due to import.
+
+        An arriving upload is what normally triggers an import, so a pair whose
+        halves missed each other has nothing left to re-examine it — the next
+        upload may be days away, or blocked entirely by a Funnel outage. This
+        runs on a timer so the wait ends on schedule instead of on luck.
+        """
+        if self._manager is None:
+            return
+        for profile_name, pair_digest in self._manager.due_pairs():
+            logger.info("Queuing due HTTP pair for %s", profile_name)
+            self._queue_pair(profile_name, pair_digest)
+
     def start(self) -> None:
         """Bind the loopback receiver and recover any durable pending pairs."""
         if self._manager is None or self._registry is None:
@@ -110,8 +124,7 @@ class DaemonHttpIngestHandler:
                 HTTP_INGEST_HOST,
                 HTTP_INGEST_PORT,
             )
-            for profile_name, pair_digest in self._manager.pending_pairs():
-                self._queue_pair(profile_name, pair_digest)
+            self.sweep()
         except OSError as exc:
             logger.error(
                 "HTTP ingest could not bind %s:%d: %s. Telegram and scheduled "

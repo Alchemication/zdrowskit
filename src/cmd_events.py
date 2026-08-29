@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 _CATEGORY_STYLE: dict[str, str] = {
     "nudge": "cyan",
     "import": "green",
+    "ingest": "bright_green",
     "notify": "blue",
     "chat": "magenta",
     "context": "yellow",

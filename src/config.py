@@ -118,13 +118,26 @@ HTTP_INGEST_PORT: int = int(os.environ.get("ZDROWSKIT_HTTP_INGEST_PORT", "8787")
 HTTP_INGEST_MAX_BYTES: int = 64 * 1024 * 1024
 """Maximum accepted Auto Export request body size."""
 HTTP_INGEST_PAIR_WINDOW_S: int = 60 * 60
-"""Maximum arrival gap between the Metrics and Workouts halves of an export.
+"""How long a staged half waits for its partner before importing anyway.
 
-Pairing no longer protects the data — either half can now land alone without
-erasing the other. It only keeps a nudge from reacting to half a day, so a
-missed pair costs a delayed import rather than lost data. An hour is wide
+Pairing does not protect the data — either half can land alone without erasing
+the other. It only keeps a nudge from reacting to half a day, so waiting is
+worth an hour and never worth more: halves that arrive together import at once,
+and a half whose partner is this late imports on its own. An hour is wide
 enough to absorb a slow multi-megabyte route upload while an hour-old Workouts
 payload still describes today.
+
+This was a hard gate until 2026-08-29, and a real 21.3h split then stranded two
+days of Metrics on disk indefinitely — nothing re-examined a pair that had once
+missed the window, so "delayed import" meant "never".
+"""
+HTTP_INGEST_SWEEP_INTERVAL_S: int = 5 * 60
+"""How often the daemon re-examines staged uploads whose partner never came.
+
+Uploads arriving is what normally drives an import, so a half left waiting for
+a partner needs a clock of its own or it waits forever. Five minutes is a
+twelfth of the pairing window, so an overdue half imports within a few minutes
+of becoming due, and the sweep costs one small JSON read per HTTP profile.
 """
 HTTP_INGEST_MAX_METRICS: int = 200
 """Distinct metric types accepted in one Metrics payload.
@@ -261,11 +274,49 @@ a day late.
 TAILSCALE_BINARY: Path = Path(
     os.environ.get("ZDROWSKIT_TAILSCALE_BINARY", "/usr/local/bin/tailscale")
 ).expanduser()
-"""Absolute path to the Tailscale CLI used to re-assert a lost Funnel.
+"""Absolute path to the Tailscale CLI used to inspect and repair the tailnet.
 
 Absolute rather than resolved from PATH because the daemon runs under launchd,
 whose environment does not include the shell's PATH, so a bare name found in an
 interactive terminal is not found by the daemon.
+"""
+TAILSCALE_STATUS_TIMEOUT_S: float = 10
+"""Seconds to wait for ``tailscale status --json`` before giving up.
+
+Runs on every health cycle once uploads go quiet, so it must never hang a
+daemon thread. A timeout reports "unknown", never "disconnected" — a slow CLI
+is not a broken tailnet.
+"""
+TAILSCALE_APP_NAME: str = os.environ.get("ZDROWSKIT_TAILSCALE_APP_NAME", "Tailscale")
+"""macOS application whose restart reconnects a wedged Tailscale daemon.
+
+Restarting the app is what respawns the system network extension that actually
+holds the coordination-server connection; nothing the CLI offers does. Named
+rather than hard-coded so a differently-installed app can still be repaired.
+"""
+TAILSCALE_RESTART_TIMEOUT_S: float = 20
+"""Seconds to allow the Tailscale app to quit, and again to relaunch.
+
+Generous for a local app launch. A restart that overruns this is reported as
+failed rather than waited on, because the alternative is a daemon thread
+blocked behind a hung GUI process.
+"""
+TAILSCALE_RECONNECT_TIMEOUT_S: float = 90
+"""Seconds to wait for a restarted Tailscale to report the node online again.
+
+The one measured occurrence reconnected in about twelve seconds. Ninety leaves
+room for a slower machine while still failing fast enough to tell the operator
+the repair did not work, which is the entire point of verifying it.
+"""
+NODE_OFFLINE_REPAIR_AFTER_MIN: float = 10
+"""Minutes the node must be continuously offline before a restart is attempted.
+
+Tailscale drops and re-establishes its control connection routinely — on wake,
+on network change, on a coordination-server deploy — and nearly all of those
+recover within seconds. Restarting the app on a blip would interrupt a working
+tailnet to fix nothing. Ten minutes is far longer than any self-clearing
+disconnection observed and far shorter than the 55 hours the one real
+occurrence ran before it was noticed by hand.
 """
 FUNNEL_ALLOWED_HTTPS_PORTS: tuple[int, ...] = (443, 8443, 10000)
 """Public ports Tailscale grants Funnel on. Not a preference; the set is theirs."""
@@ -289,13 +340,6 @@ if FUNNEL_HTTPS_PORT not in FUNNEL_ALLOWED_HTTPS_PORTS:
         f"{', '.join(str(port) for port in FUNNEL_ALLOWED_HTTPS_PORTS)}: "
         f"{FUNNEL_HTTPS_PORT}. Tailscale serves Funnel on no others."
     )
-FUNNEL_HEAL_TIMEOUT_S: float = 30
-"""Seconds allowed for the Funnel re-assert command before giving up.
-
-The command returns in about a second when the daemon is reachable. The ceiling
-exists so a wedged CLI cannot block the health cycle, which also drives the
-alerts this repair is meant to accompany.
-"""
 FUNNEL_OUTAGE_ESCALATE_AFTER_H: float = 48
 """Age at which a Funnel DNS outage stops being routine and is re-reported.
 

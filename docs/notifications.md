@@ -112,15 +112,42 @@ that is survivable. For a hosted profile it is fatal — their data quietly goes
 stale and they conclude the product is dead. Local iCloud and Google Drive
 profiles do not currently run these health checks.
 
-Four conditions are reported, checked in order of how specific they are about
-the cause:
+Five conditions are reported. `node` and `funnel` are settled first whenever
+uploads have gone quiet, because silence invalidates the premise the
+upload-timing conditions rest on — that the phone is demonstrably reaching us.
+`node` precedes `funnel` because a disconnected Mac produces an identical
+missing DNS record from a cause that is repairable in seconds. The rest follow
+in order of how specific they are about the cause:
 
 | Condition | Default | Meaning |
 |-----------|---------|---------|
+| `node` | 3h of silence | This Mac lost its Tailscale connection, so Tailscale stopped publishing the address phones upload to. **Operator only.** Repairable here: the daemon restarts Tailscale once per outage and reports whether the node actually came back. See [HTTP ingest](http-ingest.md#the-address-stops-resolving). |
+| `funnel` | 3h of silence | Tailscale stopped publishing that address for a Mac that is still connected — checked first, so this condition means the local side is verified healthy. **Operator only** — one Funnel serves every profile and nobody else can act on it. Past outages cleared themselves in 26-35 hours. See [HTTP ingest](http-ingest.md#the-address-stops-resolving). |
 | `error` | 6h stalled; immediate for unreadable state | The last import failed and none has succeeded while the pipe is stalled, or the ingest state file cannot be read. |
-| `split` | 6h | Uploads *are* arriving but nothing imports. A strong signal — the phone is demonstrably reachable. The message distinguishes the two causes: halves further apart than the one-hour pairing window means two automations whose schedules have drifted, and anything closer than that means the phone is fine and the import on this end is stuck. |
-| `funnel` | 3h of silence | Tailscale has stopped publishing the address phones upload to, so nothing can get through. **Operator only** — one Funnel serves every profile and nobody else can act on it. Past outages cleared themselves in 26-35 hours. See [HTTP ingest](http-ingest.md#funnel-dns-outages). |
+| `split` | 6h | Uploads arrived and nothing imports. A strong signal while the phone is demonstrably reachable. Because a half now imports on its own once the pairing window lapses, a stall this long is a fault on this end whatever the arrival gap was; the message names the gap but never sends you after the automation schedules. |
 | `stale` | 2 days | The pipe looks fine but two completed days of daily metrics are missing. The catch-all: phone off, token revoked, app deleted, parser rejecting every payload. |
+
+This ordering is what keeps one fault from hiding another. A stalled pair cannot
+clear itself while nothing can arrive, so before it an outage that began during
+a stall stayed permanently mislabelled as `split`, and the 48-hour escalation
+that hangs off `funnel` never ran. The same logic separates `node` from
+`funnel`: on 2026-08-29 a disconnected Mac was reported as an outage to wait
+out for 55 hours, when restarting Tailscale fixed it in twelve seconds.
+
+### What a repair message may claim
+
+A repair is only ever described by what the daemon watched happen. After
+restarting Tailscale it polls the node's own connection state and says either
+that it came back or that it did not — it never infers success from a command's
+exit code, and never from whatever recovered afterwards. The recovery notice
+records what was attempted and whether it was verified, and says outright when
+a recovery is not attributable to it.
+
+That rule exists because the previous version wrote "Funnel DNS resolves again;
+1.0h after the re-assert" for a recovery its own re-assert had nothing to do
+with — the fix was a hand-run app restart the daemon never saw. Crediting
+whichever command ran last is how a repair that has never worked stayed in the
+documentation for weeks.
 
 A profile that has never uploaded is never alerted: it is mid-setup, not broken.
 Once a pair has imported, a profile for which no daily metrics have ever been
@@ -168,8 +195,9 @@ are in the `DATA_HEALTH_*` docstrings in `src/config.py`.
 Each condition is reported once and then not again for 24 hours while it
 persists. What is sent when it clears depends on what the outage cost:
 
-- **A stalled pipe** (`split`, `error`) always gets its all-clear. You were told
-  to go fix something; the confirmation answers an action you took.
+- **A stalled pipe** (`split`, `error`, `node`) always gets its all-clear. You
+  were told to go fix something, or told the daemon tried; the confirmation
+  answers an action that was taken.
 - **A `funnel` outage** also gets its all-clear, for the opposite reason: you
   were told there was nothing to do, so the message that ends the waiting is
   the only one that closes it. The backlog re-sends on its own, since both

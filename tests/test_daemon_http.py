@@ -96,4 +96,4 @@ class TestDaemonHttpIngestHandler:
         runtime._runners._run_nudge.assert_called_once_with(
             "new_data", trigger_context="one new day"
         )
-        assert handler._manager.pending_pairs() == []
+        assert handler._manager.due_pairs() == []

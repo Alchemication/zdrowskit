@@ -3239,16 +3239,16 @@ class TestFunnelOutageAlerts:
 
         with (
             patch("http_ingest.assess_ingest_health", return_value=health),
-            patch.object(runtime, "_attempt_funnel_heal", return_value=True) as heal,
+            patch.object(runtime, "_attempt_node_repair") as repair,
         ):
             runtime._check_ingest_health(prefs)
             runtime._check_ingest_health(prefs)
             runtime._check_ingest_health(prefs)
 
-        # The health cycle asks on every tick; the once-per-outage guard lives
-        # inside the repair itself, which is covered directly below. What must
-        # hold here is that the operator hears about it exactly once.
-        assert heal.call_count == 3
+        # Nothing local is attempted for a genuine Funnel outage: the node is
+        # connected and its Funnel is on, and three measured occurrences showed
+        # re-asserting the mapping changes neither. The operator hears once.
+        repair.assert_not_called()
         assert runtime._poller.send_reply.call_count == 1
 
     def test_a_routine_outage_is_not_repeated_at_the_realert_window(
@@ -3259,7 +3259,6 @@ class TestFunnelOutageAlerts:
 
         with (
             patch("http_ingest.assess_ingest_health", return_value=self._funnel(5)),
-            patch.object(runtime, "_attempt_funnel_heal", return_value=False),
         ):
             runtime._check_ingest_health(prefs)
         # Well past the 24h re-alert window that governs the other conditions,
@@ -3271,7 +3270,6 @@ class TestFunnelOutageAlerts:
         ).isoformat()
         with (
             patch("http_ingest.assess_ingest_health", return_value=self._funnel(35)),
-            patch.object(runtime, "_attempt_funnel_heal", return_value=False),
         ):
             runtime._check_ingest_health(prefs)
 
@@ -3283,12 +3281,10 @@ class TestFunnelOutageAlerts:
 
         with (
             patch("http_ingest.assess_ingest_health", return_value=self._funnel(5)),
-            patch.object(runtime, "_attempt_funnel_heal", return_value=False),
         ):
             runtime._check_ingest_health(prefs)
         with (
             patch("http_ingest.assess_ingest_health", return_value=self._funnel(50)),
-            patch.object(runtime, "_attempt_funnel_heal", return_value=False),
         ):
             runtime._check_ingest_health(prefs)
             runtime._check_ingest_health(prefs)
@@ -3299,89 +3295,139 @@ class TestFunnelOutageAlerts:
         assert "Tailscale" in messages[1]
         assert runtime._state["data_health_alert"]["escalated"] is True
 
-    def test_the_repair_runs_once_per_outage(self, tmp_path: Path) -> None:
+    def _node(self, hours_ago: float = 5.0):
+        from datetime import datetime, timedelta, timezone
+
+        from http_ingest import IngestHealth
+
+        since = (datetime.now(timezone.utc) - timedelta(hours=hours_ago)).isoformat()
+        return IngestHealth(
+            status="node",
+            detail="This Mac has lost its connection to Tailscale.",
+            since=since,
+        )
+
+    def _offline_since(self, hours_ago: float) -> str:
+        from datetime import datetime, timedelta, timezone
+
+        return (datetime.now(timezone.utc) - timedelta(hours=hours_ago)).isoformat()
+
+    def test_the_node_repair_runs_once_per_outage(self, tmp_path: Path) -> None:
         import daemon as daemon_module
 
         runtime = self._runtime(tmp_path, operator=True)
-        completed = SimpleNamespace(returncode=0, stdout="Funnel started", stderr="")
-        binary = tmp_path / "tailscale"
-        binary.write_text("#!/bin/sh\n", encoding="utf-8")
+        completed = SimpleNamespace(returncode=0, stdout="", stderr="")
+        first = self._offline_since(5)
+        second = self._offline_since(2)
 
         with (
-            patch.object(daemon_module, "TAILSCALE_BINARY", binary),
-            patch.object(
-                daemon_module.subprocess, "run", return_value=completed
-            ) as run,
+            patch.object(daemon_module.subprocess, "run", return_value=completed),
+            patch(
+                "http_ingest.tailscale_node_health",
+                return_value=(True, "connected"),
+            ),
         ):
-            assert runtime._attempt_funnel_heal("2026-08-16T10:00:00+00:00") is True
-            assert runtime._attempt_funnel_heal("2026-08-16T10:00:00+00:00") is False
+            assert runtime._attempt_node_repair(first) == "reconnected"
+            assert runtime._attempt_node_repair(first) is None
             # A new outage is a new attempt.
-            assert runtime._attempt_funnel_heal("2026-08-20T10:00:00+00:00") is True
+            assert runtime._attempt_node_repair(second) == "reconnected"
 
-        assert run.call_count == 2
-        command = run.call_args.args[0]
-        assert "funnel" in command
-        # Absolute path: the daemon runs under launchd, whose PATH does not
-        # include the directory an interactive shell finds tailscale in.
-        assert command[0].startswith("/")
-
-    def test_a_named_instance_never_repoints_the_shared_funnel(
-        self, tmp_path: Path
-    ) -> None:
-        """One Funnel serves the machine; a lab taking it breaks the live host."""
+    def test_a_brief_disconnection_is_left_alone(self, tmp_path: Path) -> None:
         import daemon as daemon_module
-        import http_ingest as http_ingest_module
+        from datetime import datetime, timedelta, timezone
 
         runtime = self._runtime(tmp_path, operator=True)
-        binary = tmp_path / "tailscale"
-        binary.write_text("#!/bin/sh\n", encoding="utf-8")
+        recent = (datetime.now(timezone.utc) - timedelta(minutes=2)).isoformat()
 
-        with (
-            patch.object(http_ingest_module, "INSTANCE_NAME", "lab"),
-            patch.object(http_ingest_module, "FUNNEL_HTTPS_PORT", 443),
-            patch.object(daemon_module, "TAILSCALE_BINARY", binary),
-            patch.object(daemon_module.subprocess, "run") as run,
-        ):
-            assert runtime._attempt_funnel_heal("2026-08-16T10:00:00+00:00") is False
+        # Tailscale drops and re-establishes its control connection on wake and
+        # on network changes, almost always recovering in seconds. Restarting
+        # the app during one of those interrupts a tailnet to fix nothing.
+        with patch.object(daemon_module.subprocess, "run") as run:
+            assert runtime._attempt_node_repair(recent) is None
 
         run.assert_not_called()
 
-    def test_a_named_instance_repairs_its_own_funnel_port(self, tmp_path: Path) -> None:
-        """A lab on its own public port owns that mapping and may re-assert it."""
-        import daemon as daemon_module
-        import http_ingest as http_ingest_module
-
-        runtime = self._runtime(tmp_path, operator=True)
-        completed = SimpleNamespace(returncode=0, stdout="Funnel started", stderr="")
-        binary = tmp_path / "tailscale"
-        binary.write_text("#!/bin/sh\n", encoding="utf-8")
-
-        with (
-            patch.object(http_ingest_module, "INSTANCE_NAME", "lab"),
-            patch.object(http_ingest_module, "FUNNEL_HTTPS_PORT", 8443),
-            patch.object(daemon_module, "FUNNEL_HTTPS_PORT", 8443),
-            patch.object(daemon_module, "TAILSCALE_BINARY", binary),
-            patch.object(
-                daemon_module.subprocess, "run", return_value=completed
-            ) as run,
-        ):
-            assert runtime._attempt_funnel_heal("2026-08-16T10:00:00+00:00") is True
-
-        assert "--https=8443" in run.call_args.args[0]
-
-    def test_a_missing_cli_does_not_crash_the_health_cycle(
+    def test_a_restart_that_does_not_reconnect_reports_failure(
         self, tmp_path: Path
     ) -> None:
         import daemon as daemon_module
 
         runtime = self._runtime(tmp_path, operator=True)
+        completed = SimpleNamespace(returncode=0, stdout="", stderr="")
 
-        # A host where the CLI lives elsewhere must degrade to alert-only
-        # rather than take the health cycle down with it.
-        with patch.object(
-            daemon_module, "TAILSCALE_BINARY", tmp_path / "no-such-tailscale"
+        # The whole point of verifying: a command that exits zero while the node
+        # stays offline must not be reported as a fix. Claiming one is how a
+        # repair that has never worked stayed in the docs.
+        with (
+            patch.object(daemon_module.subprocess, "run", return_value=completed),
+            patch.object(daemon_module, "TAILSCALE_RECONNECT_TIMEOUT_S", 0.1),
+            patch(
+                "http_ingest.tailscale_node_health",
+                return_value=(False, "still offline"),
+            ),
         ):
-            assert runtime._attempt_funnel_heal("2026-08-16T10:00:00+00:00") is False
+            assert runtime._attempt_node_repair(self._offline_since(5)) == "failed"
+
+    def test_a_relaunch_that_fails_is_reported_not_waited_on(
+        self, tmp_path: Path
+    ) -> None:
+        import daemon as daemon_module
+
+        runtime = self._runtime(tmp_path, operator=True)
+        failed = SimpleNamespace(
+            returncode=1, stdout="", stderr="Unable to find application"
+        )
+
+        with patch.object(daemon_module.subprocess, "run", return_value=failed):
+            assert runtime._attempt_node_repair(self._offline_since(5)) == "failed"
+
+    def test_a_named_instance_never_restarts_the_shared_tailscale(
+        self, tmp_path: Path
+    ) -> None:
+        """Tailscale is machine-wide; a lab restarting it drops the live host."""
+        import daemon as daemon_module
+
+        runtime = self._runtime(tmp_path, operator=True)
+
+        with (
+            patch.object(daemon_module, "INSTANCE_NAME", "lab"),
+            patch.object(daemon_module.subprocess, "run") as run,
+        ):
+            assert runtime._attempt_node_repair(self._offline_since(5)) is None
+
+        run.assert_not_called()
+
+    def test_a_node_outage_tells_the_operator_what_was_done(
+        self, tmp_path: Path
+    ) -> None:
+        runtime = self._runtime(tmp_path, operator=True)
+        prefs = load_notification_prefs(runtime._notification_prefs_path)
+
+        with (
+            patch("http_ingest.assess_ingest_health", return_value=self._node()),
+            patch.object(runtime, "_attempt_node_repair", return_value="reconnected"),
+        ):
+            runtime._check_ingest_health(prefs)
+
+        message = runtime._poller.send_reply.call_args.args[0]
+        assert "dropped off Tailscale" in message
+        assert "restarted Tailscale and this Mac is connected again" in message
+
+    def test_a_failed_repair_says_so_rather_than_promising_a_fix(
+        self, tmp_path: Path
+    ) -> None:
+        runtime = self._runtime(tmp_path, operator=True)
+        prefs = load_notification_prefs(runtime._notification_prefs_path)
+
+        with (
+            patch("http_ingest.assess_ingest_health", return_value=self._node()),
+            patch.object(runtime, "_attempt_node_repair", return_value="failed"),
+        ):
+            runtime._check_ingest_health(prefs)
+
+        message = runtime._poller.send_reply.call_args.args[0]
+        assert "did not reconnect" in message
+        assert "needs a look" in message
 
     def test_recovery_sends_the_all_clear(self, tmp_path: Path) -> None:
         from http_ingest import IngestHealth
@@ -3391,7 +3437,6 @@ class TestFunnelOutageAlerts:
 
         with (
             patch("http_ingest.assess_ingest_health", return_value=self._funnel()),
-            patch.object(runtime, "_attempt_funnel_heal", return_value=True),
         ):
             runtime._check_ingest_health(prefs)
         with patch(

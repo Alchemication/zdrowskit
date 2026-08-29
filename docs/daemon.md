@@ -98,10 +98,14 @@ service. The lock file is already per-home. Give it a free port with
 `ZDROWSKIT_LOG_FILE` overrides the derived log path outright.
 
 Funnel mappings are machine-wide and one per public port. A named instance
-that leaves `ZDROWSKIT_FUNNEL_HTTPS_PORT` at its default is refused both by
-`ingest setup --funnel` and by the automatic repair during an outage, because
-it would take the default installation's mapping and send its phone uploads to
-the wrong receiver.
+that leaves `ZDROWSKIT_FUNNEL_HTTPS_PORT` at its default is refused by
+`ingest setup --funnel`, because it would take the default installation's
+mapping and send its phone uploads to the wrong receiver.
+
+For the same reason a named instance never performs the automatic Tailscale
+restart that repairs a lost connection: Tailscale is machine-wide, so a lab
+instance restarting it would drop the live installation's tailnet to fix a
+fault it does not own.
 
 A second instance therefore has two choices. Feed it from a local directory
 with `import --source local`, which needs no Funnel at all and is enough for

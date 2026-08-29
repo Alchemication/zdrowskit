@@ -23,13 +23,14 @@ from http_ingest import (
     TokenRegistry,
     UPLOAD_PATH,
     public_dns_health,
+    tailscale_node_health,
 )
 from profiles import Profile, ProfileConfigError, load_profiles
 
 PAIR_STATE_LABELS = {
     "ready": "queued for import",
     "waiting": "waiting for the other half",
-    "split": "halves arrived too far apart",
+    "split": "halves arrived too far apart; importing anyway shortly",
     "pending": "staged but not imported",
     "imported": "up to date",
 }
@@ -228,11 +229,22 @@ def cmd_ingest_status(args: argparse.Namespace) -> None:  # noqa: ARG001
     receiver_ok, receiver_detail = receiver_health()
     dns_name = _tailscale_dns_name()
     print(f"Receiver: {'ready' if receiver_ok else 'not ready'} ({receiver_detail})")
+    # Printed above the DNS line because a disconnected node produces an
+    # identical missing record, and reading them the other way round sends the
+    # operator off to wait out an outage they could fix in seconds.
+    node_ok, node_detail = tailscale_node_health()
+    node_label = {True: "connected", False: "DISCONNECTED", None: "unknown"}[node_ok]
+    print(f"Tailscale: {node_label} ({node_detail})")
     if dns_name:
         print(f"Funnel URL: https://{dns_name}{UPLOAD_PATH}")
         public_ok, public_detail = public_dns_health(dns_name)
         label = {True: "reachable", False: "NOT REACHABLE", None: "unknown"}[public_ok]
         print(f"Public DNS: {label} ({public_detail})")
+        if public_ok is False and node_ok is False:
+            print(
+                "  -> The record is missing because this Mac is disconnected, "
+                "not because of a Tailscale outage. Restart the Tailscale app."
+            )
     else:
         print("Funnel URL: unavailable (Tailscale is offline or not connected)")
     states = manager.status()

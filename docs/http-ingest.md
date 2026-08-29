@@ -266,10 +266,14 @@ Per profile, the ingest cache is bounded to:
 - one transient immutable pair while an import is running
 
 Each half imports as soon as it is new, against whatever partner is currently
-staged, provided the two are still within the pairing window. Requiring both
-halves to be new instead would strand whichever one arrived second, since two
-automations rarely fire at the same instant. Freshness is the window's job, not
-the import's. An identical completed pair is acknowledged but not re-imported.
+staged. Requiring both halves to be new instead would strand whichever one
+arrived second, since two automations rarely fire at the same instant. Halves
+that land within the pairing window import immediately; halves that miss it
+import once the window has lapsed since the later one arrived, so a wide gap
+delays an import by at most that window and never cancels one. The daemon
+re-examines staged halves on a timer, because a half left waiting has no
+further upload coming to re-evaluate it. An identical completed pair is
+acknowledged but not re-imported.
 A crash after HTTP `202` leaves the latest pair on disk; daemon startup detects
 and imports it. Parser failures keep the latest pair and a short error record
 for diagnosis.
@@ -350,6 +354,18 @@ the public DNS URL when Tailscale is connected, token presence, arrival times,
 the last successful import, and the last error. `doctor` runs the same receiver
 probe, so a stopped daemon fails both.
 
+The `Tailscale:` line reports whether this Mac still holds its own connection to
+Tailscale's coordination server. It is printed above `Public DNS:` because a
+disconnected node makes the public record disappear too — Tailscale does not
+publish an address for a node it cannot see — and the two faults want opposite
+responses.
+
+| `Tailscale:` | Meaning |
+|---|---|
+| `connected` | This Mac is in the tailnet. Anything wrong with the public record is Tailscale's side. |
+| `DISCONNECTED` | This Mac has dropped out of the tailnet, and the quoted line is Tailscale's own explanation. The public record will be gone as a consequence. Restart the Tailscale app. |
+| `unknown` | The CLI is missing, timed out, or returned something unreadable. Says nothing about the connection — never treated as a fault. |
+
 The `Public DNS:` line resolves the Funnel hostname through a public
 DNS-over-HTTPS resolver rather than the local one. This distinction matters more
 than it looks: MagicDNS answers for every tailnet member, so from this Mac the
@@ -361,11 +377,11 @@ resolver sees what Auto Export sees.
 | `Public DNS:` | Meaning |
 |---|---|
 | `reachable` | The hostname resolves publicly, to the listed Tailscale ingress addresses. |
-| `NOT REACHABLE` | No public record. Auto Export cannot reach the Funnel regardless of how healthy the receiver looks locally. Recreate the Funnel as described below. |
+| `NOT REACHABLE` | No public record. Auto Export cannot reach the Funnel regardless of how healthy the receiver looks locally. Read the `Tailscale:` line above to tell the two causes apart; the status output says so explicitly when both are failing. |
 | `unknown` | The resolver itself could not be reached — usually this machine is offline. Says nothing about the record. |
 
-`doctor` runs the same check and fails on `NOT REACHABLE`, but never on
-`unknown`. Note that it covers DNS only: a resolvable hostname whose TLS
+`doctor` runs both checks and fails on `DISCONNECTED` or `NOT REACHABLE`, but
+never on `unknown`. Note that it covers DNS only: a resolvable hostname whose TLS
 handshake fails, as happens for a few minutes after recreating a Funnel, still
 reports `reachable`.
 
@@ -378,10 +394,10 @@ can happen:
 | `queued for import` | Both halves are staged; the daemon is importing them now. |
 | `staged but not imported` | Both halves are on disk but no receipt covers them yet — normally an import running right now. If it persists, the import is stuck; check the daemon log. |
 | `waiting for the other half` | Only Metrics or only Workouts has ever arrived, or the other half is missing. Check that both automations exist and use the same URL and token. |
-| `halves arrived too far apart` | Both arrived, but more than an hour apart, so they were not paired. The next export resends the same window, so this delays an import rather than losing it; give both automations the same schedule. |
+| `halves arrived too far apart; importing anyway shortly` | Both arrived, but more than an hour apart. The detail line names the moment the import runs regardless. Putting both automations on the same schedule imports sooner; nothing is lost either way. |
 
 The daemon log records every accepted upload (profile, kind, size), every
-rejection with its reason and HTTP status, and a warning whenever halves land
+rejection with its reason and HTTP status, and a line whenever halves land
 outside the pairing window. `tail -f ~/Library/Logs/zdrowskit.daemon.log` while
 triggering an automation is the fastest way to diagnose a family member's phone.
 
@@ -408,34 +424,62 @@ Stopping Funnel does not stop the zdrowskit daemon, Telegram, reports, or local
 database access. It only prevents new iPhone HTTP uploads from reaching the
 receiver.
 
-### Funnel DNS outages
+### The address stops resolving
 
-Roughly every six days, Tailscale stops publishing the public DNS record for the
-Funnel hostname. Uploads stop dead while every local signal stays green:
-`tailscale funnel status` reports Funnel on, the node is online, and MagicDNS
-still resolves the name on this host.
-
-**Confirm it, then wait.** Four occurrences between 2026-08-02 and 2026-08-16
-each lasted 26-35 hours and cleared with no intervention. Nothing is permanently
-lost — both exports carry rolling windows, so the backlog re-sends once the
-record returns.
+Uploads stop dead and the Funnel hostname returns NXDOMAIN publicly. **Two
+different faults produce exactly this**, and they have opposite fixes, so read
+the node's own connection first:
 
 ```bash
-dig @1.1.1.1 <name> A +short     # blank means gone; check AAAA too
+uv run python main.py ingest status   # the `Tailscale:` line answers it
+tailscale status                       # or read the Online column directly
+dig @1.1.1.1 <name> A +short           # blank means gone; check AAAA too
 ```
 
-The daemon already watches for this. After a few hours of upload silence it
-checks the record, asks Tailscale to publish it again, and messages the operator
-only — see [sync alerts](notifications.md#sync-alerts).
+| `Tailscale:` | Cause | What to do |
+|---|---|---|
+| `DISCONNECTED` | This Mac lost its control connection. Tailscale does not publish a public address for a node it cannot see, so the missing record is a *symptom*. | **Restart the Tailscale app.** Reconnects in seconds; the record follows within about ten minutes. |
+| `connected` | Tailscale stopped publishing the record for a node it can see. Nobody's to fix. | **Wait.** Four occurrences between 2026-08-02 and 2026-08-16 each ran 26-35 hours and cleared unaided. |
 
-Re-running `tailscale funnel` does **not** reliably fix it. Measured against a
-live occurrence: with the hostname returning NXDOMAIN from two public resolvers,
-re-asserting the mapping changed nothing over several minutes. Whether a full
-`reset` plus re-enable helps is unresolved — one outage ended fifteen minutes
-after a reset, but at 28 hours old it was already inside the band the others
-cleared in unaided. Earlier recoveries were credited to whichever command had
-been run last, which is how "recreate the Funnel is the fix" got into this
-document despite never having been shown to work.
+Nothing is permanently lost either way — both exports carry rolling windows, so
+the backlog re-sends once the address returns.
+
+#### What does not work
+
+- **`tailscale funnel --bg` (re-asserting the mapping).** Measured against three
+  live occurrences; changed neither the node state nor the record. The daemon no
+  longer runs it.
+- **`tailscale down && tailscale up`.** Measured 2026-08-29 against a
+  disconnected node: six samples over 100 seconds, still offline throughout. It
+  re-runs the login flow, not the wedged process.
+- **`tailscale funnel reset` is unproven and aimed at the wrong layer.** One
+  outage ended fifteen minutes after a reset, but at 28 hours old it was already
+  inside the band the others cleared in unaided. It also rewrites proxy config
+  on a node that may not be talking to control at all, and repeatedly
+  provisioning certificates risks rate limits.
+
+Earlier recoveries were credited to whichever command had been run last, which
+is how "recreate the Funnel is the fix" got into this document despite never
+having been shown to work. Treat any claimed fix that was not observed changing
+a state you can read the same way.
+
+#### The 2026-08-29 occurrence
+
+The node reported `Online: false` with no network map, while `curl
+https://controlplane.tailscale.com` connected from the same machine in 2.1s and
+the node key was valid for another five months. Restarting the app — which
+respawns the system network extension holding that connection — flipped it
+online in about twelve seconds, and the record returned within the next half
+hour. It ran 55 hours before anyone looked, because the alert said "Tailscale's
+side, wait it out" the whole time.
+
+The daemon now watches for this. After a few hours of upload silence it checks
+the node's connection first, then the record, restarts Tailscale once per outage
+if the node is disconnected, and **verifies whether the node came back** before
+saying anything about it — see [sync alerts](notifications.md#sync-alerts). Both
+are checked before any local upload-timing diagnosis, because a stalled import
+cannot clear itself while nothing can arrive, and an outage that begins during
+one would otherwise be permanently reported as that stall instead.
 
 **If it has not cleared in ~48h** it is no longer the usual pattern. Check
 **DNS -> HTTPS Certificates** in the Tailscale admin console, which gates public
@@ -457,15 +501,16 @@ unless forced with `--min-validity`.
 | First Funnel command opens a browser | Approve Funnel for the tailnet; this provisions its policy and HTTPS support. |
 | Public URL does not resolve immediately | Initial public DNS propagation can take up to ten minutes. Avoid repeatedly recreating the Funnel/certificate. |
 | Local `/healthz` works, public URL does not | Run `tailscale funnel status`; port 443 must be a Funnel proxy to `http://127.0.0.1:8787`, not a private Tailscale Serve mapping. |
-| Public URL worked before and now does not | Check **both** record types: `dig @1.1.1.1 <name> A +short` and `... AAAA +short`. Either one answering means the name resolves; a resolver can hold a stale negative answer for one while serving the other, which was observed minutes after a record was republished. Do **not** test with plain `curl` or `dig` on a tailnet machine: MagicDNS answers locally with a `100.x` address, so both succeed while the phone cannot connect. See *Stop or Recreate the Funnel* above. |
-| Auto Export reports "A server with the specified hostname could not be found" | The public DNS record is gone. `main.py ingest status` shows `Public DNS: NOT REACHABLE`. Recreate the Funnel to republish it, then allow a few minutes for DNS and the certificate. |
+| Public URL worked before and now does not | Check **both** record types: `dig @1.1.1.1 <name> A +short` and `... AAAA +short`. Either one answering means the name resolves; a resolver can hold a stale negative answer for one while serving the other, which was observed minutes after a record was republished. Do **not** test with plain `curl` or `dig` on a tailnet machine: MagicDNS answers locally with a `100.x` address, so both succeed while the phone cannot connect. Check the node's own connection first — see [The address stops resolving](#the-address-stops-resolving). |
+| Auto Export reports "A server with the specified hostname could not be found" | The public address is gone. Read the `Tailscale:` line of `main.py ingest status` before doing anything: `DISCONNECTED` means restart the Tailscale app, `connected` means wait. See [The address stops resolving](#the-address-stops-resolving). Do **not** recreate the Funnel — that has never been shown to republish a record. |
+| `Tailscale: DISCONNECTED` | This Mac has lost its control connection, so Tailscale withdrew the public address. Restart the Tailscale app; it reconnects in seconds and the address follows within about ten minutes. The daemon does this on its own once per outage and reports whether it worked. |
 | `/` returns `404` | Expected. Production exposes `GET /healthz` and authenticated `POST /v1/auto-export`, not a directory listing. |
 | Auto Export gets `401` | Re-enter the exact `Bearer <token>` authorization value or rotate the profile token. |
 | Auto Export gets `422` | Read the returned error; normally aggregation, headers, JSON format, or an oversized export. |
 | `Metrics automation aggregation must be Hours (preferred) or Days` | The Metrics automation is set to something else — `Default` and `Minutes` both trigger it. |
 | `Workouts automation aggregation must be Minutes` | The Workouts automation is not on `Minutes`; per-kilometre HR and cadence cannot be computed without it. |
 | `pairing: waiting for the other half` | Only one automation reached the receiver. Check both exist and use the same URL and token. |
-| `pairing: halves arrived too far apart` | Both automations work but run more than an hour apart. Put them on the same schedule. |
+| `pairing: halves arrived too far apart; importing anyway shortly` | Both automations work but run more than an hour apart. Not a fault: the import runs at the moment the detail line names. Put them on the same schedule if you want it sooner. |
 | Works until reboot | Enable **Launch Tailscale at login**, confirm the macOS user logged in, then check `tailscale funnel status` and `main.py ingest status`. |
 | `Refusing to start the Funnel` | A named `ZDROWSKIT_INSTANCE` would take public 443 from the default installation. Give it its own `ZDROWSKIT_FUNNEL_HTTPS_PORT`, or feed it with `import --source local` instead. |
 
