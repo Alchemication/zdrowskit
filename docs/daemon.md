@@ -85,6 +85,31 @@ Logs:
 
 The log rotates at midnight and keeps seven backup files.
 
+## A Second Instance
+
+A lab installation runs beside the live one on the same machine: its own
+checkout, its own `ZDROWSKIT_HOME`, its own Telegram bot, and its own roster.
+Name it with `ZDROWSKIT_INSTANCE`, and the launchd label, the installed plist
+filename, and the log file all derive from that name, so `daemon-install`,
+`daemon-restart` and `daemon-stop` in one checkout cannot reach the other's
+service. The lock file is already per-home. Give it a free port with
+`ZDROWSKIT_HTTP_INGEST_PORT`, since the receiver binds one per process.
+
+`ZDROWSKIT_LOG_FILE` overrides the derived log path outright.
+
+Funnel mappings are machine-wide and one per public port. A named instance
+that leaves `ZDROWSKIT_FUNNEL_HTTPS_PORT` at its default is refused both by
+`ingest setup --funnel` and by the automatic repair during an outage, because
+it would take the default installation's mapping and send its phone uploads to
+the wrong receiver.
+
+A second instance therefore has two choices. Feed it from a local directory
+with `import --source local`, which needs no Funnel at all and is enough for
+working on reports, prompts and personas. Or give it its own public port from
+the set Tailscale allows plus its own `ZDROWSKIT_HTTP_INGEST_PORT`, which is
+what testing the upload path itself requires. `ingest setup` then prints a URL
+carrying that port, and the phone automation must use it verbatim.
+
 ## Operations
 
 On macOS, check if the launchd service is running. Look for a non-dash PID and

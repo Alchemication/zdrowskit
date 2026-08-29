@@ -24,6 +24,7 @@ Example:
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -59,6 +60,30 @@ APP_HOME: Path = Path(
     os.environ.get("ZDROWSKIT_HOME", "~/Documents/zdrowskit")
 ).expanduser()
 """Root directory for user-owned zdrowskit state and context files."""
+
+INSTANCE_NAME: str = os.environ.get("ZDROWSKIT_INSTANCE", "").strip()
+"""Name distinguishing one installation from another on the same machine.
+
+Empty for the normal installation. A second instance — a lab running against
+its own ``ZDROWSKIT_HOME`` and its own Telegram bot — sets this so its launchd
+label, plist filename, and log file stop colliding with the live one. Every one
+of those derives from this value rather than being written down again.
+"""
+if INSTANCE_NAME and not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", INSTANCE_NAME):
+    raise ValueError(
+        f"ZDROWSKIT_INSTANCE must be lowercase letters, digits, '_' or '-': "
+        f"{INSTANCE_NAME!r}. It becomes a launchd label and a filename."
+    )
+
+LAUNCHD_LABEL: str = "com.zdrowskit.daemon" + (
+    f".{INSTANCE_NAME}" if INSTANCE_NAME else ""
+)
+"""launchd service label, and the stem of the installed plist filename.
+
+Lives here rather than beside the install command because ``daemon-install``,
+``daemon-restart`` and ``daemon-stop`` all need the same answer, and three
+copies of a literal is how a lab instance ends up restarting the live service.
+"""
 
 AUTOEXPORT_DATA_DIR: Path = (
     Path.home()
@@ -242,13 +267,28 @@ Absolute rather than resolved from PATH because the daemon runs under launchd,
 whose environment does not include the shell's PATH, so a bare name found in an
 interactive terminal is not found by the daemon.
 """
-FUNNEL_HTTPS_PORT: int = 443
-"""Public port the Funnel serves on.
+FUNNEL_ALLOWED_HTTPS_PORTS: tuple[int, ...] = (443, 8443, 10000)
+"""Public ports Tailscale grants Funnel on. Not a preference; the set is theirs."""
 
-Tailscale grants Funnel on 443, 8443, and 10000; 443 is the only one an iPhone
-automation reaches without a port in the URL, so the documented setup uses it
-and the repair must re-assert the same mapping rather than a second one.
+FUNNEL_HTTPS_PORT: int = _env_int("ZDROWSKIT_FUNNEL_HTTPS_PORT", 443)
+"""Public port this installation's Funnel serves on.
+
+443 is the only one an iPhone automation reaches without a port in the URL, so
+the documented setup uses it, and setup and repair must assert the same mapping
+rather than a second one — which is why both read this rather than writing the
+number down again.
+
+A second installation on the same machine takes a different port from
+:data:`FUNNEL_ALLOWED_HTTPS_PORTS`, because the mapping is per-port and
+machine-wide: two instances claiming 443 would silently take it from each
+other.
 """
+if FUNNEL_HTTPS_PORT not in FUNNEL_ALLOWED_HTTPS_PORTS:
+    raise ValueError(
+        f"ZDROWSKIT_FUNNEL_HTTPS_PORT must be one of "
+        f"{', '.join(str(port) for port in FUNNEL_ALLOWED_HTTPS_PORTS)}: "
+        f"{FUNNEL_HTTPS_PORT}. Tailscale serves Funnel on no others."
+    )
 FUNNEL_HEAL_TIMEOUT_S: float = 30
 """Seconds allowed for the Funnel re-assert command before giving up.
 
@@ -716,8 +756,22 @@ MAX_VERIFICATION_REVISIONS: int = int(
 # Daemon paths and timing
 # ---------------------------------------------------------------------------
 
-LOG_FILE: Path = Path.home() / "Library/Logs/zdrowskit.daemon.log"
-"""Daemon log file (stderr/stdout sink under launchd)."""
+_DEFAULT_LOG_NAME = (
+    f"zdrowskit.daemon.{INSTANCE_NAME}.log" if INSTANCE_NAME else "zdrowskit.daemon.log"
+)
+LOG_FILE: Path = Path(
+    os.environ.get(
+        "ZDROWSKIT_LOG_FILE", str(Path.home() / "Library/Logs" / _DEFAULT_LOG_NAME)
+    )
+).expanduser()
+"""Daemon log file, and the launchd stdout/stderr sink.
+
+Named after :data:`INSTANCE_NAME` so a second instance separates from the live
+one without being configured to, since two daemons interleaving into one file
+is exactly when telling them apart matters most. Not derived from
+``APP_HOME``: the default belongs under the user's log directory, where a log
+rotator and Console.app expect it.
+"""
 
 LOCK_FILE: Path = APP_HOME / ".daemon.lock"
 """Single-instance lock file held by the daemon while running."""

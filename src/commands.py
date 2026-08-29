@@ -38,6 +38,8 @@ from config import (
     GOOGLE_DRIVE_POLL_INTERVAL_S,
     GOOGLE_DRIVE_SERVICE_ACCOUNT,
     HTTP_INGEST_TOKEN_FILE,
+    LAUNCHD_LABEL,
+    LOG_FILE,
     resolve_data_dir,
     resolve_google_drive_data_dir,
 )
@@ -61,7 +63,6 @@ from store import (
 logger = logging.getLogger(__name__)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-LAUNCHD_LABEL = "com.zdrowskit.daemon"
 LAUNCHD_PLIST = f"{LAUNCHD_LABEL}.plist"
 
 
@@ -635,12 +636,25 @@ def _render_launchd_plist(
     uv_path: Path,
     project_dir: Path,
     home: Path,
+    log_file: Path = LOG_FILE,
     codex_path: Path | None = None,
     claude_path: Path | None = None,
 ) -> str:
-    """Return a launchd plist for this checkout and user."""
+    """Return a launchd plist for this checkout and user.
+
+    Args:
+        uv_path: Absolute path to the ``uv`` binary.
+        project_dir: Checkout the daemon runs from.
+        home: The user's home directory, used for ``HOME`` and ``PATH``.
+        log_file: Where launchd should sink stdout and stderr. Defaults to the
+            path the daemon itself logs to, so the two cannot disagree.
+        codex_path: Absolute path to the Codex CLI, when present.
+        claude_path: Absolute path to the Claude CLI, when present.
+
+    Returns:
+        The rendered plist XML.
+    """
     daemon_path = project_dir / "src" / "daemon.py"
-    log_file = home / "Library" / "Logs" / "zdrowskit.daemon.log"
     path_value = _launchd_path_value(uv_path=uv_path, home=home)
     agent_env = ""
     if codex_path is not None:
@@ -794,7 +808,7 @@ def cmd_daemon_restart(args: argparse.Namespace) -> None:  # noqa: ARG001
     """
     import subprocess
 
-    label = "com.zdrowskit.daemon"
+    label = LAUNCHD_LABEL
     plist = Path.home() / "Library/LaunchAgents" / f"{label}.plist"
     uid = subprocess.check_output(["id", "-u"]).decode().strip()
     target = f"gui/{uid}/{label}"
@@ -847,7 +861,7 @@ def cmd_daemon_stop(args: argparse.Namespace) -> None:  # noqa: ARG001
     """
     import subprocess
 
-    label = "com.zdrowskit.daemon"
+    label = LAUNCHD_LABEL
     uid = subprocess.check_output(["id", "-u"]).decode().strip()
     target = f"gui/{uid}/{label}"
 

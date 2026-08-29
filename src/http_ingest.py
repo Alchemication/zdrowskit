@@ -25,6 +25,8 @@ from typing import Any, Callable
 
 from config import (
     DATA_HEALTH_STALE_CUTOFF_HOUR,
+    FUNNEL_ALLOWED_HTTPS_PORTS,
+    FUNNEL_HTTPS_PORT,
     FUNNEL_DNS_CHECK_AFTER_H,
     HTTP_INGEST_BATCH_CAPTURE_MAX_FILES,
     HTTP_INGEST_MAX_JSON_DEPTH,
@@ -33,6 +35,7 @@ from config import (
     HTTP_INGEST_MAX_METRICS,
     HTTP_INGEST_MAX_RECEIPTS,
     HTTP_INGEST_MAX_ROUTE_POINTS,
+    INSTANCE_NAME,
     HTTP_INGEST_MAX_WORKOUTS,
     PUBLIC_DNS_RESOLVER_URL,
     PUBLIC_DNS_TIMEOUT_S,
@@ -42,6 +45,9 @@ from parsers.workouts import parse_workouts_payload
 from profiles import Profile
 
 logger = logging.getLogger(__name__)
+
+# The port the documented setup uses, and the one a bare https:// URL means.
+_SHARED_FUNNEL_PORT = 443
 
 UPLOAD_PATH = "/v1/auto-export"
 BATCH_CAPTURE_PATH = "/v1/auto-export-batch"
@@ -236,6 +242,29 @@ class TokenRegistry:
         if not isinstance(expected, str) or not hmac.compare_digest(actual, expected):
             return None
         return profile if isinstance(profile, str) else None
+
+
+def funnel_conflict_reason() -> str | None:
+    """Return why this installation must not assert the Funnel, or None.
+
+    The Funnel mapping is machine-wide and per public port, so two
+    installations claiming the same port silently take it from each other —
+    the loser's phone uploads reach the winner's receiver and are rejected as
+    an unknown token, which reads as an outage rather than a misconfiguration.
+
+    Returns:
+        A sentence naming the conflict and its fix, or None when asserting the
+        Funnel is safe.
+    """
+    if INSTANCE_NAME and FUNNEL_HTTPS_PORT == _SHARED_FUNNEL_PORT:
+        return (
+            f"instance {INSTANCE_NAME!r} would claim public port "
+            f"{_SHARED_FUNNEL_PORT}, which belongs to the default "
+            "installation. Set ZDROWSKIT_FUNNEL_HTTPS_PORT to one of "
+            f"{', '.join(str(port) for port in FUNNEL_ALLOWED_HTTPS_PORTS[1:])} "
+            "for this instance, or import from a local directory instead"
+        )
+    return None
 
 
 def _strict_json_loads(body: bytes) -> dict[str, Any]:

@@ -110,8 +110,13 @@ tailscale funnel --bg --https=443 http://127.0.0.1:8787
 
 The first Funnel command may open a browser for tailnet approval. Approve it as
 the tailnet owner/admin. Tailscale then enables the required DNS, certificate,
-and Funnel policy settings. zdrowskit uses public HTTPS on port 443. See the official
+and Funnel policy settings. zdrowskit uses public HTTPS on port 443, the only
+port a phone reaches without one in the URL. See the official
 [Funnel requirements](https://tailscale.com/docs/features/tailscale-funnel).
+
+The mapping is machine-wide and one per public port, so a second installation
+on the same Mac must take its own port with `ZDROWSKIT_FUNNEL_HTTPS_PORT` —
+see [A Second Instance](daemon.md#a-second-instance).
 
 The command prints the public URL:
 
@@ -462,6 +467,7 @@ unless forced with `--min-validity`.
 | `pairing: waiting for the other half` | Only one automation reached the receiver. Check both exist and use the same URL and token. |
 | `pairing: halves arrived too far apart` | Both automations work but run more than an hour apart. Put them on the same schedule. |
 | Works until reboot | Enable **Launch Tailscale at login**, confirm the macOS user logged in, then check `tailscale funnel status` and `main.py ingest status`. |
+| `Refusing to start the Funnel` | A named `ZDROWSKIT_INSTANCE` would take public 443 from the default installation. Give it its own `ZDROWSKIT_FUNNEL_HTTPS_PORT`, or feed it with `import --source local` instead. |
 
 Tailscale documents that public DNS may take up to ten minutes to propagate and
 that the most recent `serve`/`funnel` command owns a given public port. It also

@@ -1272,6 +1272,13 @@ class ProfileRuntime:
         Returns:
             Whether a repair was attempted on this call.
         """
+        from http_ingest import funnel_conflict_reason
+
+        conflict = funnel_conflict_reason()
+        if conflict:
+            logger.info("Not re-asserting the Funnel: %s.", conflict)
+            return False
+
         previous = self._state.get("funnel_heal")
         if isinstance(previous, dict) and previous.get("since") == outage_since:
             return False

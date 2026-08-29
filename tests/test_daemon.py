@@ -3325,6 +3325,50 @@ class TestFunnelOutageAlerts:
         # include the directory an interactive shell finds tailscale in.
         assert command[0].startswith("/")
 
+    def test_a_named_instance_never_repoints_the_shared_funnel(
+        self, tmp_path: Path
+    ) -> None:
+        """One Funnel serves the machine; a lab taking it breaks the live host."""
+        import daemon as daemon_module
+        import http_ingest as http_ingest_module
+
+        runtime = self._runtime(tmp_path, operator=True)
+        binary = tmp_path / "tailscale"
+        binary.write_text("#!/bin/sh\n", encoding="utf-8")
+
+        with (
+            patch.object(http_ingest_module, "INSTANCE_NAME", "lab"),
+            patch.object(http_ingest_module, "FUNNEL_HTTPS_PORT", 443),
+            patch.object(daemon_module, "TAILSCALE_BINARY", binary),
+            patch.object(daemon_module.subprocess, "run") as run,
+        ):
+            assert runtime._attempt_funnel_heal("2026-08-16T10:00:00+00:00") is False
+
+        run.assert_not_called()
+
+    def test_a_named_instance_repairs_its_own_funnel_port(self, tmp_path: Path) -> None:
+        """A lab on its own public port owns that mapping and may re-assert it."""
+        import daemon as daemon_module
+        import http_ingest as http_ingest_module
+
+        runtime = self._runtime(tmp_path, operator=True)
+        completed = SimpleNamespace(returncode=0, stdout="Funnel started", stderr="")
+        binary = tmp_path / "tailscale"
+        binary.write_text("#!/bin/sh\n", encoding="utf-8")
+
+        with (
+            patch.object(http_ingest_module, "INSTANCE_NAME", "lab"),
+            patch.object(http_ingest_module, "FUNNEL_HTTPS_PORT", 8443),
+            patch.object(daemon_module, "FUNNEL_HTTPS_PORT", 8443),
+            patch.object(daemon_module, "TAILSCALE_BINARY", binary),
+            patch.object(
+                daemon_module.subprocess, "run", return_value=completed
+            ) as run,
+        ):
+            assert runtime._attempt_funnel_heal("2026-08-16T10:00:00+00:00") is True
+
+        assert "--https=8443" in run.call_args.args[0]
+
     def test_a_missing_cli_does_not_crash_the_health_cycle(
         self, tmp_path: Path
     ) -> None:

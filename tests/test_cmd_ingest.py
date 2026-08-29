@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+import cmd_ingest
 from cmd_ingest import cmd_ingest_setup, cmd_ingest_token
 from http_ingest import TokenRegistry, public_dns_health
 from profiles import Profile, ProfileConfigError
@@ -84,6 +85,33 @@ class TestIngestSetup:
             cmd_ingest_setup(argparse.Namespace(funnel=True))
 
         assert token_file.exists() is False
+
+    def test_a_named_instance_refuses_to_take_the_shared_funnel_port(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Taking public 443 would break the default installation's ingestion."""
+        monkeypatch.setattr("http_ingest.INSTANCE_NAME", "lab")
+        monkeypatch.setattr("http_ingest.FUNNEL_HTTPS_PORT", 443)
+
+        with pytest.raises(ProfileConfigError, match="Refusing to start the Funnel"):
+            cmd_ingest._start_funnel()
+
+    def test_a_non_default_funnel_port_appears_in_the_phone_url(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A phone posting to a bare https:// URL would reach the wrong instance."""
+        monkeypatch.setattr("cmd_ingest.FUNNEL_HTTPS_PORT", 8443)
+
+        assert (
+            cmd_ingest._public_funnel_url("host.ts.net") == "https://host.ts.net:8443"
+        )
+
+    def test_the_default_funnel_port_stays_out_of_the_url(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("cmd_ingest.FUNNEL_HTTPS_PORT", 443)
+
+        assert cmd_ingest._public_funnel_url("host.ts.net") == "https://host.ts.net"
 
 
 class TestIngestToken:

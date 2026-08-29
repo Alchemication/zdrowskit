@@ -11,12 +11,14 @@ import urllib.request
 from pathlib import Path
 
 from config import (
+    FUNNEL_HTTPS_PORT,
     HTTP_INGEST_HOST,
     HTTP_INGEST_PAIR_WINDOW_S,
     HTTP_INGEST_PORT,
     HTTP_INGEST_TOKEN_FILE,
 )
 from http_ingest import (
+    funnel_conflict_reason,
     HttpIngestManager,
     TokenRegistry,
     UPLOAD_PATH,
@@ -86,6 +88,9 @@ def _tailscale_dns_name() -> str | None:
 
 def _start_funnel() -> None:
     """Start the stable HTTPS Funnel for the configured loopback receiver."""
+    conflict = funnel_conflict_reason()
+    if conflict:
+        raise ProfileConfigError(f"Refusing to start the Funnel: {conflict}.")
     executable = shutil.which("tailscale")
     if executable is None:
         raise ProfileConfigError(
@@ -94,7 +99,7 @@ def _start_funnel() -> None:
         )
     target = f"http://{HTTP_INGEST_HOST}:{HTTP_INGEST_PORT}"
     result = subprocess.run(
-        [executable, "funnel", "--bg", "--https=443", target],
+        [executable, "funnel", "--bg", f"--https={FUNNEL_HTTPS_PORT}", target],
         capture_output=True,
         text=True,
         check=False,
@@ -102,7 +107,23 @@ def _start_funnel() -> None:
     if result.returncode != 0:
         detail = result.stderr.strip() or result.stdout.strip()
         raise ProfileConfigError(f"Could not start Tailscale Funnel: {detail}")
-    print(f"Tailscale Funnel points HTTPS port 443 to {target}")
+    print(f"Tailscale Funnel points HTTPS port {FUNNEL_HTTPS_PORT} to {target}")
+
+
+def _public_funnel_url(dns_name: str | None) -> str | None:
+    """Return the Funnel origin for this installation, port included when needed.
+
+    Args:
+        dns_name: This device's Tailscale DNS name, or None when unknown.
+
+    Returns:
+        The https origin a phone should post to, or None without a DNS name.
+    """
+    if not dns_name:
+        return None
+    if FUNNEL_HTTPS_PORT == 443:
+        return f"https://{dns_name}"
+    return f"https://{dns_name}:{FUNNEL_HTTPS_PORT}"
 
 
 def _print_token(profile: str, token: str, public_url: str | None) -> None:
@@ -140,14 +161,15 @@ def cmd_ingest_setup(args: argparse.Namespace) -> None:
         if name not in active:
             issued[name] = registry.create_token(name)
     dns_name = _tailscale_dns_name()
-    public_url = f"https://{dns_name}" if dns_name else None
+    public_url = _public_funnel_url(dns_name)
     print(f"Receiver: http://{HTTP_INGEST_HOST}:{HTTP_INGEST_PORT}{UPLOAD_PATH}")
     if public_url:
         print(f"Public URL: {public_url}{UPLOAD_PATH}")
     else:
         print(
             "Tailscale is offline or has no DNS name. Connect it, then run:\n"
-            f"  tailscale funnel --bg --https=443 http://{HTTP_INGEST_HOST}:{HTTP_INGEST_PORT}"
+            f"  tailscale funnel --bg --https={FUNNEL_HTTPS_PORT} "
+            f"http://{HTTP_INGEST_HOST}:{HTTP_INGEST_PORT}"
         )
     if issued:
         for name, token in issued.items():
@@ -177,7 +199,7 @@ def cmd_ingest_token(args: argparse.Namespace) -> None:
         )
     token = registry.create_token(profile.name, revoke_existing=args.rotate)
     dns_name = _tailscale_dns_name()
-    public_url = f"https://{dns_name}" if dns_name else None
+    public_url = _public_funnel_url(dns_name)
     _print_token(profile.name, token, public_url)
 
 

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import sqlite3
+import importlib
 import json
+import os
 from contextlib import AbstractContextManager, ExitStack
 from pathlib import Path
 from types import SimpleNamespace
@@ -29,10 +31,27 @@ from commands import (
     cmd_daemon_install,
     cmd_setup,
 )
+import config
 from config import MAX_TOKENS_INSIGHTS, MAX_TOKENS_NUDGE
 from llm import LLMResult
 from llm_verify import VerificationResult
+
+
 from store import create_llm_trace, log_feedback, log_llm_call, open_db
+
+
+def _reloaded_config_with(**env: str):
+    """Reload the config module with *env* applied, then restore the environment."""
+    previous = {name: os.environ.get(name) for name in env}
+    os.environ.update(env)
+    try:
+        return importlib.reload(config)
+    finally:
+        for name, value in previous.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
 
 
 class TestSetupCommand:
@@ -88,11 +107,47 @@ class TestSetupCommand:
             uv_path=tmp_path / "bin" / "uv",
             project_dir=tmp_path / "project",
             home=tmp_path / "home",
+            log_file=tmp_path / "home" / "daemon.log",
         )
 
         assert "/Users/adamsky" not in plist
         assert str(tmp_path / "project" / "src" / "daemon.py") in plist
         assert str(tmp_path / "bin" / "uv") in plist
+
+    def test_launchd_plist_sinks_to_the_path_the_daemon_logs_to(
+        self, tmp_path: Path
+    ) -> None:
+        """A separate sink would split one daemon's output across two files."""
+        plist = commands_module._render_launchd_plist(
+            uv_path=tmp_path / "bin" / "uv",
+            project_dir=tmp_path / "project",
+            home=tmp_path / "home",
+        )
+
+        assert plist.count(f"<string>{config.LOG_FILE}</string>") == 2
+
+    def test_launchd_label_and_plist_name_track_the_instance(self) -> None:
+        """A lab instance must not restart, or overwrite, the live service."""
+        assert commands_module.LAUNCHD_PLIST == f"{config.LAUNCHD_LABEL}.plist"
+        live_label = config.LAUNCHD_LABEL
+        live_log = config.LOG_FILE
+
+        try:
+            lab = _reloaded_config_with(ZDROWSKIT_INSTANCE="lab")
+            assert lab.LAUNCHD_LABEL == "com.zdrowskit.daemon.lab"
+            assert lab.LOG_FILE.name == "zdrowskit.daemon.lab.log"
+            assert lab.LAUNCHD_LABEL != live_label
+            assert lab.LOG_FILE != live_log
+        finally:
+            importlib.reload(config)
+
+        assert config.LAUNCHD_LABEL == live_label
+        assert config.LOG_FILE == live_log
+
+    def test_instance_name_that_cannot_be_a_label_is_rejected(self) -> None:
+        with pytest.raises(ValueError, match="ZDROWSKIT_INSTANCE"):
+            _reloaded_config_with(ZDROWSKIT_INSTANCE="Lab Env!")
+        importlib.reload(config)
 
     def test_launchd_plist_can_pin_codex_executable(self, tmp_path: Path) -> None:
         plist = commands_module._render_launchd_plist(
