@@ -795,7 +795,11 @@ def assess_ingest_health(
         phone is demonstrably talking to us, so it is detected in hours. Since
         a half now imports on its own once the pairing window lapses, a stall
         this long is a fault on this end whatever the arrival gap was — the
-        window is still passed in so the message can say which.
+        window is still passed in so the message can say which, and so a pair
+        that has not reached its import deadline yet is not mistaken for one
+        that missed it. Measured from when the un-imported upload landed, not
+        from the last import: the hours in between are hours in which there
+        was nothing to import.
 
     ``stale``
         The pipe looks fine and days of data are missing anyway. The catch-all,
@@ -927,6 +931,66 @@ def assess_ingest_health(
     )
 
 
+def _staged_arrivals(state: dict[str, Any]) -> tuple[datetime, datetime] | None:
+    """Return the oldest and newest arrival of a complete staged pair.
+
+    Args:
+        state: Parsed ingest state file.
+
+    Returns:
+        ``(oldest, newest)``, or None unless both halves are staged and
+        carry a readable arrival time.
+    """
+    uploads = state.get("uploads")
+    uploads = uploads if isinstance(uploads, dict) else {}
+    arrivals = []
+    for kind in ("metrics", "workouts"):
+        upload = uploads.get(kind)
+        if not isinstance(upload, dict):
+            return None
+        seen = _parse_iso(upload.get("received_at"))
+        if seen is None:
+            return None
+        arrivals.append(seen)
+    return min(arrivals), max(arrivals)
+
+
+def _pair_due_at(state: dict[str, Any], pair_window_s: float) -> datetime | None:
+    """Return when a complete staged pair may import, or None when it cannot.
+
+    Halves that arrived within the window are due the moment the later one
+    landed. Halves that missed each other are due one window after the pair
+    first had something new to import — ``pending_since``, not the latest
+    arrival.
+
+    The distinction is the whole point. Anchoring on the latest arrival made
+    the deadline renewable: Auto Export re-sends Metrics every 15-30 minutes,
+    each re-send moved the deadline a full hour further out, and on 2026-08-30
+    a pair only imported because the phone happened to go quiet for an hour.
+    Under a steadier cadence it would have waited forever — the same "delayed
+    means never" failure the window was rewritten to end, one layer up.
+
+    Args:
+        state: Parsed ingest state file.
+        pair_window_s: How long a staged half waits for its partner.
+
+    Returns:
+        The moment the pair may import, or None when no complete pair is
+        staged.
+    """
+    arrivals = _staged_arrivals(state)
+    if arrivals is None:
+        return None
+    oldest, newest = arrivals
+    if (newest - oldest).total_seconds() <= pair_window_s:
+        return newest
+    # Absent only in state files written before pending_since existed. Falling
+    # back to the newest arrival reproduces the old deadline for one cycle,
+    # which the next import replaces.
+    pending_since = _parse_iso(state.get("pending_since")) or newest
+    return pending_since + timedelta(seconds=pair_window_s)
+
+
 def _assess_pipe_fault(
     state: dict[str, Any],
     *,
@@ -951,7 +1015,22 @@ def _assess_pipe_fault(
     Returns:
         The fault, or None when nothing has stalled long enough to report.
     """
-    if last_import is not None:
+    # A pair inside its pairing window is waiting by design, not stuck. The
+    # health check used to know nothing about that deadline and reported the
+    # wait as a stall, telling the operator to restart an import that was doing
+    # exactly what it was asked to.
+    due_at = _pair_due_at(state, pair_window_s)
+    if due_at is not None and now < due_at:
+        return None
+
+    pending_since = _parse_iso(state.get("pending_since"))
+    if pending_since is not None:
+        # The stall began when the un-imported data landed. Measuring from the
+        # last import instead charged it for every hour the phone was asleep,
+        # so the first upload of the morning arrived already past a threshold
+        # meant to describe hours of failing to import something.
+        stalled_for = (now - pending_since).total_seconds() / 3600
+    elif last_import is not None:
         stalled_for = (now - last_import).total_seconds() / 3600
     else:
         # Nothing has ever imported, so the condition has run since the first
@@ -1001,15 +1080,15 @@ def _assess_pipe_fault(
     # would send them after the one thing that is demonstrably working.
     if gap > pair_window_s:
         detail = (
-            f"Data has been arriving for {stalled} but nothing has imported. "
-            f"Metrics and Workouts are {_format_gap(gap)} apart, so each half "
-            f"should have imported on its own within {_format_gap(pair_window_s)} "
-            "of arriving. The import on this end is stuck: check the daemon log "
+            f"An upload has been waiting {stalled} to import and none has run. "
+            f"Metrics and Workouts are {_format_gap(gap)} apart, so the pair was "
+            f"due {_format_gap(pair_window_s)} after the wait began and is long "
+            "past that. The import on this end is stuck: check the daemon log "
             "and restart it."
         )
     else:
         detail = (
-            f"Data has been arriving for {stalled} but nothing has imported. "
+            f"An upload has been waiting {stalled} to import and none has run. "
             f"Metrics and Workouts are only {_format_gap(gap)} apart, well "
             f"inside the {_format_gap(pair_window_s)} pairing window, so the "
             "phone is fine and the import on this end is stuck. Check the "
@@ -1132,35 +1211,33 @@ class HttpIngestManager:
             return None
         return hashlib.sha256(material).hexdigest()
 
-    def _newest_arrival(self, state: dict[str, Any]) -> datetime | None:
-        """Return when the most recent half of the staged pair arrived."""
-        arrivals = []
+    def _pair_due_at(self, state: dict[str, Any]) -> datetime | None:
+        """Return when the staged pair may import, or None when it cannot."""
+        return _pair_due_at(state, self.pair_window_s)
+
+    def _pending_arrivals(self, state: dict[str, Any]) -> list[datetime]:
+        """Return arrival times of staged halves the last import does not cover."""
+        imported = state.get("last_import_uploads")
+        imported = imported if isinstance(imported, dict) else {}
+        pending: list[datetime] = []
         for kind in ("metrics", "workouts"):
             upload = state["uploads"].get(kind)
             if not isinstance(upload, dict):
-                return None
-            try:
-                arrivals.append(datetime.fromisoformat(upload["received_at"]))
-            except (KeyError, TypeError, ValueError):
-                return None
-        return max(arrivals)
+                continue
+            sha256 = upload.get("sha256")
+            session_id = upload.get("session_id")
+            if not isinstance(sha256, str) or not isinstance(session_id, str):
+                continue
+            if imported.get(kind) == f"{sha256}:{session_id}":
+                continue
+            seen = _parse_iso(upload.get("received_at"))
+            if seen is not None:
+                pending.append(seen)
+        return pending
 
-    def _pair_due_at(self, state: dict[str, Any]) -> datetime | None:
-        """Return when the staged pair may import, or None when it cannot.
-
-        Halves that arrived within the window are due immediately. Halves that
-        missed each other are due one full window after the later one landed:
-        by then the partner it was waiting for is definitively not coming, and
-        continuing to wait costs the day it carries. The gap therefore delays
-        an import; it never cancels one.
-        """
-        gap = self._pair_gap_s(state)
-        newest = self._newest_arrival(state)
-        if gap is None or newest is None:
-            return None
-        if gap <= self.pair_window_s:
-            return newest
-        return newest + timedelta(seconds=self.pair_window_s)
+    def _has_pending_half(self, state: dict[str, Any]) -> bool:
+        """Whether a staged half is not covered by the last successful import."""
+        return bool(self._pending_arrivals(state))
 
     def _pair_state(
         self,
@@ -1280,6 +1357,11 @@ class HttpIngestManager:
             )
             _atomic_write(self._payload_path(profile, upload.kind), body)
             received_at = _utc_now()
+            # Stamped before this upload is recorded, so it marks when the
+            # pipeline first had something new to import rather than when it
+            # most recently did. A refresh of an already-pending half must not
+            # move it; that is what made the import deadline renewable.
+            had_pending = self._has_pending_half(state)
             # Only the latest upload per kind is kept, so without this a profile
             # that configured just one automation would look freshly active
             # forever and never trip the health check.
@@ -1296,6 +1378,8 @@ class HttpIngestManager:
                 "session_id": upload.session_id,
                 "bytes": upload.size,
             }
+            if not had_pending:
+                state["pending_since"] = received_at
             candidate = self._pair_candidate(state, profile_name=profile_name)
             pair_ready = candidate is not None
             _atomic_write_json(self._state_path(profile), state)
@@ -1410,6 +1494,16 @@ class HttpIngestManager:
                 receipts = state["receipts"]
                 receipts.append({"pair": pair_digest, "imported_at": now})
                 state["receipts"] = receipts[-HTTP_INGEST_MAX_RECEIPTS:]
+                # A half that landed while this import ran is still pending, and
+                # its wait started when it arrived rather than when the previous
+                # one did. Re-deriving from what the receipt leaves uncovered
+                # keeps the stamp honest and repairs a state file written before
+                # it existed.
+                still_pending = self._pending_arrivals(state)
+                if still_pending:
+                    state["pending_since"] = min(still_pending).isoformat()
+                else:
+                    state.pop("pending_since", None)
             else:
                 state["last_error"] = {
                     "pair": pair_digest,

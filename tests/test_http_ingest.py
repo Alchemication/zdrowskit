@@ -793,9 +793,10 @@ class TestIngestHealth:
             {
                 "uploads": {
                     "metrics": {"received_at": self._at(0.1)},
-                    "workouts": {"received_at": self._at(1.8)},
+                    "workouts": {"received_at": self._at(9)},
                 },
-                "last_imported_at": self._at(9),
+                "pending_since": self._at(9),
+                "last_imported_at": self._at(9.5),
             },
         )
 
@@ -828,6 +829,55 @@ class TestIngestHealth:
         assert "same schedule" not in health.detail
         assert "the import on this end is stuck" in health.detail
 
+    def test_a_pair_still_inside_its_window_is_not_reported_as_stuck(
+        self, tmp_path: Path
+    ) -> None:
+        # The 2026-08-30 false alarm. Metrics resumed after an overnight gap and
+        # the pair was waiting out its window exactly as designed, but the check
+        # knew nothing of that deadline and told the operator to restart the one
+        # component that was working.
+        profile = _profile(tmp_path)
+        self._state(
+            profile,
+            {
+                "uploads": {
+                    "metrics": {"received_at": self._at(0.5)},
+                    "workouts": {"received_at": self._at(10)},
+                },
+                "pending_since": self._at(0.5),
+                "last_imported_at": self._at(10),
+            },
+        )
+
+        health = self._assess(profile)
+
+        assert health.status != "split"
+        assert health.is_alerting is False
+
+    def test_the_stall_clock_ignores_hours_with_nothing_to_import(
+        self, tmp_path: Path
+    ) -> None:
+        # Halves 18m apart are due immediately, so only the clock is under test.
+        # Measuring from the last import charged the stall for the whole night
+        # the phone spent asleep, and the day's first upload arrived already
+        # past a threshold meant to describe hours of failing to import.
+        profile = _profile(tmp_path)
+        self._state(
+            profile,
+            {
+                "uploads": {
+                    "metrics": {"received_at": self._at(0.5)},
+                    "workouts": {"received_at": self._at(0.2)},
+                },
+                "pending_since": self._at(0.5),
+                "last_imported_at": self._at(10),
+            },
+        )
+
+        health = self._assess(profile)
+
+        assert health.status != "split"
+
     def test_a_stalled_pipe_outranks_the_staleness_it_causes(
         self, tmp_path: Path
     ) -> None:
@@ -837,15 +887,16 @@ class TestIngestHealth:
             {
                 "uploads": {
                     "metrics": {"received_at": self._at(0.1)},
-                    "workouts": {"received_at": self._at(1.8)},
+                    "workouts": {"received_at": self._at(28)},
                 },
+                "pending_since": self._at(28),
                 "last_imported_at": self._at(30),
             },
         )
 
-        # Both are true, but only one names the fix. "Set both automations to
-        # the same schedule" beats "days are missing" when the schedules are
-        # demonstrably why they are missing.
+        # Both are true, but only one names the fix. A stuck import beats "days
+        # are missing" when the stuck import is demonstrably why they are
+        # missing.
         health = self._assess(profile, newest_data_date=self._current(2))
 
         assert health.status == "split"
@@ -996,9 +1047,9 @@ class TestPairStatus:
         )
         state_path = profile.http_cache / ".ingest_state.json"
         stale = json.loads(state_path.read_text(encoding="utf-8"))
-        stale["uploads"]["metrics"]["received_at"] = (
-            datetime.now(timezone.utc) - timedelta(hours=21)
-        ).isoformat()
+        landed = (datetime.now(timezone.utc) - timedelta(hours=21)).isoformat()
+        stale["uploads"]["metrics"]["received_at"] = landed
+        stale["pending_since"] = landed
         state_path.write_text(json.dumps(stale), encoding="utf-8")
         manager.accept(
             "adam",
@@ -1006,18 +1057,77 @@ class TestPairStatus:
             _body("workouts"),
         )
 
-        # Workouts has only just landed, so the window it owes Metrics is open.
-        assert manager.due_pairs() == []
-
-        lapsed = json.loads(state_path.read_text(encoding="utf-8"))
-        lapsed["uploads"]["workouts"]["received_at"] = (
-            datetime.now(timezone.utc) - timedelta(seconds=601)
-        ).isoformat()
-        state_path.write_text(json.dumps(lapsed), encoding="utf-8")
+        # Metrics has already waited far longer than the window it was owed, so
+        # its partner landing makes the pair due at once rather than starting a
+        # fresh wait that the arrival itself would keep restarting.
         due = manager.due_pairs()
 
         assert [name for name, _digest in due] == ["adam"]
         assert manager.begin_import("adam", due[0][1]) is not None
+
+    def test_a_refreshed_half_cannot_renew_the_import_deadline(
+        self, tmp_path: Path
+    ) -> None:
+        # The 2026-08-30 stall. The deadline was anchored on the latest arrival,
+        # so each of Auto Export's 15-30 minute Metrics re-sends pushed it a full
+        # window further out. That morning's pair imported only because the phone
+        # happened to fall quiet for an hour; a steadier cadence never imports.
+        profile = _profile(tmp_path)
+        manager = HttpIngestManager(
+            {"adam": profile},
+            pair_window_s=600,
+            on_pair_ready=lambda name, digest: None,
+        )
+        self._import_one_pair(manager)
+        state_path = profile.http_cache / ".ingest_state.json"
+
+        # Workouts last uploaded last night and is already imported; Metrics
+        # resumes this morning, far outside the window, and keeps refreshing.
+        overnight = json.loads(state_path.read_text(encoding="utf-8"))
+        overnight["uploads"]["workouts"]["received_at"] = (
+            datetime.now(timezone.utc) - timedelta(hours=10)
+        ).isoformat()
+        state_path.write_text(json.dumps(overnight), encoding="utf-8")
+
+        first = _body("metrics", variant=1)
+        manager.accept("adam", validate_upload(_headers("metrics"), first), first)
+        assert manager.due_pairs() == []
+
+        waited = json.loads(state_path.read_text(encoding="utf-8"))
+        pending_since = (
+            datetime.now(timezone.utc) - timedelta(seconds=601)
+        ).isoformat()
+        waited["pending_since"] = pending_since
+        state_path.write_text(json.dumps(waited), encoding="utf-8")
+
+        refreshed = _body("metrics", variant=2)
+        manager.accept(
+            "adam", validate_upload(_headers("metrics"), refreshed), refreshed
+        )
+
+        after = json.loads(state_path.read_text(encoding="utf-8"))
+        assert after["pending_since"] == pending_since
+        due = manager.due_pairs()
+        assert [name for name, _digest in due] == ["adam"]
+
+    def test_importing_clears_the_wait_it_was_started_for(self, tmp_path: Path) -> None:
+        profile = _profile(tmp_path)
+        manager = HttpIngestManager(
+            {"adam": profile},
+            pair_window_s=600,
+            on_pair_ready=lambda name, digest: None,
+        )
+        self._import_one_pair(manager)
+        state_path = profile.http_cache / ".ingest_state.json"
+
+        # Nothing is outstanding, so the next arrival starts a fresh wait rather
+        # than inheriting one that a stale stamp would keep reporting as a stall.
+        assert "pending_since" not in json.loads(state_path.read_text(encoding="utf-8"))
+
+        fresh = _body("workouts", variant=1)
+        manager.accept("adam", validate_upload(_headers("workouts"), fresh), fresh)
+
+        assert "pending_since" in json.loads(state_path.read_text(encoding="utf-8"))
 
     def _import_one_pair(self, manager: HttpIngestManager) -> None:
         """Drive a first Workouts + Metrics pair all the way through import."""

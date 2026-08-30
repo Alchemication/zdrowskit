@@ -269,11 +269,14 @@ Each half imports as soon as it is new, against whatever partner is currently
 staged. Requiring both halves to be new instead would strand whichever one
 arrived second, since two automations rarely fire at the same instant. Halves
 that land within the pairing window import immediately; halves that miss it
-import once the window has lapsed since the later one arrived, so a wide gap
-delays an import by at most that window and never cancels one. The daemon
-re-examines staged halves on a timer, because a half left waiting has no
-further upload coming to re-evaluate it. An identical completed pair is
-acknowledged but not re-imported.
+import once the window has lapsed since the pipeline first had something new to
+import, so a wide gap delays an import by at most that window and never cancels
+one. That anchor is deliberately not the latest arrival: Auto Export re-sends
+each half every fifteen to thirty minutes, and a deadline measured from the
+newest upload is pushed further out by every one of them, so a pair can wait
+indefinitely while uploads keep succeeding. The daemon re-examines staged halves
+on a timer, because a half left waiting has no further upload coming to
+re-evaluate it. An identical completed pair is acknowledged but not re-imported.
 A crash after HTTP `202` leaves the latest pair on disk; daemon startup detects
 and imports it. Parser failures keep the latest pair and a short error record
 for diagnosis.

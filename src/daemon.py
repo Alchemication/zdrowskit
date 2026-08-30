@@ -1606,6 +1606,11 @@ class ProfileRuntime:
             # user's to chase, and the message exists so they stop looking.
             "funnel": "Your phone can't upload — Tailscale's side",
             "node": "Your phone can't upload — this Mac dropped off Tailscale",
+            # Both describe a fault on this Mac while the phone is provably
+            # still reaching us. Without them these fell through to the generic
+            # heading below, which named the one thing that was working.
+            "split": "Your phone's uploads are arriving but not importing",
+            "error": "The last import of your health data failed",
         }
         heading = headings.get(health.status, "Health data isn't syncing")
         if escalating:
