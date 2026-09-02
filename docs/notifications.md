@@ -102,6 +102,13 @@ The coaching and content LLMs share enough recent output to avoid redundancy:
 - **Coach:** the scheduled path runs at most once per calendar day. Manual
   `/coach` calls can rerun it on demand.
 - **No replay after mute:** skipped nudges/reports are not replayed after a temporary mute expires.
+- **Failed reports:** a scheduled report that fails on a passing fault — the
+  network dropped, the provider was down — is retried on later ticks that same
+  day, and you are told once, when the attempts run out. A failure that would
+  repeat identically, such as the verifier refusing the draft or the week
+  holding too little data, ends the day on the first attempt. The attempt
+  budget is `MAX_REPORT_ATTEMPTS_PER_DAY` in `src/config.py`; `main.py events`
+  shows each attempt as it happens.
 
 ## Sync Alerts
 
@@ -209,6 +216,22 @@ persists. What is sent when it clears depends on what the outage cost:
 - **A stale gap that stayed a gap** names the alerted dates whose daily metrics
   are still absent. Reports covering them may be incomplete; a later rolling
   Metrics upload can still backfill them.
+
+### A message counts as sent only when Telegram takes it
+
+The 24-hour repeat guard is armed by delivery, not by the attempt. Every
+Telegram send retries a transport fault on its own first; if it still cannot
+get through, the condition stays unreported and the next tick tries again.
+
+This is the one rule that keeps the alert channel honest. It used to work the
+other way — the alert was recorded before the send, so a delivery failure could
+not cause a retry storm — and on 2 Sep 2026 a dropped socket meant the state
+said the user had been told while nothing had reached them, with the guard then
+suppressing the alert for a day. What went unreported was three days of missing
+uploads: the failure hid exactly the outage it existed to announce.
+
+A condition suppressed by your own preferences is different, and is still
+recorded. You asked not to hear it, so there is nothing to retry.
 
 `funnel` is the one condition exempt from the 24-hour repeat. It is a wait, not
 a task, and a daily reminder would only teach you to swipe away the channel that

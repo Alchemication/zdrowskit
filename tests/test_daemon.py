@@ -12,6 +12,7 @@ import pytest
 import daemon as daemon_module
 import notification_prefs as notification_prefs_module
 import daemon_runners as daemon_runners_module
+from config import MAX_REPORT_ATTEMPTS_PER_DAY
 from cmd_llm_common import InsufficientWeekData
 from cmd_llm_common import CommandResult
 from context_edit import (
@@ -92,6 +93,113 @@ class TestWeeklyReportScheduling:
             "Weekly review",
             None,
             detail=None,
+        )
+
+    def test_transient_failure_leaves_the_day_open_for_a_retry(
+        self, tmp_path: Path
+    ) -> None:
+        """A network blip must not cost the week its report.
+
+        On 31 Aug 2026 one ``[Errno 49]`` at 10:23 set the skip date, and the
+        remaining 54 scheduler ticks that day all logged "already ran". The
+        report was never regenerated.
+        """
+        import logging
+
+        daemon = _make_daemon(tmp_path)
+
+        def _blip(args):
+            logging.getLogger("commands").error(
+                "LLM call failed: InternalServerError: DeepseekException - "
+                "[Errno 49] Can't assign requested address"
+            )
+            raise SystemExit(1)
+
+        with (
+            patch.object(daemon, "_run_import"),
+            patch("cmd_insights.cmd_insights", side_effect=_blip),
+            patch.object(daemon, "_notify_user_failure") as notify_failure,
+            patch.object(daemon, "_record_event") as record_event,
+        ):
+            daemon._run_weekly_report()
+
+        assert "last_review_skip_date" not in daemon._state
+        assert daemon._state["review_attempts"]["count"] == 1
+        # Quiet until the budget runs out: one notice about an outage is
+        # information, three is noise.
+        notify_failure.assert_not_called()
+        assert [c.args[1] for c in record_event.call_args_list] == ["retrying"]
+
+    def test_transient_failure_gives_up_once_the_budget_is_spent(
+        self, tmp_path: Path
+    ) -> None:
+        import logging
+
+        daemon = _make_daemon(tmp_path)
+
+        def _blip(args):
+            logging.getLogger("commands").error(
+                "LLM call failed: [Errno 49] Can't assign requested address"
+            )
+            raise SystemExit(1)
+
+        with (
+            patch.object(daemon, "_run_import"),
+            patch("cmd_insights.cmd_insights", side_effect=_blip),
+            patch.object(daemon, "_notify_user_failure") as notify_failure,
+            patch.object(daemon, "_record_event") as record_event,
+        ):
+            for _ in range(MAX_REPORT_ATTEMPTS_PER_DAY):
+                daemon._run_weekly_report()
+
+        today = daemon_runners_module.date.today().isoformat()
+        assert daemon._state["last_review_skip_date"] == today
+        assert daemon._state["review_attempts"]["count"] == (
+            MAX_REPORT_ATTEMPTS_PER_DAY
+        )
+        # Exactly one notice, on the attempt that wrote the day off.
+        notify_failure.assert_called_once()
+        kinds = [c.args[1] for c in record_event.call_args_list]
+        assert kinds == ["retrying"] * (MAX_REPORT_ATTEMPTS_PER_DAY - 1) + ["failed"]
+
+    def test_verifier_refusal_ends_the_day_on_the_first_attempt(
+        self, tmp_path: Path
+    ) -> None:
+        """A verdict that will repeat identically earns no retries.
+
+        Re-running the report would spend three more LLM calls to be refused
+        three more times, and notify the user each time.
+        """
+        import logging
+
+        daemon = _make_daemon(tmp_path)
+
+        def _refused(args):
+            logging.getLogger("commands").error(
+                "Insights verification failed; refusing to save/send report"
+            )
+            raise SystemExit(1)
+
+        with (
+            patch.object(daemon, "_run_import"),
+            patch("cmd_insights.cmd_insights", side_effect=_refused),
+            patch.object(daemon, "_notify_user_failure") as notify_failure,
+            patch.object(daemon, "_record_event") as record_event,
+        ):
+            daemon._run_weekly_report()
+
+        today = daemon_runners_module.date.today().isoformat()
+        assert daemon._state["last_review_skip_date"] == today
+        notify_failure.assert_called_once()
+        assert [c.args[1] for c in record_event.call_args_list] == ["failed"]
+
+    def test_retry_budget_resets_when_the_day_rolls_over(self, tmp_path: Path) -> None:
+        daemon = _make_daemon(tmp_path)
+        daemon._state["review_attempts"] = {"date": "2020-01-01", "count": 99}
+
+        assert daemon._runners._record_report_attempt("review") == 1
+        assert daemon._state["review_attempts"]["date"] == (
+            daemon_runners_module.date.today().isoformat()
         )
 
     def test_weekly_report_skips_quietly_when_the_week_has_no_data(
@@ -2941,6 +3049,44 @@ class TestIngestHealthAlerts:
         sent = runtime._poller.send_reply.call_args_list
         assert len(sent) == 1
         assert "split detail" in sent[0].args[0]
+        assert runtime._state["data_health_alert"]["status"] == "split"
+
+    def test_an_undelivered_alert_is_retried_on_the_next_tick(
+        self, tmp_path: Path
+    ) -> None:
+        """A failed send must not arm the 24h de-dup guard.
+
+        This was recorded before the send, so on 2 Sep 2026 a dropped socket
+        left the state saying the user had been told while the alert — about
+        three days of missing uploads — reached nobody, and the guard then
+        suppressed it for a day.
+        """
+        runtime = self._runtime(tmp_path, self._health("stale"))
+        runtime._poller.send_reply.return_value = None
+        prefs = load_notification_prefs(runtime._notification_prefs_path)
+
+        with patch(
+            "http_ingest.assess_ingest_health", return_value=self._health("split")
+        ):
+            runtime._check_ingest_health(prefs)
+            assert "data_health_alert" not in runtime._state
+            # The next tick must try again rather than treat it as told.
+            runtime._check_ingest_health(prefs)
+
+        assert runtime._poller.send_reply.call_count == 2
+
+    def test_a_delivered_alert_arms_the_guard(self, tmp_path: Path) -> None:
+        runtime = self._runtime(tmp_path, self._health("stale"))
+        runtime._poller.send_reply.return_value = 4321
+        prefs = load_notification_prefs(runtime._notification_prefs_path)
+
+        with patch(
+            "http_ingest.assess_ingest_health", return_value=self._health("split")
+        ):
+            runtime._check_ingest_health(prefs)
+            runtime._check_ingest_health(prefs)
+
+        assert runtime._poller.send_reply.call_count == 1
         assert runtime._state["data_health_alert"]["status"] == "split"
 
     def test_a_changed_condition_alerts_again_immediately(self, tmp_path: Path) -> None:

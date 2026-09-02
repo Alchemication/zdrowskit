@@ -38,9 +38,11 @@ from llm import (
     _call_with_retry,
     _completion_kwargs_for_model,
     _fallback_chain,
+    _is_network_error,
     _is_overloaded,
     call_llm,
     extract_memory,
+    is_transient_error_text,
 )
 from llm_context import (
     DEFAULT_SOUL_PATH,
@@ -1597,6 +1599,77 @@ class TestIsOverloaded:
         assert not _is_overloaded(Exception("rate_limit_error"))
 
 
+class TestIsNetworkError:
+    """A transport fault must be told apart from a provider refusal."""
+
+    # The exact string litellm produced on 31 Aug 2026, when the weekly report
+    # died on a network blip and was never regenerated.
+    REAL = (
+        "litellm.InternalServerError: InternalServerError: DeepseekException - "
+        "[Errno 49] Can't assign requested address"
+    )
+
+    def test_real_flattened_provider_error(self) -> None:
+        assert _is_network_error(Exception(self.REAL))
+
+    def test_raw_oserror(self) -> None:
+        assert _is_network_error(OSError(49, "Can't assign requested address"))
+
+    def test_dns_failure(self) -> None:
+        import socket
+
+        assert _is_network_error(socket.gaierror("Name or service not known"))
+
+    def test_oserror_in_cause_chain(self) -> None:
+        """litellm re-raises as a provider type; the cause still names it."""
+        try:
+            try:
+                raise OSError(61, "Connection refused")
+            except OSError as inner:
+                raise Exception("provider call failed") from inner
+        except Exception as exc:
+            assert _is_network_error(exc)
+
+    def test_exception_type_name(self) -> None:
+        connect_error = type("APIConnectionError", (Exception,), {})
+        assert _is_network_error(connect_error("no detail in the message"))
+
+    def test_auth_failure_is_not_network(self) -> None:
+        assert not _is_network_error(Exception("authentication failed"))
+
+    def test_bad_request_is_not_network(self) -> None:
+        assert not _is_network_error(Exception("context_length_exceeded"))
+
+    def test_overloaded_is_not_network(self) -> None:
+        """Overloaded is a refusal: it deserves the other provider, not this."""
+        assert not _is_network_error(Exception("overloaded_error"))
+
+
+class TestIsTransientErrorText:
+    """The daemon only has the logged text, never the exception."""
+
+    def test_captured_network_failure(self) -> None:
+        assert is_transient_error_text(
+            "LLM call failed: InternalServerError: DeepseekException - "
+            "[Errno 49] Can't assign requested address"
+        )
+
+    def test_captured_overload(self) -> None:
+        assert is_transient_error_text("LLM call failed: Overloaded")
+
+    def test_verifier_refusal_is_not_transient(self) -> None:
+        """The refusal that must still end the day on the first attempt."""
+        assert not is_transient_error_text(
+            "Insights verification failed; refusing to save/send report"
+        )
+
+    def test_none(self) -> None:
+        assert not is_transient_error_text(None)
+
+    def test_empty(self) -> None:
+        assert not is_transient_error_text("")
+
+
 class TestCallWithRetry:
     def _mock_response(self, text: str = "ok") -> MagicMock:
         resp = MagicMock()
@@ -1682,6 +1755,77 @@ class TestCallWithRetry:
         mock_litellm.completion.side_effect = self._overloaded_error()
         with pytest.raises(Exception, match="overloaded_error"):
             _call_with_retry({"model": "m"}, "m")
+
+    # --- transport faults -------------------------------------------------
+
+    def _network_error(self) -> Exception:
+        """The failure that took the 31 Aug 2026 weekly report."""
+        return Exception(
+            "litellm.InternalServerError: InternalServerError: "
+            "DeepseekException - [Errno 49] Can't assign requested address"
+        )
+
+    @patch("llm.time.sleep")
+    @patch("llm.litellm")
+    def test_network_error_retries_instead_of_giving_up(
+        self, mock_litellm, mock_sleep
+    ) -> None:
+        """This used to be zero retries, which is how one blip lost a report."""
+        mock_litellm.completion.side_effect = [
+            self._network_error(),
+            self._mock_response("after the blip"),
+        ]
+        resp, model = _call_with_retry({"model": "m"}, "m")
+        assert resp.choices[0].message.content == "after the blip"
+        assert mock_litellm.completion.call_count == 2
+        mock_sleep.assert_called_once_with(10)
+
+    @patch("llm.time.sleep")
+    @patch("llm.litellm")
+    def test_network_error_backs_off_across_the_full_ladder(
+        self, mock_litellm, mock_sleep
+    ) -> None:
+        mock_litellm.completion.side_effect = [
+            self._network_error(),
+            self._network_error(),
+            self._network_error(),
+            self._mock_response("recovered"),
+        ]
+        _call_with_retry({"model": "m"}, "m")
+        assert [c.args[0] for c in mock_sleep.call_args_list] == [10, 30, 90]
+
+    @patch("llm.time.sleep")
+    @patch("llm.litellm")
+    def test_network_error_does_not_try_the_other_provider(
+        self, mock_litellm, mock_sleep
+    ) -> None:
+        """The fallback is reached over the same socket layer that just failed.
+
+        Spending a second ladder of backoff on it only doubles the wait before
+        the caller learns what the first ladder already established.
+        """
+        mock_litellm.completion.side_effect = self._network_error()
+        with pytest.raises(Exception, match="Can't assign requested address"):
+            _call_with_retry({"model": DEEPSEEK_PRO_MODEL}, DEEPSEEK_PRO_MODEL)
+        # One ladder only: four attempts, three delays.
+        assert mock_litellm.completion.call_count == 4
+        assert mock_sleep.call_count == 3
+
+    @patch("llm.time.sleep")
+    @patch("llm.litellm")
+    def test_overloaded_still_crosses_providers(self, mock_litellm, mock_sleep) -> None:
+        """A refusal is the one case where the other provider is the answer."""
+        mock_litellm.completion.side_effect = [
+            self._overloaded_error(),
+            self._overloaded_error(),
+            self._overloaded_error(),
+            self._overloaded_error(),
+            self._mock_response("fallback ok"),
+        ]
+        _resp, model = _call_with_retry(
+            {"model": DEEPSEEK_PRO_MODEL}, DEEPSEEK_PRO_MODEL
+        )
+        assert model == FALLBACK_MODEL
 
     def test_fallback_chain_pairs_budget_models(self) -> None:
         assert _fallback_chain(PRIMARY_FLASH_MODEL) == [

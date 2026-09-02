@@ -43,6 +43,7 @@ _KIND_STYLE: dict[str, str] = {
     "prefs_suppressed": "bright_yellow",
     "already_ran": "dim",
     "failed": "bold red",
+    "retrying": "bright_yellow",
     "new_data": "bold green",
     "no_changes": "dim",
     "edited": "bold yellow",

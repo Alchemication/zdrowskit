@@ -22,6 +22,23 @@ several do where an eval found the tier default was the wrong safety net. So
 tier membership does not tell you the effective fallback; only the resolved
 route does.
 
+### When the fallback engages
+
+A call that fails is retried on its own route first, with exponential backoff.
+What happens after that depends on what failed:
+
+- **The provider refused** — overloaded, or otherwise unwilling. The other
+  provider is exactly the right answer, so the call crosses to the fallback and
+  runs the same ladder there.
+- **The network dropped** — a refused, reset or unassignable connection. The
+  fallback is reached over the same socket layer that just failed, so crossing
+  to it would only spend a second ladder of backoff to learn the same thing.
+  The call stops after one ladder and reports the fault to its caller.
+
+Transport faults used to get no retries at all, only an instant hop to the
+other provider — which meant a blip lasting seconds consumed both routes and
+failed the call. That is what lost the weekly report on 31 Aug 2026.
+
 `reasoning_effort` is the one reasoning control: Anthropic receives it
 directly; DeepSeek translates `high`/`max` into thinking mode and treats the
 other values as thinking off. It is on for every judgment surface — reports,

@@ -24,7 +24,12 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 
 from config import MAX_CONVERSATION_MESSAGES
-from notify import chunk_text, md_to_telegram_html, send_telegram_photo
+from notify import (
+    chunk_text,
+    md_to_telegram_html,
+    send_telegram_photo,
+    urlopen_retrying,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -254,7 +259,7 @@ class _TelegramClient:
             url, data=data, headers={"Content-Type": "application/json"}
         )
         try:
-            urllib.request.urlopen(req, timeout=_TELEGRAM_REQUEST_TIMEOUT_S)  # noqa: S310
+            urlopen_retrying(req, _TELEGRAM_REQUEST_TIMEOUT_S, what="sendChatAction")
         except Exception:
             logger.debug("Failed to send typing indicator", exc_info=True)
 
@@ -310,7 +315,9 @@ class _TelegramClient:
                 url, data=data, headers={"Content-Type": "application/json"}
             )
             try:
-                urllib.request.urlopen(req, timeout=_TELEGRAM_REQUEST_TIMEOUT_S)  # noqa: S310
+                urlopen_retrying(
+                    req, _TELEGRAM_REQUEST_TIMEOUT_S, what="editMessageText"
+                )  # noqa: S310
             except Exception:
                 logger.debug("Animation edit failed", exc_info=True)
             i += 1
@@ -396,7 +403,7 @@ class _TelegramClient:
             url, data=data, headers={"Content-Type": "application/json"}
         )
         try:
-            urllib.request.urlopen(req, timeout=_TELEGRAM_REQUEST_TIMEOUT_S)  # noqa: S310
+            urlopen_retrying(req, _TELEGRAM_REQUEST_TIMEOUT_S, what="editMessageText")
         except urllib.error.HTTPError as exc:
             detail = _telegram_http_error_detail(exc)
             if _is_redundant_edit(detail):
@@ -414,7 +421,9 @@ class _TelegramClient:
                 url, data=data, headers={"Content-Type": "application/json"}
             )
             try:
-                urllib.request.urlopen(req, timeout=_TELEGRAM_REQUEST_TIMEOUT_S)  # noqa: S310
+                urlopen_retrying(
+                    req, _TELEGRAM_REQUEST_TIMEOUT_S, what="editMessageText"
+                )  # noqa: S310
             except urllib.error.HTTPError as exc:
                 detail = _telegram_http_error_detail(exc)
                 if _is_redundant_edit(detail):
@@ -463,7 +472,7 @@ class _TelegramClient:
             url, data=data, headers={"Content-Type": "application/json"}
         )
         try:
-            urllib.request.urlopen(req, timeout=_TELEGRAM_REQUEST_TIMEOUT_S)  # noqa: S310
+            urlopen_retrying(req, _TELEGRAM_REQUEST_TIMEOUT_S, what="editMessageText")
         except urllib.error.HTTPError as exc:
             detail = _telegram_http_error_detail(exc)
             if _is_redundant_edit(detail):
@@ -481,7 +490,9 @@ class _TelegramClient:
                 url, data=data, headers={"Content-Type": "application/json"}
             )
             try:
-                urllib.request.urlopen(req, timeout=_TELEGRAM_REQUEST_TIMEOUT_S)  # noqa: S310
+                urlopen_retrying(
+                    req, _TELEGRAM_REQUEST_TIMEOUT_S, what="editMessageText"
+                )  # noqa: S310
             except urllib.error.HTTPError as exc:
                 detail = _telegram_http_error_detail(exc)
                 if _is_redundant_edit(detail):
@@ -523,7 +534,9 @@ class _TelegramClient:
             url, data=data, headers={"Content-Type": "application/json"}
         )
         try:
-            urllib.request.urlopen(req, timeout=_TELEGRAM_REQUEST_TIMEOUT_S)  # noqa: S310
+            urlopen_retrying(
+                req, _TELEGRAM_REQUEST_TIMEOUT_S, what="editMessageReplyMarkup"
+            )  # noqa: S310
         except Exception:
             logger.warning(
                 "Failed to edit reply markup for message %d",
@@ -581,8 +594,10 @@ class _TelegramClient:
                 url, data=data, headers={"Content-Type": "application/json"}
             )
             try:
-                with urllib.request.urlopen(  # noqa: S310
-                    req, timeout=_TELEGRAM_REQUEST_TIMEOUT_S
+                with urlopen_retrying(
+                    req,
+                    _TELEGRAM_REQUEST_TIMEOUT_S,
+                    what="sendMessage",
                 ) as resp:
                     body = json.loads(resp.read().decode("utf-8"))
                 if body.get("ok") and first_message_id is None:
@@ -596,8 +611,10 @@ class _TelegramClient:
                     url, data=data, headers={"Content-Type": "application/json"}
                 )
                 try:
-                    with urllib.request.urlopen(  # noqa: S310
-                        req, timeout=_TELEGRAM_REQUEST_TIMEOUT_S
+                    with urlopen_retrying(
+                        req,
+                        _TELEGRAM_REQUEST_TIMEOUT_S,
+                        what="sendMessage",
                     ) as resp:
                         body = json.loads(resp.read().decode("utf-8"))
                     if body.get("ok") and first_message_id is None:
@@ -695,8 +712,10 @@ class _TelegramClient:
             url, data=data, headers={"Content-Type": "application/json"}
         )
         try:
-            with urllib.request.urlopen(  # noqa: S310
-                req, timeout=_TELEGRAM_REQUEST_TIMEOUT_S
+            with urlopen_retrying(
+                req,
+                _TELEGRAM_REQUEST_TIMEOUT_S,
+                what="sendMessage",
             ) as resp:
                 body = json.loads(resp.read().decode("utf-8"))
             if body.get("ok"):
@@ -710,8 +729,10 @@ class _TelegramClient:
                 url, data=data, headers={"Content-Type": "application/json"}
             )
             try:
-                with urllib.request.urlopen(  # noqa: S310
-                    req, timeout=_TELEGRAM_REQUEST_TIMEOUT_S
+                with urlopen_retrying(
+                    req,
+                    _TELEGRAM_REQUEST_TIMEOUT_S,
+                    what="sendMessage",
                 ) as resp:
                     body = json.loads(resp.read().decode("utf-8"))
                 if body.get("ok"):
@@ -738,7 +759,9 @@ class _TelegramClient:
             url, data=data, headers={"Content-Type": "application/json"}
         )
         try:
-            urllib.request.urlopen(req, timeout=_TELEGRAM_REQUEST_TIMEOUT_S)  # noqa: S310
+            urlopen_retrying(
+                req, _TELEGRAM_REQUEST_TIMEOUT_S, what="answerCallbackQuery"
+            )  # noqa: S310
         except Exception:
             logger.debug("Failed to answer callback query", exc_info=True)
 
@@ -761,8 +784,10 @@ class _TelegramClient:
             url, data=data, headers={"Content-Type": "application/json"}
         )
         try:
-            with urllib.request.urlopen(  # noqa: S310
-                req, timeout=_TELEGRAM_REQUEST_TIMEOUT_S
+            with urlopen_retrying(
+                req,
+                _TELEGRAM_REQUEST_TIMEOUT_S,
+                what="setMyCommands",
             ) as resp:
                 body = json.loads(resp.read().decode("utf-8"))
             return body.get("ok", False)

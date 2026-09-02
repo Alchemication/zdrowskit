@@ -2,17 +2,21 @@
 
 from __future__ import annotations
 
+import urllib.error
+import urllib.request
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 
 from cmd_llm_common import telegram_chat_id
+from config import TELEGRAM_SEND_RETRY_DELAYS
 from notify import (
     md_to_telegram_html,
     send_telegram,
     send_telegram_photo,
     split_report_sections,
+    urlopen_retrying,
 )
 
 
@@ -209,3 +213,61 @@ class TestTelegramChatId:
 
     def test_stringifies_a_numeric_roster_id(self) -> None:
         assert telegram_chat_id(SimpleNamespace(telegram_id=12345)) == "12345"
+
+
+class TestUrlopenRetrying:
+    """Telegram sends must survive a passing transport fault.
+
+    Every send used to be a single attempt: one dropped socket and the message
+    was gone, with the caller returning None and no trace beyond a log line.
+    That is how a data-sync alert about three days of missing uploads was
+    itself lost on 2 Sep 2026.
+    """
+
+    def _request(self) -> urllib.request.Request:
+        return urllib.request.Request("https://api.telegram.org/botX/sendMessage")
+
+    @patch("notify.time.sleep")
+    @patch("notify.urllib.request.urlopen")
+    def test_succeeds_without_sleeping(self, mock_open, mock_sleep) -> None:
+        mock_open.return_value = "response"
+        assert urlopen_retrying(self._request(), what="sendMessage") == "response"
+        mock_sleep.assert_not_called()
+
+    @patch("notify.time.sleep")
+    @patch("notify.urllib.request.urlopen")
+    def test_retries_a_dropped_socket(self, mock_open, mock_sleep) -> None:
+        mock_open.side_effect = [
+            OSError(49, "Can't assign requested address"),
+            "response",
+        ]
+        assert urlopen_retrying(self._request(), what="sendMessage") == "response"
+        assert mock_open.call_count == 2
+        mock_sleep.assert_called_once_with(TELEGRAM_SEND_RETRY_DELAYS[0])
+
+    @patch("notify.time.sleep")
+    @patch("notify.urllib.request.urlopen")
+    def test_backs_off_across_the_full_ladder(self, mock_open, mock_sleep) -> None:
+        mock_open.side_effect = OSError(49, "Can't assign requested address")
+        with pytest.raises(OSError):
+            urlopen_retrying(self._request(), what="sendMessage")
+        assert mock_open.call_count == len(TELEGRAM_SEND_RETRY_DELAYS) + 1
+        assert [c.args[0] for c in mock_sleep.call_args_list] == list(
+            TELEGRAM_SEND_RETRY_DELAYS
+        )
+
+    @patch("notify.time.sleep")
+    @patch("notify.urllib.request.urlopen")
+    def test_http_error_is_not_retried(self, mock_open, mock_sleep) -> None:
+        """Telegram answered and declined.
+
+        Retrying will not change its mind, and send_reply depends on seeing it
+        at once to fall back from HTML to plain text.
+        """
+        mock_open.side_effect = urllib.error.HTTPError(
+            "url", 400, "Bad Request", {}, None
+        )
+        with pytest.raises(urllib.error.HTTPError):
+            urlopen_retrying(self._request(), what="sendMessage")
+        assert mock_open.call_count == 1
+        mock_sleep.assert_not_called()

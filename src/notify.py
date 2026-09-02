@@ -2,6 +2,7 @@
 
 Public API:
     md_to_telegram_html     — convert markdown to Telegram-compatible HTML.
+    urlopen_retrying        — open a Telegram request, retrying transport faults.
     send_telegram           — send formatted report via Telegram Bot API.
     send_telegram_photo     — send a photo via Telegram Bot API.
     send_telegram_report    — send a sectioned report with interleaved charts.
@@ -20,10 +21,65 @@ import logging
 import os
 import re
 import time
+import urllib.error
+import urllib.request
 from html import escape as html_escape
+
+from config import TELEGRAM_SEND_RETRY_DELAYS
 
 logger = logging.getLogger(__name__)
 _TELEGRAM_REQUEST_TIMEOUT_S = 15
+
+
+def urlopen_retrying(
+    req: urllib.request.Request,
+    timeout: float = _TELEGRAM_REQUEST_TIMEOUT_S,
+    *,
+    what: str = "request",
+):
+    """Open *req*, retrying a transport fault but never a Telegram refusal.
+
+    Every Telegram send used to be a single attempt: one dropped socket and the
+    message was gone, with the caller returning None and nothing to say about
+    it. That silently swallowed nudges, weekly reports, failure notices and the
+    data-sync alert alike — including, on 2 Sep 2026, the one alert whose whole
+    job was to report that uploads had stopped.
+
+    An ``HTTPError`` means Telegram answered and declined. Retrying will not
+    change its mind, and callers depend on seeing it immediately to run their
+    own fallback (HTML to plain text), so it is re-raised untouched.
+
+    Args:
+        req: The prepared request.
+        timeout: Per-attempt socket timeout in seconds.
+        what: Short label for the log line, e.g. ``"sendMessage"``.
+
+    Returns:
+        The opened response object.
+
+    Raises:
+        urllib.error.HTTPError: Telegram answered and refused the request.
+        Exception: The last transport error, once attempts are exhausted.
+    """
+    last_exc: Exception | None = None
+    for delay in (*TELEGRAM_SEND_RETRY_DELAYS, None):
+        try:
+            return urllib.request.urlopen(req, timeout=timeout)  # noqa: S310
+        except urllib.error.HTTPError:
+            raise
+        except Exception as exc:
+            last_exc = exc
+            if delay is None:
+                break
+            logger.warning(
+                "Telegram %s failed (%s: %s); retrying in %ds ...",
+                what,
+                type(exc).__name__,
+                exc,
+                delay,
+            )
+            time.sleep(delay)
+    raise last_exc  # type: ignore[misc]
 
 
 def md_to_telegram_html(md_text: str) -> str:
@@ -204,8 +260,6 @@ def _send_telegram_chunk(
     Returns:
         The message_id of the sent message, or None on failure.
     """
-    import urllib.error
-    import urllib.request
 
     payload: dict = {
         "chat_id": chat_id,
@@ -220,9 +274,7 @@ def _send_telegram_chunk(
         url, data=data, headers={"Content-Type": "application/json"}
     )
     try:
-        with urllib.request.urlopen(  # noqa: S310
-            req, timeout=_TELEGRAM_REQUEST_TIMEOUT_S
-        ) as resp:
+        with urlopen_retrying(req, what="sendMessage") as resp:
             body = json.loads(resp.read().decode("utf-8"))
         if body.get("ok"):
             return body["result"]["message_id"]
@@ -246,9 +298,7 @@ def _send_telegram_chunk(
         url, data=data, headers={"Content-Type": "application/json"}
     )
     try:
-        with urllib.request.urlopen(  # noqa: S310
-            req, timeout=_TELEGRAM_REQUEST_TIMEOUT_S
-        ) as resp:
+        with urlopen_retrying(req, what="sendMessage") as resp:
             body = json.loads(resp.read().decode("utf-8"))
         if body.get("ok"):
             return body["result"]["message_id"]
@@ -357,7 +407,6 @@ def send_telegram_photo(
     Returns:
         True if sent successfully, False otherwise.
     """
-    import urllib.request
 
     creds = _get_telegram_creds(chat_id, bot_token)
     if creds is None:
@@ -395,7 +444,7 @@ def send_telegram_photo(
     )
 
     try:
-        urllib.request.urlopen(req, timeout=_TELEGRAM_REQUEST_TIMEOUT_S)  # noqa: S310
+        urlopen_retrying(req, what="sendPhoto")
         logger.info("Telegram photo sent")
         return True
     except Exception as e:

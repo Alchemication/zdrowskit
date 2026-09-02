@@ -36,8 +36,41 @@ from store import create_llm_trace, log_llm_call
 
 logger = logging.getLogger(__name__)
 
-# Exponential backoff delays (seconds) between retries on overloaded errors.
+# Exponential backoff delays (seconds) between retries on a transient failure.
 _RETRY_DELAYS = [10, 30, 90]
+
+# Exception type names that mean a transport fault but do not derive from
+# OSError, so an isinstance check cannot see them.
+_NETWORK_EXCEPTION_NAMES = frozenset(
+    {
+        "APIConnectionError",
+        "APITimeoutError",
+        "ConnectError",
+        "ConnectTimeout",
+        "ReadTimeout",
+        "Timeout",
+    }
+)
+
+# Substrings identifying a transport fault in a provider exception that has
+# already flattened the underlying OSError to a string. Matched lowercase.
+# "[Errno 49] Can't assign requested address" is the one observed in the wild:
+# it arrived wrapped as a DeepSeek InternalServerError, was retried zero times,
+# and took that Monday's weekly report with it.
+_NETWORK_ERROR_SIGNALS = (
+    "can't assign requested address",
+    "connection aborted",
+    "connection refused",
+    "connection reset",
+    "network is down",
+    "network is unreachable",
+    "no route to host",
+    "nodename nor servname",
+    "name or service not known",
+    "remote end closed connection",
+    "server disconnected",
+    "temporary failure in name resolution",
+)
 
 
 def _warn_on_aliased_fallback() -> None:
@@ -141,6 +174,67 @@ def _response_cost(response: Any) -> float | None:
 def _is_overloaded(exc: Exception) -> bool:
     """Return True if *exc* is an Anthropic overloaded error."""
     return "overloaded_error" in str(exc) or "Overloaded" in str(exc)
+
+
+def _is_network_error(exc: Exception) -> bool:
+    """Return True if *exc* is a connection-level fault rather than a refusal.
+
+    Distinguished from :func:`_is_overloaded` because the two deserve opposite
+    responses. An overloaded provider is a reason to try the other provider; a
+    socket that cannot connect is not, since the next provider is reached
+    through the same broken network.
+
+    Walks the ``__cause__``/``__context__`` chain because litellm re-raises the
+    underlying ``OSError`` as a provider exception whose type says nothing
+    about the cause, and falls back to message matching for the providers that
+    flatten it to a string.
+
+    Args:
+        exc: The exception raised by the completion attempt.
+
+    Returns:
+        True when the failure looks like a transport fault.
+    """
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        # socket.gaierror and socket.timeout are both OSError subclasses, so
+        # this one check covers DNS failure, refused connections, resets and
+        # socket timeouts alike.
+        if isinstance(current, OSError):
+            return True
+        if type(current).__name__ in _NETWORK_EXCEPTION_NAMES:
+            return True
+        current = current.__cause__ or current.__context__
+
+    text = str(exc).lower()
+    return any(signal in text for signal in _NETWORK_ERROR_SIGNALS)
+
+
+def is_transient_error_text(text: str | None) -> bool:
+    """Return True when a captured error message describes a passing fault.
+
+    The daemon catches ``SystemExit`` from a failed command and only has the
+    text of the last logged error, not the exception, so it cannot reuse
+    :func:`_is_network_error` directly. Callers use this to tell a fault worth
+    re-attempting later (the provider was down, the network was out) from a
+    verdict that will repeat identically on every retry (the verifier refused
+    the draft, the week has too little data).
+
+    Args:
+        text: Captured error message, or None when nothing was captured.
+
+    Returns:
+        True when the message names a transport fault or an overloaded
+        provider. False for None, empty text, and every deterministic refusal.
+    """
+    if not text:
+        return False
+    lowered = text.lower()
+    if "overloaded" in lowered:
+        return True
+    return any(signal in lowered for signal in _NETWORK_ERROR_SIGNALS)
 
 
 def _is_deepseek_model(model: str) -> bool:
@@ -462,10 +556,13 @@ def _call_with_retry(
 ) -> tuple:
     """Call litellm.completion with retries and provider fallback.
 
-    Retries overloaded errors on the same model using exponential backoff. Any
-    provider failure then falls across the Anthropic/DeepSeek boundary, so a
-    DeepSeek outage tries Anthropic and an Anthropic outage tries DeepSeek.
-    Re-raises the last exception if all attempts fail.
+    Retries overloaded providers and transport faults on the same model using
+    exponential backoff. A provider *refusal* then falls across the
+    Anthropic/DeepSeek boundary, so a DeepSeek outage tries Anthropic and an
+    Anthropic outage tries DeepSeek. A transport fault does not: the fallback
+    is reached over the same network that just refused the connection, so the
+    chain stops after one ladder rather than spending a second one to learn the
+    same thing. Re-raises the last exception if all attempts fail.
 
     Args:
         kwargs: litellm.completion keyword arguments (may be mutated for fallback).
@@ -477,6 +574,7 @@ def _call_with_retry(
         A (response, effective_model) tuple.
     """
     last_exc: Exception | None = None
+    unreachable = False
     chain = _fallback_chain(model, fallback_models=fallback_models)
     for model_index, candidate in enumerate(chain):
         for attempt, delay in enumerate(_RETRY_DELAYS + [None]):
@@ -489,16 +587,34 @@ def _call_with_retry(
                 return response, candidate
             except Exception as exc:
                 last_exc = exc
-                if _is_overloaded(exc) and delay is not None:
+                network_fault = _is_network_error(exc)
+                if (_is_overloaded(exc) or network_fault) and delay is not None:
                     logger.warning(
-                        "%s overloaded (attempt %d/%d), retrying in %ds ...",
+                        "%s %s (attempt %d/%d), retrying in %ds ...",
                         candidate,
+                        "unreachable" if network_fault else "overloaded",
                         attempt + 1,
                         len(_RETRY_DELAYS),
                         delay,
                     )
                     time.sleep(delay)
                     continue
+
+                if network_fault:
+                    # The other provider is reached over the same socket layer
+                    # that just refused us, so failing across the chain would
+                    # only spend a second ladder of backoff to learn the same
+                    # thing. Give up here and let the caller decide.
+                    logger.warning(
+                        "%s unreachable after %d attempts (%s: %s); "
+                        "not trying a fallback provider over the same network",
+                        candidate,
+                        len(_RETRY_DELAYS) + 1,
+                        type(exc).__name__,
+                        exc,
+                    )
+                    unreachable = True
+                    break
 
                 next_model = (
                     chain[model_index + 1] if model_index + 1 < len(chain) else None
@@ -512,6 +628,8 @@ def _call_with_retry(
                         next_model,
                     )
                 break
+        if unreachable:
+            break
 
     raise last_exc  # type: ignore[misc]
 

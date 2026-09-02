@@ -215,6 +215,31 @@ returns promptly on a flaky network. A timeout reports "unknown", never
 """
 DATA_HEALTH_REALERT_S: int = 24 * 60 * 60
 """How long before an unresolved ingest problem is reported again."""
+TELEGRAM_SEND_RETRY_DELAYS: tuple[int, ...] = (2, 8, 20)
+"""Backoff between attempts when a Telegram send fails on the network.
+
+Only transport faults consume an attempt; a refusal from Telegram itself is
+final and is re-raised at once, because the callers have their own fallbacks
+(HTML to plain text) that depend on seeing it promptly.
+
+Four attempts across 30 seconds. Sized against the fault it exists to survive:
+on 2 Sep 2026 a send raised "[Errno 49] Can't assign requested address" and the
+message — a data-sync alert — was dropped with no retry and no trace, which is
+also how the outage it was reporting stayed invisible. Thirty seconds covers a
+blip of that shape while staying short enough that a chat reply the user is
+waiting on still arrives inside a plausible pause.
+"""
+MAX_REPORT_ATTEMPTS_PER_DAY: int = 3
+"""Attempts a scheduled report gets on one day before the day is written off.
+
+Only transient failures consume an attempt; a verifier refusal or a short week
+is a verdict that would repeat identically, so it ends the day on the first
+try. Three is drawn from the failure this exists to survive: a network outage
+took the 31 Aug weekly report, and because one attempt was treated as the whole
+day's entitlement the report was never regenerated. The scheduler ticks every
+30 minutes, so three attempts spread the retry across an hour of outage while
+still bounding how long a genuinely broken provider is re-notified about.
+"""
 DATA_HEALTH_STALE_AFTER_DAYS: int = 2
 """Complete days missing daily metrics before the profile is warned.
 

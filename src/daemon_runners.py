@@ -24,8 +24,10 @@ from typing import TYPE_CHECKING
 from cmd_llm_common import InsufficientWeekData
 from config import (
     COACH_SUPPRESSION_S,
+    MAX_REPORT_ATTEMPTS_PER_DAY,
     MIN_NUDGE_INTERVAL_S,
 )
+from llm import is_transient_error_text
 
 if TYPE_CHECKING:
     from cmd_coach import CoachProposal
@@ -222,6 +224,32 @@ class DaemonRunnerHandler:
 
         self._d._state[f"last_{report_type}_date"] = date.today().isoformat()
         self._d._save_state()
+
+    def _record_report_attempt(self, report_type: str) -> int:
+        """Count one failed attempt at today's report and return the running total.
+
+        The record is keyed by date and simply replaced when the day rolls
+        over, so nothing needs to prune it.
+
+        Args:
+            report_type: Report state key, currently only "review".
+
+        Returns:
+            How many times today's report has now failed, counting this one.
+        """
+        key = f"{report_type}_attempts"
+        today_str = date.today().isoformat()
+        record = self._d._state.get(key)
+        if not isinstance(record, dict) or record.get("date") != today_str:
+            record = {"date": today_str, "count": 0}
+        try:
+            previous = int(record.get("count", 0))
+        except (TypeError, ValueError):
+            previous = 0
+        record["count"] = previous + 1
+        self._d._state[key] = record
+        self._d._save_state()
+        return record["count"]
 
     # ------------------------------------------------------------------
     # Data snapshot helpers
@@ -631,21 +659,46 @@ class DaemonRunnerHandler:
                 captured = cap.last_message
                 suppression = cap.last_suppression
                 logger.error("Weekly review report failed")
-                # Suppress same-day retries: the scheduler ticks every 30
-                # minutes and the report window stays open until midnight,
-                # so without this we'd re-run (and re-notify) every tick.
-                self._d._state["last_review_skip_date"] = date.today().isoformat()
-                self._d._save_state()
-                self._d._notify_user_failure(
-                    "Weekly review",
-                    captured,
-                    detail=suppression,
-                )
+                attempts = self._record_report_attempt("review")
+                transient = is_transient_error_text(captured)
+                retrying = transient and attempts < MAX_REPORT_ATTEMPTS_PER_DAY
+                if retrying:
+                    # A passing fault must not end the day. The scheduler is
+                    # the only thing that will ever try again, and the window
+                    # stays open until midnight, so leaving the skip date unset
+                    # lets the next tick pick the report back up. Stay quiet
+                    # until the budget runs out: one notice about a network
+                    # outage is information, three is noise.
+                    logger.info(
+                        "Weekly review will retry (attempt %d of %d)",
+                        attempts,
+                        MAX_REPORT_ATTEMPTS_PER_DAY,
+                    )
+                else:
+                    # Either a verdict that will repeat identically on every
+                    # retry, or a transient fault that has now used its budget.
+                    self._d._state["last_review_skip_date"] = date.today().isoformat()
+                    self._d._save_state()
+                    self._d._notify_user_failure(
+                        "Weekly review",
+                        captured,
+                        detail=suppression,
+                    )
                 self._d._record_event(
                     "insights",
-                    "failed",
-                    "Weekly review report failed",
-                    {"kind": "weekly", "error": (captured or "")[:500]},
+                    "retrying" if retrying else "failed",
+                    (
+                        f"Weekly review report failed, retrying "
+                        f"(attempt {attempts} of {MAX_REPORT_ATTEMPTS_PER_DAY})"
+                        if retrying
+                        else "Weekly review report failed"
+                    ),
+                    {
+                        "kind": "weekly",
+                        "error": (captured or "")[:500],
+                        "attempt": attempts,
+                        "transient": transient,
+                    },
                 )
 
     def _run_nudge(

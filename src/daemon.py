@@ -1575,18 +1575,21 @@ class ProfileRuntime:
             )
             return
 
-        # Record before sending: a delivery failure must not cause a retry storm
-        # on the next tick, and the log still carries the detail either way. The
-        # missing range is recorded too, so the recovery notice can say which of
-        # those days actually came back.
-        self._state["data_health_alert"] = {
+        # The missing range is recorded alongside the timestamp so the recovery
+        # notice can say which of those days actually came back.
+        alerted_record = {
             "status": health.status,
             "sent_at": now_iso,
             "missing_from": health.missing_from,
             "missing_to": health.missing_to,
             "escalated": escalating,
         }
-        self._save_state()
+
+        def _mark_alerted() -> None:
+            """Record this alert as delivered, arming the 24h de-dup guard."""
+            self._state["data_health_alert"] = alerted_record
+            self._save_state()
+
         logger.warning(
             "Ingest health for %s is %s: %s",
             self.profile.name,
@@ -1595,10 +1598,13 @@ class ProfileRuntime:
         )
 
         if decision["status"] != "allowed":
+            # A preference the user set, not a delivery failure. Record it so
+            # the guard holds: they asked not to hear this.
             logger.info(
                 "Ingest health alert suppressed by prefs: %s",
                 decision.get("reason", "unknown"),
             )
+            _mark_alerted()
             return
         headings = {
             "stale": "Daily health metrics are missing",
@@ -1636,10 +1642,26 @@ class ProfileRuntime:
                 "needs a look: open the Tailscale app on the Mac and check it "
                 "is signed in."
             )
-        self._poller.send_reply(
+        # Record only once Telegram has taken it. This used to be recorded
+        # before the send, to stop a delivery failure from re-firing every
+        # tick — but the 24h de-dup guard above then swallowed the alert
+        # entirely. On 2 Sep 2026 that is exactly what happened: the send
+        # raised "[Errno 49] Can't assign requested address", the state said
+        # the user had been told, and three days of missing uploads went
+        # unreported. Sends retry their own transport faults now, so reaching
+        # here with nothing delivered means a real outage worth carrying to
+        # the next tick rather than forgetting.
+        if self._poller.send_reply(
             f"⚠️ **{heading}**\n\n{body}\n\n"
             "Say _mute sync alerts for a week_ to silence this."
-        )
+        ):
+            _mark_alerted()
+        else:
+            logger.error(
+                "Ingest health alert for %s could not be delivered; "
+                "will try again on the next tick",
+                self.profile.name,
+            )
 
     def _poll_google_drive_once(self, *, force_import: bool) -> bool:
         """Delegate one Google Drive poll to the Drive handler.
