@@ -137,6 +137,99 @@ class TestSelectOnlyValidation:
         assert result[0]["cnt"] == 3
 
 
+class TestCommonTableExpressions:
+    """WITH is a read shape and must reach the database.
+
+    Rejecting it left the coach with an error instead of data on questions it
+    could only phrase as a CTE, and no way to tell that the refusal was about
+    the first word rather than the content.
+    """
+
+    def test_allows_single_cte(self, db_path: Path) -> None:
+        result = json.loads(
+            execute_run_sql(
+                db_path,
+                {
+                    "query": (
+                        "WITH busy AS (SELECT date, steps FROM daily "
+                        "WHERE steps > 5000) SELECT COUNT(*) AS cnt FROM busy"
+                    )
+                },
+            )
+        )
+        assert isinstance(result, list), result
+        assert result[0]["cnt"] >= 1
+
+    def test_allows_chained_ctes(self, db_path: Path) -> None:
+        """The real 2 Sep nudge query shape: two CTEs joined at the end."""
+        result = json.loads(
+            execute_run_sql(
+                db_path,
+                {
+                    "query": (
+                        "WITH recent AS ("
+                        "  SELECT date, hrv_ms, resting_hr FROM daily"
+                        "  WHERE hrv_ms IS NOT NULL"
+                        "), runs AS ("
+                        "  SELECT date, duration_min FROM workout_all"
+                        "  WHERE category = 'run'"
+                        ") "
+                        "SELECT r.date, r.hrv_ms, u.duration_min "
+                        "FROM runs u JOIN recent r ON r.date = u.date "
+                        "ORDER BY r.date DESC"
+                    )
+                },
+            )
+        )
+        assert isinstance(result, list), result
+        assert all("hrv_ms" in row for row in result)
+
+    def test_is_case_insensitive(self, db_path: Path) -> None:
+        result = json.loads(
+            execute_run_sql(
+                db_path,
+                {"query": "with x as (select 1 as n) select n from x"},
+            )
+        )
+        assert isinstance(result, list), result
+        assert result[0]["n"] == 1
+
+    def test_rejects_cte_wrapping_a_write(self, db_path: Path) -> None:
+        """Allowing WITH must not open a path to a write statement."""
+        result = json.loads(
+            execute_run_sql(
+                db_path,
+                {
+                    "query": (
+                        "WITH x AS (SELECT 1) "
+                        "INSERT INTO daily (date) VALUES ('2020-01-01')"
+                    )
+                },
+            )
+        )
+        assert "error" in result
+
+    def test_write_leaves_no_row_behind(self, db_path: Path) -> None:
+        """The rejection above must be a refusal, not a silent success."""
+        execute_run_sql(
+            db_path,
+            {
+                "query": (
+                    "WITH x AS (SELECT 1) "
+                    "INSERT INTO daily (date) VALUES ('2020-01-01')"
+                )
+            },
+        )
+        conn = sqlite3.connect(str(db_path))
+        try:
+            rows = conn.execute(
+                "SELECT COUNT(*) FROM daily WHERE date = '2020-01-01'"
+            ).fetchone()[0]
+        finally:
+            conn.close()
+        assert rows == 0
+
+
 # ---------------------------------------------------------------------------
 # Query execution
 # ---------------------------------------------------------------------------
@@ -296,4 +389,39 @@ class TestExecuteTool:
 
     def test_unknown_tool(self, db_path: Path) -> None:
         result = json.loads(execute_tool("nonexistent", {}, db_path))
+        assert "error" in result
+
+
+class TestStatementTerminator:
+    """A trailing semicolon must not read as a broken query.
+
+    The LIMIT wrapper puts the query inside a subquery, where a terminator is
+    a syntax error. The model sees "near ';': syntax error", concludes its
+    query was wrong, and spends a round-trip rewriting one that was correct.
+    """
+
+    def test_select_with_semicolon(self, db_path: Path) -> None:
+        result = json.loads(
+            execute_run_sql(db_path, {"query": "SELECT COUNT(*) AS cnt FROM daily;"})
+        )
+        assert isinstance(result, list), result
+        assert result[0]["cnt"] == 3
+
+    def test_cte_with_semicolon(self, db_path: Path) -> None:
+        result = json.loads(
+            execute_run_sql(
+                db_path,
+                {"query": "WITH x AS (SELECT 1 AS n) SELECT n FROM x;"},
+            )
+        )
+        assert isinstance(result, list), result
+        assert result[0]["n"] == 1
+
+    def test_semicolon_with_trailing_whitespace(self, db_path: Path) -> None:
+        result = json.loads(execute_run_sql(db_path, {"query": "SELECT 1 AS n ;  \n"}))
+        assert isinstance(result, list), result
+        assert result[0]["n"] == 1
+
+    def test_bare_semicolon_is_an_empty_query(self, db_path: Path) -> None:
+        result = json.loads(execute_run_sql(db_path, {"query": ";"}))
         assert "error" in result

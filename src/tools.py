@@ -31,6 +31,11 @@ _DEFAULT_LIMIT = 50
 # Timeout in seconds for SQL execution.
 _SQL_TIMEOUT = 5
 
+# Statement keywords that can begin a read-only query. Enforcement of
+# read-only-ness is the mode=ro connection, not this set; this only keeps an
+# obviously-wrong statement from reaching SQLite.
+_READ_STATEMENT_KEYWORDS = frozenset({"SELECT", "WITH"})
+
 
 def run_sql_tool() -> list[dict]:
     """Tool definition for read-only SQL queries against the health database.
@@ -66,7 +71,7 @@ def run_sql_tool() -> list[dict]:
                     "properties": {
                         "query": {
                             "type": "string",
-                            "description": "A SELECT SQL query.",
+                            "description": "A read-only SQL query (SELECT, or WITH ... SELECT).",
                         },
                         "limit": {
                             "type": "integer",
@@ -98,8 +103,8 @@ def execute_run_sql(db_path: Path, arguments: dict) -> str:
     """Execute a read-only SQL query and return JSON rows.
 
     Opens a separate read-only SQLite connection, validates that the
-    statement is a SELECT, wraps it with a LIMIT clause, and executes
-    with a timeout.
+    statement begins as a query (``SELECT`` or ``WITH``), wraps it with a
+    LIMIT clause, and executes with a timeout.
 
     Args:
         db_path: Path to the SQLite database file.
@@ -113,12 +118,29 @@ def execute_run_sql(db_path: Path, arguments: dict) -> str:
     if not query:
         return json.dumps({"error": "Empty query."})
 
-    # Only allow SELECT statements.
+    # Only allow read shapes. WITH is included because common-table
+    # expressions are the natural way to phrase the multi-step questions the
+    # coach asks, and rejecting them left the model with no data and no way to
+    # tell that its query was refused for its first word rather than its
+    # content. Nothing is granted by allowing it: the connection below is
+    # opened mode=ro, and the SELECT wrapper only compiles around a statement
+    # that is already a query, so a "WITH ... INSERT" fails twice over.
     first_word = query.lstrip("( \t\n").split()[0].upper() if query.strip() else ""
-    if first_word != "SELECT":
-        return json.dumps({"error": "Only SELECT queries are allowed."})
+    if first_word not in _READ_STATEMENT_KEYWORDS:
+        return json.dumps(
+            {"error": "Only SELECT and WITH (read-only) queries are allowed."}
+        )
 
     limit = min(int(arguments.get("limit", _DEFAULT_LIMIT)), _MAX_LIMIT)
+
+    # A statement terminator is idiomatic SQL and every model writes one
+    # eventually, but it cannot survive being wrapped in a subquery: the
+    # result is "near ';': syntax error", which reads like a fault in the
+    # query itself. The model then burns a round-trip re-deriving a query that
+    # was already correct.
+    query = query.rstrip().rstrip(";").rstrip()
+    if not query:
+        return json.dumps({"error": "Empty query."})
 
     # Wrap with LIMIT to cap result size.
     wrapped = f"SELECT * FROM ({query}) LIMIT {limit}"
