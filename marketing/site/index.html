@@ -161,7 +161,11 @@
     .pill { padding: 7px 10px; border: 1px solid var(--ink); font-size: 10px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
     .pill-yes { background: var(--green); }
 
-    .typing { display: flex; gap: 5px; align-items: center; height: 0; overflow: hidden; opacity: 0; padding-left: 4px; }
+    /* A flex item still claims a gap when its height is zero, so the collapsed
+       indicator would push the first two cards 44px apart against 22px
+       everywhere else. The negative bottom margin cancels the gap it is not
+       using; the animation returns it to zero while the dots are up. */
+    .typing { display: flex; gap: 5px; align-items: center; height: 0; margin-bottom: -22px; overflow: hidden; opacity: 0; padding-left: 4px; }
     .typing i { width: 7px; height: 7px; background: var(--green-dark); border-radius: 50%; animation: dot 1s infinite; }
     .typing i:nth-child(2) { animation-delay: .15s; }
     .typing i:nth-child(3) { animation-delay: .3s; }
@@ -328,7 +332,7 @@
        prefers-reduced-motion; the delays and scroll timeline are cleared here. */
     @keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
     @keyframes arrive { from { opacity: 0; transform: translateY(10px) scale(.985); } to { opacity: 1; transform: none; } }
-    @keyframes typing { 0% { height: 0; opacity: 0; } 12% { height: 26px; opacity: 1; } 78% { height: 26px; opacity: 1; } 100% { height: 0; opacity: 0; } }
+    @keyframes typing { 0% { height: 0; margin-bottom: -22px; opacity: 0; } 12% { height: 26px; margin-bottom: 0; opacity: 1; } 78% { height: 26px; margin-bottom: 0; opacity: 1; } 100% { height: 0; margin-bottom: -22px; opacity: 0; } }
     @keyframes dot { 0%, 60%, 100% { transform: translateY(0); } 30% { transform: translateY(-4px); } }
     @keyframes pulse { 50% { opacity: .35; } }
 
@@ -374,6 +378,7 @@
       .fact b { font-size: 20px; }
       .fact span { font-size: 9px; letter-spacing: .04em; line-height: 1.3; }
       .phone-body { gap: 18px; padding: 14px 18px 18px 14px; }
+      .typing { margin-bottom: -18px; }
       .message { padding: 14px; }
       .message h3 { font-size: 20px; }
       .context { grid-template-columns: 1fr; }
