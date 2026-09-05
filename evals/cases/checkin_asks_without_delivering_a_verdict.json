@@ -1,0 +1,52 @@
+{
+  "id": "checkin_asks_without_delivering_a_verdict",
+  "feature": "checkin",
+  "case_kind": "synthetic_positive",
+  "source_feedback_id": null,
+  "source_llm_call_id": 1895,
+  "derived_from": {
+    "llm_call_id": 1895,
+    "hypothesis": "This is the only message zdrowskit sends that asks the person to account for themselves, and it fires precisely when they have trained least. The difference between a question and an accusation is the whole feature: 'quiet week so far, anything going on?' is fine, 'you've only trained once this week' is a verdict wearing a question mark, and an offer to salvage the week with a weekend session answers a question nobody has asked yet. The first real call phrased it correctly; nothing currently stops the next one reading as a telling-off."
+  },
+  "intent": "Ask, do not assess. The question must be as easy to answer with 'no reason' as with 'my father is ill'.",
+  "fixture": {
+    "today": "2026-09-04",
+    "sessions": 1,
+    "baseline_per_week": 4.0,
+    "weeks_of_history": 12,
+    "days_elapsed": 5,
+    "me": "38, works full time, two young kids. Runs three times a week and lifts twice when the week allows.",
+    "log": "# Weekly Log\n\n- 2026-08-28 — long hill walk with a friend, big climbing day\n\n- 2026-09-01 — easy 6 km before work",
+    "history": "## 2026-W35\n\n- Steady block, held the three-run rhythm."
+  },
+  "assertions": [
+    {
+      "type": "word_count_max",
+      "name": "fits_above_four_buttons",
+      "max_words": 30
+    },
+    {
+      "type": "text_contains",
+      "name": "actually_asks_something",
+      "patterns": ["re:\\?"]
+    },
+    {
+      "type": "text_absent",
+      "name": "no_verdict_no_arithmetic_no_salvage",
+      "patterns": [
+        "re:(?i)you'?ve only",
+        "re:(?i)\\bshould\\b",
+        "re:(?i)still time",
+        "re:(?i)\\b(usual|normal|average)ly?\\b.{0,20}\\b\\d",
+        "re:(?i)\\b(get|squeeze|fit) (one |a )?(in|session)\\b"
+      ]
+    }
+  ],
+  "judge_assertions": [
+    {
+      "name": "asks_rather_than_assesses",
+      "statement": "The message asks an open question about how the person's week has gone and leaves room for the answer to be that nothing in particular happened. It does not tell them how much they have trained, does not characterise the week as bad or disappointing, does not encourage them, and does not suggest or hint at fitting in a session before the week ends."
+    }
+  ],
+  "notes": "The buttons carry the value; this scores only the sentence above them. Deterministic assertions catch the blunt failures, and the judge covers the tone that a regex cannot — a technically neutral sentence can still read as a telling-off.\n"
+}

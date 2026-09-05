@@ -86,7 +86,17 @@ Deterministic checks run first. Available types:
 `tool_called`, `tool_not_called`, `tool_arg_matches`, `text_contains`,
 `text_absent`, `text_without_chart_absent`, `memory_present`, `memory_contains`,
 `memory_absent`, `memory_bullet_max`, `word_count_max`,
-`visible_char_count_max`, `forbidden_opening`.
+`visible_char_count_max`, `forbidden_opening`, `targets_slots`,
+`plan_frame_mode`.
+
+`targets_slots` and `plan_frame_mode` score the **parsed** result rather than
+the response text, because both features validate before anything reaches the
+user: a target naming a category the vocabulary rejects, or a suppression with
+no stated reason, produces nothing in production. Asserting on the raw JSON
+would pass a case whose answer never becomes a bar. `targets_slots` is given
+the fixture's `activity_types` for the same reason — a target naming a workout
+type is legitimate only for a profile that has recorded it, and an assertion
+without that list rejects the correct answer.
 
 Multi-pattern assertions are not all alike: `text_contains` and
 `memory_contains` pass only when **every** pattern matches, while `text_absent`
@@ -210,9 +220,15 @@ path with the number of attempts that took it, and whether any attempt
 exhausted `max_tool_iterations` and was forced to answer with what it had. The
 leaderboard shows the average per row and expands to the full paths on click.
 
-Features with no tool loop — `memory` and `verification_judge` are single calls
-by design — record this as unknown rather than zero, so "was never given tools"
-cannot be read as "chose not to use them".
+Features with no tool loop — `memory`, `verification_judge`, `targets`,
+`plan_frame` and `checkin` are single calls by design — record this as unknown
+rather than zero, so "was never given tools" cannot be read as "chose not to
+use them".
+
+`plan_frame` fixtures are rejected at load time if they carry health data,
+targets, or progress. The production call is given life context and nothing
+about how the week is going, so a fixture able to smuggle the numbers in would
+be scoring a different question from the one that ships.
 
 ## Leaderboard
 

@@ -1,0 +1,26 @@
+{
+  "id": "plan_frame_does_not_reduce_an_ordinary_week",
+  "feature": "plan_frame",
+  "case_kind": "synthetic_negative",
+  "source_feedback_id": null,
+  "source_llm_call_id": 1894,
+  "derived_from": {
+    "llm_call_id": 1894,
+    "hypothesis": "Call 1894, the first real plan-frame decision, returned `facts` for an ordinary training week, reasoning that a long hike before a hard run made it 'a disrupted load week where verdicts would be unkind'. Re-running that exact context ten times gave `full` eight times and `facts` twice, so this is drift at the boundary rather than a reproducible regression — but the drift runs in the direction that silently removes the strip, and the stated reason is about training load, which is not a life circumstance at all. The journal's only life note was having no time to train after working late, which the prompt explicitly lists as a reason NOT to reduce. This case pins the rule that near-miss violates. It uses a cleaner ordinary-week fixture than the real context, and passes where the real one is unstable, so it guards the rule without inheriting the ambiguity."
+  },
+  "intent": "A busy week is still a week the plan applies to. Only a circumstance that displaces training as a thing worth measuring may reduce the strip.",
+  "fixture": {
+    "today": "2026-09-04",
+    "me": "38, works full time, two young kids. Runs three times a week and lifts twice when the week allows. No current injuries.",
+    "log": "# Weekly Log\n\n- 2026-08-23 — 45 min paddling in choppy water, plus push-ups, planks and squats\n\n- 2026-08-28 — long hill walk in West Cork with a friend, big climbing day\n\n- 2026-09-01 — no workout planned after a high-HR 6 km run yesterday\n\n- 2026-09-03 — no time for training, took the day off and then worked late",
+    "history": "## 2026-W35\n\n- Steady block. Nothing outstanding to carry.\n\n## 2026-W34\n\n- Held the three-run rhythm despite a team offsite midweek."
+  },
+  "assertions": [
+    {
+      "type": "plan_frame_mode",
+      "name": "keeps_the_full_strip",
+      "allowed": ["full"]
+    }
+  ],
+  "notes": "The load-bearing guard for this feature. Without it a model scores well by reducing the strip whenever the week looks hard, which is invisible to the user and indistinguishable from the feature having nothing to say. Measured drift on the real context was 2 in 10 toward `facts`; if that rate rises, tighten the prompt's `facts` criteria rather than loosening this case.\n"
+}

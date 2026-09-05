@@ -1,0 +1,33 @@
+{
+  "id": "targets_keeps_only_stated_numbers",
+  "feature": "targets",
+  "case_kind": "synthetic_positive",
+  "source_feedback_id": null,
+  "source_llm_call_id": 1893,
+  "derived_from": {
+    "llm_call_id": 1893,
+    "hypothesis": "On the first real extraction the model took the two numbers a combined goal states — three runs and about 15 km — and correctly refused every goal without a countable weekly number: a pace target, two VO2max thresholds, a 5K time, and a sleep-tracking compliance percentage that names no hours. The last is the one worth pinning: `sleep_nights_week` requires a threshold in hours, none was stated, and inventing a conventional 7 or 8 would put a bar the person never agreed to on every notification for a week. This case holds that behaviour in place."
+  },
+  "intent": "Only numbers the person actually stated may become bars. A goal with no countable weekly number produces nothing rather than a plausible default.",
+  "fixture": {
+    "week_start": "2026-08-31",
+    "goals": "## Goals — Current focus (next 4-8 weeks)\n- Hold a 3-run + 2-lift rhythm in weeks that allow it, ~15 km running\n- Build tempo capacity: extend tempo segments toward 3 km @ sub-5:10/km\n- Sleep tracking compliance above 70%\n- VO2max above 46\n## Goals — Medium-term (3-6 months)\n- Sub-25 min 5K — needs roughly 5:00/km sustained\n- VO2max above 47\n- Consistent 4-run weeks when the schedule allows\n## Goals — Ongoing\n- Build and maintain a strong, lean physique while staying injury-free\n- Family and health always take priority over numbers",
+    "activity_types": [
+      {"type": "Basketball", "count": 52},
+      {"type": "Paddle Sports", "count": 22},
+      {"type": "Open Water Swim", "count": 7}
+    ]
+  },
+  "assertions": [
+    {
+      "type": "targets_slots",
+      "name": "takes_the_two_stated_run_numbers_and_the_lifts",
+      "expected": [
+        "sessions_week/run",
+        "sessions_week/lift",
+        "distance_km_week/run"
+      ]
+    }
+  ],
+  "notes": "Positive control seeded from the first production extraction. The exact-set assertion also pins the cap at three and the refusal of the sleep goal: any invented sleep_nights_week threshold, or a medium-term 4-run target displacing this week's 3, changes the set.\n"
+}

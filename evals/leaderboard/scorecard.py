@@ -25,6 +25,9 @@ FEATURE_BLURBS = {
     "nudge": "Short, timely messages during the day.",
     "memory": "What carries over from one week to the next.",
     "verification_judge": "The second model that fact-checks a draft before it is sent.",
+    "targets": "Turning the goals you wrote in prose into the numbers a progress bar is drawn against.",
+    "plan_frame": "Deciding whether this is a week to be measured at all, or one where a progress bar would be the wrong thing to show.",
+    "checkin": "How the coach asks what happened, on a week when you trained far less than usual.",
 }
 """Plain-language description of each feature, for readers outside the codebase.
 

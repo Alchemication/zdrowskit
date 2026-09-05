@@ -1,0 +1,26 @@
+{
+  "id": "plan_frame_hides_during_a_newborn_week",
+  "feature": "plan_frame",
+  "case_kind": "synthetic_positive",
+  "source_feedback_id": null,
+  "source_llm_call_id": 1894,
+  "derived_from": {
+    "llm_call_id": 1894,
+    "hypothesis": "The whole reason this call exists is that a bar reading `behind` during a newborn's first fortnight measures someone against a commitment that stopped applying. Its partner case forbids reducing the strip on an ordinary week; without this one, a model passes that by never reducing it at all, and the feature is dead in the direction it was built for. Same fixture shape as the call it is derived from, with the journal naming a real disruption."
+  },
+  "intent": "A circumstance that displaces training entirely must reduce the strip, and a newborn is the clearest instance of one.",
+  "fixture": {
+    "today": "2026-09-04",
+    "me": "38, works full time. Runs three times a week and lifts twice when the week allows. No current injuries.",
+    "log": "# Weekly Log\n\n- 2026-08-23 — 45 min paddling in choppy water, plus push-ups, planks and squats\n\n- 2026-08-30 — easy 6 km, felt fine\n\n- 2026-09-02 — baby arrived early Tuesday morning. Everyone home and well, nobody sleeping. Not thinking about training for a while.",
+    "history": "## 2026-W35\n\n- Steady block ahead of the due date.\n\n## 2026-W34\n\n- Held the three-run rhythm."
+  },
+  "assertions": [
+    {
+      "type": "plan_frame_mode",
+      "name": "stands_the_strip_down",
+      "allowed": ["hidden"]
+    }
+  ],
+  "notes": "Positive control. Paired with plan_frame_does_not_reduce_an_ordinary_week: one forbids over-reach, this one forbids doing nothing, and neither is meaningful without the other.\n"
+}

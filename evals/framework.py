@@ -74,6 +74,9 @@ EVAL_FEATURE_TO_PRODUCTION_FEATURE = {
     "insights": "insights",
     "memory": "memory",
     "verification_judge": "verification",
+    "targets": "targets",
+    "plan_frame": "plan_frame",
+    "checkin": "checkin",
 }
 
 
@@ -449,7 +452,9 @@ def run_case(
     # retried — but a malformed assertion must still be recorded rather than
     # aborting the whole run partway through a suite.
     try:
-        result.assertions = run_assertions(case.assertions, execution=result.execution)
+        result.assertions = run_assertions(
+            case.assertions, execution=result.execution, fixture=case.fixture
+        )
         if all(assertion.passed for assertion in result.assertions):
             result.assertions.extend(
                 run_judge_assertions(
@@ -545,6 +550,22 @@ def _execute_case(
             cache=cache,
             refresh_cache=refresh_cache,
         )
+    elif case.feature in {"targets", "plan_frame", "checkin"}:
+        from evals import run_small_calls
+
+        runner = {
+            "targets": run_small_calls.run_targets_case,
+            "plan_frame": run_small_calls.run_plan_frame_case,
+            "checkin": run_small_calls.run_checkin_case,
+        }[case.feature]
+        execution, result.model, result.route = runner(
+            case,
+            model=model,
+            reasoning_effort=reasoning_effort,
+            temperature=temperature,
+            cache=cache,
+            refresh_cache=refresh_cache,
+        )
     else:
         raise ValueError(f"Unsupported eval feature: {case.feature}")
     result.execution = execution
@@ -584,9 +605,19 @@ def _eval_route(
 def run_assertions(
     assertions: list[dict[str, Any]],
     execution: EvalExecution,
+    fixture: dict[str, Any] | None = None,
 ) -> list[AssertionResult]:
-    """Evaluate deterministic assertions against a captured execution."""
-    return [_evaluate_assertion(assertion, execution) for assertion in assertions]
+    """Evaluate deterministic assertions against a captured execution.
+
+    The fixture is passed through because some responses can only be validated
+    against the same facts production validates them against — a target naming
+    a workout type is legitimate only for a profile that has recorded it, so an
+    assertion without the fixture rejects the correct answer.
+    """
+    return [
+        _evaluate_assertion(assertion, execution, fixture or {})
+        for assertion in assertions
+    ]
 
 
 def run_judge_assertions(
@@ -1120,6 +1151,30 @@ def _case_from_dict(raw: dict[str, Any], path: Path) -> EvalCase:
                 f"{path} {feature} fixture must include today, context, and "
                 "health_data or health_data_text"
             )
+    elif feature == "targets":
+        if "goals" not in fixture:
+            raise ValueError(f"{path} targets fixture must include goals")
+    elif feature == "plan_frame":
+        # No health-data key is accepted on purpose. The production call is
+        # given life context and nothing about how the week is going, and a
+        # fixture that could smuggle the numbers in would be scoring a
+        # different question from the one that ships.
+        if not any(key in fixture for key in ("me", "log", "history")):
+            raise ValueError(
+                f"{path} plan_frame fixture must include at least one of "
+                "me, log, or history"
+            )
+        forbidden = sorted(
+            {"health_data", "health_data_text", "targets", "progress"} & set(fixture)
+        )
+        if forbidden:
+            raise ValueError(
+                f"{path} plan_frame fixture must not carry measurements "
+                f"({forbidden}) — the call never sees them in production"
+            )
+    elif feature == "checkin":
+        if "sessions" not in fixture:
+            raise ValueError(f"{path} checkin fixture must include sessions")
     else:
         raise ValueError(f"{path} unsupported feature: {feature}")
     return EvalCase(
@@ -1680,6 +1735,7 @@ def _load_seed_tables(conn: sqlite3.Connection, db_seed: dict[str, Any]) -> None
 def _evaluate_assertion(
     assertion: dict[str, Any],
     execution: EvalExecution,
+    fixture: dict[str, Any] | None = None,
 ) -> AssertionResult:
     atype = assertion.get("type")
     name = str(assertion.get("name", atype))
@@ -1709,8 +1765,81 @@ def _evaluate_assertion(
         return _assert_visible_char_count_max(name, assertion, execution)
     if atype == "forbidden_opening":
         return _assert_forbidden_opening(name, assertion, execution)
+    if atype == "targets_slots":
+        return _assert_targets_slots(name, assertion, execution, fixture or {})
+    if atype == "plan_frame_mode":
+        return _assert_plan_frame_mode(name, assertion, execution)
     return AssertionResult(
         name=name, passed=False, detail=f"Unknown assertion type: {atype}"
+    )
+
+
+def _assert_targets_slots(
+    name: str,
+    assertion: dict[str, Any],
+    execution: EvalExecution,
+    fixture: dict[str, Any],
+) -> AssertionResult:
+    """Check the targets a response actually yields, after validation.
+
+    Asserting on the parsed result rather than the raw JSON is deliberate: a
+    payload naming a category the vocabulary rejects, or a number outside its
+    bounds, produces no ring in production. Scoring the text would pass a case
+    whose target never reaches a bar.
+
+    Supports ``expected`` (exact set of ``metric/category`` slots), ``includes``
+    and ``excludes``.
+    """
+    from weekly_targets import parse_targets_response
+
+    # Same known-types set the production call is validated against. Without
+    # it every type-addressed target is rejected as never recorded, and the
+    # case fails the correct answer while looking like a model defect.
+    known = frozenset(str(entry["type"]) for entry in fixture.get("activity_types", []))
+    targets = parse_targets_response(execution.text or "", "eval", known)
+    actual = sorted(item.slot_label for item in targets)
+
+    expected = assertion.get("expected")
+    if expected is not None:
+        passed = actual == sorted(str(slot) for slot in expected)
+        return AssertionResult(
+            name=name,
+            passed=passed,
+            detail=f"expected {sorted(expected)}, parsed {actual}",
+        )
+
+    missing = [s for s in assertion.get("includes", []) if s not in actual]
+    present = [s for s in assertion.get("excludes", []) if s in actual]
+    passed = not missing and not present
+    detail = f"parsed {actual}"
+    if missing:
+        detail += f"; missing {missing}"
+    if present:
+        detail += f"; forbidden {present}"
+    return AssertionResult(name=name, passed=passed, detail=detail)
+
+
+def _assert_plan_frame_mode(
+    name: str,
+    assertion: dict[str, Any],
+    execution: EvalExecution,
+) -> AssertionResult:
+    """Check the plan-frame decision a response actually yields.
+
+    Parsed rather than pattern-matched, so a suppression missing its required
+    reason scores as what production does with it — nothing — instead of as the
+    mode it claimed.
+    """
+    from plan_frame import parse_plan_frame_response
+
+    parsed = parse_plan_frame_response(execution.text or "")
+    actual = parsed.mode if parsed else None
+    allowed = [str(mode) for mode in assertion.get("allowed", [])]
+    passed = actual in allowed
+    return AssertionResult(
+        name=name,
+        passed=passed,
+        detail=f"parsed mode {actual!r}, allowed {allowed}",
     )
 
 
