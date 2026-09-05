@@ -4,14 +4,17 @@ Regression scorecard for zdrowskit evals. A case is one frozen input plus checks
 
 ## What ships today
 
-The most recent scored run for each feature, on the model it actually runs on, against the 30 cases in `evals/cases` today.
+The most recent scored run for each feature, on the model it actually runs on, against the 35 cases in `evals/cases` today.
 
 | Feature | Route | Cases | Strict | Attempt | Flaky | Repeat | Tool calls | Avg Latency | Cost/run | Commit | Recorded |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
 | chat | gpt-5.6-luna (high) | 11/11 | 63.6% | 81.8% | 3 | 3 | 0.8 avg (7 cases, 1-3), 3 varied | 7.12s | $0.0168 | 2bfda76* | 2026-08-12 |
+| checkin | gpt-5.6-luna | 1/1 | 100.0% | 100.0% | 0 | 5 | - | 1.20s | $0.0002 | a2fba5f* | 2026-09-05 |
 | insights | gpt-5.6-luna (high) | 3/3 | 66.7% | 66.7% | 0 | 3 | 2.2 avg (3 cases, 1-6), 1 varied | 23.81s | $0.0139 | 2bfda76* | 2026-08-12 |
 | memory | gpt-5.6-luna | 3/3 | 100.0% | 100.0% | 0 | 3 | - | 1.15s | $0.0007 | 2bfda76* | 2026-08-12 |
 | nudge | gpt-5.6-luna (high) | 6/6 | 100.0% | 100.0% | 0 | 3 | 0.1 avg (1 case, up to 1), 1 varied | 5.88s | $0.0084 | 2bfda76* | 2026-08-12 |
+| plan_frame | gpt-5.6-luna | 2/2 | 100.0% | 100.0% | 0 | 5 | - | 1.27s | $0.0004 | a2fba5f | 2026-09-05 |
+| targets | gpt-5.6-luna | 2/2 | 100.0% | 100.0% | 0 | 5 | - | 1.37s | $0.0003 | a2fba5f* | 2026-09-05 |
 | verification_judge | deepseek-v4-flash (high) | 7/7 | 85.7% | 90.5% | 1 | 3 | - | 65.96s | $0.0227 | 2bfda76* | 2026-08-12 |
 
 ## chat · 11 cases
@@ -28,6 +31,16 @@ Leading row (`gpt-5.6-luna`, repeat=3) per-case stability:
 
 - `chat_strategy_change_updates_weekly_plan` 2/3 FLAKY — weekly_plan_mentions_four_runs
 - `chat_tempo_short_warmup_negative` 0/3 fail — treats_shortened_session_as_not_meeting_the_prescription
+
+## checkin · 1 cases
+
+How the coach asks what happened, on a week when you trained far less than usual.
+
+| Model | Reasoning | Repeat | Cases | Strict | Attempt | Flaky | Tool calls | Avg Latency | Cost/run | Commit | Not passing |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
+| **gpt-5.6-luna** (ships today) | none | 5 | 1/1 | 100.0% | 100.0% | 0 | - | 1.20s | $0.0002 | a2fba5f* | - |
+
+Leading row (`gpt-5.6-luna`) passed every case on every attempt.
 
 ## insights · 3 cases
 
@@ -66,6 +79,26 @@ Short, timely messages during the day.
 | **gpt-5.6-luna** (ships today) | high | 3 | 6/6 | 100.0% | 100.0% | 0 | - | 4.51s | $0.0054 | 760d8b6 | - |
 | **gpt-5.6-luna** (ships today) | high | 3 | 6/6 | 100.0% | 100.0% | 0 | 0.1 avg (1 case, up to 1), 1 varied | 5.88s | $0.0084 | 2bfda76* | - |
 | **gpt-5.6-luna** (ships today) | high | 3 | 6/6 | 100.0% | 100.0% | 0 | - | 5.19s | $0.0095 | adc9c5e* | - |
+
+Leading row (`gpt-5.6-luna`) passed every case on every attempt.
+
+## plan_frame · 2 cases
+
+Deciding whether this is a week to be measured at all, or one where a progress bar would be the wrong thing to show.
+
+| Model | Reasoning | Repeat | Cases | Strict | Attempt | Flaky | Tool calls | Avg Latency | Cost/run | Commit | Not passing |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
+| **gpt-5.6-luna** (ships today) | none | 5 | 2/2 | 100.0% | 100.0% | 0 | - | 1.27s | $0.0004 | a2fba5f | - |
+
+Leading row (`gpt-5.6-luna`) passed every case on every attempt.
+
+## targets · 2 cases
+
+Turning the goals you wrote in prose into the numbers a progress bar is drawn against.
+
+| Model | Reasoning | Repeat | Cases | Strict | Attempt | Flaky | Tool calls | Avg Latency | Cost/run | Commit | Not passing |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
+| **gpt-5.6-luna** (ships today) | none | 5 | 2/2 | 100.0% | 100.0% | 0 | - | 1.37s | $0.0003 | a2fba5f* | - |
 
 Leading row (`gpt-5.6-luna`) passed every case on every attempt.
 
