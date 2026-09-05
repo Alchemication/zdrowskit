@@ -22,6 +22,7 @@ Public API:
     measure_week            — measure stored targets against the week so far.
     render_progress_block   — the multi-line strip for reports.
     render_progress_line    — the single-line form for nudges.
+    render_dots             — the dotted form of one countable ring, or None.
     ring_label / ring_unit  — the label and unit one ring prints.
     pick_headline_ring      — the one ring a nudge should lead with.
     weekly_progress_block   — end-to-end block for a report, or None.
@@ -39,6 +40,7 @@ from pathlib import Path
 
 from config import (
     WEEKLY_PROGRESS_BAR_CELLS,
+    WEEKLY_PROGRESS_MAX_DOTS,
     WEEKLY_PROGRESS_MAX_LABEL_CHARS,
     WEEKLY_PROGRESS_PACE_SLACK_DAYS,
 )
@@ -57,6 +59,20 @@ DAYS_IN_WEEK = 7
 
 _BAR_FILLED = "█"  # FULL BLOCK
 _BAR_EMPTY = "░"  # LIGHT SHADE
+
+# The inline nudge line is drawn in Telegram's proportional body font, where a
+# run of FULL BLOCKs closes into one solid slab that reads as a redaction box
+# rather than a bar. Dots keep their gaps at any width, and being plain text
+# they inherit the message colour, so they follow the reader's theme.
+#
+# Completion is not marked with a glyph of its own. Telegram's HTML subset
+# cannot colour text, so the only green available is an emoji, which costs
+# about double the width — enough to wrap the line on a watch — and reads
+# loudly on a surface whose job is to be glanced at. It also buys nothing: a
+# partial ring always floors to at least one empty dot, so a run with no empty
+# dot left in it already means the target was met.
+_DOT_FILLED = "●"  # BLACK CIRCLE
+_DOT_EMPTY = "○"  # WHITE CIRCLE
 
 STATUS_DONE = "done"
 STATUS_ON_PACE = "on pace"
@@ -393,30 +409,74 @@ def render_progress_block(
     return "```\n" + "\n".join(lines) + "\n```"
 
 
+def render_dots(ring: RingProgress) -> str | None:
+    """Render one countable ring as a run of dots, one per unit.
+
+    Two sessions of two is drawn as two objects, not as a fraction the reader
+    converts into objects. That only works when there is something whole to
+    count, so a summed ring — kilometres, minutes — gets no dots, and neither
+    does a target too long to count at a glance.
+
+    A complete ring is a run with no empty dot in it, which needs no separate
+    completion glyph; see the note beside the glyph constants.
+
+    Args:
+        ring: The ring to draw.
+
+    Returns:
+        The dot run, or None when this ring should print numbers instead.
+    """
+    target = ring.target.target
+    if ring.target.spec.shape != "count":
+        return None
+    if not float(target).is_integer() or not 1 <= target <= WEEKLY_PROGRESS_MAX_DOTS:
+        return None
+
+    total = int(target)
+    if ring.status == STATUS_DONE:
+        return _DOT_FILLED * total
+    # Floor rather than round, for the same reason `pace_floor` does: a filled
+    # dot is a claim that a whole session happened, and half a session rounded
+    # up is a dot the person did not earn. It is also what keeps an unfinished
+    # ring showing an empty dot, which is the only thing distinguishing it from
+    # a complete one.
+    filled = max(0, min(total, int(ring.actual)))
+    return _DOT_FILLED * filled + _DOT_EMPTY * (total - filled)
+
+
 def render_progress_line(ring: RingProgress, *, show_verdict: bool = True) -> str:
     """Render the single-line progress form used in a nudge header.
+
+    Unlike :func:`render_progress_block`, this lands in the message body rather
+    than a ``<pre>`` block, so it can rely on neither monospace alignment nor
+    the block's glyphs. A countable ring is drawn as dots, which need no
+    numbers beside them; everything else prints its numbers and no bar at all.
 
     Args:
         ring: The ring to show.
         show_verdict: Whether to append a completion or remaining-work label.
 
     Returns:
-        One line, short enough to sit beside a trigger label without wrapping
-        on a phone.
+        One line, short enough to head a nudge without wrapping on a phone or
+        a watch.
     """
-    bar = render_bar(
-        ring.fraction,
-        complete=ring.status == STATUS_DONE,
-        started=ring.actual > 0,
-    )
+    label = ring_label(ring.target)
+    dots = render_dots(ring)
+    if dots is not None:
+        # Overshoot has no dot to live in — a third session against a target of
+        # two would otherwise render exactly like stopping at two.
+        extra = int(ring.actual) - int(ring.target.target)
+        surplus = f"+{extra}" if extra > 0 else ""
+        return " ".join(part for part in (label, dots, surplus) if part)
+
     parts = [
-        ring_label(ring.target),
+        label,
         _value_text(ring),
         ring_unit(ring),
-        bar,
-        progress_caption(ring) if show_verdict else "",
     ]
-    return " ".join(part for part in parts if part)
+    line = " ".join(part for part in parts if part)
+    caption = progress_caption(ring) if show_verdict else ""
+    return f"{line} · {caption}" if caption else line
 
 
 def pick_headline_ring(rings: list[RingProgress]) -> RingProgress | None:
@@ -534,9 +594,14 @@ def ring_fingerprint(ring: RingProgress, week_start: str) -> str:
 
     Deliberately coarser than the measured value. A 200 m walk changes the
     number without changing anything the reader would act on, so the
-    fingerprint tracks only what is visible: which ring is leading, whether it is complete,
-    and how many bar cells are filled. Crossing a tenth of the target
-    is movement; drifting inside one is not.
+    fingerprint tracks only what is visible: which ring is leading, whether it
+    is complete, and how far its glyphs have moved. Drifting inside one glyph
+    is not movement.
+
+    The granularity is read off the rendered form rather than fixed here, so a
+    dotted ring is compared per session and a numbered one per tenth. Deciding
+    it independently is how a nudge gets suppressed as unchanged while a dot
+    the reader can see has visibly moved.
 
     The week is included so the Monday reset always counts as news.
 
@@ -547,13 +612,23 @@ def ring_fingerprint(ring: RingProgress, week_start: str) -> str:
     Returns:
         An opaque comparison key.
     """
-    filled = render_bar(
-        ring.fraction,
-        complete=ring.status == STATUS_DONE,
-        started=ring.actual > 0,
-    ).count(_BAR_FILLED)
+    dots = render_dots(ring)
+    if dots is not None:
+        # The surplus counter is part of the drawn line, so a fourth session
+        # against a target of three is news even though every dot is already
+        # filled and none of them can move again.
+        surplus = max(0, int(ring.actual) - int(ring.target.target))
+        drawn = f"d{dots.count(_DOT_FILLED)}+{surplus}"
+    else:
+        drawn = "b{}".format(
+            render_bar(
+                ring.fraction,
+                complete=ring.status == STATUS_DONE,
+                started=ring.actual > 0,
+            ).count(_BAR_FILLED)
+        )
     slot = ring.target.slot_label
-    return f"{week_start}|{slot}|{ring.actual >= ring.target.target}|{filled}"
+    return f"{week_start}|{slot}|{ring.actual >= ring.target.target}|{drawn}"
 
 
 def _load_shown_fingerprint(conn: sqlite3.Connection) -> str | None:

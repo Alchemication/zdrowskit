@@ -371,12 +371,11 @@ def cmd_nudge(
         _trigger, f"\U0001f514 {_trigger.replace('_', ' ').title()}"
     )
 
-    # One weekly ring folded into the header, and only when it has visibly
-    # moved since the last nudge that carried one. Nudges fire up to twice a
-    # day while the bars move three or four times a week, so an ungated line
-    # would be the same sentence a dozen times a week — the part the reader
-    # learns to skip, sitting immediately above the part that matters. The
-    # trigger label always stays: it is what says why the phone buzzed.
+    # One weekly ring as the header, and only when it has visibly moved since
+    # the last nudge that carried one. Nudges fire up to twice a day while the
+    # rings move three or four times a week, so an ungated line would be the
+    # same sentence a dozen times a week — the part the reader learns to skip,
+    # sitting immediately above the part that matters.
     #
     # Called here, past verification and every SKIP path, for two reasons: the
     # nudge is by now committed to being sent, so recording the line as shown
@@ -399,7 +398,14 @@ def cmd_nudge(
         frame=frame,
     )
     progress, progress_fingerprint = shown if shown else (None, None)
-    heading = f"**{header}** · {progress}" if progress else f"**{header}**"
+    # The ring replaces the trigger label rather than sitting beside it.
+    # "Data Sync" names the plumbing that woke the bot up, reads identically on
+    # every nudge, and took two thirds of the line on a watch — enough to wrap
+    # the state it was meant to make room for onto a second row. "Lifts ●●"
+    # says where the week stands and implies the trigger anyway. The label
+    # returns whenever there is no ring to show, because a nudge with no
+    # header at all loses the one line that says why the phone buzzed.
+    heading = f"**{progress}**" if progress else f"**{header}**"
     nudge_text = f"{heading}\n\n{nudge_text}"
 
     _save_nudge(

@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import sqlite3
+import unicodedata
 from datetime import date
 
 import pytest
 
+from config import WEEKLY_PROGRESS_MAX_DOTS
 from models import DailySnapshot, WorkoutSnapshot
 from store import insert_manual_workout, store_snapshots
 from weekly_progress import (
@@ -18,6 +20,7 @@ from weekly_progress import (
     pick_headline_ring,
     record_progress_line_shown,
     render_bar,
+    render_dots,
     render_progress_block,
     render_progress_line,
     ring_label,
@@ -349,10 +352,86 @@ class TestRenderProgressBlock:
         assert "21/30" in block
 
 
+class TestRenderDots:
+    def test_countable_ring_draws_one_dot_per_unit(self) -> None:
+        assert render_dots(_ring("sessions_week", 4, 2, category="lift")) == "●●○○"
+
+    def test_completed_ring_has_no_empty_dot_left(self) -> None:
+        assert render_dots(_ring("sessions_week", 2, 2, category="lift")) == "●●"
+
+    def test_only_a_complete_ring_ever_fills_every_dot(self) -> None:
+        # This is the whole completion signal: no separate glyph marks "done",
+        # so an unfinished ring must never render without an empty dot.
+        for actual in (0, 0.5, 1, 1.5, 2.99):
+            dots = render_dots(_ring("sessions_week", 3, actual, category="lift"))
+            assert dots is not None
+            assert "○" in dots
+
+    def test_untouched_ring_is_all_empty(self) -> None:
+        assert render_dots(_ring("sessions_week", 3, 0, category="lift")) == "○○○"
+
+    def test_partial_unit_never_fills_a_dot(self) -> None:
+        # Only `total`-shaped rings measure fractionally, but a count ring is
+        # stored as a float and must not round a half-session up into a dot.
+        assert render_dots(_ring("sessions_week", 3, 1.9, category="lift")) == "●○○"
+
+    def test_summed_rings_get_no_dots(self) -> None:
+        assert render_dots(_ring("distance_km_week", 30, 21.4, category="run")) is None
+
+    def test_target_past_the_dot_limit_gets_no_dots(self) -> None:
+        big = WEEKLY_PROGRESS_MAX_DOTS + 1
+        assert render_dots(_ring("sessions_week", big, 2, category="lift")) is None
+
+    def test_target_at_the_dot_limit_still_draws(self) -> None:
+        dots = render_dots(
+            _ring("sessions_week", WEEKLY_PROGRESS_MAX_DOTS, 1, category="lift")
+        )
+        assert dots is not None
+        assert len(dots) == WEEKLY_PROGRESS_MAX_DOTS
+
+
 class TestRenderProgressLine:
-    def test_line_carries_label_values_bar_and_status(self) -> None:
+    def test_countable_ring_is_a_label_and_dots(self) -> None:
+        line = render_progress_line(_ring("sessions_week", 2, 2, category="lift"))
+        assert line == "Lifts ●●"
+
+    def test_the_line_carries_no_double_width_glyph(self) -> None:
+        # Emoji are East Asian "Wide": about double the advance of a text
+        # glyph, which is what wrapped the line onto a second row on a watch.
+        for ring in (
+            _ring("sessions_week", 2, 2, category="lift"),
+            _ring("sessions_week", 4, 2, category="lift"),
+            _ring("sleep_nights_week", 7, 5, threshold=7.0),
+            _ring("distance_km_week", 30, 21.4, category="run"),
+        ):
+            line = render_progress_line(ring)
+            wide = [ch for ch in line if unicodedata.east_asian_width(ch) == "W"]
+            assert not wide, f"{line!r} carries {wide!r}"
+
+    def test_no_block_glyph_ever_reaches_the_proportional_line(self) -> None:
+        # The slab this replaced: FULL BLOCK closes into a solid rectangle
+        # outside a <pre> block, which is the one place this line is used.
+        for ring in (
+            _ring("sessions_week", 4, 2, category="lift"),
+            _ring("distance_km_week", 30, 21.4, category="run"),
+        ):
+            line = render_progress_line(ring)
+            assert "█" not in line
+            assert "░" not in line
+
+    def test_overshoot_is_counted_beside_the_dots(self) -> None:
+        line = render_progress_line(_ring("sessions_week", 2, 3, category="lift"))
+        assert line == "Lifts ●● +1"
+
+    def test_summed_ring_keeps_its_numbers_and_verdict(self) -> None:
         line = render_progress_line(_ring("distance_km_week", 30, 21.4, category="run"))
-        assert line == "Run km 21.4/30 ███████░░░ 8.6 left"
+        assert line == "Run km 21.4/30 · 8.6 left"
+
+    def test_summed_ring_without_a_verdict_drops_the_caption(self) -> None:
+        line = render_progress_line(
+            _ring("distance_km_week", 30, 21.4, category="run"), show_verdict=False
+        )
+        assert line == "Run km 21.4/30"
 
     def test_line_is_one_line(self) -> None:
         line = render_progress_line(_ring("sleep_nights_week", 5, 2, threshold=7.0))

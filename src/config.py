@@ -471,6 +471,18 @@ pace verdict fit one line inside a Telegram <pre> block on a phone; a wider
 track wraps, and a wrapped bar is worse than none.
 """
 
+WEEKLY_PROGRESS_MAX_DOTS: int = 7
+"""Largest counted target still drawn as one dot per session, night or day.
+
+The inline nudge line draws a countable goal as a run of dots, one per unit, so
+the reader counts objects rather than decoding a percentage. That only works
+while the run is countable at a glance: seven is a week's worth, the ceiling on
+sleep and step rings already, and about where a row of dots stops being
+counted and starts being estimated. Session targets are accepted up to
+twenty-one, and twenty-one dots is a smear, so a target above this falls back
+to printed numbers.
+"""
+
 WEEKLY_TARGET_TYPE_CHOICES: int = 8
 """Recorded activity types offered to the target extraction as ring candidates.
 

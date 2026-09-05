@@ -54,6 +54,20 @@ def _reloaded_config_with(**env: str):
                 os.environ[name] = value
 
 
+# Minimal stand-ins for the two builders every nudge test patches out, so a
+# test about the header does not restate the pipeline feeding it.
+_NUDGE_LLM_DATA: dict = {
+    "current_week": {"summary": {"week_label": "2026-W14"}, "days": []},
+    "history": [],
+    "week_complete": False,
+    "week_label": "2026-W14",
+}
+_NUDGE_MESSAGES: list[dict] = [
+    {"role": "system", "content": "s"},
+    {"role": "user", "content": "u"},
+]
+
+
 class TestSetupCommand:
     def test_setup_creates_env_and_points_at_profile_add(
         self, tmp_path: Path, monkeypatch, capsys
@@ -1536,6 +1550,91 @@ class TestCmdNudge:
         assert "**Rest today.**" in captured.out
         assert save_nudge.call_args.args[0].startswith("**📊 Data Sync**")
         assert send_telegram.call_args.args[0].startswith("**📊 Data Sync**")
+
+    def test_a_shown_ring_replaces_the_trigger_label(
+        self,
+        in_memory_db,
+        capsys,
+    ) -> None:
+        """The ring is the header, not a suffix on "Data Sync".
+
+        The label reads identically on every nudge and cost two thirds of the
+        line on a watch, which is what wrapped the ring onto a second row.
+        """
+        args = SimpleNamespace(
+            db="ignored.db",
+            model=None,
+            months=1,
+            trigger="new_data",
+            telegram=False,
+        )
+        result = LLMResult(
+            text="**Rest today.** Keep it boring and recover.",
+            model="test-model",
+            input_tokens=1,
+            output_tokens=12,
+            total_tokens=13,
+            latency_s=0.1,
+            llm_call_id=7,
+        )
+
+        with (
+            patch("cmd_nudge.load_context", return_value={"prompt": "x", "soul": "y"}),
+            patch("cmd_nudge.open_db", return_value=in_memory_db),
+            patch("cmd_nudge.build_llm_data", return_value=_NUDGE_LLM_DATA),
+            patch("cmd_nudge.build_messages", return_value=_NUDGE_MESSAGES),
+            patch("cmd_nudge.call_llm", return_value=result),
+            patch("cmd_nudge._save_nudge"),
+            patch(
+                "cmd_nudge.weekly_progress_nudge_line",
+                return_value=("Lifts \u25cf\u25cf", "fp-1"),
+            ),
+            patch("cmd_nudge.record_progress_line_shown"),
+            patch("cmd_nudge.send_telegram", return_value=123) as send_telegram,
+        ):
+            cmd_nudge(args)
+
+        sent_text = send_telegram.call_args.args[0]
+        assert sent_text.startswith("**Lifts \u25cf\u25cf**")
+        assert "Data Sync" not in sent_text
+        assert "\U0001f4ca" not in sent_text
+
+    def test_the_trigger_label_returns_when_there_is_no_ring(
+        self,
+        in_memory_db,
+        capsys,
+    ) -> None:
+        """A quiet week must not leave the nudge with no header at all."""
+        args = SimpleNamespace(
+            db="ignored.db",
+            model=None,
+            months=1,
+            trigger="new_data",
+            telegram=False,
+        )
+        result = LLMResult(
+            text="**Rest today.** Keep it boring and recover.",
+            model="test-model",
+            input_tokens=1,
+            output_tokens=12,
+            total_tokens=13,
+            latency_s=0.1,
+            llm_call_id=8,
+        )
+
+        with (
+            patch("cmd_nudge.load_context", return_value={"prompt": "x", "soul": "y"}),
+            patch("cmd_nudge.open_db", return_value=in_memory_db),
+            patch("cmd_nudge.build_llm_data", return_value=_NUDGE_LLM_DATA),
+            patch("cmd_nudge.build_messages", return_value=_NUDGE_MESSAGES),
+            patch("cmd_nudge.call_llm", return_value=result),
+            patch("cmd_nudge._save_nudge"),
+            patch("cmd_nudge.weekly_progress_nudge_line", return_value=None),
+            patch("cmd_nudge.send_telegram", return_value=123) as send_telegram,
+        ):
+            cmd_nudge(args)
+
+        assert send_telegram.call_args.args[0].startswith("**\U0001f4ca Data Sync**")
 
     def test_nudge_passes_route_reasoning_effort(
         self,

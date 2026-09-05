@@ -35,18 +35,37 @@ Lifts      ██████████      2/2 sessions  done
 Sleep ≥7h  ████░░░░░░      2/5 nights    3 left
 ```
 
-A nudge carries one line, folded into the trigger header, showing the ring the
-arriving data moved:
+A nudge is headed by one ring instead — the one the arriving data moved:
 
 ```
-📊 Data Sync · Run km 21.4/30 ███████░░░ 8.6 left
+Lifts ●●
+Runs ●●○○
+Sleep ≥7h ●●●●●○○
+Run km 21.4/30 · 8.6 left
 ```
 
-The trigger label stays because it says why the phone buzzed. Nudges get one
-ring rather than three, and only when that ring has visibly moved since the
-last nudge that carried a line — a bar crossed a tenth of its target, the target was completed, a different activity took the lead, or a new week started.
+The report's strip sits in a monospace block, where the columns line up and a
+bar of blocks is readable. A nudge header does not: it is drawn in the ordinary
+message font, where a run of `█` closes into a solid slab and the line is wide
+enough to wrap on a watch. So the two surfaces draw differently on purpose.
 
-Nudges fire up to twice a day while the bars move three or four times a week,
+A goal you can count — sessions, nights, step days — is drawn as one dot per
+unit, up to `WEEKLY_PROGRESS_MAX_DOTS`; a filled dot is one session that
+happened. A run with no empty dot left in it is a completed target, which is
+why nothing else marks one. Beyond that limit, and for goals that sum a
+quantity rather than count events, the line prints numbers instead. Anything
+past the target is counted after the dots, as `+1`.
+
+The ring replaces the trigger label rather than joining it. `Lifts ●●` says
+where the week stands and implies well enough what moved; the label said the
+same words on every nudge. It comes back whenever there is no ring to show, so
+a nudge is never left without a header. Nudges get one ring rather than three,
+and only when that ring has visibly moved since the last nudge that carried a
+line — a dot filled, or a numbered ring crossed a tenth of its target, the
+target was completed, a different activity took the lead, or a new week
+started.
+
+Nudges fire up to twice a day while the rings move three or four times a week,
 so an ungated line would repeat itself most of the week. Repetition at the top
 of a message is what teaches you to skip the top of the message, and the nudge
 itself starts immediately below it. The weekly report is never gated this way:
@@ -69,9 +88,12 @@ decides how much of the strip fits your current context:
 
 | | What you see |
 |---|---|
-| **full** | bars, numbers, and a remaining-work or completion label — the default |
-| **facts** | bars and numbers, no completion label — travelling, a deload, a niggle |
+| **full** | the rings, and a remaining-work or completion label — the default |
+| **facts** | the rings alone, no label — travelling, a deload, a niggle |
 | **hidden** | no strip at all |
+
+A dotted nudge header looks the same either way: dots state what happened and
+never judge the pace, so there is no label on one to drop.
 
 **That call is never shown how your week is going.** It gets your context and
 nothing else, so it cannot hide a bar for being unflattering. Falling behind on
@@ -198,8 +220,9 @@ priority. Ranges take the lower bound.
 
 ### Completion labels
 
-During an unfinished week the strip shows how much is left, or `done` when a
-target is met. It does not label you `behind` or assume that sessions are spread
+During an unfinished week the report's strip shows how much is left, or `done`
+when a target is met; a dotted nudge header shows neither, because its dots
+already say both. It does not label you `behind` or assume that sessions are spread
 evenly across the week. Sunday remains unfinished until the day ends. A report
 for a completed week labels an unmet amount `short`.
 
