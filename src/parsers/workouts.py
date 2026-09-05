@@ -41,6 +41,14 @@ _CATEGORY_MAP: dict[str, str] = {
     "treadmill running": "run",
     "traditional strength training": "lift",
     "functional strength training": "lift",
+    # HIIT is its own training modality, not a strength session and not a
+    # nameless leftover. Left in "other" it was invisible: nothing reads that
+    # bucket, so a profile doing it several times a week had that volume
+    # missing from every category count a prompt sees. It earns no splits and
+    # no pace baseline — Apple records no distance for it — so the category is
+    # purely about being counted as itself.
+    "high intensity interval training": "hiit",
+    "hiit": "hiit",
     "outdoor walk": "walk",
     "indoor walk": "walk",
     # Hiking is outdoor ambulatory activity with usable route data. Walks feed
@@ -91,7 +99,7 @@ def _category(name: str) -> str:
         name: Raw workout name from the JSON, e.g. "Outdoor Run".
 
     Returns:
-        One of "run", "lift", "walk", "cycle", or "other".
+        One of "run", "lift", "walk", "cycle", "hiit", or "other".
     """
     return _CATEGORY_MAP.get(name.lower(), "other")
 

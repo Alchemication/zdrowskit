@@ -15,6 +15,7 @@ uv run python main.py doctor              # check local setup readiness
 uv run python main.py events              # system event log: fires, skips, imports
 uv run python main.py llm-log             # inspect stored LLM call traces
 uv run python main.py notify              # inspect/reset notification settings
+uv run python main.py targets             # this week's goal targets + progress
 uv run python main.py models              # inspect/change model routing
 uv run python main.py telegram-setup      # register bot /commands for Telegram menu
 uv run python main.py daemon-install      # generate + load launchd daemon plist
@@ -38,6 +39,8 @@ uv run python main.py nudge --trigger log_update
 uv run python main.py llm-log --id 42
 uv run python main.py llm-log --feedback
 uv run python main.py llm-log --trace 7
+uv run python main.py targets refresh
+uv run python main.py targets clear
 uv run python main.py events --since 3d --category nudge
 uv run python main.py events --usage --since 30d
 uv run python main.py db status

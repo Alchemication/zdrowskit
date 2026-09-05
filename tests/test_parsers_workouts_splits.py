@@ -796,6 +796,41 @@ class TestWalkSplits:
         assert workouts[0].category == "walk"
         assert [split.km_index for split in workouts[0].splits] == [1]
 
+    def test_hiit_gets_its_own_category(self, tmp_path: Path) -> None:
+        """Left in "other" a HIIT habit is invisible: nothing reads that bucket."""
+        path = tmp_path / "workouts.json"
+        _write_workouts_file(
+            path,
+            {
+                "name": "High Intensity Interval Training",
+                "start": "2026-03-10 18:00:00 +0000",
+                "duration": 1500.0,
+            },
+        )
+
+        workouts = parse_workouts(path)
+
+        assert workouts[0].category == "hiit"
+        assert workouts[0].counts_as_lift is False
+        assert workouts[0].splits == []
+
+    def test_paddle_sports_stays_uncategorised(self, tmp_path: Path) -> None:
+        """Paddling is reached by naming the type, not by inventing a category."""
+        path = tmp_path / "workouts.json"
+        _write_workouts_file(
+            path,
+            {
+                "name": "Paddle Sports",
+                "start": "2026-03-10 16:00:00 +0000",
+                "duration": 3600.0,
+            },
+        )
+
+        workouts = parse_workouts(path)
+
+        assert workouts[0].category == "other"
+        assert workouts[0].type == "Paddle Sports"
+
     def test_walk_gps_glitch_segment_is_skipped(self, tmp_path: Path) -> None:
         """The walk speed cap rejects a teleport that a run cap would also reject."""
         path = tmp_path / "workouts.json"

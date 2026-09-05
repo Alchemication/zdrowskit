@@ -8,7 +8,7 @@ independent copy; `--profile NAME` selects it in the CLI.
 |------|-----------|---------|
 | `soul.md` | you | The coach's persona: who it is and how it talks to you |
 | `me.md` | you or chat | Your profile: age, body, injuries, what you already do |
-| `strategy.md` | you, chat, or coach | Goals + weekly training schedule + diet + sleep targets, all in one file |
+| `strategy.md` | you, chat, or coach | Goals + weekly training schedule + diet + sleep targets, all in one file. Numbers stated in the goal and plan sections also become the weekly progress bars |
 | `log.md` | you or chat | Freeform weekly journal: why things happened, such as travel, illness, or life |
 | `baselines.md` | auto | Rolling + seasonal baselines computed from the DB by `insights` and `coach` |
 | `history.md` | auto | Rolling memory: what a separate call after each weekly report chose to carry forward |
@@ -53,6 +53,22 @@ invent an age, injury, sport, or goal to fill the gap, and the nudge's
 scheduled-session rule does not fire without a real weekly plan, so a new
 profile is never prescribed training it did not ask for. Anything written
 outside a heading or comment counts as filled in.
+
+## Goals That Become Progress Bars
+
+The `## Goals` and `## Weekly Plan` sections of `strategy.md` are read once a
+week and matched to metrics the database can count, which is what draws the
+progress strip on nudges and weekly reports. See
+[Notifications](notifications.md#weekly-progress-strip) for what is countable
+and how the pace verdict is decided.
+
+Only stated numbers are used. A goal written without one — "run more", "sleep
+better" — produces no bar, and nothing is assumed in its place. Inspect what
+was derived with `uv run python main.py targets`.
+
+`log.md` is also written to by the weekly check-in: when a week runs far below
+your normal, the coach asks why and one tap records the answer there. See
+[Notifications](notifications.md#quiet-week-check-in).
 
 The journal (`log.md`) is what makes this different from a dashboard. Numbers say what happened. The journal says why. The LLM connects both.
 

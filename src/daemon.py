@@ -1213,6 +1213,115 @@ class ProfileRuntime:
             self._runners._run_weekly_report()
 
         self._check_ingest_health(prefs)
+        self._maybe_send_checkin(prefs, now=now)
+
+    def _maybe_send_checkin(self, prefs: dict, *, now: datetime) -> None:
+        """Ask about a week that has gone quiet, at most once per week.
+
+        Runs on the scheduler tick rather than on arriving data, because the
+        signal is absence: a week where nothing is happening produces no syncs
+        to react to, so every other notification path in the daemon goes quiet
+        at exactly the moment this one has something to say.
+
+        Delivery is gated on the nudge channel's preferences. It is an
+        unprompted message of the same kind, so muting nudges or setting an
+        earliest hour has to silence it too — otherwise this becomes the one
+        notification that ignores the settings and lands at one in the morning.
+        The daily nudge count is deliberately not consumed: at most one of
+        these exists per week and it should not spend a nudge slot.
+
+        Args:
+            prefs: Loaded notification preferences.
+            now: The current, timezone-aware moment.
+        """
+        from llm_context import load_context
+        from notification_prefs import evaluate_nudge_delivery
+        from plan_frame import resolve_plan_frame
+        from quiet_week import (
+            compose_checkin,
+            record_asked,
+            should_ask_checkin,
+        )
+        from store import open_db
+
+        decision = evaluate_nudge_delivery(prefs, now=now)
+        if decision["status"] != "allowed":
+            logger.debug(
+                "Quiet-week check-in held by notification prefs: %s",
+                decision.get("reason", "unknown"),
+            )
+            return
+
+        today = now.date()
+        try:
+            context = load_context(
+                self.context_dir, prompt_file="nudge_prompt", max_log=5
+            )
+        except FileNotFoundError:
+            context = {}
+
+        conn = open_db(self.db)
+        try:
+
+            def _context_explains_it() -> bool:
+                """Resolve the plan frame fresh, rather than trusting the cache.
+
+                A cached suppression from an old illness would otherwise
+                silence this indefinitely, and nothing else would re-resolve
+                it: a quiet week fires no nudges and no report, which are the
+                only other callers. The staleness rules only apply on resolve.
+                """
+                frame = resolve_plan_frame(
+                    conn,
+                    me=context.get("me"),
+                    log=context.get("log"),
+                    history=context.get("history"),
+                    today=today.isoformat(),
+                    model_prefs_path=self.model_prefs_path,
+                )
+                return frame.mode != "full"
+
+            ask, reason, activity = should_ask_checkin(
+                conn, today=today, plan_frame_knows=_context_explains_it
+            )
+            if not ask or activity is None:
+                logger.debug("No quiet-week check-in: %s", reason)
+                return
+
+            text, keyboard, llm_call_id = compose_checkin(
+                conn,
+                activity=activity,
+                today=today,
+                me=context.get("me"),
+                log=context.get("log"),
+                history=context.get("history"),
+                model_prefs_path=self.model_prefs_path,
+            )
+            message_id = self._poller.send_reply(
+                text, reply_markup={"inline_keyboard": keyboard}
+            )
+            if message_id is None:
+                # Never recorded as asked. A failed send is not a question the
+                # person declined to answer, and counting it as one would let
+                # two Telegram outages retire the feature permanently.
+                logger.error("Quiet-week check-in could not be delivered")
+                return
+            record_asked(
+                conn,
+                week_start=(today - timedelta(days=today.weekday())).isoformat(),
+                activity=activity,
+                message_id=message_id,
+                llm_call_id=llm_call_id,
+            )
+            logger.info(
+                "Quiet-week check-in sent: %d sessions against ~%.1f expected",
+                activity.sessions,
+                activity.expected_by_now,
+            )
+        except Exception:
+            logger.error("Quiet-week check-in failed", exc_info=True)
+        finally:
+            conn.close()
 
     def _newest_data_date(self, *, through: str) -> str | None:
         """Return the newest stored metric date through a completed day.

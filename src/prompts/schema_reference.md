@@ -10,7 +10,7 @@
 
 **workout_all** — one row per session, FK: `date`, with `source` (`'import'` or `'manual'`)
 
-- Identity: `type`, `category` (`run` / `lift` / `walk` / `cycle` / `other`)
+- Identity: `type`, `category` (`run` / `lift` / `walk` / `cycle` / `hiit` / `other`)
 - Core fields: `duration_min`, `hr_min`, `hr_avg`, `hr_max`, `active_energy_kj`, `intensity_kcal_per_hr_kg`
 - Environment: `temperature_c`, `humidity_pct`
 - Location: `location_id`, `location_label`, `location_locality`, `location_region`, `location_country`, `location_country_code` (route workouts only; locality-level, not precise GPS)

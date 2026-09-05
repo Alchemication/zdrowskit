@@ -32,6 +32,9 @@ from config import (
     DEFAULT_MEMORY_MODEL,
     DEFAULT_NOTIFY_MODEL,
     DEFAULT_NUDGE_MODEL,
+    DEFAULT_CHECKIN_MODEL,
+    DEFAULT_PLAN_FRAME_MODEL,
+    DEFAULT_TARGETS_MODEL,
     FALLBACK_FLASH_MODEL,
     FALLBACK_PRO_MODEL,
     MODEL_PREFS_PATH,
@@ -54,6 +57,9 @@ FLASH_FEATURES: tuple[str, ...] = (
     "notify",
     "add_clone",
     "memory",
+    "targets",
+    "plan_frame",
+    "checkin",
     "verification_rewrite",
 )
 FEATURES: tuple[str, ...] = PRO_FEATURES + FLASH_FEATURES
@@ -77,6 +83,9 @@ FEATURE_LABELS: dict[str, str] = {
     "notify": "Notify parser",
     "add_clone": "Add workout",
     "memory": "Weekly memory",
+    "targets": "Weekly targets",
+    "plan_frame": "Plan frame",
+    "checkin": "Weekly check-in",
     "verification": "Verifier",
     "verification_rewrite": "Verifier rewrite",
 }
@@ -86,7 +95,7 @@ TELEGRAM_FEATURE_GROUPS: dict[str, tuple[str, ...]] = {
     "reports": ("insights",),
     "coach": ("coach",),
     "nudges": ("nudge",),
-    "utilities": ("notify", "add_clone", "memory"),
+    "utilities": ("notify", "add_clone", "memory", "targets", "plan_frame", "checkin"),
 }
 
 # Capability tier shown next to each model in Telegram buttons. Helps users
@@ -159,6 +168,21 @@ def default_model_prefs() -> dict[str, Any]:
             "memory": {
                 "profile": "flash",
                 "primary": DEFAULT_MEMORY_MODEL,
+                "temperature": None,
+            },
+            "targets": {
+                "profile": "flash",
+                "primary": DEFAULT_TARGETS_MODEL,
+                "temperature": None,
+            },
+            "plan_frame": {
+                "profile": "flash",
+                "primary": DEFAULT_PLAN_FRAME_MODEL,
+                "temperature": None,
+            },
+            "checkin": {
+                "profile": "flash",
+                "primary": DEFAULT_CHECKIN_MODEL,
                 "temperature": None,
             },
             "add_clone": {
@@ -252,6 +276,9 @@ def selectable_models() -> list[str]:
         DEFAULT_CHAT_MODEL,
         DEFAULT_NOTIFY_MODEL,
         DEFAULT_ADD_CLONE_MODEL,
+        DEFAULT_TARGETS_MODEL,
+        DEFAULT_PLAN_FRAME_MODEL,
+        DEFAULT_CHECKIN_MODEL,
         VERIFICATION_MODEL,
         VERIFICATION_REWRITE_MODEL,
     ]
@@ -477,9 +504,9 @@ def _feature_model_defaults(feature: str, primary: str) -> dict[str, Any]:
             ),
         }
     if primary == OPENAI_LUNA_MODEL:
-        # Luna carries three features now — chat, nudges, weekly memory — so it
-        # needs the same posture the other primaries declare. Temperature is
-        # omitted because GPT-5.6 rejects it alongside reasoning.
+        # Luna is the default primary on most surfaces now, so it needs the
+        # same posture the other primaries declare. Temperature is omitted
+        # because GPT-5.6 rejects it alongside reasoning.
         return {
             "reasoning_effort": (
                 "high" if feature in HIGH_REASONING_FEATURES else None

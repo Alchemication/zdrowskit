@@ -101,6 +101,7 @@ from cmd_models import cmd_models
 from cmd_nudge import cmd_nudge
 from cmd_notify import RESET_TARGETS as NOTIFY_RESET_TARGETS
 from cmd_notify import cmd_notify
+from cmd_targets import cmd_targets
 from config import GOOGLE_DRIVE_SERVICE_ACCOUNT
 from commands import (
     cmd_context,
@@ -451,6 +452,23 @@ def main() -> None:
         help="Notification target to reset (default: all)",
     )
 
+    # targets
+    p_targets = sub.add_parser(
+        "targets",
+        help="Show, refresh, or clear this week's progress targets",
+    )
+    _add_db(p_targets)
+    targets_sub = p_targets.add_subparsers(dest="targets_cmd")
+    targets_sub.add_parser("show", help="Show this week's targets and progress")
+    targets_sub.add_parser(
+        "refresh",
+        help="Re-derive this week's targets from strategy.md goals",
+    )
+    targets_sub.add_parser(
+        "clear",
+        help="Drop this week's targets so the next notification re-derives them",
+    )
+
     # models
     # Derived, never hand-listed: a duplicate of this list is how `memory`
     # shipped as a routable feature that `models set` could not reach.
@@ -592,6 +610,7 @@ def main() -> None:
         "coach",
         "llm-log",
         "events",
+        "targets",
     }
     profile_path_commands = database_commands | {"context", "notify", "models"}
     if args.cmd in profile_path_commands:
@@ -667,6 +686,7 @@ def main() -> None:
         "coach": _cli_coach,
         "llm-log": cmd_llm_log,
         "notify": cmd_notify,
+        "targets": cmd_targets,
         "models": cmd_models,
         "events": cmd_events,
         "daemon-install": cmd_daemon_install,

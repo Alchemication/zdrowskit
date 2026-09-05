@@ -36,8 +36,10 @@ from llm_health import build_llm_data, build_review_facts, render_health_data
 from llm_verify import extract_tool_evidence, slim_source_messages
 from memory_writer import write_memory
 from milestones import compute_milestones
+from plan_frame import resolve_plan_frame
 from notify import send_telegram_report
 from store import create_llm_trace, open_db
+from weekly_progress import weekly_progress_block
 
 logger = logging.getLogger(__name__)
 
@@ -173,6 +175,26 @@ def _print_explain(
     # Saved report path
     if report_path:
         stderr.print(f"\n[dim]Report saved to:[/dim] [cyan]{report_path}[/cyan]")
+
+
+def _report_day(health_data: dict) -> date:
+    """Return the day the progress strip should be measured up to.
+
+    Reports default to the finished week, and that week's strip has to show it
+    filled to its own Sunday — measuring to today would place a completed week
+    at day 3 of the week after it.
+
+    Args:
+        health_data: Output of ``build_llm_data``.
+
+    Returns:
+        The reported week's last day, or today when that week is still running.
+    """
+    week_end = health_data.get("week_end")
+    today = date.today()
+    if not week_end:
+        return today
+    return min(today, date.fromisoformat(str(week_end)))
 
 
 def _save_report(report: str, reports_dir: Path = REPORTS_DIR) -> Path:
@@ -499,11 +521,39 @@ def cmd_insights(
         metadata={"source_llm_call_id": result.llm_call_id, "week_label": week_label},
     )
 
+    # The weekly report is where the full strip earns its space: it arrives
+    # once a week, it is the message the week is actually reviewed in, and it
+    # is the only surface with room for three bars above the analysis. Built
+    # after verification and after memory extraction — these are measured
+    # numbers, so no model gets to reword them and none of them belongs in
+    # history.md.
+    report_day = _report_day(health_data)
+    frame = resolve_plan_frame(
+        conn,
+        me=context.get("me"),
+        log=context.get("log"),
+        history=context.get("history"),
+        today=report_day.isoformat(),
+        trace_id=trace_id,
+        model_prefs_path=getattr(args, "model_prefs_path", None),
+    )
+    progress_block = weekly_progress_block(
+        conn,
+        strategy_md=context.get("strategy"),
+        today=report_day,
+        trace_id=trace_id,
+        model_prefs_path=getattr(args, "model_prefs_path", None),
+        frame=frame,
+    )
+    delivered_report = (
+        f"{progress_block}\n\n{visible_report}" if progress_block else visible_report
+    )
+
     reports_dir = getattr(args, "reports_dir", None)
     report_path = (
-        _save_report(visible_report, Path(reports_dir))
+        _save_report(delivered_report, Path(reports_dir))
         if reports_dir is not None
-        else _save_report(visible_report)
+        else _save_report(delivered_report)
     )
 
     if args.explain:
@@ -518,7 +568,7 @@ def cmd_insights(
             report_path,
         )
 
-    print(visible_report)
+    print(delivered_report)
 
     if memory and not args.no_update_history:
         append_history(context_dir, memory, week_label=week_label)
@@ -531,7 +581,7 @@ def cmd_insights(
     telegram_message_id: int | None = None
     if args.telegram:
         telegram_message_id = send_telegram_report(
-            visible_report,
+            delivered_report,
             notify_subject,
             charts=chart_results,
             reply_markup=reply_markup,
@@ -539,7 +589,7 @@ def cmd_insights(
         )
 
     return CommandResult(
-        text=visible_report,
+        text=delivered_report,
         llm_call_id=result.llm_call_id,
         telegram_message_id=telegram_message_id,
     )

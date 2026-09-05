@@ -551,6 +551,7 @@ class _TelegramClient:
         *,
         _pre_converted: bool = False,
         force_reply: bool = False,
+        reply_markup: dict | None = None,
     ) -> int | None:
         """Send a text message with HTML formatting, chunking if necessary.
 
@@ -562,6 +563,9 @@ class _TelegramClient:
             _pre_converted: If True, *text* is already Telegram HTML — skip
                 conversion.  Used internally by :meth:`edit_message`.
             force_reply: When True, attach Telegram's ForceReply markup.
+            reply_markup: Optional markup (e.g. an inline keyboard) attached to
+                the first chunk. Takes precedence over *force_reply*, since a
+                message offering buttons should not also demand a typed reply.
 
         Returns:
             The message_id of the first sent chunk, or None on failure.
@@ -586,7 +590,9 @@ class _TelegramClient:
             # Only set reply on the first chunk.
             if i == 0 and reply_to_message_id is not None:
                 payload["reply_to_message_id"] = reply_to_message_id
-            if i == 0 and force_reply:
+            if i == 0 and reply_markup is not None:
+                payload["reply_markup"] = reply_markup
+            elif i == 0 and force_reply:
                 payload["reply_markup"] = {"force_reply": True, "selective": True}
 
             data = json.dumps(payload).encode("utf-8")

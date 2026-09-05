@@ -1,7 +1,8 @@
 # LLM Setup
 
 zdrowskit uses separate LLM routes for separate jobs. Chat, weekly reports,
-coach reviews, nudges, preference parsing, workout cloning, memory, verification,
+coach reviews, nudges, preference parsing, workout cloning, memory, weekly
+target extraction, the plan-frame decision, the weekly check-in, verification,
 and verification rewrites can each use a different primary and fallback model.
 
 This separation is deliberate. A model that is good enough to parse a `/notify`
@@ -42,9 +43,10 @@ failed the call. That is what lost the weekly report on 31 Aug 2026.
 `reasoning_effort` is the one reasoning control: Anthropic receives it
 directly; DeepSeek translates `high`/`max` into thinking mode and treats the
 other values as thinking off. It is on for every judgment surface — reports,
-coach, nudges, chat, verification, rewrites, `/add` — and off for the two
-extraction jobs, `/notify` parsing and weekly memory, where selecting a
-structured answer against a stated rule list is the whole task. Temperature is
+coach, nudges, chat, verification, rewrites, `/add` — and off for the
+extraction jobs: `/notify` parsing, weekly memory, weekly target
+extraction, and the plan-frame decision, where selecting a structured answer
+against a stated rule list is the whole task. Temperature is
 omitted throughout.
 
 This document does not list which model each feature currently uses. Those

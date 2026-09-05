@@ -32,6 +32,11 @@ from llm_health import build_llm_data, format_recent_nudges, render_health_data
 from llm_verify import extract_tool_evidence, slim_source_messages
 from notify import send_telegram
 from store import create_llm_trace, open_db
+from plan_frame import resolve_plan_frame
+from weekly_progress import (
+    record_progress_line_shown,
+    weekly_progress_nudge_line,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -365,7 +370,37 @@ def cmd_nudge(
     header = _TRIGGER_HEADERS.get(
         _trigger, f"\U0001f514 {_trigger.replace('_', ' ').title()}"
     )
-    nudge_text = f"**{header}**\n\n{nudge_text}"
+
+    # One weekly ring folded into the header, and only when it has visibly
+    # moved since the last nudge that carried one. Nudges fire up to twice a
+    # day while the bars move three or four times a week, so an ungated line
+    # would be the same sentence a dozen times a week — the part the reader
+    # learns to skip, sitting immediately above the part that matters. The
+    # trigger label always stays: it is what says why the phone buzzed.
+    #
+    # Called here, past verification and every SKIP path, for two reasons: the
+    # nudge is by now committed to being sent, so recording the line as shown
+    # is truthful, and measured numbers never pass through a model that could
+    # reword them.
+    frame = resolve_plan_frame(
+        conn,
+        me=context.get("me"),
+        log=context.get("log"),
+        history=context.get("history"),
+        today=datetime.now().date().isoformat(),
+        trace_id=trace_id,
+        model_prefs_path=getattr(args, "model_prefs_path", None),
+    )
+    shown = weekly_progress_nudge_line(
+        conn,
+        strategy_md=context.get("strategy"),
+        trace_id=trace_id,
+        model_prefs_path=getattr(args, "model_prefs_path", None),
+        frame=frame,
+    )
+    progress, progress_fingerprint = shown if shown else (None, None)
+    heading = f"**{header}** · {progress}" if progress else f"**{header}**"
+    nudge_text = f"{heading}\n\n{nudge_text}"
 
     _save_nudge(
         nudge_text,
@@ -387,6 +422,12 @@ def cmd_nudge(
             reply_markup,
             chat_id=telegram_chat_id(args),
         )
+
+    # Only now is the line something the person has actually seen. Recording
+    # it at composition time would let a failed send suppress it from the next
+    # nudge on the strength of a message that never arrived.
+    if progress_fingerprint and (telegram_message_id is not None or not use_telegram):
+        record_progress_line_shown(conn, progress_fingerprint, progress or "")
 
     return CommandResult(
         text=nudge_text,

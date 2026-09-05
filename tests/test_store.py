@@ -783,6 +783,50 @@ class TestLlmFeedback:
         assert load_feedback_for_call(in_memory_db, call_id) == []
 
 
+class TestHiitBackfill:
+    def test_historical_hiit_rows_are_recategorised(self) -> None:
+        """Rows imported before the category existed must not sit in two buckets."""
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        apply_migrations(conn)
+        conn.executemany(
+            "INSERT INTO workout (start_utc, date, type, category, duration_min, "
+            "imported_at) VALUES (?, ?, ?, ?, ?, ?)",
+            [
+                (
+                    "2026-01-01T18:00:00Z",
+                    "2026-01-01",
+                    "High Intensity Interval Training",
+                    "other",
+                    25.0,
+                    "x",
+                ),
+                (
+                    "2026-01-02T18:00:00Z",
+                    "2026-01-02",
+                    "Paddle Sports",
+                    "other",
+                    60.0,
+                    "x",
+                ),
+            ],
+        )
+        conn.execute("INSERT INTO daily (date, imported_at) VALUES ('2026-01-01', 'x')")
+        conn.execute("INSERT INTO daily (date, imported_at) VALUES ('2026-01-02', 'x')")
+        conn.commit()
+
+        from db.migrations import discover_migrations
+
+        hiit = next(m for m in discover_migrations() if m.key.endswith("hiit_category"))
+        hiit.upgrade(conn)
+
+        rows = dict(
+            conn.execute("SELECT type, category FROM workout").fetchall()  # type: ignore[arg-type]
+        )
+        assert rows["High Intensity Interval Training"] == "hiit"
+        assert rows["Paddle Sports"] == "other"
+
+
 class TestMigrations:
     def test_applies_all_on_fresh_db(self) -> None:
         conn = sqlite3.connect(":memory:")
@@ -791,7 +835,7 @@ class TestMigrations:
 
         applied = apply_migrations(conn)
 
-        assert len(applied) == 14
+        assert len(applied) == 19
         statuses = list_migrations(conn)
         assert all(status.status == "applied" for status in statuses)
         schema = get_live_schema(conn)

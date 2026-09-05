@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -3596,3 +3597,158 @@ class TestFunnelOutageAlerts:
         # only one that closes it.
         assert "working again" in messages[-1]
         assert "data_health_alert" not in runtime._state
+
+
+class TestQuietWeekCheckin:
+    """The daemon side of the quiet-week check-in.
+
+    Every defect found in review lived here rather than in the detection
+    module: preferences bypassed, a stale suppression trusted, a failed send
+    counted as a refusal to answer. Unit tests on ``quiet_week`` saw none of
+    them, so these exercise the daemon method itself.
+    """
+
+    FRIDAY = datetime(2026, 9, 4, 14, 0).astimezone()
+
+    def _runtime(self, tmp_path: Path) -> ProfileRuntime:
+        runtime = _make_daemon(tmp_path)
+        runtime._chat._poller = MagicMock()
+        runtime._chat._poller.send_reply.return_value = 4242
+        return runtime
+
+    def _seed_habit(self, runtime: ProfileRuntime) -> None:
+        """Give the profile a steady four-a-week habit and an empty this week."""
+        from models import DailySnapshot, WorkoutSnapshot
+        from store import store_snapshots
+
+        monday = self.FRIDAY.date() - timedelta(days=self.FRIDAY.date().weekday())
+        snapshots = []
+        for back in range(12, 0, -1):
+            week = monday - timedelta(weeks=back)
+            for offset in range(4):
+                day = (week + timedelta(days=offset)).isoformat()
+                snapshots.append(
+                    DailySnapshot(
+                        date=day,
+                        workouts=[
+                            WorkoutSnapshot(
+                                type="Outdoor Run",
+                                category="run",
+                                start_utc=f"{day}T07:00:00Z",
+                                duration_min=40.0,
+                            )
+                        ],
+                    )
+                )
+        conn = open_db(runtime.db)
+        try:
+            store_snapshots(conn, snapshots)
+        finally:
+            conn.close()
+
+    def _run(self, runtime: ProfileRuntime, prefs: dict) -> None:
+        with (
+            patch(
+                "plan_frame.resolve_plan_frame",
+                return_value=SimpleNamespace(mode="full"),
+            ),
+            patch(
+                "quiet_week.compose_checkin",
+                return_value=("Quiet week — anything going on?", [[{"text": "x"}]], 9),
+            ),
+        ):
+            runtime._maybe_send_checkin(prefs, now=self.FRIDAY)
+
+    def _asked(self, runtime: ProfileRuntime) -> int:
+        conn = open_db(runtime.db)
+        try:
+            return conn.execute("SELECT COUNT(*) FROM checkin").fetchone()[0]
+        finally:
+            conn.close()
+
+    def test_sends_when_a_regular_week_goes_quiet(self, tmp_path: Path) -> None:
+        runtime = self._runtime(tmp_path)
+        self._seed_habit(runtime)
+        prefs = load_notification_prefs(runtime._notification_prefs_path)
+        self._run(runtime, prefs)
+        assert runtime._chat._poller.send_reply.called
+        assert self._asked(runtime) == 1
+
+    def test_muted_nudges_silence_it(self, tmp_path: Path) -> None:
+        """It is an unprompted message of the same kind, so a mute must hold."""
+        runtime = self._runtime(tmp_path)
+        self._seed_habit(runtime)
+        prefs = load_notification_prefs(runtime._notification_prefs_path)
+        prefs["overrides"] = {"nudges": {"enabled": False}}
+        self._run(runtime, prefs)
+        assert not runtime._chat._poller.send_reply.called
+        assert self._asked(runtime) == 0
+
+    def test_quiet_hours_hold_it(self, tmp_path: Path) -> None:
+        """Nothing should land at one in the morning because it is Friday."""
+        runtime = self._runtime(tmp_path)
+        self._seed_habit(runtime)
+        prefs = load_notification_prefs(runtime._notification_prefs_path)
+        prefs["overrides"] = {"nudges": {"earliest_time": "23:59"}}
+        self._run(runtime, prefs)
+        assert not runtime._chat._poller.send_reply.called
+
+    def test_a_failed_send_is_not_recorded_as_asked(self, tmp_path: Path) -> None:
+        """Two outages must not look like two refusals and retire the feature."""
+        runtime = self._runtime(tmp_path)
+        runtime._chat._poller.send_reply.return_value = None
+        self._seed_habit(runtime)
+        prefs = load_notification_prefs(runtime._notification_prefs_path)
+        self._run(runtime, prefs)
+        assert self._asked(runtime) == 0
+
+    def test_the_plan_frame_is_resolved_not_read_from_cache(
+        self, tmp_path: Path
+    ) -> None:
+        """A quiet week fires no nudge and no report, so nothing else would ever
+        re-resolve a stale suppression."""
+        runtime = self._runtime(tmp_path)
+        self._seed_habit(runtime)
+        prefs = load_notification_prefs(runtime._notification_prefs_path)
+        with (
+            patch(
+                "plan_frame.resolve_plan_frame",
+                return_value=SimpleNamespace(mode="full"),
+            ) as resolve,
+            patch(
+                "quiet_week.compose_checkin",
+                return_value=("Quiet week?", [[{"text": "x"}]], 9),
+            ),
+        ):
+            runtime._maybe_send_checkin(prefs, now=self.FRIDAY)
+        assert resolve.called
+
+    def test_a_suppressing_context_stops_the_question(self, tmp_path: Path) -> None:
+        runtime = self._runtime(tmp_path)
+        self._seed_habit(runtime)
+        prefs = load_notification_prefs(runtime._notification_prefs_path)
+        with (
+            patch(
+                "plan_frame.resolve_plan_frame",
+                return_value=SimpleNamespace(mode="hidden"),
+            ),
+            patch(
+                "quiet_week.compose_checkin",
+                return_value=("Quiet week?", [[{"text": "x"}]], 9),
+            ),
+        ):
+            runtime._maybe_send_checkin(prefs, now=self.FRIDAY)
+        assert not runtime._chat._poller.send_reply.called
+        assert self._asked(runtime) == 0
+
+    def test_a_normal_week_never_reaches_the_model(self, tmp_path: Path) -> None:
+        runtime = self._runtime(tmp_path)
+        prefs = load_notification_prefs(runtime._notification_prefs_path)
+        with (
+            patch("plan_frame.resolve_plan_frame") as resolve,
+            patch("quiet_week.compose_checkin") as compose,
+        ):
+            runtime._maybe_send_checkin(prefs, now=self.FRIDAY)
+        assert not resolve.called
+        assert not compose.called
+        assert not runtime._chat._poller.send_reply.called

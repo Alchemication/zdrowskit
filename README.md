@@ -7,6 +7,8 @@ Your watch collects thousands of data points a week. Apple shows you rings. zdro
 - **Personalised weekly reports** - not generic summaries, but analysis that knows your goals, your plan, your injuries, your journal, and how this season compares to prior years
 - **Coaching proposals** - after the scheduled weekly report (Monday by default), the coach reviews the completed week and proposes concrete changes to your training plan or goals, with diff-first Approve/Reject buttons in Telegram
 - **Reactive nudges** - new data synced or context changed? The coach notices and says something useful, or stays quiet if there is nothing to say
+- **Progress against your own goals** - nudges and weekly reports open with bars for the week so far, measured against the numbers you actually stated in your strategy. Running, walking, cycling, strength, steps and sleep all count; nothing is assumed when you have set no goal
+- **Notices when a week goes quiet** - if training falls far below your own normal and nothing in your notes explains it, the coach asks once, on Friday, with buttons. One tap records why, and that answer changes how the following weeks judge you
 - **Remembers you week to week** - a freeform journal captures why things happened, and after each weekly report a separate pass decides what is worth carrying forward, so later reports, nudges, and chat all build on it
 - **Ask anything about your data** - "What's my fastest 1km pace?", "How's my HRV trending since January?", "Do I sleep worse after evening runs?" If the data exists, it will find the answer and chart it
 - **Host a small family roster** - one daemon and bot route each private chat to an isolated database, context directory, preferences, and runtime state
@@ -99,6 +101,7 @@ uv run python main.py insights            # personalised weekly report via LLM
 uv run python main.py coach               # coaching review with plan/goal proposals
 uv run python main.py nudge               # short reactive nudge
 uv run python main.py context             # show context files and their status
+uv run python main.py targets             # this week's goal targets + progress
 uv run python main.py models              # inspect/change model routing
 uv run python main.py telegram-setup      # register Telegram bot commands
 uv run python main.py daemon-install      # install the launchd daemon

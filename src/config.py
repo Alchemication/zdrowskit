@@ -449,6 +449,135 @@ store their coverage and a null value, so a partial kilometre is visibly unknown
 rather than confidently wrong.
 """
 
+WEEKLY_TARGET_MAX_RINGS: int = 3
+"""Goals rendered as progress rings in a notification.
+
+The strip competes for the top of a message whose actual point is one or two
+sentences below it, so its whole budget is the two seconds before the reader
+starts reading. Three bars is what a phone shows without pushing that point off
+the first screen, and it matches how the strategy template is written — a
+current focus of a handful of goals, of which only the countable ones become
+rings. Goals beyond the third are dropped by priority rather than shrinking
+every bar to fit.
+"""
+
+WEEKLY_PROGRESS_BAR_CELLS: int = 10
+"""Cells in one ASCII progress bar.
+
+Ten because each cell is then a clean tenth, which is what makes the bar
+readable without counting — a partly filled track of ten reads as a percentage
+directly. It is also short enough that a label, the bar, both numbers and a
+pace verdict fit one line inside a Telegram <pre> block on a phone; a wider
+track wraps, and a wrapped bar is worse than none.
+"""
+
+WEEKLY_TARGET_TYPE_CHOICES: int = 8
+"""Recorded activity types offered to the target extraction as ring candidates.
+
+Sports the schema gives no category of their own — paddling, basketball,
+swimming, HIIT — are reachable only by naming the workout type Apple recorded,
+so the derivation is shown the types this profile actually has. Eight covers
+the long tail of a real roster (one operator profile has eight such types
+across 417 sessions) while keeping a one-off from crowding out a habit; the
+list is ordered by session count, so what gets cut is what happened least.
+
+This bounds the menu, not the answer: a type recorded even once is still
+accepted if the goal names it, because the goal is the evidence that it
+matters, not the history.
+"""
+
+WEEKLY_PROGRESS_MAX_LABEL_CHARS: int = 16
+"""Longest ring label drawn before it is shortened with an ellipsis.
+
+Apple's own workout names run from "Rowing" to "High Intensity Interval
+Training", and the strip pads every label to the widest one. A 31-character
+label would push the bars off a phone screen and wrap the line, which costs
+more than the truncated words are worth. Sixteen fits every common name
+outright and leaves the bar, both numbers and the pace verdict on one line.
+"""
+
+QUIET_WEEK_BASELINE_WEEKS: int = 12
+"""Completed weeks used to learn what a normal training week looks like.
+
+Long enough that one holiday or one illness cannot move the median much, short
+enough to follow a real change in someone's life rather than holding them to
+the person they were last winter. Matches the shortest training-volume baseline
+so "normal" means one thing across the project.
+"""
+
+QUIET_WEEK_MIN_WEEKS: int = 6
+"""Completed weeks required before a week can be called unusually quiet.
+
+Below this there is no personal normal to be quiet against, only an average of
+however little has been recorded — and a beginner's third week would read as a
+collapse. The same reasoning as BASELINE_MIN_SAMPLES, applied to weeks.
+"""
+
+QUIET_WEEK_MIN_BASELINE_SESSIONS: float = 2.0
+"""Sessions a normal week must contain before a quiet one is worth asking about.
+
+Someone who trains once a fortnight has no rhythm to break, so a missed week
+carries no information and the question would be an intrusion. Two sessions a
+week is the point at which a gap means something happened.
+"""
+
+QUIET_WEEK_SHORTFALL_RATIO: float = 0.4
+"""Share of normal pace below which a week counts as quiet.
+
+Set low on purpose. This triggers a message asking the person about their life,
+so it has to fire on weeks that are genuinely unusual rather than merely below
+average — half of all weeks are below average. At four-tenths of their own pace
+by check-in day, someone with a three-session habit has done at most one.
+"""
+
+QUIET_WEEK_CHECK_WEEKDAY: int = 4
+"""Weekday the check-in may be sent, Monday=0.
+
+Friday. Earlier in the week a gap is indistinguishable from a slow start;
+by Saturday there is no week left to act on. Friday is the last day the answer
+can still change what happens, which is what keeps it a question rather than a
+verdict.
+"""
+
+QUIET_WEEK_MAX_UNANSWERED: int = 2
+"""Consecutive unanswered check-ins before the question stops being asked.
+
+Two silences is an answer. Continuing past it turns a question into nagging,
+and the person who most needs the feature left alone is the one who has twice
+had nothing to say. A single answer at any point resets the count.
+"""
+
+PLAN_FRAME_MAX_AGE_DAYS: int = 7
+"""How long a "the plan applies" decision holds before it is asked again.
+
+Life context moves on a scale of days and the journal is not always updated the
+moment it does, so a decision has to expire on its own rather than waiting for
+an edit. A week matches the planning cycle the decision is about: by the time a
+new week starts, the question is genuinely a new one.
+"""
+
+PLAN_FRAME_SUPPRESSED_MAX_AGE_DAYS: int = 2
+"""How long a decision to suppress the progress strip holds before re-asking.
+
+Deliberately shorter than PLAN_FRAME_MAX_AGE_DAYS, because the two errors are
+not symmetric. Showing the strip during a hard week is visible and can be
+complained about; hiding it is invisible, and a stale suppression from a flu
+week could quietly swallow the feature for a month. Suppression has to keep
+justifying itself; normality does not.
+"""
+
+WEEKLY_PROGRESS_PACE_SLACK_DAYS: int = 1
+"""Days of shortfall tolerated before a weekly goal is called behind.
+
+A weekly goal is almost never met at a constant daily rate — three runs and two
+lifts land on whichever days the week allows — so measuring against exact
+elapsed pace reports "behind" on most midweek checks with nothing actually
+wrong, and a bar that cries wolf stops being read. One day of slack means a
+goal is only called behind once it has fallen short of where *yesterday's* pace
+would have put it. The slack is dropped on the final day of the week, where
+anything under the target genuinely is under it.
+"""
+
 
 MAX_HISTORY_ENTRIES: int = 10
 """Weekly memory entries retained in history.md and injected into prompts.
@@ -552,6 +681,32 @@ MAX_TOKENS_NOTIFY: int = _env_int("ZDROWSKIT_MAX_TOKENS_NOTIFY", 512)
 
 MAX_TOKENS_ADD_CLONE: int = _env_int("ZDROWSKIT_MAX_TOKENS_ADD_CLONE", 512)
 """Output token budget for /add historical workout clone selection."""
+
+MAX_TOKENS_CHECKIN: int = _env_int("ZDROWSKIT_MAX_TOKENS_CHECKIN", 256)
+"""Output token budget for the quiet-week check-in question.
+
+One or two sentences under a 30-word contract. Sized like the plan-frame
+decision: a longer answer would mean the model is writing a coaching message
+rather than a question, which is the failure the prompt spends most of its
+length forbidding.
+"""
+
+MAX_TOKENS_PLAN_FRAME: int = _env_int("ZDROWSKIT_MAX_TOKENS_PLAN_FRAME", 256)
+"""Output token budget for the plan-frame decision.
+
+The call emits one of three words and a sentence explaining it. Smaller than
+every other budget here because a longer answer would mean the model is
+reasoning in prose rather than deciding, and there is nothing for it to write.
+"""
+
+MAX_TOKENS_TARGETS: int = _env_int("ZDROWSKIT_MAX_TOKENS_TARGETS", 512)
+"""Output token budget for weekly target extraction.
+
+The call emits at most WEEKLY_TARGET_MAX_RINGS JSON objects of four short
+fields against a closed vocabulary. Sized like /notify parsing, which is the
+same shape of job — select a structured answer from prose — rather than like
+the writing surfaces.
+"""
 
 MAX_TOKENS_MEMORY: int = _env_int("ZDROWSKIT_MAX_TOKENS_MEMORY", 1024)
 """Output token budget for the weekly memory extraction call.
@@ -778,6 +933,55 @@ returned a clean block in 6 of 6 at 1024 in roughly 200 tokens, with or without
 effort, and its bullets stay qualitative where Haiku's kept quoting figures the
 database already holds. The task is selecting two lines against a stated rule
 list — extended thinking was never what made it work."""
+
+DEFAULT_CHECKIN_MODEL: str = os.environ.get(
+    "ZDROWSKIT_CHECKIN_MODEL",
+    OPENAI_LUNA_MODEL,
+)
+"""Default model for phrasing the quiet-week check-in.
+
+Not measured. Unlike the other cheap routes this one writes prose a person
+reads, so it is the first candidate to move to a judgement-tier model if the
+questions come out tone-deaf — the whole feature turns on the question not
+sounding like an accusation. Reasoning off for now: the prompt states the
+constraints and the output is two sentences.
+"""
+
+DEFAULT_PLAN_FRAME_MODEL: str = os.environ.get(
+    "ZDROWSKIT_PLAN_FRAME_MODEL",
+    OPENAI_LUNA_MODEL,
+)
+"""Default model for deciding whether the training plan still applies.
+
+Not measured — there are no plan_frame eval cases yet, and this is recorded as
+a borrowed choice. It is a three-way classification against a stated rule list,
+which is the extraction shape the other cheap routes take, so it follows them
+onto Luna with reasoning off rather than paying a judgement-tier price for a
+one-word answer.
+
+The cases to write first are the two that decide whether this feature works at
+all: a journal describing a newborn with the week going badly, which must
+suppress; and a journal describing an ordinary week with the week going badly,
+which must not. A model that cannot tell those apart makes the progress strip
+disappear for everyone who has a hard week.
+"""
+
+DEFAULT_TARGETS_MODEL: str = os.environ.get(
+    "ZDROWSKIT_TARGETS_MODEL",
+    OPENAI_LUNA_MODEL,
+)
+"""Default model for deriving weekly targets from strategy.md goals.
+
+Not measured on this prompt — there are no targets eval cases yet, and this is
+recorded as a borrowed choice rather than a result. It is the same shape of job
+as weekly memory: read prose, select against a stated rule list, emit a short
+structured answer. That is the job DeepSeek Flash was found unable to terminate
+on, spending the whole budget on a reasoning trace nobody asked for, so the
+route follows memory onto Luna with reasoning off.
+
+Write targets cases before defending this choice; a wrong target here is a
+visibly wrong number on every notification for a week.
+"""
 
 ENABLE_LLM_VERIFICATION: bool = _env_bool("ZDROWSKIT_ENABLE_LLM_VERIFICATION", True)
 """Global feature flag for post-generation LLM verification.
