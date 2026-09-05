@@ -1,5 +1,5 @@
 {
-  "id": "targets_names_the_recorded_sport",
+  "id": "targets_names_and_counts_recorded_sport",
   "feature": "targets",
   "case_kind": "synthetic_positive",
   "source_feedback_id": null,
@@ -13,18 +13,43 @@
     "week_start": "2026-08-31",
     "goals": "## Goals — Current focus (next 4-8 weeks)\n- Get out paddling twice a week while the weather holds\n- Two strength sessions a week for the shoulders",
     "activity_types": [
-      {"type": "Basketball", "count": 52},
-      {"type": "Paddle Sports", "count": 22},
-      {"type": "Open Water Swim", "count": 7},
-      {"type": "Pool Swim", "count": 3}
+      {
+        "type": "Basketball",
+        "count": 52
+      },
+      {
+        "type": "Paddle Sports",
+        "count": 22
+      },
+      {
+        "type": "Open Water Swim",
+        "count": 7
+      },
+      {
+        "type": "Pool Swim",
+        "count": 3
+      }
     ]
   },
   "assertions": [
     {
       "type": "targets_slots",
       "name": "measures_paddling_as_paddling",
-      "includes": ["sessions_week/type:Paddle Sports"],
-      "excludes": ["sessions_week/any", "sessions_week/run"]
+      "includes": [
+        "sessions_week/type:Paddle Sports"
+      ],
+      "excludes": [
+        "sessions_week/any",
+        "sessions_week/run"
+      ],
+      "values": {
+        "sessions_week/type:Paddle Sports": {
+          "target": 2
+        },
+        "sessions_week/lift": {
+          "target": 2
+        }
+      }
     }
   ],
   "notes": "Guards the type-addressed path. `excludes` names `sessions_week/any` specifically because that is the plausible wrong answer: it parses, validates, stores and renders, and is silently wrong for anyone who also runs.\n"

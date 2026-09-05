@@ -47,8 +47,8 @@ from weekly_targets import (
     StoredTarget,
     activity_type_of,
     ensure_weekly_targets,
-    week_bounds_for,
     week_start_for,
+    week_bounds_for,
 )
 
 logger = logging.getLogger(__name__)
@@ -334,11 +334,21 @@ def _value_text(ring: RingProgress) -> str:
     return f"{actual}/{target}"
 
 
+def progress_caption(ring: RingProgress, *, week_complete: bool = False) -> str:
+    """Describe remaining work without assuming a daily training schedule."""
+    if ring.actual >= ring.target.target:
+        return STATUS_DONE
+    remaining = _fmt_number(ring.target.target - ring.actual, ring.target.spec.decimals)
+    suffix = "short" if week_complete else "left"
+    return f"{remaining} {suffix}"
+
+
 def render_progress_block(
     rings: list[RingProgress],
     *,
     week_start: str,
     show_verdict: bool = True,
+    week_complete: bool = False,
 ) -> str | None:
     """Render the multi-line progress strip for a report.
 
@@ -349,10 +359,8 @@ def render_progress_block(
     Args:
         rings: Measured rings, in display order.
         week_start: ISO Monday of the week.
-        show_verdict: Whether each bar may carry its pace word. The numbers are
-            facts about the week; the verdict is a judgement about the person,
-            and in a week the plan does not fit, that judgement belongs to the
-            coach's sentence rather than to a column.
+        show_verdict: Whether to show completion or remaining-work labels.
+        week_complete: True only after the measured week has ended.
 
     Returns:
         A fenced markdown block, or None when there is nothing to draw.
@@ -375,7 +383,9 @@ def render_progress_block(
             complete=ring.status == STATUS_DONE,
             started=ring.actual > 0,
         )
-        verdict = ring.status if show_verdict else ""
+        verdict = (
+            progress_caption(ring, week_complete=week_complete) if show_verdict else ""
+        )
         line = (
             f"{label:<{label_w}}  {bar}  {value:>{value_w}} {unit:<{unit_w}}  {verdict}"
         )
@@ -388,7 +398,7 @@ def render_progress_line(ring: RingProgress, *, show_verdict: bool = True) -> st
 
     Args:
         ring: The ring to show.
-        show_verdict: Whether to append the pace word.
+        show_verdict: Whether to append a completion or remaining-work label.
 
     Returns:
         One line, short enough to sit beside a trigger label without wrapping
@@ -404,7 +414,7 @@ def render_progress_line(ring: RingProgress, *, show_verdict: bool = True) -> st
         _value_text(ring),
         ring_unit(ring),
         bar,
-        ring.status if show_verdict else "",
+        progress_caption(ring) if show_verdict else "",
     ]
     return " ".join(part for part in parts if part)
 
@@ -509,7 +519,10 @@ def weekly_progress_block(
             model_prefs_path=model_prefs_path,
         )
         return render_progress_block(
-            rings, week_start=week_start, show_verdict=frame.shows_verdict
+            rings,
+            week_start=week_start,
+            show_verdict=frame.shows_verdict,
+            week_complete=week_bounds_for(week_start)[1] < date.today().isoformat(),
         )
     except Exception as exc:  # noqa: BLE001 - never block a notification
         logger.error("Weekly progress block failed: %s", exc)
@@ -521,8 +534,8 @@ def ring_fingerprint(ring: RingProgress, week_start: str) -> str:
 
     Deliberately coarser than the measured value. A 200 m walk changes the
     number without changing anything the reader would act on, so the
-    fingerprint tracks only what is visible: which ring is leading, its pace
-    verdict, and how many bar cells are filled. Crossing a tenth of the target
+    fingerprint tracks only what is visible: which ring is leading, whether it is complete,
+    and how many bar cells are filled. Crossing a tenth of the target
     is movement; drifting inside one is not.
 
     The week is included so the Monday reset always counts as news.
@@ -540,7 +553,7 @@ def ring_fingerprint(ring: RingProgress, week_start: str) -> str:
         started=ring.actual > 0,
     ).count(_BAR_FILLED)
     slot = ring.target.slot_label
-    return f"{week_start}|{slot}|{ring.status}|{filled}"
+    return f"{week_start}|{slot}|{ring.actual >= ring.target.target}|{filled}"
 
 
 def _load_shown_fingerprint(conn: sqlite3.Connection) -> str | None:

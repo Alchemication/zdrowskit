@@ -1239,6 +1239,7 @@ class ProfileRuntime:
         from plan_frame import resolve_plan_frame
         from quiet_week import (
             compose_checkin,
+            checkin_data_current,
             record_asked,
             should_ask_checkin,
         )
@@ -1279,10 +1280,18 @@ class ProfileRuntime:
                     today=today.isoformat(),
                     model_prefs_path=self.model_prefs_path,
                 )
-                return frame.mode != "full"
+                return (
+                    frame.mode != "full"
+                    and getattr(frame, "source", None) != "preference"
+                )
 
             ask, reason, activity = should_ask_checkin(
-                conn, today=today, plan_frame_knows=_context_explains_it
+                conn,
+                today=today,
+                plan_frame_knows=_context_explains_it,
+                data_current=checkin_data_current(
+                    conn, health_dir=self.health_dir, source=self.import_source, now=now
+                ),
             )
             if not ask or activity is None:
                 logger.debug("No quiet-week check-in: %s", reason)

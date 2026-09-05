@@ -10,8 +10,8 @@ do not call an LLM.
 | **Memory** | Decides what carries forward from an insights report | After every scheduled or manual insights report | Same as insights | A couple of bullets | none | Extracted bullets stored under the week in `history.md`; never sent to the user |
 | **Coach** | Strategy review, only when proposals exist | After scheduled insights, or manual `/coach` | Weekly when scheduled; manual on demand | A few paragraphs | `run_sql`, `update_context` for `strategy` only | `SKIP` if no changes warranted; bundled message with inline Accept/Reject buttons per edit |
 | **Nudge** | Short reactive next-action nudge | Data sync, file edit | Up to 2/day by default | One or two sentences | `run_sql` | `SKIP` if nothing changes; text only, no chart |
-| **Targets** | Turns the prose goals in `strategy.md` into countable weekly targets | First notification of a new week, or an edit to the goal sections | At most once a week | None — stored, not sent | none | Strict JSON against a closed metric vocabulary; drives the progress strip |
-| **Plan frame** | Decides how much of the progress strip this person's current life warrants | First notification after the journal changes, or when the last decision ages out | At most once a day when reduced, once a week otherwise | None — stored, not sent | none | Never shown the measurements, so it cannot hide an unflattering bar |
+| **Targets** | Turns the prose goals in `strategy.md` into countable weekly targets | First notification of a new week, or an edit to the goal sections | Cached per week and goal text, including empty results | None — stored, not sent | none | Strict JSON against a closed metric vocabulary; drives the progress strip |
+| **Plan frame** | Decides how much of the progress strip this person's current life warrants | First notification after the journal changes, or when the last decision ages out | Cached until context changes or the decision expires | None — stored, not sent | none | Never shown the measurements, so it cannot hide an unflattering bar |
 | **Quiet-week check-in** | Asks what is going on when a week runs far below this person's own normal | Friday, deterministic detection | At most 1/week, and stops after two silences | One question plus four buttons | none | Answer is written to `log.md`, where the plan frame reads it |
 | **Sync alerts** | Warns when an HTTP profile's metrics stop updating or its imports stall | Checked on the scheduler tick | At most 1/day per unchanged condition | Short deterministic message | none | Pipe-fault all-clear; unresolved dates named after stale recovery |
 | **Chat** | Interactive conversation: answer the current message, ask anything, get charts | Your Telegram message | On demand | Brief unless you ask for detail | `run_sql`, `update_context` for `me`, `strategy`, or `log` | Optional `<chart>`; context edits require confirmation by default |
@@ -30,22 +30,21 @@ A report carries the full strip:
 
 ```
 Week 2026-W36 · day 4 of 7
-Run        ███████░░░  21.4/30 km        on pace
+Run        ███████░░░  21.4/30 km        8.6 left
 Lifts      ██████████      2/2 sessions  done
-Sleep ≥7h  ████░░░░░░      2/5 nights    behind
+Sleep ≥7h  ████░░░░░░      2/5 nights    3 left
 ```
 
 A nudge carries one line, folded into the trigger header, showing the ring the
 arriving data moved:
 
 ```
-📊 Data Sync · Run km 21.4/30 ███████░░░ on pace
+📊 Data Sync · Run km 21.4/30 ███████░░░ 8.6 left
 ```
 
 The trigger label stays because it says why the phone buzzed. Nudges get one
 ring rather than three, and only when that ring has visibly moved since the
-last nudge that carried a line — a bar crossed a tenth of its target, the pace
-verdict flipped, a different activity took the lead, or a new week started.
+last nudge that carried a line — a bar crossed a tenth of its target, the target was completed, a different activity took the lead, or a new week started.
 
 Nudges fire up to twice a day while the bars move three or four times a week,
 so an ungated line would repeat itself most of the week. Repetition at the top
@@ -70,8 +69,8 @@ decides how much of the strip fits your current context:
 
 | | What you see |
 |---|---|
-| **full** | bars, numbers, and the pace verdict — the default |
-| **facts** | bars and numbers, no verdict — travelling, a deload, a niggle |
+| **full** | bars, numbers, and a remaining-work or completion label — the default |
+| **facts** | bars and numbers, no completion label — travelling, a deload, a niggle |
 | **hidden** | no strip at all |
 
 **That call is never shown how your week is going.** It gets your context and
@@ -114,7 +113,10 @@ Quiet one so far this week — anything going on, or just how it landed?
 One tap writes a line to `log.md`. That is the whole point: the plan-frame
 decision reads `log.md`, so a tap on Friday changes whether next week's progress
 strip judges you at all. `Add a note` asks for one line instead, and your own
-words are stored rather than the canned phrasing.
+words are stored rather than the canned phrasing. Replies are linked to the
+stored question message, so restarting the daemon does not lose a pending note.
+The bot confirms only after saving the journal and answer; a failed save can be
+retried. Delayed answers retain the week the question concerned.
 
 **Detection is deterministic.** Sessions so far this week are compared against
 the median of your recent completed weeks, scaled to the day. An LLM is asked
@@ -127,6 +129,10 @@ It stays silent when:
 - notification preferences say so. It is an unprompted message of the same kind
   as a nudge, so muting nudges or setting an earliest hour silences it too. It
   does not consume a nudge from the daily count.
+- daily metrics or workout exports are stale or their freshness is unknown.
+  `QUIET_WEEK_DATA_MAX_AGE_DAYS` in `src/config.py` sets the freshness window.
+  For HTTP profiles, the latest workout upload must also have imported
+  successfully; receiving an upload alone is insufficient.
 - it is not the check-in weekday, or it has already asked this week
 - the plan frame already knows something is going on — asking then would prove
   it had not been listening
@@ -147,7 +153,7 @@ Thresholds live in `src/config.py`, each with the reasoning behind its value.
 ### Where the numbers come from
 
 The targets come from the `## Goals` and `## Weekly Plan` sections of
-`strategy.md`. A small LLM call reads that prose once a week and matches each
+`strategy.md`. A small LLM call reads that prose for each new week or changed goal text and matches each
 stated goal to a metric the database can count; the numbers are then stored for
 the week and every notification renders from the same stored values, so the
 same bar cannot differ between two messages an hour apart.
@@ -190,14 +196,12 @@ and are left out rather than approximated.
 At most `WEEKLY_TARGET_MAX_RINGS` goals become bars; the rest are dropped by
 priority. Ranges take the lower bound.
 
-### Pace
+### Completion labels
 
-A bar is called `behind` only once it falls short of where the previous day's
-pace would have put it. Real weeks are lumpy — sessions land where the week
-allows them — so exact elapsed pace would report a problem on most midweek
-checks. On the final day the slack is dropped: anything under target is under
-target. Counted goals round the requirement down, since half a session cannot
-be owed.
+During an unfinished week the strip shows how much is left, or `done` when a
+target is met. It does not label you `behind` or assume that sessions are spread
+evenly across the week. Sunday remains unfinished until the day ends. A report
+for a completed week labels an unmet amount `short`.
 
 ### Inspecting and correcting it
 
@@ -206,6 +210,18 @@ uv run python main.py targets            # this week's targets, progress, and pr
 uv run python main.py targets refresh    # re-read strategy.md and re-derive now
 uv run python main.py targets clear      # drop this week's targets
 ```
+
+In Telegram, `/targets` shows the current targets and their source sentences.
+Use its **Pause progress**, **Resume progress**, and **Refresh targets** buttons,
+or `/targets pause`, `/targets resume`, and `/targets refresh`. A pause lasts
+until you resume; it hides the strip, not ordinary nudges or quiet-week questions.
+To correct a number, tell the chat what goal to change; the existing strategy-edit
+approval flow shows the proposed edit before saving it.
+
+`targets clear` resets extraction, including a cached empty result; it does not
+pause progress. Successful extraction with no measurable goals retires obsolete
+bars and is cached. A failed extraction keeps old bars only when the goal text
+has not changed; changed goals never display the old numbers.
 
 `targets` prints the sentence each number came from and the call id to pass to
 `llm-log --id`. Editing the goal sections of `strategy.md` — including by

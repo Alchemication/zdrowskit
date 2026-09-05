@@ -339,11 +339,11 @@ class TestParseTargetsResponse:
     def test_empty_array_is_accepted(self) -> None:
         assert parse_targets_response('{"targets": []}', "h") == []
 
-    def test_unparseable_output_is_empty(self) -> None:
-        assert parse_targets_response("I could not find any goals.", "h") == []
+    def test_unparseable_output_is_failure(self) -> None:
+        assert parse_targets_response("I could not find any goals.", "h") is None
 
-    def test_json_array_instead_of_object_is_empty(self) -> None:
-        assert parse_targets_response('[{"metric": "distance_km_week"}]', "h") == []
+    def test_json_array_instead_of_object_is_failure(self) -> None:
+        assert parse_targets_response('[{"metric": "distance_km_week"}]', "h") is None
 
 
 class TestActivityTypeDiscovery:
@@ -608,16 +608,57 @@ class TestEnsureWeeklyTargets:
         )
         assert load_targets(in_memory_db, "2026-08-31") == []
 
-    def test_a_failed_derivation_keeps_the_existing_targets(
+    def test_failed_derivation_does_not_show_goals_from_old_strategy(
         self, in_memory_db: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         ensure_weekly_targets(
             in_memory_db, strategy_md=STRATEGY, week_start="2026-08-31"
         )
-        monkeypatch.setattr("weekly_targets.derive_targets", lambda *a, **k: [])
+        monkeypatch.setattr("weekly_targets.derive_targets", lambda *a, **k: None)
         kept = ensure_weekly_targets(
             in_memory_db,
             strategy_md=STRATEGY.replace("30 km", "35 km"),
             week_start="2026-08-31",
+        )
+        assert kept == []
+
+    def test_valid_empty_result_retires_targets_and_is_cached(
+        self, in_memory_db: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from unittest.mock import Mock
+
+        ensure_weekly_targets(
+            in_memory_db, strategy_md=STRATEGY, week_start="2026-08-31"
+        )
+        derive = Mock(return_value=[])
+        monkeypatch.setattr("weekly_targets.derive_targets", derive)
+        for _ in range(2):
+            assert (
+                ensure_weekly_targets(
+                    in_memory_db,
+                    strategy_md="## Goals\nRun when I feel like it",
+                    week_start="2026-08-31",
+                )
+                == []
+            )
+        assert derive.call_count == 1
+        assert load_targets(in_memory_db, "2026-08-31") == []
+        clear_targets(in_memory_db, "2026-08-31")
+        ensure_weekly_targets(
+            in_memory_db,
+            strategy_md="## Goals\nRun when I feel like it",
+            week_start="2026-08-31",
+        )
+        assert derive.call_count == 2
+
+    def test_failed_refresh_preserves_unchanged_goals(
+        self, in_memory_db: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        ensure_weekly_targets(
+            in_memory_db, strategy_md=STRATEGY, week_start="2026-08-31"
+        )
+        monkeypatch.setattr("weekly_targets.derive_targets", lambda *a, **k: None)
+        kept = ensure_weekly_targets(
+            in_memory_db, strategy_md=STRATEGY, week_start="2026-08-31", force=True
         )
         assert [item.target for item in kept] == [30]

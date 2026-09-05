@@ -1,5 +1,5 @@
 {
-  "id": "targets_keeps_only_stated_numbers",
+  "id": "targets_preserves_stated_values",
   "feature": "targets",
   "case_kind": "synthetic_positive",
   "source_feedback_id": null,
@@ -13,9 +13,18 @@
     "week_start": "2026-08-31",
     "goals": "## Goals — Current focus (next 4-8 weeks)\n- Hold a 3-run + 2-lift rhythm in weeks that allow it, ~15 km running\n- Build tempo capacity: extend tempo segments toward 3 km @ sub-5:10/km\n- Sleep tracking compliance above 70%\n- VO2max above 46\n## Goals — Medium-term (3-6 months)\n- Sub-25 min 5K — needs roughly 5:00/km sustained\n- VO2max above 47\n- Consistent 4-run weeks when the schedule allows\n## Goals — Ongoing\n- Build and maintain a strong, lean physique while staying injury-free\n- Family and health always take priority over numbers",
     "activity_types": [
-      {"type": "Basketball", "count": 52},
-      {"type": "Paddle Sports", "count": 22},
-      {"type": "Open Water Swim", "count": 7}
+      {
+        "type": "Basketball",
+        "count": 52
+      },
+      {
+        "type": "Paddle Sports",
+        "count": 22
+      },
+      {
+        "type": "Open Water Swim",
+        "count": 7
+      }
     ]
   },
   "assertions": [
@@ -26,8 +35,19 @@
         "sessions_week/run",
         "sessions_week/lift",
         "distance_km_week/run"
-      ]
+      ],
+      "values": {
+        "sessions_week/run": {
+          "target": 3
+        },
+        "sessions_week/lift": {
+          "target": 2
+        },
+        "distance_km_week/run": {
+          "target": 15
+        }
+      }
     }
   ],
-  "notes": "Positive control seeded from the first production extraction. The exact-set assertion also pins the cap at three and the refusal of the sleep goal: any invented sleep_nights_week threshold, or a medium-term 4-run target displacing this week's 3, changes the set.\n"
+  "notes": "The exact slot set rejects invented metrics. Exact values separately pin the current three runs, two lifts and 15 km, including rejection of the medium-term four-run target. Supersedes the historical slot-only case; those recorded passes do not validate these assertions."
 }

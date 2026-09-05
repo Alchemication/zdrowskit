@@ -1797,6 +1797,20 @@ def _assert_targets_slots(
     # case fails the correct answer while looking like a model defect.
     known = frozenset(str(entry["type"]) for entry in fixture.get("activity_types", []))
     targets = parse_targets_response(execution.text or "", "eval", known)
+    if targets is None:
+        return AssertionResult(name=name, passed=False, detail="Invalid target payload")
+    values = assertion.get("values", {})
+    by_slot = {item.slot_label: item for item in targets}
+    for slot, fields in values.items():
+        item = by_slot.get(slot)
+        if item is None or any(
+            getattr(item, field) != value for field, value in fields.items()
+        ):
+            return AssertionResult(
+                name=name,
+                passed=False,
+                detail=f"Incorrect values for {slot}: expected {fields}",
+            )
     actual = sorted(item.slot_label for item in targets)
 
     expected = assertion.get("expected")

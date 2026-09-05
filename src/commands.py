@@ -896,6 +896,7 @@ def cmd_daemon_stop(args: argparse.Namespace) -> None:  # noqa: ARG001
 
 # Bot commands registered with Telegram for / autocomplete and menu button.
 TELEGRAM_BOT_COMMANDS: list[dict[str, str]] = [
+    {"command": "targets", "description": "View goals or pause progress"},
     {"command": "add", "description": "Add workout or sleep"},
     {"command": "codex", "description": "Ask Codex about this repo"},
     {"command": "claude", "description": "Ask Claude about this repo"},

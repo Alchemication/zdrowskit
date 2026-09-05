@@ -81,7 +81,7 @@ class PlanFrame:
 
     @property
     def shows_verdict(self) -> bool:
-        """True when a bar may also carry its ``on pace`` / ``behind`` word.
+        """True when a bar may also carry its completion or remaining-work label.
 
         The numbers are facts about the week. The verdict is a judgement about
         the person, and in a week the plan does not fit, that judgement belongs
@@ -246,6 +246,20 @@ def parse_plan_frame_response(text: str) -> PlanFrame | None:
     return PlanFrame(mode=mode, reason=reason, source="llm")
 
 
+def progress_paused(conn: sqlite3.Connection) -> bool:
+    """Return the person's explicit progress-strip preference."""
+    row = conn.execute("SELECT paused FROM progress_preference WHERE id = 1").fetchone()
+    return bool(row and row["paused"])
+
+
+def set_progress_paused(conn: sqlite3.Connection, paused: bool) -> None:
+    """Persist a user-requested pause until they explicitly resume progress."""
+    with conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO progress_preference VALUES (1, ?)", (int(paused),)
+        )
+
+
 def resolve_plan_frame(
     conn: sqlite3.Connection,
     *,
@@ -282,6 +296,10 @@ def resolve_plan_frame(
     from llm import call_llm
     from model_prefs import resolve_model_route
 
+    if progress_paused(conn):
+        return PlanFrame(
+            mode=MODE_HIDDEN, reason="Progress paused by you", source="preference"
+        )
     moment = now or datetime.now(timezone.utc)
     digest = context_digest(me, log, history)
 

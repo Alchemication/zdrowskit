@@ -1475,3 +1475,88 @@ class TestPrinting:
         panel = _FakeConsole.instances[0].printed[0]
         assert isinstance(panel, _FakePanel)
         assert "Latency: 1.23s | Cost: $0.0567" in panel.renderable
+
+
+class TestTargetValueAssertions:
+    def test_wrong_numbers_fail_even_when_slots_match(self) -> None:
+        case = next(
+            case
+            for case in load_cases()
+            if case.id == "targets_preserves_stated_values"
+        )
+        for values, expected in [((4, 9, 100), False), ((3, 2, 15), True)]:
+            text = json.dumps(
+                {
+                    "targets": [
+                        {
+                            "metric": "sessions_week",
+                            "category": "run",
+                            "target": values[0],
+                        },
+                        {
+                            "metric": "sessions_week",
+                            "category": "lift",
+                            "target": values[1],
+                        },
+                        {
+                            "metric": "distance_km_week",
+                            "category": "run",
+                            "target": values[2],
+                        },
+                    ]
+                }
+            )
+            assert (
+                all(
+                    result.passed
+                    for result in run_assertions(
+                        case.assertions, EvalExecution(text=text), fixture=case.fixture
+                    )
+                )
+                is expected
+            )
+
+    def test_threshold_is_checked(self) -> None:
+        assertion = {
+            "type": "targets_slots",
+            "values": {"sleep_nights_week": {"target": 5, "threshold": 7}},
+        }
+        for threshold, expected in [(8, False), (7, True)]:
+            execution = EvalExecution(
+                text=json.dumps(
+                    {
+                        "targets": [
+                            {
+                                "metric": "sleep_nights_week",
+                                "target": 5,
+                                "threshold": threshold,
+                            }
+                        ]
+                    }
+                )
+            )
+            assert run_assertions([assertion], execution)[0].passed is expected
+
+
+class TestOriginalPlanFrameRegression:
+    def test_original_response_fails_and_corrected_response_passes(self) -> None:
+        case = next(
+            case
+            for case in load_cases()
+            if case.id == "plan_frame_preserves_original_ordinary_week"
+        )
+        original = case.notes.removeprefix("Original stored response: ")
+        assert not all(
+            result.passed
+            for result in run_assertions(case.assertions, EvalExecution(text=original))
+        )
+        corrected = json.dumps(
+            {
+                "mode": "full",
+                "reason": "Training load and old coaching advice do not establish a current life disruption.",
+            }
+        )
+        assert all(
+            result.passed
+            for result in run_assertions(case.assertions, EvalExecution(text=corrected))
+        )

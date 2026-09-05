@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 import types
+from pathlib import Path
 from datetime import date, datetime, timedelta, timezone
 
 import pytest
@@ -159,7 +160,7 @@ class TestShouldAskCheckin:
         knows: bool = False,
     ) -> tuple[bool, str]:
         ask, reason, _ = should_ask_checkin(
-            conn, today=today, plan_frame_knows=lambda: knows
+            conn, data_current=True, today=today, plan_frame_knows=lambda: knows
         )
         return ask, reason
 
@@ -176,7 +177,9 @@ class TestShouldAskCheckin:
             consulted = True
             return False
 
-        should_ask_checkin(in_memory_db, today=FRIDAY, plan_frame_knows=_knows)
+        should_ask_checkin(
+            in_memory_db, data_current=True, today=FRIDAY, plan_frame_knows=_knows
+        )
         assert consulted is False
 
     def test_asks_when_a_regular_week_goes_quiet(
@@ -362,7 +365,7 @@ class TestLedger:
 
     def test_journal_entries_match_the_log_format(self) -> None:
         assert journal_entry("Took it easy.", today=FRIDAY) == (
-            "- 2026-09-04: Took it easy."
+            "- 2026-09-04 — Took it easy."
         )
 
 
@@ -424,3 +427,69 @@ class TestKeyboardAndMessage:
         )
         assert text.strip()
         assert call_id is None
+
+
+class TestCheckinFreshness:
+    def test_unknown_sync_never_asks(self, in_memory_db: sqlite3.Connection) -> None:
+        _seed(in_memory_db, this_week=0)
+        ask, reason, _ = should_ask_checkin(in_memory_db, today=FRIDAY)
+        assert not ask
+        assert "sync" in reason
+
+    def test_recent_metrics_cannot_hide_stale_workout_export(
+        self, in_memory_db: sqlite3.Connection, tmp_path: Path
+    ) -> None:
+        import os
+        from quiet_week import checkin_data_current
+
+        store_snapshots(
+            in_memory_db, [DailySnapshot(date=FRIDAY.isoformat(), steps=8000)]
+        )
+        workouts = tmp_path / "Workouts"
+        workouts.mkdir()
+        payload = workouts / "latest.json"
+        payload.write_text("{}")
+        stale = (NOW - timedelta(days=7)).timestamp()
+        os.utime(payload, (stale, stale))
+        assert not checkin_data_current(
+            in_memory_db, health_dir=tmp_path, source="local", now=NOW
+        )
+        os.utime(payload, (NOW.timestamp(), NOW.timestamp()))
+        assert checkin_data_current(
+            in_memory_db, health_dir=tmp_path, source="local", now=NOW
+        )
+
+    def test_http_upload_must_be_imported(
+        self, in_memory_db: sqlite3.Connection, tmp_path: Path
+    ) -> None:
+        import json
+        from quiet_week import checkin_data_current
+
+        store_snapshots(
+            in_memory_db, [DailySnapshot(date=FRIDAY.isoformat(), steps=8000)]
+        )
+        state = {
+            "uploads": {
+                "workouts": {
+                    "received_at": NOW.isoformat(),
+                    "sha256": "new",
+                    "session_id": "s",
+                }
+            },
+            "last_import_uploads": {"workouts": "old:s"},
+        }
+        path = tmp_path / ".ingest_state.json"
+        path.write_text(json.dumps(state))
+        assert not checkin_data_current(
+            in_memory_db, health_dir=tmp_path, source="http", now=NOW
+        )
+        state["last_import_uploads"]["workouts"] = "new:s"
+        path.write_text(json.dumps(state))
+        assert checkin_data_current(
+            in_memory_db, health_dir=tmp_path, source="http", now=NOW
+        )
+        state["last_error"] = "parse failed"
+        path.write_text(json.dumps(state))
+        assert not checkin_data_current(
+            in_memory_db, health_dir=tmp_path, source="http", now=NOW
+        )

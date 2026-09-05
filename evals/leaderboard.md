@@ -4,7 +4,7 @@ Regression scorecard for zdrowskit evals. A case is one frozen input plus checks
 
 ## What ships today
 
-The most recent scored run for each feature, on the model it actually runs on, against the 35 cases in `evals/cases` today.
+The most recent scored run for each feature, on the model it actually runs on, against the 36 cases in `evals/cases` today.
 
 | Feature | Route | Cases | Strict | Attempt | Flaky | Repeat | Tool calls | Avg Latency | Cost/run | Commit | Recorded |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
@@ -13,9 +13,13 @@ The most recent scored run for each feature, on the model it actually runs on, a
 | insights | gpt-5.6-luna (high) | 3/3 | 66.7% | 66.7% | 0 | 3 | 2.2 avg (3 cases, 1-6), 1 varied | 23.81s | $0.0139 | 2bfda76* | 2026-08-12 |
 | memory | gpt-5.6-luna | 3/3 | 100.0% | 100.0% | 0 | 3 | - | 1.15s | $0.0007 | 2bfda76* | 2026-08-12 |
 | nudge | gpt-5.6-luna (high) | 6/6 | 100.0% | 100.0% | 0 | 3 | 0.1 avg (1 case, up to 1), 1 varied | 5.88s | $0.0084 | 2bfda76* | 2026-08-12 |
-| plan_frame | gpt-5.6-luna | 2/2 | 100.0% | 100.0% | 0 | 5 | - | 1.27s | $0.0004 | a2fba5f | 2026-09-05 |
+| plan_frame | gpt-5.6-luna | 2/3 | 100.0% | 100.0% | 0 | 5 | - | 1.27s | $0.0004 | a2fba5f | 2026-09-05 |
 | targets | gpt-5.6-luna | 2/2 | 100.0% | 100.0% | 0 | 5 | - | 1.37s | $0.0003 | a2fba5f* | 2026-09-05 |
 | verification_judge | deepseek-v4-flash (high) | 7/7 | 85.7% | 90.5% | 1 | 3 | - | 65.96s | $0.0227 | 2bfda76* | 2026-08-12 |
+
+**`plan_frame` was last measured before 1 case(s) existed**, so its score does not cover: `plan_frame_preserves_original_ordinary_week`
+
+**`targets` was last measured before 2 case(s) existed**, so its score does not cover: `targets_names_and_counts_recorded_sport`, `targets_preserves_stated_values`
 
 ## chat · 11 cases
 
@@ -82,13 +86,13 @@ Short, timely messages during the day.
 
 Leading row (`gpt-5.6-luna`) passed every case on every attempt.
 
-## plan_frame · 2 cases
+## plan_frame · 3 cases
 
 Deciding whether this is a week to be measured at all, or one where a progress bar would be the wrong thing to show.
 
 | Model | Reasoning | Repeat | Cases | Strict | Attempt | Flaky | Tool calls | Avg Latency | Cost/run | Commit | Not passing |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
-| **gpt-5.6-luna** (ships today) | none | 5 | 2/2 | 100.0% | 100.0% | 0 | - | 1.27s | $0.0004 | a2fba5f | - |
+| **gpt-5.6-luna** (ships today) | none | 5 | 2/3 | 100.0% | 100.0% | 0 | - | 1.27s | $0.0004 | a2fba5f | - |
 
 Leading row (`gpt-5.6-luna`) passed every case on every attempt.
 

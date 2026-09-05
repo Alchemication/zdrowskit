@@ -10,7 +10,7 @@ from pathlib import Path
 
 from config import CONTEXT_DIR
 from llm_context import load_context
-from plan_frame import load_plan_frame
+from plan_frame import load_plan_frame, progress_paused
 from store import open_db
 from weekly_progress import measure_week, render_progress_block, week_label_for
 from weekly_targets import (
@@ -91,6 +91,8 @@ def cmd_targets(args: argparse.Namespace) -> None:
     # exists to show what the system holds, and a suppressed strip is invisible
     # everywhere else by construction.
     frame = load_plan_frame(conn)
+    if progress_paused(conn):
+        print("Progress is paused. Use /targets resume in Telegram to resume it.")
 
     rings = measure_week(conn, targets, week_start=week_start, today=today)
     block = render_progress_block(rings, week_start=week_start)

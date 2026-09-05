@@ -835,7 +835,7 @@ class TestMigrations:
 
         applied = apply_migrations(conn)
 
-        assert len(applied) == 19
+        assert len(applied) == 20
         statuses = list_migrations(conn)
         assert all(status.status == "applied" for status in statuses)
         schema = get_live_schema(conn)
@@ -851,6 +851,9 @@ class TestMigrations:
         assert "CREATE TABLE location" in schema
         assert "CREATE TABLE location_point_cache" in schema
         assert "CREATE TABLE location_point_failed" in schema
+        assert "CREATE TABLE target_derivation" in schema
+        assert "CREATE TABLE progress_preference" in schema
+        assert "note_prompt_id" in schema
 
     def test_adopts_legacy_schema_and_applies_missing(self) -> None:
         conn = sqlite3.connect(":memory:")

@@ -237,10 +237,6 @@ class TelegramChatHandler:
         self._poller = None  # type: ignore[assignment]
         self._conversation = None  # type: ignore[assignment]
         self._pending_edits = None  # type: ignore[assignment]
-        # Week a check-in is waiting on a typed answer for, if any. Plain
-        # state rather than sender-owned, so a reply arriving before the
-        # sender is reattached is dropped rather than raising.
-        self._pending_checkin_note: str | None = None
         self._status_lock = threading.Lock()
         self._handler_status: dict[str, object] = {
             "active_handlers": 0,
@@ -370,18 +366,9 @@ class TelegramChatHandler:
             return
 
         reply_to = message.get("reply_to_message")
-        if (
-            reply_to
-            and self._pending_checkin_note
-            and self._is_checkin_prompt(reply_to)
-        ):
-            week_start = self._pending_checkin_note
-            self._pending_checkin_note = None
-            self._write_checkin_answer(week_start, "note", note=text)
-            self._poller.send_reply(
-                "Noted, thanks — I'll keep that in mind.",
-                reply_to_message_id=message["message_id"],
-            )
+        from telegram_progress import handle_checkin_reply
+
+        if reply_to and handle_checkin_reply(self, message):
             return
 
         if reply_to and self._daemon._consume_rejection_reason(reply_to, text):
@@ -669,6 +656,11 @@ class TelegramChatHandler:
             args = text.split(maxsplit=1)
             request_text = args[1].strip() if len(args) > 1 else ""
             self._daemon._notify_flow.handle_command(request_text, message_id)
+        elif cmd == "/targets":
+            from telegram_progress import handle_targets
+
+            parts = text.split(maxsplit=1)
+            handle_targets(self, parts[1].strip() if len(parts) > 1 else "", message_id)
         elif cmd == "/models":
             self._daemon._model_flow.handle_command(message_id)
         elif cmd == "/status":
@@ -1709,85 +1701,6 @@ class TelegramChatHandler:
     # Callback dispatch
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _is_checkin_prompt(reply_to: dict) -> bool:
-        """Return True when a reply is answering the check-in's note request."""
-        return "One line is plenty" in (reply_to.get("text") or "")
-
-    def _handle_checkin_callback(
-        self, cb_id: str, data: str, msg_id: int | None
-    ) -> None:
-        """Record a quiet-week check-in answer and write it to log.md.
-
-        The tap is the whole point of the feature: it turns "this week went
-        quiet" into a sentence in the journal, which the plan-frame decision
-        reads before the next notification judges the week. A button that only
-        dismissed the message would leave the system exactly as ignorant as it
-        was before it asked.
-
-        Args:
-            cb_id: Telegram callback query id.
-            data: Payload of the form ``checkin:<week_start>:<answer>``.
-            msg_id: Message the buttons were attached to.
-        """
-        from quiet_week import CHOICE_BY_KEY
-
-        parts = data.split(":", 2)
-        if len(parts) != 3:
-            self._poller.answer_callback_query(cb_id, "Unknown action.")
-            return
-        _, week_start, answer = parts
-
-        if answer == "note":
-            # Ask for the sentence rather than writing a placeholder. A bare
-            # "add a note" marker in log.md would say less than nothing.
-            self._pending_checkin_note = week_start
-            self._poller.answer_callback_query(cb_id, "Go ahead.")
-            self._poller.send_reply(
-                "What happened? One line is plenty.", force_reply=True
-            )
-            return
-
-        choice = CHOICE_BY_KEY.get(answer)
-        if choice is None:
-            self._poller.answer_callback_query(cb_id, "Unknown action.")
-            return
-
-        self._write_checkin_answer(week_start, answer, note=None)
-        self._poller.answer_callback_query(cb_id, "Noted.")
-        if msg_id:
-            self._poller.edit_message(msg_id, f"\u2705 Noted — {choice.label}")
-
-    def _write_checkin_answer(
-        self, week_start: str, answer: str, *, note: str | None
-    ) -> None:
-        """Persist a check-in answer and append it to log.md."""
-        from context_edit import ContextEdit, apply_edit
-        from quiet_week import journal_entry, record_answer
-        from store import open_db
-
-        conn = open_db(self._daemon.db)
-        try:
-            line = record_answer(conn, week_start=week_start, answer=answer, note=note)
-        finally:
-            conn.close()
-        if not line:
-            return
-
-        edit = ContextEdit(
-            file="log",
-            action="append",
-            content=journal_entry(line, today=datetime.now().date()),
-            summary="Weekly check-in answer",
-        )
-        try:
-            self._daemon._self_originated_writes.add(
-                (self._daemon.context_dir / "log.md").resolve()
-            )
-            apply_edit(self._daemon.context_dir, edit, strict=True)
-        except Exception:
-            logger.error("Could not write check-in answer to log.md", exc_info=True)
-
     def _handle_telegram_callback(self, callback_query: dict) -> None:
         """Handle an inline keyboard button press.
 
@@ -1804,6 +1717,13 @@ class TelegramChatHandler:
         from events import normalize_telegram_callback
 
         self._record_usage("callback", normalize_telegram_callback(data))
+
+        if data.startswith("targets:"):
+            from telegram_progress import handle_targets
+
+            self._poller.answer_callback_query(cb_id, "Updating progress.")
+            handle_targets(self, data.split(":", 1)[1], msg_id)
+            return
 
         if data.startswith("ctx_accept:"):
             edit_id = data.split(":", 1)[1]
@@ -1830,7 +1750,9 @@ class TelegramChatHandler:
                     self._poller.edit_message(msg_id, "This edit has expired.")
 
         elif data.startswith("checkin:"):
-            self._handle_checkin_callback(cb_id, data, msg_id)
+            from telegram_progress import handle_checkin_callback
+
+            handle_checkin_callback(self, cb_id, data, msg_id)
 
         elif data.startswith("notify_"):
             self._daemon._notify_flow.handle_callback(cb_id, data, msg_id)

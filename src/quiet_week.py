@@ -33,6 +33,7 @@ Public API:
 from __future__ import annotations
 
 import logging
+import json
 import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -46,6 +47,7 @@ from config import (
     QUIET_WEEK_MAX_UNANSWERED,
     QUIET_WEEK_MIN_BASELINE_SESSIONS,
     QUIET_WEEK_MIN_WEEKS,
+    QUIET_WEEK_DATA_MAX_AGE_DAYS,
     QUIET_WEEK_SHORTFALL_RATIO,
 )
 
@@ -230,17 +232,55 @@ def consecutive_silences(conn: sqlite3.Connection) -> int:
     return silences
 
 
+def checkin_data_current(
+    conn: sqlite3.Connection, *, health_dir: Path, source: str, now: datetime
+) -> bool:
+    """Require recent daily data and a recent workout export before inferring absence.
+
+    HTTP additionally requires that the latest workout upload was successfully
+    imported. File timestamps alone would accept an uploaded but failed payload.
+    """
+    cutoff = now - timedelta(days=QUIET_WEEK_DATA_MAX_AGE_DAYS)
+    try:
+        row = conn.execute(
+            "SELECT MAX(date) AS day FROM daily WHERE steps IS NOT NULL "
+            "OR exercise_min IS NOT NULL OR resting_hr IS NOT NULL"
+        ).fetchone()
+        if not row or not row["day"] or row["day"] < cutoff.date().isoformat():
+            return False
+        if source == "http":
+            state = json.loads((health_dir / ".ingest_state.json").read_text())
+            upload = state.get("uploads", {}).get("workouts", {})
+            marker = f"{upload.get('sha256')}:{upload.get('session_id')}"
+            if (
+                state.get("last_error")
+                or state.get("last_import_uploads", {}).get("workouts") != marker
+            ):
+                return False
+            received = datetime.fromisoformat(upload["received_at"])
+            return cutoff <= received <= now
+        files = list((health_dir / "Workouts").glob("*.json"))
+        return any(
+            cutoff.timestamp() <= file.stat().st_mtime <= now.timestamp()
+            for file in files
+        )
+    except (OSError, ValueError, KeyError, TypeError, sqlite3.Error):
+        return False
+
+
 def should_ask_checkin(
     conn: sqlite3.Connection,
     *,
     today: date,
     plan_frame_knows: Callable[[], bool] | None = None,
+    data_current: bool = False,
 ) -> tuple[bool, str, WeekActivity | None]:
     """Decide whether to ask about this week. Deterministic throughout.
 
     Args:
         conn: Open database connection.
         today: The day being considered.
+        data_current: True only when recent imports support inferring absence.
         plan_frame_knows: Called to ask whether the plan-frame decision has
             already established that something is going on; asking then would
             prove the system was not listening. Deferred rather than passed as
@@ -253,6 +293,9 @@ def should_ask_checkin(
     """
     if today.weekday() != QUIET_WEEK_CHECK_WEEKDAY:
         return False, "not the check-in weekday", None
+
+    if not data_current:
+        return False, "sync freshness unknown or stale", None
 
     week_start = _week_start(today).isoformat()
     if already_asked(conn, week_start):
@@ -459,6 +502,7 @@ def record_answer(
             )
     except sqlite3.Error as exc:
         logger.warning("Could not record check-in answer: %s", exc)
+        raise
 
     text = (note or "").strip() or choice.journal
     return text or None
@@ -466,4 +510,4 @@ def record_answer(
 
 def journal_entry(line: str, *, today: date) -> str:
     """Format an answer as a dated log.md bullet, matching the file's shape."""
-    return f"- {today.isoformat()}: {line}"
+    return f"- {today.isoformat()} — {line}"

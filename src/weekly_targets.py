@@ -519,6 +519,9 @@ def clear_targets(conn: sqlite3.Connection, week_start: str) -> int:
         cursor = conn.execute(
             "DELETE FROM weekly_target WHERE week_start = ?", (week_start,)
         )
+        conn.execute(
+            "DELETE FROM target_derivation WHERE week_start = ?", (week_start,)
+        )
     return cursor.rowcount or 0
 
 
@@ -641,7 +644,7 @@ def parse_targets_response(
     text: str,
     strategy_hash: str,
     known_types: frozenset[str] = frozenset(),
-) -> list[StoredTarget]:
+) -> list[StoredTarget] | None:
     """Parse and validate the derivation call's JSON payload.
 
     Args:
@@ -653,7 +656,7 @@ def parse_targets_response(
     Returns:
         Validated targets, deduplicated by metric and category, in vocabulary
         order, capped at :data:`config.WEEKLY_TARGET_MAX_RINGS`. Empty when the
-        model declined or the payload was unusable.
+        model declined; None when the payload was unusable.
     """
     from llm import strip_json_fences
 
@@ -661,14 +664,14 @@ def parse_targets_response(
         payload = json.loads(strip_json_fences(text))
     except (TypeError, ValueError) as exc:
         logger.warning("Target derivation returned unparseable JSON: %s", exc)
-        return []
+        return None
     if not isinstance(payload, dict):
         logger.warning("Target derivation returned %s, not an object", type(payload))
-        return []
+        return None
 
     raw_items = payload.get("targets")
     if not isinstance(raw_items, list):
-        return []
+        return None
 
     accepted: dict[tuple[str, str], StoredTarget] = {}
     for raw in raw_items:
@@ -791,12 +794,11 @@ def derive_targets(
     trace_id: int | None = None,
     model_prefs_path: Path | None = None,
     metadata: dict | None = None,
-) -> list[StoredTarget]:
+) -> list[StoredTarget] | None:
     """Turn stated goals into measurable weekly targets with one LLM call.
 
-    Failure is never fatal and never partial: any exception yields an empty
-    list, which renders as no progress strip at all. A notification must not be
-    lost because a decorative header could not be computed.
+    A failed call returns None; a valid decision with no goals returns an empty
+    list. The caller can retry failures without repeatedly deriving empty goals.
 
     Args:
         goal_text: Output of :func:`extract_goal_text`.
@@ -807,7 +809,7 @@ def derive_targets(
         metadata: Extra metadata recorded on the logged call.
 
     Returns:
-        Validated targets, or an empty list.
+        Validated targets (including an empty result), or None on failure.
     """
     from config import MAX_TOKENS_TARGETS
     from llm import call_llm
@@ -835,12 +837,11 @@ def derive_targets(
         )
     except Exception as exc:  # noqa: BLE001 - a missing strip must not break a send
         logger.error("Weekly target derivation failed: %s", exc)
-        return []
+        return None
 
     targets = parse_targets_response(result.text, digest, known_types)
-    if not targets:
-        logger.info("No measurable weekly targets found in strategy.md goals")
-        return []
+    if targets is None:
+        return None
     return [
         StoredTarget(
             spec=item.spec,
@@ -896,6 +897,13 @@ def ensure_weekly_targets(
     if existing and not force and existing[0].strategy_hash == digest:
         return existing
 
+    cached = conn.execute(
+        "SELECT strategy_hash FROM target_derivation WHERE week_start = ?",
+        (week_start,),
+    ).fetchone()
+    if cached and not force and cached["strategy_hash"] == digest:
+        return existing
+
     derived = derive_targets(
         goal_text,
         week_start=week_start,
@@ -903,12 +911,16 @@ def ensure_weekly_targets(
         trace_id=trace_id,
         model_prefs_path=model_prefs_path,
     )
-    if not derived:
-        # Keep whatever the week already had: a transport failure should not
-        # silently retire targets the user has been watching all week.
-        return existing
+    if derived is None:
+        # Retain targets only while they still describe the current goals.
+        return existing if existing and existing[0].strategy_hash == digest else []
 
     save_targets(conn, week_start, derived)
+    with conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO target_derivation VALUES (?, ?)",
+            (week_start, digest),
+        )
     logger.info(
         "Derived %d weekly target(s) for %s: %s",
         len(derived),

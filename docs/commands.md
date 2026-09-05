@@ -132,3 +132,10 @@ then run the same idempotent database import as a local source.
 
 The daemon loads all enabled profiles, polls each Drive source independently,
 and uses one shared Telegram update stream.
+
+### Progress controls in Telegram
+
+`/targets` shows weekly progress, source goals, and pause/resume and refresh
+buttons. `/targets pause` hides the strip until `/targets resume`; it does not
+mute other notifications. `/targets refresh` re-reads goals. To correct a goal,
+ask the chat to change it and approve the proposed strategy edit.

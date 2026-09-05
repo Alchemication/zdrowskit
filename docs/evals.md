@@ -96,7 +96,11 @@ no stated reason, produces nothing in production. Asserting on the raw JSON
 would pass a case whose answer never becomes a bar. `targets_slots` is given
 the fixture's `activity_types` for the same reason — a target naming a workout
 type is legitimate only for a profile that has recorded it, and an assertion
-without that list rejects the correct answer.
+without that list rejects the correct answer. The optional `values` mapping
+checks exact `target` and `threshold` fields by metric/category slot; slot names
+alone cannot detect an invented target number. The plan-frame suite also retains
+the original stored context as a real regression, alongside the simpler controls. Strengthened target cases use distinct IDs,
+so historical slot-only passes do not count as coverage of numeric correctness.
 
 Multi-pattern assertions are not all alike: `text_contains` and
 `memory_contains` pass only when **every** pattern matches, while `text_absent`

@@ -2,8 +2,7 @@ You are deciding one narrow thing: whether a weekly training plan is still the
 right yardstick to hold this person to right now.
 
 Their notifications can open with a small progress strip — bars showing how the
-week is going against the goals they set, each with a verdict like `on pace` or
-`behind`. You decide how much of that strip is appropriate today. You are not
+week is going against the goals they set, each with a completion or remaining-work label. You decide how much of that strip is appropriate today. You are not
 writing to the person, you are not coaching them, and you will never be shown
 how their week is actually going.
 
@@ -15,9 +14,9 @@ Return **one JSON object** and nothing else.
 {{"mode": "full" | "facts" | "hidden", "reason": "<one short sentence>"}}
 ```
 
-- `full` — show the bars and their verdicts. **This is the default.**
+- `full` — show the bars and completion labels. **This is the default.**
 - `facts` — show the bars and the numbers, but drop the verdict. Use this when
-  the numbers are still worth seeing but calling them `behind` would be unfair.
+  the numbers are still worth seeing but emphasizing an unmet target would be unhelpful.
 - `hidden` — show nothing.
 - `reason` is required for `facts` and `hidden`, and is read by the person who
   maintains this system, never by the user. Name the specific circumstance.
@@ -37,16 +36,22 @@ training as a thing to be measured:
 - they have said in as many words that they are stepping back
 
 Choose `facts` for the middle ground, where the numbers are still interesting
-but a verdict would be unkind or meaningless:
+but a completion label would be unhelpful:
 
 - travelling, away from their gym, on holiday
 - a deliberate deload, taper, or easy week
 - a minor niggle they are working around
 - a disrupted week they have flagged without stopping
 
+Weekly memory is past coaching advice, not a statement that the person is
+currently stepping back. Old recommendations to recover, skip tempo, or ease
+training do not establish a current disruption. A strenuous run, hike, or
+cluster of workouts is training load, not a life circumstance. Do not combine
+those with a busy-work note to infer a disrupted week.
+
 ## What is **not** a reason to reduce the strip
 
-- **A bad week.** Falling behind is exactly what the strip exists to say, and
+- **A bad week.** Showing progress against the stated target is what the strip exists to do, and
   the person set the goal themselves. Being unflattering is not a reason to
   hide.
 - **Guessing.** If nothing in their context points to a specific circumstance,

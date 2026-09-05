@@ -505,6 +505,13 @@ the person they were last winter. Matches the shortest training-volume baseline
 so "normal" means one thing across the project.
 """
 
+QUIET_WEEK_DATA_MAX_AGE_DAYS: int = 2
+"""Maximum age of imported workout exports and daily metrics before a check-in.
+
+Two days tolerates routine export delays; older inputs cannot distinguish
+inactivity from a broken sync. Unknown freshness also suppresses the question.
+"""
+
 QUIET_WEEK_MIN_WEEKS: int = 6
 """Completed weeks required before a week can be called unusually quiet.
 
@@ -940,11 +947,10 @@ DEFAULT_CHECKIN_MODEL: str = os.environ.get(
 )
 """Default model for phrasing the quiet-week check-in.
 
-Not measured. Unlike the other cheap routes this one writes prose a person
-reads, so it is the first candidate to move to a judgement-tier model if the
-questions come out tone-deaf — the whole feature turns on the question not
-sounding like an accusation. Reasoning off for now: the prompt states the
-constraints and the output is two sentences.
+Measured by checkin_asks_without_delivering_a_verdict on the production route.
+The small fixture checks tone and brevity, not detection or reply persistence.
+See the eval leaderboard for current results. Reasoning stays off for this
+short phrasing task.
 """
 
 DEFAULT_PLAN_FRAME_MODEL: str = os.environ.get(
@@ -953,17 +959,10 @@ DEFAULT_PLAN_FRAME_MODEL: str = os.environ.get(
 )
 """Default model for deciding whether the training plan still applies.
 
-Not measured — there are no plan_frame eval cases yet, and this is recorded as
-a borrowed choice. It is a three-way classification against a stated rule list,
-which is the extraction shape the other cheap routes take, so it follows them
-onto Luna with reasoning off rather than paying a judgement-tier price for a
-one-word answer.
-
-The cases to write first are the two that decide whether this feature works at
-all: a journal describing a newborn with the week going badly, which must
-suppress; and a journal describing an ordinary week with the week going badly,
-which must not. A model that cannot tell those apart makes the progress strip
-disappear for everyone who has a hard week.
+Eval cases cover ordinary-week and newborn controls plus the original call-log
+regression. The original context exposed suppression drift; passing simplified
+controls alone does not establish reliability. See the eval leaderboard for
+current results. Reasoning stays off for this constrained classification.
 """
 
 DEFAULT_TARGETS_MODEL: str = os.environ.get(
@@ -972,15 +971,9 @@ DEFAULT_TARGETS_MODEL: str = os.environ.get(
 )
 """Default model for deriving weekly targets from strategy.md goals.
 
-Not measured on this prompt — there are no targets eval cases yet, and this is
-recorded as a borrowed choice rather than a result. It is the same shape of job
-as weekly memory: read prose, select against a stated rule list, emit a short
-structured answer. That is the job DeepSeek Flash was found unable to terminate
-on, spending the whole budget on a reasoning trace nobody asked for, so the
-route follows memory onto Luna with reasoning off.
-
-Write targets cases before defending this choice; a wrong target here is a
-visibly wrong number on every notification for a week.
+Eval cases cover stated-number and named-sport goals, including exact target
+values. Coverage remains narrow; see the eval leaderboard for current results.
+Reasoning stays off for this structured extraction task.
 """
 
 ENABLE_LLM_VERIFICATION: bool = _env_bool("ZDROWSKIT_ENABLE_LLM_VERIFICATION", True)

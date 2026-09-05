@@ -56,15 +56,16 @@ outside a heading or comment counts as filled in.
 
 ## Goals That Become Progress Bars
 
-The `## Goals` and `## Weekly Plan` sections of `strategy.md` are read once a
-week and matched to metrics the database can count, which is what draws the
+The `## Goals` and `## Weekly Plan` sections of `strategy.md` are read for each new
+week or changed goal text and matched to metrics the database can count, which is what draws the
 progress strip on nudges and weekly reports. See
 [Notifications](notifications.md#weekly-progress-strip) for what is countable
 and how the pace verdict is decided.
 
 Only stated numbers are used. A goal written without one — "run more", "sleep
 better" — produces no bar, and nothing is assumed in its place. Inspect what
-was derived with `uv run python main.py targets`.
+was derived with `/targets` in Telegram or `uv run python main.py targets`.
+An empty result is cached too; removing numeric goals removes their old bars.
 
 `log.md` is also written to by the weekly check-in: when a week runs far below
 your normal, the coach asks why and one tap records the answer there. See

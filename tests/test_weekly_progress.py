@@ -340,7 +340,7 @@ class TestRenderProgressBlock:
             [_ring("distance_km_week", 30, 21.4, category="run")], week_start=WEEK_START
         )
         assert "21.4/30" in block
-        assert "on pace" in block
+        assert "8.6 left" in block
 
     def test_whole_measurements_lose_the_decimal_point(self) -> None:
         block = render_progress_block(
@@ -352,7 +352,7 @@ class TestRenderProgressBlock:
 class TestRenderProgressLine:
     def test_line_carries_label_values_bar_and_status(self) -> None:
         line = render_progress_line(_ring("distance_km_week", 30, 21.4, category="run"))
-        assert line == "Run km 21.4/30 ███████░░░ on pace"
+        assert line == "Run km 21.4/30 ███████░░░ 8.6 left"
 
     def test_line_is_one_line(self) -> None:
         line = render_progress_line(_ring("sleep_nights_week", 5, 2, threshold=7.0))
@@ -812,15 +812,14 @@ class TestNudgeLineIsGatedOnChange:
         )
         assert self._line(in_memory_db, WEDNESDAY) is None
 
-    def test_a_pace_verdict_flip_is_news(
+    def test_time_passing_alone_does_not_repeat_progress(
         self, in_memory_db: sqlite3.Connection
     ) -> None:
-        """Same distance, later in the week: on pace becomes behind."""
+        """A rest day does not create a new claim about the same progress."""
         _seed_week(in_memory_db)
         assert self._line(in_memory_db, WEDNESDAY) is not None
         line = self._line(in_memory_db, SUNDAY)
-        assert line is not None
-        assert line.endswith("behind")
+        assert line is None
 
     def test_a_new_week_is_always_news(self, in_memory_db: sqlite3.Connection) -> None:
         _seed_week(in_memory_db)
@@ -877,3 +876,15 @@ class TestWeekLabel:
 
     def test_sunday_of_the_same_week(self) -> None:
         assert week_label_for("2026-09-07") == "2026-W37"
+
+
+class TestNeutralProgress:
+    def test_sunday_before_a_planned_run_has_no_pace_judgment(self) -> None:
+        ring = _ring("distance_km_week", 30, 20, category="run", day=7)
+        line = render_progress_line(ring)
+        assert "10 left" in line
+        assert "behind" not in line
+        completed = render_progress_block(
+            [ring], week_start=WEEK_START, week_complete=True
+        )
+        assert "10 short" in completed

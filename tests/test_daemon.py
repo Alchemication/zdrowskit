@@ -3612,6 +3612,7 @@ class TestQuietWeekCheckin:
 
     def _runtime(self, tmp_path: Path) -> ProfileRuntime:
         runtime = _make_daemon(tmp_path)
+        runtime.health_dir = tmp_path / "exports"
         runtime._chat._poller = MagicMock()
         runtime._chat._poller.send_reply.return_value = 4242
         return runtime
@@ -3640,6 +3641,14 @@ class TestQuietWeekCheckin:
                         ],
                     )
                 )
+        import os
+
+        snapshots.append(DailySnapshot(date=self.FRIDAY.date().isoformat(), steps=8000))
+        exports = runtime.health_dir / "Workouts"
+        exports.mkdir(parents=True, exist_ok=True)
+        payload = exports / "latest.json"
+        payload.write_text('{"data": {"workouts": []}}')
+        os.utime(payload, (self.FRIDAY.timestamp(), self.FRIDAY.timestamp()))
         conn = open_db(runtime.db)
         try:
             store_snapshots(conn, snapshots)
