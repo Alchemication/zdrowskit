@@ -22,6 +22,7 @@ from standouts import (
     cooldown_remaining_days,
     find_candidates,
     last_announced_at,
+    pending_keys,
 )
 from store import open_db
 
@@ -83,6 +84,7 @@ def cmd_standouts(args: argparse.Namespace) -> None:
         remaining = cooldown_remaining_days(conn)
         last = last_announced_at(conn)
         seen = announced_keys(conn)
+        pending = pending_keys(conn)
     except sqlite3.Error as exc:
         print(
             "Announcement ledger unreadable, so no standout can fire: "
@@ -94,7 +96,9 @@ def cmd_standouts(args: argparse.Namespace) -> None:
         )
         return
 
-    if last is None:
+    if last is None and remaining:
+        print(f"Cooldown: {remaining} day(s) left (delivery reservation pending).")
+    elif last is None:
         print("Cooldown: clear (nothing announced yet).")
     elif remaining:
         print(
@@ -104,19 +108,30 @@ def cmd_standouts(args: argparse.Namespace) -> None:
     else:
         print(f"Cooldown: clear (last announced {last.date().isoformat()}).")
 
+    if pending:
+        print(
+            f"Delivery reservations: {len(pending)} unresolved; they remain "
+            "suppressed to prevent duplicate sends."
+        )
+
     candidates = find_candidates(conn, today=today)
     if not candidates:
         print()
         print(_NO_CANDIDATES_HELP)
         return
 
-    fresh = [item for item in candidates if item.key not in seen]
+    fresh = [item for item in candidates if item.key not in seen | pending]
 
     print()
-    print(f"Candidates ({len(candidates)} found, {len(fresh)} not yet announced):")
+    print(f"Candidates ({len(candidates)} found, {len(fresh)} available):")
     print()
     for item in candidates:
-        print(_describe(item, announced=item.key in seen))
+        description = _describe(item, announced=item.key in seen)
+        if item.key in pending:
+            description = description.replace(
+                f"  {item.kind}", f"  {item.kind}  [delivery pending]", 1
+            )
+        print(description)
         print()
 
     if not fresh:
@@ -128,6 +143,6 @@ def cmd_standouts(args: argparse.Namespace) -> None:
         )
     else:
         print(
-            "The picker would be asked to choose one of these, or to decline "
-            "all of them. Declining is a normal outcome."
+            "The picker would normally choose one of these. It declines only "
+            "when the journal explicitly contradicts the recorded candidate."
         )

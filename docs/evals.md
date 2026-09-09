@@ -245,13 +245,14 @@ key and a finished headline. The picker only ever chooses between sentences
 that were computed and phrased before the call, so a fixture handing it raw
 data would be testing generation — the exact thing the design removed.
 
-Standout cases come in pairs on purpose. A picker told that declining is the
-normal outcome can over-learn it and never fire again, and because the feature
-is budgeted at roughly one announcement a month, months of silence looks
-identical to months of nothing qualifying. Restraint cases alone would score
-that picker clean. So every restraint case is paired with one that must fire,
-and the pair is the only thing that distinguishes working restraint from a dead
-selector.
+Standout cases come in pairs on purpose. A picker can over-learn restraint and
+never fire again, and because the feature is budgeted at roughly one
+announcement a month, months of silence looks identical to months of nothing
+qualifying. Restraint cases alone would score that picker clean. So every
+restraint case is paired with one that must fire. When a restraint fixture uses
+journal context, a matching plan-frame case must also show that production's
+earlier gate stays `full`; otherwise the picker case describes an unreachable
+path.
 
 ## Leaderboard
 

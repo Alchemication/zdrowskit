@@ -31,7 +31,8 @@ Public API:
     Standout                    — one candidate fact, already phrased.
     find_candidates             — every eligible fact, gates applied.
     find_standout               — the full path: gates, selection, one or none.
-    record_standout_announced   — ledger write, after the message is delivered.
+    reserve_standout_delivery   — durable claim made before delivery starts.
+    record_standout_announced   — finalize a reservation after delivery.
     cooldown_remaining_days     — how long until the next one may fire.
 """
 
@@ -103,6 +104,7 @@ class Standout:
         span_days: Days between the oldest and newest member of that set.
         margin_pct: How far it beat the previous best, or None when the fact is
             a threshold crossing rather than a record.
+        source_workout_ids: Workouts whose arrival can make this fact news.
     """
 
     key: str
@@ -112,6 +114,7 @@ class Standout:
     population: int
     span_days: int
     margin_pct: float | None = None
+    source_workout_ids: tuple[str, ...] = ()
 
 
 def _scope_phrase(population: int, span_days: int, plural_noun: str) -> str:
@@ -194,7 +197,7 @@ def _pace_candidates(conn: sqlite3.Connection, today: date) -> list[Standout]:
                     ROWS BETWEEN CURRENT ROW AND {km_count - 1} FOLLOWING
                 )
             )
-            SELECT date, MIN(total_pace) / {km_count}.0 AS pace
+            SELECT start_utc, date, MIN(total_pace) / {km_count}.0 AS pace
             FROM windows
             WHERE row_count = {km_count} AND value_count = {km_count}
             GROUP BY start_utc, date
@@ -229,6 +232,7 @@ def _pace_candidates(conn: sqlite3.Connection, today: date) -> list[Standout]:
                 population=len(rows),
                 span_days=span,
                 margin_pct=margin,
+                source_workout_ids=(best["start_utc"],),
             )
         )
     return found
@@ -266,7 +270,7 @@ def _extreme_candidates(
     for category, singular, plural in categories:
         rows = conn.execute(
             f"""
-            SELECT date, {column} AS value
+            SELECT start_utc, date, {column} AS value
             FROM workout_all
             WHERE category = ? AND {column} IS NOT NULL AND {column} > 0
             ORDER BY value DESC
@@ -301,6 +305,7 @@ def _extreme_candidates(
                 population=len(rows),
                 span_days=span,
                 margin_pct=margin,
+                source_workout_ids=(best["start_utc"],),
             )
         )
     return found
@@ -346,6 +351,15 @@ def _volume_candidates(conn: sqlite3.Connection, today: date) -> list[Standout]:
         if span < STANDOUT_MIN_SPAN_DAYS:
             continue
         scope = _scope_phrase(row["sessions"], span, plural)
+        recent_ids = tuple(
+            result["start_utc"]
+            for result in conn.execute(
+                "SELECT start_utc FROM workout_all "
+                "WHERE category = ? AND gpx_distance_km IS NOT NULL "
+                "AND date >= ? ORDER BY start_utc",
+                (category, cutoff),
+            ).fetchall()
+        )
         found.append(
             Standout(
                 key=f"volume_{category}|{threshold}",
@@ -357,23 +371,31 @@ def _volume_candidates(conn: sqlite3.Connection, today: date) -> list[Standout]:
                 occurred_on=row["last_date"],
                 population=row["sessions"],
                 span_days=span,
+                source_workout_ids=recent_ids,
             )
         )
     return found
 
 
 def find_candidates(
-    conn: sqlite3.Connection, *, today: date | None = None
+    conn: sqlite3.Connection,
+    *,
+    today: date | None = None,
+    eligible_workout_ids: set[str] | None = None,
 ) -> list[Standout]:
     """Return every fact that is currently true, rare and sufficiently evidenced.
 
     Every gate that does not need a model runs here: comparison population,
-    recency of the achievement, and the margin over the previous best. What
-    survives is a list of finished sentences, any of which could be sent as-is.
+    recency of the achievement, and the margin over the previous best where
+    applicable. What survives is a list of finished sentences, any of which
+    could be sent as-is.
 
     Args:
         conn: Open database connection.
         today: Day to detect against. Defaults to the local date.
+        eligible_workout_ids: When provided, keep only facts caused by one of
+            these newly inserted or changed workouts. An empty set therefore
+            produces no candidates.
 
     Returns:
         Candidates, best margin first. Never raises.
@@ -410,6 +432,12 @@ def find_candidates(
             # One generator failing must not cost the others. A missing split
             # table on an old profile is exactly this case.
             logger.warning("Standout generator failed: %s", exc)
+    if eligible_workout_ids is not None:
+        found = [
+            item
+            for item in found
+            if eligible_workout_ids.intersection(item.source_workout_ids)
+        ]
     return sorted(found, key=lambda item: item.margin_pct or 0.0, reverse=True)
 
 
@@ -444,6 +472,17 @@ def announced_keys(conn: sqlite3.Connection) -> set[str]:
     return {row["key"] for row in rows}
 
 
+def pending_keys(conn: sqlite3.Connection) -> set[str]:
+    """Return achievements with an unresolved delivery reservation."""
+    rows = conn.execute("SELECT key FROM standout_delivery_pending").fetchall()
+    return {row["key"] for row in rows}
+
+
+def suppressed_keys(conn: sqlite3.Connection) -> set[str]:
+    """Return achievements already delivered or reserved for delivery."""
+    return announced_keys(conn) | pending_keys(conn)
+
+
 def last_announced_at(conn: sqlite3.Connection) -> datetime | None:
     """Return when a standout was last announced, or None if never.
 
@@ -474,12 +513,102 @@ def cooldown_remaining_days(
         sqlite3.Error: The ledger could not be read.
     """
     moment = now or datetime.now(timezone.utc)
-    last = last_announced_at(conn)
-    if last is None:
+    row = conn.execute(
+        """
+        SELECT MAX(stamped_at) AS latest
+        FROM (
+            SELECT announced_at AS stamped_at FROM standout_announced
+            UNION ALL
+            SELECT reserved_at AS stamped_at FROM standout_delivery_pending
+        )
+        """
+    ).fetchone()
+    if row is None or not row["latest"]:
         return 0
+    try:
+        last = datetime.fromisoformat(row["latest"])
+    except ValueError:
+        return 0
+    if last.tzinfo is None:
+        last = last.replace(tzinfo=timezone.utc)
     elapsed = moment - last
     remaining = timedelta(days=STANDOUT_COOLDOWN_DAYS) - elapsed
     return max(0, remaining.days + (1 if remaining.seconds else 0))
+
+
+def reserve_standout_delivery(
+    conn: sqlite3.Connection,
+    standout: Standout,
+    *,
+    now: datetime | None = None,
+) -> bool:
+    """Durably reserve one standout before attempting delivery.
+
+    Returns:
+        True when this call acquired the reservation. False when the fact was
+        already delivered or another sender already reserved it.
+
+    Raises:
+        sqlite3.Error: The reservation could not be read or written. Callers
+            must fail closed and continue without the standout.
+    """
+    moment = now or datetime.now(timezone.utc)
+    cutoff = moment - timedelta(days=STANDOUT_COOLDOWN_DAYS)
+    with conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO standout_delivery_pending
+                (key, kind, headline, occurred_on, reserved_at)
+            SELECT ?, ?, ?, ?, ?
+            WHERE NOT EXISTS (
+                SELECT 1 FROM standout_announced WHERE key = ?
+            )
+            AND NOT EXISTS (
+                SELECT 1 FROM standout_delivery_pending WHERE key = ?
+            )
+            AND NOT EXISTS (
+                SELECT 1 FROM standout_announced
+                WHERE julianday(announced_at) > julianday(?)
+            )
+            AND NOT EXISTS (
+                SELECT 1 FROM standout_delivery_pending
+                WHERE julianday(reserved_at) > julianday(?)
+            )
+            """,
+            (
+                standout.key,
+                standout.kind,
+                standout.headline,
+                standout.occurred_on,
+                moment.isoformat(),
+                standout.key,
+                standout.key,
+                cutoff.isoformat(),
+                cutoff.isoformat(),
+            ),
+        )
+    return cursor.rowcount == 1
+
+
+def release_standout_delivery(
+    conn: sqlite3.Connection,
+    standout: Standout,
+) -> None:
+    """Release a reservation after a definite delivery failure."""
+    try:
+        with conn:
+            conn.execute(
+                "DELETE FROM standout_delivery_pending WHERE key = ?",
+                (standout.key,),
+            )
+    except sqlite3.Error as exc:
+        # Keeping an uncertain reservation fails closed. It may suppress one
+        # future standout, but it cannot cause a duplicate delivery.
+        logger.error(
+            "Could not release failed standout delivery %s; keeping it suppressed: %s",
+            standout.key,
+            exc,
+        )
 
 
 def record_standout_announced(
@@ -488,12 +617,7 @@ def record_standout_announced(
     *,
     now: datetime | None = None,
 ) -> None:
-    """Record a standout as delivered.
-
-    Called after the message carrying it has actually gone out, for the same
-    reason the progress line is: a failed send must not spend a month's budget
-    on something nobody read.
-    """
+    """Move a delivered standout from its reservation into the ledger."""
     moment = now or datetime.now(timezone.utc)
     try:
         with conn:
@@ -509,14 +633,17 @@ def record_standout_announced(
                     moment.isoformat(),
                 ),
             )
+            conn.execute(
+                "DELETE FROM standout_delivery_pending WHERE key = ?",
+                (standout.key,),
+            )
     except sqlite3.Error as exc:
-        # The message has already gone out, so this cannot fail closed the way
-        # the reads do. Logged at error rather than warning because the
-        # consequence is real: an unrecorded announcement leaves the cooldown
-        # unstarted, and the same fact is eligible again on the next nudge.
+        # The transaction rolls the delete back too, leaving the durable
+        # reservation in place. The message may be absent from the historical
+        # ledger, but it cannot be delivered twice.
         logger.error(
-            "Could not record announced standout %s; the cooldown did not "
-            "start and this fact may be announced again: %s",
+            "Could not finalize announced standout %s; its delivery "
+            "reservation remains suppressed: %s",
             standout.key,
             exc,
         )
@@ -617,6 +744,7 @@ def find_standout(
     me: str | None,
     log: str | None,
     history: str | None,
+    eligible_workout_ids: set[str] | None = None,
     today: date | None = None,
     now: datetime | None = None,
     trace_id: int | None = None,
@@ -635,6 +763,9 @@ def find_standout(
         me: Contents of me.md.
         log: Recent entries from log.md.
         history: Recent weekly memory entries.
+        eligible_workout_ids: Workouts inserted or changed by the import that
+            triggered this nudge. When supplied, unrelated recent records are
+            excluded.
         today: Day to detect against. Defaults to the local date.
         now: Override for the current moment, for tests.
         trace_id: Trace to attach the selection call to.
@@ -654,9 +785,15 @@ def find_standout(
             logger.debug("Standout on cooldown for another %d day(s)", remaining)
             return None
 
-        seen = announced_keys(conn)
+        seen = suppressed_keys(conn)
         candidates = [
-            item for item in find_candidates(conn, today=today) if item.key not in seen
+            item
+            for item in find_candidates(
+                conn,
+                today=today,
+                eligible_workout_ids=eligible_workout_ids,
+            )
+            if item.key not in seen
         ]
         if not candidates:
             return None

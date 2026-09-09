@@ -12,6 +12,7 @@ from config import (
     HTTP_INGEST_PORT,
     HTTP_INGEST_TOKEN_FILE,
 )
+from daemon_data import changed_workout_ids, data_snapshot, format_data_delta
 from http_ingest import HttpIngestManager, TokenRegistry
 from http_ingest_server import HttpIngestServer
 
@@ -62,7 +63,7 @@ class DaemonHttpIngestHandler:
             "started",
             "Complete HTTP Metrics and Workouts pair received",
         )
-        before = runtime._runners._data_snapshot()
+        before = data_snapshot(runtime.db)
         try:
             result = runtime._runners._run_import(data_dir=generation)
             if result is None:
@@ -86,11 +87,16 @@ class DaemonHttpIngestHandler:
                 error=str(exc),
             )
             raise
-        after = runtime._runners._data_snapshot()
-        trigger_context = runtime._runners._format_data_delta(before, after)
+        after = data_snapshot(runtime.db)
+        trigger_context = format_data_delta(runtime.db, before, after)
+        standout_workout_ids = changed_workout_ids(before, after)
         runtime._state["last_data_snapshot"] = after
         runtime._save_state()
-        runtime._runners._run_nudge("new_data", trigger_context=trigger_context)
+        runtime._runners._run_nudge(
+            "new_data",
+            trigger_context=trigger_context,
+            standout_workout_ids=standout_workout_ids,
+        )
 
     def sweep(self) -> None:
         """Queue every staged pair that is now due to import.

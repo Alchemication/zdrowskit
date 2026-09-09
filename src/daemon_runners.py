@@ -15,7 +15,6 @@ file-watching, and scheduling glue.
 from __future__ import annotations
 
 import logging
-import sqlite3
 import types
 from datetime import date, datetime
 from pathlib import Path
@@ -27,6 +26,7 @@ from config import (
     MAX_REPORT_ATTEMPTS_PER_DAY,
     MIN_NUDGE_INTERVAL_S,
 )
+from daemon_data import changed_workout_ids, data_snapshot
 from llm import is_transient_error_text
 
 if TYPE_CHECKING:
@@ -251,138 +251,6 @@ class DaemonRunnerHandler:
         self._d._save_state()
         return record["count"]
 
-    # ------------------------------------------------------------------
-    # Data snapshot helpers
-    # ------------------------------------------------------------------
-
-    def _data_snapshot(self) -> dict:
-        """Snapshot table-level markers used to compute import deltas.
-
-        Returns:
-            A dict with row counts and max-date markers for the daily,
-            workout_all, and sleep_all tables. Empty dict on failure.
-        """
-        try:
-            conn = sqlite3.connect(str(self._d.db))
-            cur = conn.cursor()
-            snap: dict = {}
-            for table, date_col in (
-                ("daily", "date"),
-                ("workout_all", "start_utc"),
-                ("sleep_all", "date"),
-            ):
-                try:
-                    row = cur.execute(
-                        f"SELECT COUNT(*), MAX({date_col}) FROM {table}"
-                    ).fetchone()
-                except sqlite3.Error:
-                    continue
-                snap[f"{table}_count"] = row[0] if row else 0
-                snap[f"{table}_max"] = row[1] if row else None
-            conn.close()
-            return snap
-        except sqlite3.Error as exc:
-            logger.warning("Data snapshot failed: %s", exc)
-            return {}
-
-    def _format_data_delta(self, before: dict, after: dict) -> str:
-        """Describe what records arrived between two data snapshots.
-
-        Args:
-            before: Snapshot taken before the import ran.
-            after: Snapshot taken after the import ran.
-
-        Returns:
-            Human-readable text the LLM can use to know what is actually new.
-            Falls back to a generic line when nothing identifiable changed.
-        """
-        if not after:
-            return "New health data synced (delta unavailable)."
-
-        lines: list[str] = []
-
-        # New workouts: rows with start_utc strictly greater than the prior max.
-        prev_workout_max = before.get("workout_all_max")
-        try:
-            conn = sqlite3.connect(str(self._d.db))
-            conn.row_factory = sqlite3.Row
-            if prev_workout_max:
-                rows = conn.execute(
-                    "SELECT start_utc, date, type, category, duration_min, "
-                    "gpx_distance_km FROM workout_all "
-                    "WHERE start_utc > ? ORDER BY start_utc",
-                    (prev_workout_max,),
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    "SELECT start_utc, date, type, category, duration_min, "
-                    "gpx_distance_km FROM workout_all "
-                    "ORDER BY start_utc DESC LIMIT 3"
-                ).fetchall()
-            for r in rows:
-                dur = r["duration_min"]
-                dur_s = f"{dur:.0f} min" if dur is not None else "?"
-                dist = r["gpx_distance_km"]
-                dist_s = f", {dist:.2f} km" if dist is not None else ""
-                lines.append(
-                    f"- New workout: {r['type']} ({r['category']}), "
-                    f"{dur_s}{dist_s} on {r['date']}"
-                )
-
-            # New sleep nights: rows with date strictly greater than prior max.
-            prev_sleep_max = before.get("sleep_all_max")
-            if prev_sleep_max:
-                rows = conn.execute(
-                    "SELECT date, sleep_total_h, sleep_efficiency_pct "
-                    "FROM sleep_all WHERE date > ? ORDER BY date",
-                    (prev_sleep_max,),
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    "SELECT date, sleep_total_h, sleep_efficiency_pct "
-                    "FROM sleep_all ORDER BY date DESC LIMIT 2"
-                ).fetchall()
-            for r in rows:
-                h = r["sleep_total_h"]
-                eff = r["sleep_efficiency_pct"]
-                h_s = f"{h:.1f}h" if h is not None else "?h"
-                eff_s = f", {eff:.0f}% efficiency" if eff is not None else ""
-                lines.append(f"- New sleep night: {r['date']} — {h_s}{eff_s}")
-
-            # New daily metric rows for dates beyond the previous max.
-            prev_daily_max = before.get("daily_max")
-            if prev_daily_max:
-                rows = conn.execute(
-                    "SELECT date, steps, hrv_ms, resting_hr FROM daily "
-                    "WHERE date > ? ORDER BY date",
-                    (prev_daily_max,),
-                ).fetchall()
-                for r in rows:
-                    parts = []
-                    if r["steps"] is not None:
-                        parts.append(f"steps {r['steps']}")
-                    if r["hrv_ms"] is not None:
-                        parts.append(f"HRV {r['hrv_ms']:.0f} ms")
-                    if r["resting_hr"] is not None:
-                        parts.append(f"RHR {r['resting_hr']:.0f} bpm")
-                    detail = ", ".join(parts) if parts else "(no metrics yet)"
-                    lines.append(f"- New daily row: {r['date']} — {detail}")
-            conn.close()
-        except sqlite3.Error as exc:
-            logger.warning("Delta query failed: %s", exc)
-            return "New health data synced (delta query failed)."
-
-        if not lines:
-            # No new identifiable rows — most likely an in-place refresh
-            # of today's metrics (e.g. a late HRV reading landing).
-            return (
-                "Health data refreshed but no new completed activities or sleep "
-                "nights since the previous sync. Today's metrics may have "
-                "updated in place."
-            )
-
-        return "Records added in this import:\n" + "\n".join(lines)
-
     def _format_context_trigger(self, stem: str, trigger: str) -> str:
         """Describe a context-file edit so the LLM knows where to look.
 
@@ -467,7 +335,7 @@ class DaemonRunnerHandler:
             ),
         )
         with self._d._import_lock:
-            before = self._data_snapshot()
+            before = data_snapshot(self._d.db)
             try:
                 log_import = logger.debug if skip_if_drive_unchanged else logger.info
                 log_import(
@@ -485,12 +353,12 @@ class DaemonRunnerHandler:
                 return None
             if result.import_skipped:
                 return result
-            after = self._data_snapshot()
+            after = data_snapshot(self._d.db)
         changed = any(
             before.get(k) != after.get(k)
             for k in after
             if k.endswith("_count") or k.endswith("_max")
-        )
+        ) or bool(changed_workout_ids(before, after))
         if changed:
             delta = {
                 "daily_added": max(
@@ -706,6 +574,7 @@ class DaemonRunnerHandler:
         trigger: str,
         *,
         trigger_context: str | None = None,
+        standout_workout_ids: set[str] | None = None,
         _from_drain: bool = False,
     ) -> None:
         """Run a nudge and send via Telegram.
@@ -719,6 +588,8 @@ class DaemonRunnerHandler:
                 the trigger refers to (e.g. which records were imported,
                 which file was edited). When None, a generic placeholder is
                 used.
+            standout_workout_ids: Imported workouts inserted or changed by the
+                triggering sync. Standout detection is limited to these IDs.
             _from_drain: Internal flag — True when called from the deferred
                 queue drain path.
         """
@@ -748,7 +619,12 @@ class DaemonRunnerHandler:
                     {"trigger": trigger, "until": decision.get("until")},
                 )
                 return
-            self._d._queue_nudge_trigger(trigger, now=now)
+            self._d._queue_nudge_trigger(
+                trigger,
+                now=now,
+                trigger_context=trigger_context,
+                standout_workout_ids=standout_workout_ids,
+            )
             queue_size = len(self._d._state.get("quiet_queue", []))
             logger.info(
                 "Nudge deferred until %s (trigger: %s, queue size: %d)",
@@ -795,6 +671,7 @@ class DaemonRunnerHandler:
             last_coach_summary=self._d._state.get("last_coach_summary", ""),
             last_coach_summary_date=self._d._state.get("last_coach_summary_date", ""),
             trigger_context=trigger_context or "",
+            standout_workout_ids=sorted(standout_workout_ids or set()),
         )
         with _capture_last_error() as cap:
             try:
@@ -868,16 +745,28 @@ class DaemonRunnerHandler:
         # Compose a consolidated trigger_context from every queued event so
         # the nudge has the full picture of what accumulated during quiet hours.
         parts = [
-            f"- {e['trigger']} at {e['ts'][:16]}" for e in queue if e.get("trigger")
+            f"- {e['trigger']} at {e.get('ts', '')[:16]}"
+            + (f": {e['trigger_context']}" if e.get("trigger_context") else "")
+            for e in queue
+            if e.get("trigger")
         ]
         trigger_context = (
             "Multiple triggers accumulated during quiet hours; choosing the "
             "highest-priority one to drive the message:\n" + "\n".join(parts)
             if len(queue) > 1
-            else None
+            else str(queue[0].get("trigger_context") or "") or None
         )
+        standout_workout_ids = {
+            str(workout_id)
+            for entry in queue
+            if entry.get("trigger") == "new_data"
+            for workout_id in entry.get("standout_workout_ids", [])
+        }
         self._d._run_nudge(
-            best["trigger"], trigger_context=trigger_context, _from_drain=True
+            best["trigger"],
+            trigger_context=trigger_context,
+            standout_workout_ids=standout_workout_ids,
+            _from_drain=True,
         )
 
     # ------------------------------------------------------------------

@@ -24,7 +24,7 @@ from cmd_llm_common import (
 from cmd_llm_log import cmd_llm_log
 from cmd_notify_interpreter import interpret_notify_request
 from cmd_nudge import cmd_nudge
-from standouts import Standout
+from standouts import Standout, pending_keys
 from config import TELEGRAM_MESSAGE_EFFECTS
 import commands as commands_module
 from commands import (
@@ -78,6 +78,7 @@ _STANDOUT = Standout(
     population=1115,
     span_days=2805,
     margin_pct=10.4,
+    source_workout_ids=("fresh-workout",),
 )
 
 
@@ -1665,6 +1666,7 @@ class TestCmdNudge:
             months=1,
             trigger="new_data",
             telegram=False,
+            standout_workout_ids=["fresh-workout"],
         )
         result = LLMResult(
             text="That pace off a normal week says the base is holding.",
@@ -1718,6 +1720,7 @@ class TestCmdNudge:
             months=1,
             trigger="new_data",
             telegram=False,
+            standout_workout_ids=["fresh-workout"],
         )
         result = LLMResult(
             text="That distance says the base is there. Keep tomorrow easy.",
@@ -1857,6 +1860,7 @@ class TestCmdNudge:
             months=1,
             trigger="new_data",
             telegram=False,
+            standout_workout_ids=["fresh-workout"],
         )
         result = LLMResult(
             text="Keep tomorrow easy.",
@@ -1882,6 +1886,46 @@ class TestCmdNudge:
             cmd_nudge(args)
 
         detect.assert_called_once()
+        assert detect.call_args.kwargs["eligible_workout_ids"] == {"fresh-workout"}
+
+    def test_deferred_import_still_checks_when_a_context_trigger_wins(
+        self,
+        in_memory_db,
+        capsys,
+    ) -> None:
+        args = SimpleNamespace(
+            db="ignored.db",
+            model=None,
+            months=1,
+            trigger="log_update",
+            telegram=False,
+            standout_workout_ids=["fresh-workout"],
+        )
+        result = LLMResult(
+            text="Keep tomorrow easy.",
+            model="test-model",
+            input_tokens=1,
+            output_tokens=4,
+            total_tokens=5,
+            latency_s=0.1,
+            llm_call_id=41,
+        )
+
+        with (
+            patch("cmd_nudge.load_context", return_value={"prompt": "x", "soul": "y"}),
+            patch("cmd_nudge.open_db", return_value=in_memory_db),
+            patch("cmd_nudge.build_llm_data", return_value=_NUDGE_LLM_DATA),
+            patch("cmd_nudge.build_messages", return_value=_NUDGE_MESSAGES),
+            patch("cmd_nudge.call_llm", return_value=result),
+            patch("cmd_nudge._save_nudge"),
+            patch("cmd_nudge.find_standout", return_value=None) as detect,
+            patch("cmd_nudge.weekly_progress_nudge_line", return_value=None),
+            patch("cmd_nudge.send_telegram", return_value=123),
+        ):
+            cmd_nudge(args)
+
+        detect.assert_called_once()
+        assert detect.call_args.kwargs["eligible_workout_ids"] == {"fresh-workout"}
 
     def test_a_standout_carries_a_message_effect(
         self,
@@ -1895,6 +1939,7 @@ class TestCmdNudge:
             months=1,
             trigger="new_data",
             telegram=True,
+            standout_workout_ids=["fresh-workout"],
         )
         result = LLMResult(
             text="Keep tomorrow easy.",
@@ -1975,6 +2020,7 @@ class TestCmdNudge:
             months=1,
             trigger="new_data",
             telegram=False,
+            standout_workout_ids=["fresh-workout"],
         )
         result = LLMResult(
             text="SKIP",
@@ -2053,6 +2099,7 @@ class TestCmdNudge:
             months=1,
             trigger="new_data",
             telegram=True,
+            standout_workout_ids=["fresh-workout"],
         )
         result = LLMResult(
             text="Keep tomorrow easy.",
@@ -2078,6 +2125,7 @@ class TestCmdNudge:
             cmd_nudge(args)
 
         recorded.assert_not_called()
+        assert pending_keys(in_memory_db) == set()
 
     def test_the_writer_is_told_what_the_standout_says(
         self,
@@ -2091,6 +2139,7 @@ class TestCmdNudge:
             months=1,
             trigger="new_data",
             telegram=False,
+            standout_workout_ids=["fresh-workout"],
         )
         result = LLMResult(
             text="Keep tomorrow easy.",

@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from daemon_data import changed_workout_ids, data_snapshot, format_data_delta
+
 if TYPE_CHECKING:
     from daemon import ProfileRuntime
 
@@ -33,13 +35,13 @@ class GoogleDrivePollHandler:
         """
         try:
             with self._d._import_lock:
-                before = self._d._runners._data_snapshot()
+                before = data_snapshot(self._d.db)
                 result = self._d._runners._run_import(
                     skip_if_drive_unchanged=not force_import,
                     record_no_changes=False,
                     record_failure=not self._failure_event_recorded,
                 )
-                after = self._d._runners._data_snapshot()
+                after = data_snapshot(self._d.db)
         except Exception as exc:
             logger.exception("Google Drive poll failed: %s", exc)
             if not self._failure_event_recorded:
@@ -76,11 +78,16 @@ class GoogleDrivePollHandler:
         if result.parsed_days == 0:
             return True
 
-        trigger_context = self._d._runners._format_data_delta(before, after)
+        trigger_context = format_data_delta(self._d.db, before, after)
+        standout_workout_ids = changed_workout_ids(before, after)
         self._d._state["last_data_snapshot"] = after
 
         self._d._save_state()
-        self._d._runners._run_nudge("new_data", trigger_context=trigger_context)
+        self._d._runners._run_nudge(
+            "new_data",
+            trigger_context=trigger_context,
+            standout_workout_ids=standout_workout_ids,
+        )
         return True
 
     def run(self) -> None:

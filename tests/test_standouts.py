@@ -27,7 +27,10 @@ from standouts import (
     find_standout,
     last_announced_at,
     parse_standout_response,
+    pending_keys,
     record_standout_announced,
+    release_standout_delivery,
+    reserve_standout_delivery,
 )
 
 TODAY = date(2026, 9, 9)
@@ -172,7 +175,7 @@ class TestParseStandoutResponse:
 
 
 class TestLedger:
-    """Once-ever announcement plus the global cooldown, from one table."""
+    """Once-ever announcement plus the global cooldown and reservation."""
 
     def _standout(self, key: str = "distance_run|2026-09-08|21.2") -> Standout:
         return Standout(
@@ -191,13 +194,47 @@ class TestLedger:
         assert last_announced_at(in_memory_db) is None
         assert cooldown_remaining_days(in_memory_db) == 0
         assert announced_keys(in_memory_db) == set()
+        assert pending_keys(in_memory_db) == set()
+
+    def test_reservation_suppresses_before_delivery(
+        self, in_memory_db: sqlite3.Connection
+    ) -> None:
+        now = datetime(2026, 9, 9, tzinfo=timezone.utc)
+        assert reserve_standout_delivery(in_memory_db, self._standout(), now=now)
+        assert pending_keys(in_memory_db) == {"distance_run|2026-09-08|21.2"}
+        assert announced_keys(in_memory_db) == set()
+        assert cooldown_remaining_days(in_memory_db, now=now) == STANDOUT_COOLDOWN_DAYS
+        assert not reserve_standout_delivery(in_memory_db, self._standout(), now=now)
+
+    def test_reservation_atomically_enforces_the_global_cooldown(
+        self, in_memory_db: sqlite3.Connection
+    ) -> None:
+        now = datetime(2026, 9, 9, tzinfo=timezone.utc)
+        assert reserve_standout_delivery(in_memory_db, self._standout("first"), now=now)
+        assert not reserve_standout_delivery(
+            in_memory_db,
+            self._standout("different-achievement"),
+            now=now,
+        )
+        assert pending_keys(in_memory_db) == {"first"}
+
+    def test_failed_delivery_releases_the_reservation(
+        self, in_memory_db: sqlite3.Connection
+    ) -> None:
+        standout = self._standout()
+        assert reserve_standout_delivery(in_memory_db, standout)
+        release_standout_delivery(in_memory_db, standout)
+        assert pending_keys(in_memory_db) == set()
+        assert cooldown_remaining_days(in_memory_db) == 0
 
     def test_recording_starts_the_cooldown(
         self, in_memory_db: sqlite3.Connection
     ) -> None:
         now = datetime(2026, 9, 9, tzinfo=timezone.utc)
+        reserve_standout_delivery(in_memory_db, self._standout(), now=now)
         record_standout_announced(in_memory_db, self._standout(), now=now)
         assert announced_keys(in_memory_db) == {"distance_run|2026-09-08|21.2"}
+        assert pending_keys(in_memory_db) == set()
         assert cooldown_remaining_days(in_memory_db, now=now) == STANDOUT_COOLDOWN_DAYS
 
     def test_cooldown_expires_exactly_once_the_window_passes(
@@ -254,7 +291,7 @@ class TestCandidateGates:
         self, in_memory_db: sqlite3.Connection
     ) -> None:
         _fill_runs(in_memory_db, count=STANDOUT_MIN_POPULATION + 5, pace=6.0)
-        _add_workout(
+        record_id = _add_workout(
             in_memory_db,
             day=TODAY,
             category="run",
@@ -264,6 +301,38 @@ class TestCandidateGates:
         kinds = {item.kind for item in find_candidates(in_memory_db, today=TODAY)}
         assert "distance_run" in kinds
         assert "pace_window_5" in kinds
+        filtered = find_candidates(
+            in_memory_db,
+            today=TODAY,
+            eligible_workout_ids={record_id},
+        )
+        assert {item.kind for item in filtered} >= {"distance_run", "pace_window_5"}
+
+    def test_an_unrelated_arriving_workout_cannot_surface_a_recent_record(
+        self, in_memory_db: sqlite3.Connection
+    ) -> None:
+        _fill_runs(in_memory_db, count=STANDOUT_MIN_POPULATION + 5, pace=6.0)
+        _add_workout(
+            in_memory_db,
+            day=TODAY,
+            category="run",
+            distance_km=21.0,
+            splits=[5.0] * 10,
+        )
+        unrelated_id = _add_workout(
+            in_memory_db,
+            day=TODAY,
+            category="walk",
+            distance_km=2.0,
+        )
+        assert (
+            find_candidates(
+                in_memory_db,
+                today=TODAY,
+                eligible_workout_ids={unrelated_id},
+            )
+            == []
+        )
 
     def test_the_same_record_set_long_ago_is_not_news(
         self, in_memory_db: sqlite3.Connection
@@ -434,34 +503,39 @@ class TestLedgerFailsClosed:
         # It gave up before generating candidates, so no model call is possible.
         assert called == []
 
-    def test_a_read_only_ledger_still_suppresses(
-        self, in_memory_db: sqlite3.Connection, monkeypatch
+    def test_an_unreadable_pending_ledger_still_suppresses(
+        self, in_memory_db: sqlite3.Connection
     ) -> None:
-        def _boom(*args, **kwargs):
-            raise sqlite3.OperationalError("database is locked")
-
-        monkeypatch.setattr("standouts.last_announced_at", _boom)
+        in_memory_db.execute("DROP TABLE standout_delivery_pending")
         assert (
             find_standout(in_memory_db, me=None, log=None, history=None, today=TODAY)
             is None
         )
 
-    def test_a_failed_write_does_not_raise_into_the_nudge(
+    def test_a_failed_finalize_keeps_the_reservation(
         self, in_memory_db: sqlite3.Connection
     ) -> None:
-        # The message has already gone out by then; the caller cannot act on it.
-        in_memory_db.execute("DROP TABLE standout_announced")
-        record_standout_announced(
-            in_memory_db,
-            Standout(
-                key="k",
-                kind="distance_run",
-                headline="h",
-                occurred_on="2026-09-08",
-                population=400,
-                span_days=900,
-            ),
+        standout = Standout(
+            key="k",
+            kind="distance_run",
+            headline="h",
+            occurred_on="2026-09-08",
+            population=400,
+            span_days=900,
         )
+        assert reserve_standout_delivery(in_memory_db, standout)
+        in_memory_db.execute(
+            """
+            CREATE TRIGGER fail_standout_finalize
+            BEFORE INSERT ON standout_announced
+            BEGIN
+                SELECT RAISE(FAIL, 'simulated ledger write failure');
+            END
+            """
+        )
+        record_standout_announced(in_memory_db, standout)
+        assert pending_keys(in_memory_db) == {"k"}
+        assert cooldown_remaining_days(in_memory_db) > 0
 
 
 class TestSpanGate:

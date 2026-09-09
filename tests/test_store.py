@@ -835,7 +835,7 @@ class TestMigrations:
 
         applied = apply_migrations(conn)
 
-        assert len(applied) == 21
+        assert len(applied) == 22
         statuses = list_migrations(conn)
         assert all(status.status == "applied" for status in statuses)
         schema = get_live_schema(conn)
@@ -848,6 +848,7 @@ class TestMigrations:
         assert "CREATE TABLE events" in schema
         assert "CREATE TABLE workout_split" in schema
         assert "CREATE TABLE llm_trace" in schema
+        assert "CREATE TABLE standout_delivery_pending" in schema
         assert "CREATE TABLE location" in schema
         assert "CREATE TABLE location_point_cache" in schema
         assert "CREATE TABLE location_point_failed" in schema

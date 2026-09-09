@@ -65,7 +65,7 @@ class TestDrivePolling:
 
         with (
             patch("commands.cmd_import", return_value=expected) as cmd_import,
-            patch.object(daemon._runners, "_data_snapshot", return_value={}),
+            patch("daemon_runners.data_snapshot", return_value={}),
         ):
             result = daemon._runners._run_import(
                 skip_if_drive_unchanged=True,
@@ -92,17 +92,12 @@ class TestDrivePolling:
         after = {"daily_count": 11, "daily_max": "2026-07-19"}
 
         with (
-            patch.object(
-                daemon._runners, "_data_snapshot", side_effect=[before, after]
-            ),
+            patch("daemon_drive.data_snapshot", side_effect=[before, after]),
             patch.object(
                 daemon._runners, "_run_import", return_value=result
             ) as run_import,
-            patch.object(
-                daemon._runners,
-                "_format_data_delta",
-                return_value="1 new day",
-            ),
+            patch("daemon_drive.format_data_delta", return_value="1 new day"),
+            patch("daemon_drive.changed_workout_ids", return_value={"workout-1"}),
             patch.object(daemon._runners, "_run_nudge") as run_nudge,
             patch.object(daemon, "_record_event") as record_event,
         ):
@@ -114,7 +109,11 @@ class TestDrivePolling:
             record_no_changes=False,
             record_failure=True,
         )
-        run_nudge.assert_called_once_with("new_data", trigger_context="1 new day")
+        run_nudge.assert_called_once_with(
+            "new_data",
+            trigger_context="1 new day",
+            standout_workout_ids={"workout-1"},
+        )
         assert record_event.call_args.args[:3] == (
             "import",
             "drive_update",
@@ -133,7 +132,7 @@ class TestDrivePolling:
         )
 
         with (
-            patch.object(daemon._runners, "_data_snapshot", return_value={}),
+            patch("daemon_drive.data_snapshot", return_value={}),
             patch.object(daemon._runners, "_run_import", return_value=result),
             patch.object(daemon._runners, "_run_nudge") as run_nudge,
             patch.object(daemon, "_record_event") as record_event,
@@ -149,7 +148,8 @@ class TestDrivePolling:
 
         with (
             patch("commands.cmd_import", side_effect=SystemExit(1)),
-            patch.object(daemon._runners, "_data_snapshot", return_value={}),
+            patch("daemon_runners.data_snapshot", return_value={}),
+            patch("daemon_drive.data_snapshot", return_value={}),
             patch.object(daemon, "_record_event") as record_event,
         ):
             assert daemon._poll_google_drive_once(force_import=True) is False
@@ -179,7 +179,8 @@ class TestDrivePolling:
                 "commands.cmd_import",
                 side_effect=[SystemExit(1), current, SystemExit(1)],
             ),
-            patch.object(daemon._runners, "_data_snapshot", return_value={}),
+            patch("daemon_drive.data_snapshot", return_value={}),
+            patch("daemon_runners.data_snapshot", return_value={}),
             patch.object(daemon, "_record_event") as record_event,
         ):
             assert daemon._poll_google_drive_once(force_import=True) is False

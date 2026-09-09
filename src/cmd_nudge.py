@@ -6,6 +6,7 @@ import argparse
 import json
 import logging
 import re
+import sqlite3
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -31,7 +32,13 @@ from llm_context import build_messages, load_context, load_prompt_text
 from llm_health import build_llm_data, format_recent_nudges, render_health_data
 from llm_verify import extract_tool_evidence, slim_source_messages
 from notify import send_telegram
-from standouts import effect_for, find_standout, record_standout_announced
+from standouts import (
+    effect_for,
+    find_standout,
+    record_standout_announced,
+    release_standout_delivery,
+    reserve_standout_delivery,
+)
 from store import create_llm_trace, open_db
 from plan_frame import resolve_plan_frame
 from weekly_progress import (
@@ -148,24 +155,39 @@ def cmd_nudge(
     # one rare thing worth interrupting for. The sentence itself is computed
     # and gated in `standouts`; nothing here lets a model phrase it.
     #
-    # Arriving data only. A record is news because it came in with this sync,
-    # and the recency window is wide enough to absorb an import landing a day
-    # or two late — but not wide enough to make it honest on a journal or
-    # strategy edit, where announcing a workout from two days ago is a non
-    # sequitur about something the person did not just do.
+    # Arriving workout data only. A record is news because the workout behind
+    # it was inserted or changed by this sync. A recency window alone is not
+    # enough: a sleep-only refresh must not surface a two-day-old record.
+    raw_standout_workout_ids = getattr(args, "standout_workout_ids", ())
+    eligible_workout_ids = {str(value) for value in raw_standout_workout_ids}
+    standout_triggered = bool(eligible_workout_ids)
     standout = (
         find_standout(
             conn,
             me=context.get("me"),
             log=context.get("log"),
             history=context.get("history"),
+            eligible_workout_ids=eligible_workout_ids,
             today=datetime.now().date(),
             trace_id=trace_id,
             model_prefs_path=getattr(args, "model_prefs_path", None),
         )
-        if _trigger == "new_data"
+        if standout_triggered
         else None
     )
+    if standout is not None:
+        try:
+            if not reserve_standout_delivery(conn, standout):
+                logger.info(
+                    "Standout %s was already reserved or announced", standout.key
+                )
+                standout = None
+        except sqlite3.Error as exc:
+            logger.error(
+                "Could not reserve standout delivery; continuing without it: %s",
+                exc,
+            )
+            standout = None
     context["standout"] = (
         standout.headline if standout else "(none — do not invent one)"
     )
@@ -216,6 +238,8 @@ def cmd_nudge(
                 },
             )
         except Exception as e:
+            if standout is not None:
+                release_standout_delivery(conn, standout)
             err_name = type(e).__name__
             if "authentication" in err_name.lower() or "auth" in str(e).lower():
                 logger.error(
@@ -297,6 +321,8 @@ def cmd_nudge(
                 },
             )
         except Exception as e:
+            if standout is not None:
+                release_standout_delivery(conn, standout)
             logger.error("Nudge final synthesis call failed: %s", e)
             sys.exit(1)
 
@@ -491,9 +517,9 @@ def cmd_nudge(
             message_effect_id=(effect_for(standout) if standout is not None else None),
         )
 
-    # Only now is the line something the person has actually seen. Recording
-    # it at composition time would let a failed send suppress it from the next
-    # nudge on the strength of a message that never arrived.
+    # The reservation was written before composition so a successful send can
+    # never race or fail its way into a duplicate. A definite send failure
+    # releases it; successful delivery moves it atomically into the ledger.
     delivered = telegram_message_id is not None or not use_telegram
     if progress_fingerprint and delivered:
         record_progress_line_shown(conn, progress_fingerprint, progress or "")
@@ -501,6 +527,8 @@ def cmd_nudge(
     # the next four weeks on the strength of nothing.
     if standout is not None and delivered:
         record_standout_announced(conn, standout)
+    elif standout is not None:
+        release_standout_delivery(conn, standout)
 
     return CommandResult(
         text=nudge_text,

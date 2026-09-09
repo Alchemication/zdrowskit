@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from commands import ImportResult
 from daemon_http import DaemonHttpIngestHandler
@@ -62,11 +62,6 @@ class TestDaemonHttpIngestHandler:
         runtime = MagicMock()
         runtime.name = "adam"
         runtime._state = {}
-        runtime._runners._data_snapshot.side_effect = [
-            {"daily_count": 1},
-            {"daily_count": 2},
-        ]
-        runtime._runners._format_data_delta.return_value = "one new day"
         runtime._runners._run_import.return_value = ImportResult(
             source="http",
             drive_files_downloaded=0,
@@ -82,18 +77,28 @@ class TestDaemonHttpIngestHandler:
         handler = DaemonHttpIngestHandler(daemon, {"adam": profile})
         assert handler._manager is not None
 
-        for kind in ("metrics", "workouts"):
-            body = _payload(kind)
-            handler._manager.accept(
-                "adam",
-                validate_upload(_headers(kind), body),
-                body,
-            )
+        with (
+            patch(
+                "daemon_http.data_snapshot",
+                side_effect=[{"daily_count": 1}, {"daily_count": 2}],
+            ),
+            patch("daemon_http.format_data_delta", return_value="one new day"),
+            patch("daemon_http.changed_workout_ids", return_value={"workout-1"}),
+        ):
+            for kind in ("metrics", "workouts"):
+                body = _payload(kind)
+                handler._manager.accept(
+                    "adam",
+                    validate_upload(_headers(kind), body),
+                    body,
+                )
 
         runtime._runners._run_import.assert_called_once()
         generation = runtime._runners._run_import.call_args.kwargs["data_dir"]
         assert generation.exists() is False
         runtime._runners._run_nudge.assert_called_once_with(
-            "new_data", trigger_context="one new day"
+            "new_data",
+            trigger_context="one new day",
+            standout_workout_ids={"workout-1"},
         )
         assert handler._manager.due_pairs() == []

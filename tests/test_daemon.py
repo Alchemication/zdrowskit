@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import daemon as daemon_module
+from daemon_data import changed_workout_ids
 import notification_prefs as notification_prefs_module
 import daemon_runners as daemon_runners_module
 from config import MAX_REPORT_ATTEMPTS_PER_DAY
@@ -293,10 +294,10 @@ class TestWeeklyReportScheduling:
         daemon._health_debounce_count = 3
 
         with (
-            patch.object(daemon._runners, "_data_snapshot", side_effect=[{}, {}]),
+            patch.object(daemon_module, "data_snapshot", side_effect=[{}, {}]),
             patch.object(daemon._runners, "_run_import"),
             patch.object(
-                daemon._runners, "_format_data_delta", return_value="No new rows"
+                daemon_module, "format_data_delta", return_value="No new rows"
             ),
             patch.object(daemon._runners, "_run_nudge"),
         ):
@@ -321,12 +322,68 @@ class TestWeeklyReportScheduling:
             patch.object(daemon_runners_module, "datetime", fake_datetime),
             patch("cmd_nudge.cmd_nudge") as cmd_nudge,
         ):
-            daemon._run_nudge("new_data")
+            daemon._run_nudge(
+                "new_data",
+                trigger_context="new run",
+                standout_workout_ids={"workout-1"},
+            )
 
         assert daemon._state["quiet_queue"][0]["trigger"] == "new_data"
+        assert daemon._state["quiet_queue"][0]["trigger_context"] == "new run"
+        assert daemon._state["quiet_queue"][0]["standout_workout_ids"] == ["workout-1"]
         cmd_nudge.assert_not_called()
         state = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
         assert state["quiet_queue"][0]["trigger"] == "new_data"
+
+    def test_changed_workout_ids_excludes_unchanged_and_deleted_rows(
+        self,
+    ) -> None:
+        before = {
+            "recent_workouts": {
+                "unchanged": ["2026-09-09", "run", 40.0, 6.0, []],
+                "updated": ["2026-09-09", "run", 40.0, 6.0, []],
+                "deleted": ["2026-09-09", "walk", 20.0, 2.0, []],
+            }
+        }
+        after = {
+            "recent_workouts": {
+                "unchanged": ["2026-09-09", "run", 40.0, 6.0, []],
+                "updated": ["2026-09-09", "run", 42.0, 6.0, []],
+                "inserted": ["2026-09-09", "lift", 50.0, None, []],
+            }
+        }
+
+        assert changed_workout_ids(before, after) == {
+            "updated",
+            "inserted",
+        }
+
+    def test_quiet_queue_preserves_import_workouts_for_standouts(
+        self, tmp_path: Path
+    ) -> None:
+        daemon = _make_daemon(tmp_path)
+        daemon._state["quiet_queue"] = [
+            {
+                "trigger": "new_data",
+                "ts": "2026-09-09T09:00:00+00:00",
+                "trigger_context": "new run",
+                "standout_workout_ids": ["workout-1"],
+            },
+            {
+                "trigger": "log_update",
+                "ts": "2026-09-09T09:05:00+00:00",
+                "trigger_context": "journal edit",
+                "standout_workout_ids": [],
+            },
+        ]
+
+        with patch.object(daemon, "_run_nudge") as run_nudge:
+            daemon._runners._drain_quiet_queue()
+
+        run_nudge.assert_called_once()
+        assert run_nudge.call_args.args == ("log_update",)
+        assert run_nudge.call_args.kwargs["standout_workout_ids"] == {"workout-1"}
+        assert "new run" in run_nudge.call_args.kwargs["trigger_context"]
 
     def test_disabled_nudges_skip_without_queueing(self, tmp_path: Path) -> None:
         daemon = _make_daemon(tmp_path)

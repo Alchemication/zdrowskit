@@ -10,7 +10,7 @@ do not call an LLM.
 | **Memory** | Decides what carries forward from an insights report | After every scheduled or manual insights report | Same as insights | A couple of bullets | none | Extracted bullets stored under the week in `history.md`; never sent to the user |
 | **Coach** | Strategy review, only when proposals exist | After scheduled insights, or manual `/coach` | Weekly when scheduled; manual on demand | A few paragraphs | `run_sql`, `update_context` for `strategy` only | `SKIP` if no changes warranted; bundled message with inline Accept/Reject buttons per edit |
 | **Nudge** | Short reactive next-action nudge | Data sync, file edit | Up to 2/day by default | One or two sentences | `run_sql` | `SKIP` if nothing changes; text only, no chart |
-| **Standout picker** | Chooses whether a rare fact about your own history is worth interrupting for | A nudge, only when the deterministic pass found a candidate | At most one announcement per `STANDOUT_COOLDOWN_DAYS` | None — picks a key, writes nothing | none | Declines by default; the sentence it picks was computed, not written |
+| **Standout picker** | Checks a qualified rare fact against explicit recording contradictions in your journal | A data-sync nudge, only when the triggering import changed a qualifying workout | At most one announcement per `STANDOUT_COOLDOWN_DAYS` | None — picks a key, writes nothing | none | Normally picks; the sentence was computed, not written |
 | **Targets** | Turns the prose goals in `strategy.md` into countable weekly targets | First notification of a new week, or an edit to the goal sections | Cached per week and goal text, including empty results | None — stored, not sent | none | Strict JSON against a closed metric vocabulary; drives the progress strip |
 | **Plan frame** | Decides how much of the progress strip this person's current life warrants | First notification after the journal changes, or when the last decision ages out | Cached until context changes or the decision expires | None — stored, not sent | none | Never shown the measurements, so it cannot hide an unflattering bar |
 | **Quiet-week check-in** | Asks what is going on when a week runs far below this person's own normal | Friday, deterministic detection | At most 1/week, and stops after two silences | One question plus four buttons | none | Answer is written to `log.md`, where the plan frame reads it |
@@ -168,17 +168,17 @@ anything not on the list is treated as declining.
 Every numeric bar is applied before the call, and the prompt says so, because a
 threshold enforced in prose is a threshold that varies between one run and the
 next. What the call gets instead is you: your profile and your recent journal.
-Its remaining job is the one no threshold can encode, which is whether
-announcing a true and qualified record is the right thing to do today. Somebody
-who has just written that they tore a calf on the run that set the record does
-not want to be congratulated for it. That is a narrow gate needing something
-actually written, not an inference about how the week looks.
+Its remaining job is the one no threshold can encode: interpreting an explicit
+candidate-specific contradiction in the journal. If the watch stayed on during
+the bus ride home, the database can truthfully rank the recorded distance while
+the resulting walking claim is still misleading. Health, fatigue and life
+circumstances are handled by the earlier plan-frame gate, not reconsidered here.
 
 ### What has to be true before anything is claimed
 
 | Gate | Why |
 |---|---|
-| The nudge is a data sync | A record is news because it arrived with this sync. On a journal edit it is a non sequitur about something you did not just do |
+| The triggering import inserted or changed the workout behind the fact | A record is news because it arrived with this sync. A sleep-only refresh or unrelated workout must not surface an older candidate |
 | A minimum comparison population, counted per activity | On a short history, "best recorded" mostly restates how little was recorded |
 | A minimum span of recorded history | Thirty sessions inside four months clears a count and still says nothing. "Ever" has to mean something |
 | Dated within the last few days | A record noticed five weeks late reads as the system noticing late |
@@ -208,15 +208,18 @@ needs the population, span and recency gates alone.
 
 Once several kinds of record are computed, something is true most weeks, and a
 trophy arriving most weeks is worth nothing. So at most one standout is
-announced per `STANDOUT_COOLDOWN_DAYS`, across every kind, and the picker is
-told that declining is the normal outcome. Firing nothing for six weeks is a
-correct result rather than a fault.
+announced per `STANDOUT_COOLDOWN_DAYS`, across every kind. Candidates have
+already spent that scarcity budget to reach the picker, so it normally selects
+one and declines only for an explicit contradiction in the journal. Firing
+nothing for six weeks remains a correct result: usually no candidate qualifies.
 
 Two suppressions run together. Each achievement is announced once ever, so the
 same record re-derived on the next sync stops at its own ledger entry. On top
-of that sits the global cooldown. Both are recorded only after Telegram
-confirms delivery, so a failed send cannot spend a month of budget on a message
-nobody read.
+of that sits the global cooldown. A durable delivery reservation is written
+before Telegram is called. A definite send failure releases it; successful
+delivery moves it into the announcement ledger. If finalization fails after
+Telegram accepts the message, the reservation remains suppressed instead of
+allowing a duplicate.
 
 ### The writer and the verifier both know about it
 

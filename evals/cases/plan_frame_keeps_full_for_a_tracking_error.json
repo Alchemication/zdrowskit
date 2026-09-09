@@ -1,0 +1,26 @@
+{
+  "id": "plan_frame_keeps_full_for_a_tracking_error",
+  "feature": "plan_frame",
+  "case_kind": "synthetic_negative",
+  "source_feedback_id": null,
+  "source_llm_call_id": 1894,
+  "derived_from": {
+    "llm_call_id": 1894,
+    "hypothesis": "The standout picker can only catch a candidate-specific recording contradiction if production's earlier plan-frame gate remains full. A watch left running on a bus is neither an acute health concern nor a life circumstance that displaces training, so reducing the frame here would make the paired standout restraint case unreachable."
+  },
+  "intent": "A tracking error affects one recorded candidate; it does not make progress framing inappropriate for the person's week.",
+  "fixture": {
+    "today": "2026-09-09",
+    "me": "38, works full time, two young kids. Runs three times a week and lifts twice when the week allows. Training for a half marathon in the spring.",
+    "log": "# Weekly Log\n\n- 2026-09-08 — walked 8.8 km along the coast, then got the bus home. Forgot to stop the watch until I got off, so Health says 23.2 km but the last 14.4 km was the bus, not walking.\n",
+    "history": "## 2026-W36\n\n- Ordinary training week; no broader circumstances changed the plan."
+  },
+  "assertions": [
+    {
+      "type": "plan_frame_mode",
+      "name": "leaves_the_standout_picker_reachable",
+      "allowed": ["full"]
+    }
+  ],
+  "notes": "Reachability control for standout_declines_when_the_journal_says_not_to. The two cases use the same profile and journal: this one pins the earlier production gate, while the standout case pins the later candidate-specific interpretation.\n"
+}

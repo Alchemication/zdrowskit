@@ -57,6 +57,7 @@ from daemon_notify_flow import (  # noqa: F401
     PendingNotifyClarification,
     PendingNotifyProposal,
 )
+from daemon_data import changed_workout_ids, data_snapshot, format_data_delta
 from llm_verify import (
     VerificationSuppression,
     register_suppression_listener,
@@ -767,12 +768,24 @@ class ProfileRuntime:
         save_notification_prefs(prefs, path=self._notification_prefs_path)
 
     def _queue_nudge_trigger(
-        self, trigger: str, *, now: datetime | None = None
+        self,
+        trigger: str,
+        *,
+        now: datetime | None = None,
+        trigger_context: str | None = None,
+        standout_workout_ids: set[str] | None = None,
     ) -> None:
         """Append a nudge trigger to the deferred queue."""
         now = now or datetime.now().astimezone()
         queue: list[dict] = self._state.get("quiet_queue", [])
-        queue.append({"trigger": trigger, "ts": now.isoformat()})
+        queue.append(
+            {
+                "trigger": trigger,
+                "ts": now.isoformat(),
+                "trigger_context": trigger_context or "",
+                "standout_workout_ids": sorted(standout_workout_ids or set()),
+            }
+        )
         self._state["quiet_queue"] = queue[-10:]
         self._save_state()
 
@@ -844,15 +857,20 @@ class ProfileRuntime:
             {"debounce_s": HEALTH_DEBOUNCE_S, "file_events": file_events},
         )
         with self._import_lock:
-            before = self._runners._data_snapshot()
+            before = data_snapshot(self.db)
             result = self._runners._run_import()
-            after = self._runners._data_snapshot()
+            after = data_snapshot(self.db)
         if result is None:
             return
-        trigger_context = self._runners._format_data_delta(before, after)
+        trigger_context = format_data_delta(self.db, before, after)
+        standout_workout_ids = changed_workout_ids(before, after)
         self._state["last_data_snapshot"] = after
         self._save_state()
-        self._runners._run_nudge("new_data", trigger_context=trigger_context)
+        self._runners._run_nudge(
+            "new_data",
+            trigger_context=trigger_context,
+            standout_workout_ids=standout_workout_ids,
+        )
 
     def _fire_context(self, stem: str) -> None:
         """Handle a context file change trigger.
