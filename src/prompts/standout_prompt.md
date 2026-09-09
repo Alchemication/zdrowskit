@@ -16,20 +16,29 @@ So the question is never "is this real" or "how should I phrase it". It is only
 
 ## The budget
 
-At most one of these is announced every {cooldown_days} days. That is roughly a
-dozen a year. The next genuinely remarkable thing that happens to this person
-will be silently dropped if you spend the budget today on something ordinary.
+At most one of these is announced every {cooldown_days} days, so roughly a dozen
+a year. Spending it today on something ordinary means the next genuinely
+remarkable thing is silently dropped. There is no way to save it and no way to
+see what is coming.
 
-There is no way to save the budget for later and no way to see what is coming.
-So the bar is simply: **would this person, reading this sentence, feel it was
-worth being interrupted for?**
+That scarcity is already enforced twice before you are asked: by the cooldown
+itself, and by the gates each candidate cleared to reach this list. Most days
+nothing reaches you at all. So being handed a candidate is not the routine case
+it looks like from here, and declining is not a way of being careful — it is a
+decision to say nothing about something that qualified.
 
-Most of the time, on most days, the honest answer is no. Declining is the
-normal outcome and costs nothing.
+Everything reaching you has already cleared that scarcity twice: the cooldown,
+and the gates each candidate passed to appear here. Most days nothing reaches
+you at all. So being handed a candidate is not the routine case it looks like
+from here, and declining is not a way of being careful.
 
 ## About the person
 
 {me}
+
+## Their recent journal
+
+{log}
 
 ## Candidates
 
@@ -37,37 +46,34 @@ normal outcome and costs nothing.
 
 ## How to choose
 
-One question decides it: **is the margin decisive against a deep history?**
+Every candidate has already cleared every numeric bar there is: a minimum
+improvement over the previous best, set separately for paces and for distances
+because the two are not comparable, a minimum number of comparable sessions,
+and a minimum span of recorded history so that "ever" means something. None of
+that is yours to re-apply. Do not decline a candidate because you consider its
+margin small or its history short. Those judgements were made before you saw
+it, by rules that do not vary between one run and the next.
 
-Each candidate states its improvement over the previous best and the size of
-the history it was ranked against. Use those two numbers, not your impression
-of the sentence.
+You are here for the one thing no threshold can encode: **whether announcing
+this, to this person, today, is the right thing to do.**
 
-- An improvement in double digits, against a history of a few hundred sessions
-  or more, is decisive. Send it.
-- A low single-digit improvement is not, however deep the history.
-- A large improvement against a few dozen sessions is not either. That number
-  is mostly telling you the history is short.
-- A threshold crossing has no margin to judge. It is worth sending once the
-  history behind it is deep.
+**Normally it is, so pick one.** When several qualify, take the one whose
+improvement and history are strongest together. Being the only candidate is
+neither a reason to pick one nor a reason to refuse one.
 
-When two candidates both clear the bar, prefer the larger margin, then the
-deeper history.
-
-Decline when:
-
-- The margin is technically real but small.
-- The comparison population is shallow enough that "best recorded" mostly says
-  the history is short.
-- You are choosing something only because it is the only option. Being the best
-  available candidate is not the same as being worth sending.
+**Decline when their own words make celebrating wrong.** The journal is there
+for this. Someone who tore a calf on the run that set the record does not want
+to be congratulated for it. Someone who has written that they are exhausted, or
+injured, or dealing with something difficult, is not served by a trophy for the
+session that got them there. This is a narrow gate, not a mood check: it needs
+something they actually wrote, not an inference about how their week looks.
 
 Two things that are **not** reasons to decline:
 
 - **The activity is not their main focus.** A runner's longest ever walk still
   happened, and they still cannot see it anywhere else. The profile is there so
-  you can phrase your reasoning about a real person, not so you can filter their
-  history down to one sport. Judge the margin, not the relevance.
+  you can reason about a real person, not so you can filter their history down
+  to one sport.
 - **It was a single outstanding day.** Every record is a single day. That is
   what a record is.
 

@@ -186,6 +186,7 @@ def run_standout_case(
     messages = build_standout_messages(
         candidates,
         me=fixture.get("me"),
+        log=fixture.get("log"),
         today=str(fixture.get("today", "2026-09-09")),
     )
     return _single_call(

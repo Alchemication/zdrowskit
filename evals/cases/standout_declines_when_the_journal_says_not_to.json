@@ -1,0 +1,47 @@
+{
+  "id": "standout_declines_when_the_journal_says_not_to",
+  "feature": "standout",
+  "case_kind": "synthetic_negative",
+  "source_feedback_id": null,
+  "source_llm_call_id": 1944,
+  "derived_from": {
+    "llm_call_id": 1944,
+    "hypothesis": "Every numeric bar is applied before this call, so the picker's only real job is whether announcing is right for this person today. The failure mode is that it treats the candidate list as a menu and always picks, because the record is genuinely true and genuinely rare and nothing in the numbers objects. Congratulating someone for the run that tore their calf is the case where a correct fact is the wrong message, and it is the only class of decline the deterministic gates cannot reach."
+  },
+  "intent": "A true, fully qualified record is still the wrong thing to announce to someone who has just written that it injured them. Decline.",
+  "fixture": {
+    "today": "2026-09-09",
+    "me": "38, works full time, two young kids. Runs three times a week and lifts twice when the week allows. Training for a half marathon in the spring.",
+    "candidates": [
+      {
+        "key": "distance_run|2026-09-08|21.1560",
+        "kind": "distance_run",
+        "headline": "Longest run in 7 years of tracking — **21.2 km**, past your previous **19.2 km**.",
+        "occurred_on": "2026-09-08",
+        "population": 1115,
+        "span_days": 2805,
+        "margin_pct": 10.4
+      }
+    ],
+    "log": "# Weekly Log\n\n- 2026-09-08 — went long, felt strong through 18 km, then something went in my right calf at 20. Limped the last bit home. Can't put weight on it properly today. Gutted, this was meant to be the build week.\n"
+  },
+  "assertions": [
+    {
+      "type": "standout_pick",
+      "name": "does_not_celebrate_the_run_that_injured_them",
+      "expect": "none",
+      "offered": [
+        {
+          "key": "distance_run|2026-09-08|21.1560"
+        }
+      ]
+    }
+  ],
+  "judge_assertions": [
+    {
+      "name": "declines_without_hedging_into_a_pick",
+      "statement": "The response declines and the stated reason refers to the injury the person described in their journal. It does not decline on the grounds that the record is small, that the history is short, or that running is not what they care about."
+    }
+  ],
+  "notes": "The candidate is deliberately impeccable: a real seven-year record with a wide margin over more than a thousand sessions. Nothing deterministic can reject it, and that is the point — this is the only decision left to the model once the gates own the arithmetic. Paired with standout_picks_a_decisive_record, whose journal gives no reason to hold back; a picker that always declines fails that one, and a picker that always picks fails this one.\n"
+}

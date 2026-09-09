@@ -1801,6 +1801,88 @@ class TestCmdNudge:
 
         assert seen["evidence"]["standout_headline"] is None
 
+    def test_a_journal_edit_never_announces_an_old_workout(
+        self,
+        in_memory_db,
+        capsys,
+    ) -> None:
+        """A record is news because it arrived with this sync.
+
+        The recency window is wide enough to absorb a late import, which makes
+        it far too wide to be honest on an edit: announcing a workout from two
+        days ago because someone wrote a journal line is a non sequitur.
+        """
+        result = LLMResult(
+            text="Noted. Keep the week as planned.",
+            model="test-model",
+            input_tokens=1,
+            output_tokens=5,
+            total_tokens=6,
+            latency_s=0.1,
+            llm_call_id=39,
+        )
+        for trigger in ("log_update", "strategy_updated", "profile_updated"):
+            args = SimpleNamespace(
+                db="ignored.db",
+                model=None,
+                months=1,
+                trigger=trigger,
+                telegram=False,
+            )
+            with (
+                patch(
+                    "cmd_nudge.load_context",
+                    return_value={"prompt": "x", "soul": "y"},
+                ),
+                patch("cmd_nudge.open_db", return_value=in_memory_db),
+                patch("cmd_nudge.build_llm_data", return_value=_NUDGE_LLM_DATA),
+                patch("cmd_nudge.build_messages", return_value=_NUDGE_MESSAGES),
+                patch("cmd_nudge.call_llm", return_value=result),
+                patch("cmd_nudge._save_nudge"),
+                patch("cmd_nudge.find_standout") as detect,
+                patch("cmd_nudge.weekly_progress_nudge_line", return_value=None),
+                patch("cmd_nudge.send_telegram", return_value=123),
+            ):
+                cmd_nudge(args)
+            detect.assert_not_called()
+
+    def test_arriving_data_is_what_looks_for_a_standout(
+        self,
+        in_memory_db,
+        capsys,
+    ) -> None:
+        args = SimpleNamespace(
+            db="ignored.db",
+            model=None,
+            months=1,
+            trigger="new_data",
+            telegram=False,
+        )
+        result = LLMResult(
+            text="Keep tomorrow easy.",
+            model="test-model",
+            input_tokens=1,
+            output_tokens=4,
+            total_tokens=5,
+            latency_s=0.1,
+            llm_call_id=40,
+        )
+
+        with (
+            patch("cmd_nudge.load_context", return_value={"prompt": "x", "soul": "y"}),
+            patch("cmd_nudge.open_db", return_value=in_memory_db),
+            patch("cmd_nudge.build_llm_data", return_value=_NUDGE_LLM_DATA),
+            patch("cmd_nudge.build_messages", return_value=_NUDGE_MESSAGES),
+            patch("cmd_nudge.call_llm", return_value=result),
+            patch("cmd_nudge._save_nudge"),
+            patch("cmd_nudge.find_standout", return_value=None) as detect,
+            patch("cmd_nudge.weekly_progress_nudge_line", return_value=None),
+            patch("cmd_nudge.send_telegram", return_value=123),
+        ):
+            cmd_nudge(args)
+
+        detect.assert_called_once()
+
     def test_a_standout_carries_a_message_effect(
         self,
         in_memory_db,

@@ -147,14 +147,24 @@ def cmd_nudge(
     # restating it, and a nudge that would otherwise skip still has to ship the
     # one rare thing worth interrupting for. The sentence itself is computed
     # and gated in `standouts`; nothing here lets a model phrase it.
-    standout = find_standout(
-        conn,
-        me=context.get("me"),
-        log=context.get("log"),
-        history=context.get("history"),
-        today=datetime.now().date(),
-        trace_id=trace_id,
-        model_prefs_path=getattr(args, "model_prefs_path", None),
+    #
+    # Arriving data only. A record is news because it came in with this sync,
+    # and the recency window is wide enough to absorb an import landing a day
+    # or two late — but not wide enough to make it honest on a journal or
+    # strategy edit, where announcing a workout from two days ago is a non
+    # sequitur about something the person did not just do.
+    standout = (
+        find_standout(
+            conn,
+            me=context.get("me"),
+            log=context.get("log"),
+            history=context.get("history"),
+            today=datetime.now().date(),
+            trace_id=trace_id,
+            model_prefs_path=getattr(args, "model_prefs_path", None),
+        )
+        if _trigger == "new_data"
+        else None
     )
     context["standout"] = (
         standout.headline if standout else "(none — do not invent one)"

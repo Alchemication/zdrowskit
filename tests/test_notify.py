@@ -206,6 +206,87 @@ class TestTelegramDestinationGuard:
         mock_urlopen.assert_not_called()
 
 
+class TestMessageEffectNeverCostsTheMessage:
+    """Regression: a refused effect used to lose the whole nudge.
+
+    The effect was carried into the plain-text fallback, so a well-formed but
+    unknown effect id made Telegram refuse both attempts and the nudge was
+    dropped. Proven against the live API before the fix: two 400s, no message.
+    An effect is decoration; the message is not.
+    """
+
+    def _responses(self, *outcomes):
+        """Build urlopen side effects from 'refuse' / 'ok' outcomes."""
+        sent: list[dict] = []
+
+        def _fake(req, *args, **kwargs):
+            import json
+
+            sent.append(json.loads(req.data.decode()))
+            outcome = outcomes[len(sent) - 1]
+            if outcome == "refuse":
+                raise urllib.error.HTTPError(
+                    "url",
+                    400,
+                    "Bad Request",
+                    {},
+                    None,  # type: ignore[arg-type]
+                )
+
+            class _Resp:
+                def __enter__(self_inner):
+                    return self_inner
+
+                def __exit__(self_inner, *exc):
+                    return False
+
+                def read(self_inner):
+                    return json.dumps(
+                        {"ok": True, "result": {"message_id": 7}}
+                    ).encode()
+
+            return _Resp()
+
+        return _fake, sent
+
+    def test_a_refused_effect_is_dropped_and_the_message_still_lands(
+        self, monkeypatch
+    ) -> None:
+        monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "fake-token")
+        fake, sent = self._responses("refuse", "ok")
+        with patch("urllib.request.urlopen", side_effect=fake):
+            result = send_telegram(
+                "**hi**", "W01", chat_id="123", message_effect_id="9999"
+            )
+
+        assert result == 7
+        assert len(sent) == 2
+        assert sent[0]["message_effect_id"] == "9999"
+        # The retry keeps the formatting and sheds only the animation.
+        assert "message_effect_id" not in sent[1]
+        assert sent[1]["parse_mode"] == "HTML"
+
+    def test_bad_markup_still_falls_through_to_plain_text(self, monkeypatch) -> None:
+        monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "fake-token")
+        fake, sent = self._responses("refuse", "refuse", "ok")
+        with patch("urllib.request.urlopen", side_effect=fake):
+            result = send_telegram(
+                "**hi**", "W01", chat_id="123", message_effect_id="9999"
+            )
+
+        assert result == 7
+        assert len(sent) == 3
+        assert "parse_mode" not in sent[2]
+        assert "message_effect_id" not in sent[2]
+
+    def test_no_effect_means_no_extra_attempt(self, monkeypatch) -> None:
+        monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "fake-token")
+        fake, sent = self._responses("ok")
+        with patch("urllib.request.urlopen", side_effect=fake):
+            assert send_telegram("hi", "W01", chat_id="123") == 7
+        assert len(sent) == 1
+
+
 class TestTelegramChatId:
     def test_returns_none_without_a_resolved_profile(self) -> None:
         assert telegram_chat_id(SimpleNamespace()) is None

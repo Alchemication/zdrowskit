@@ -237,43 +237,24 @@ def chunk_text(text: str, max_len: int = 4000) -> list[str]:
     return chunks
 
 
-def _send_telegram_chunk(
+def _post_message(
     url: str,
-    chat_id: str,
-    text: str,
-    html_text: str,
-    reply_markup: dict | None = None,
-    message_effect_id: str | None = None,
-) -> int | None:
-    """Send a single Telegram message chunk, falling back to plain text.
-
-    Tries HTML parse_mode first.  If Telegram rejects the markup (e.g.
-    malformed tags), retries the same chunk as plain text so the message
-    is never lost.
+    payload: dict,
+    *,
+    what: str,
+) -> tuple[int | None, bool]:
+    """POST one sendMessage payload.
 
     Args:
         url: Telegram sendMessage API URL.
-        chat_id: Target chat ID.
-        text: Original plain-text version (fallback).
-        html_text: HTML-formatted version (preferred).
-        reply_markup: Optional Telegram reply markup (e.g. inline keyboard).
-        message_effect_id: Optional animated effect played once on delivery.
-            Private chats only, which every profile is.
+        payload: The request body.
+        what: Short label for logs.
 
     Returns:
-        The message_id of the sent message, or None on failure.
+        ``(message_id, refused)``. ``refused`` is True only when Telegram
+        answered and declined, which is the case a different payload might
+        survive; a transport failure has already been retried and is final.
     """
-
-    payload: dict = {
-        "chat_id": chat_id,
-        "text": html_text,
-        "parse_mode": "HTML",
-        "disable_web_page_preview": True,
-    }
-    if reply_markup is not None:
-        payload["reply_markup"] = reply_markup
-    if message_effect_id is not None:
-        payload["message_effect_id"] = message_effect_id
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         url, data=data, headers={"Content-Type": "application/json"}
@@ -282,39 +263,76 @@ def _send_telegram_chunk(
         with urlopen_retrying(req, what="sendMessage") as resp:
             body = json.loads(resp.read().decode("utf-8"))
         if body.get("ok"):
-            return body["result"]["message_id"]
-        return None
+            return body["result"]["message_id"], False
+        logger.warning("Telegram declined the %s send: %s", what, body)
+        return None, True
     except urllib.error.HTTPError as e:
-        logger.warning("HTML send failed (%s), retrying as plain text", e)
+        logger.warning("Telegram refused the %s send (%s)", what, e)
+        return None, True
     except Exception as e:
-        logger.error("Failed to send Telegram message: %s", e)
-        return None
+        logger.error("Failed to send Telegram message (%s): %s", what, e)
+        return None, False
 
-    # Fallback: plain text, no parse_mode.
-    fallback_payload: dict = {
-        "chat_id": chat_id,
-        "text": text,
-        "disable_web_page_preview": True,
-    }
+
+def _send_telegram_chunk(
+    url: str,
+    chat_id: str,
+    text: str,
+    html_text: str,
+    reply_markup: dict | None = None,
+    message_effect_id: str | None = None,
+) -> int | None:
+    """Send one message chunk, shedding what Telegram refuses until it lands.
+
+    Three attempts, each dropping the most likely cause of the last refusal
+    while keeping everything the message actually needs.
+
+    The effect goes first because it is decoration and the nudge is not. It
+    used to be carried into the plain-text retry, on the reasoning that a
+    message losing its markup should not also lose the thing marking it as
+    rare. That is backwards, and measurably so: a well-formed but unknown
+    effect id made Telegram refuse both attempts, and the entire nudge was
+    lost rather than an animation. An effect can be refused for reasons the
+    text cannot fix — an id Telegram retires, a chat that is not private —
+    so it must never be in the last attempt.
+
+    Args:
+        url: Telegram sendMessage API URL.
+        chat_id: Target chat ID.
+        text: Original plain-text version.
+        html_text: HTML-formatted version (preferred).
+        reply_markup: Optional Telegram reply markup (e.g. inline keyboard).
+        message_effect_id: Optional animated effect played once on delivery.
+            Private chats only, which every profile is.
+
+    Returns:
+        The message_id of the sent message, or None when every attempt failed.
+    """
+    base: dict = {"chat_id": chat_id, "disable_web_page_preview": True}
     if reply_markup is not None:
-        fallback_payload["reply_markup"] = reply_markup
-    # The effect is carried into the fallback too. A message that lost its
-    # markup should not also silently lose the thing marking it as rare.
+        base["reply_markup"] = reply_markup
+
+    rich = {**base, "text": html_text, "parse_mode": "HTML"}
+    attempts: list[tuple[str, dict]] = []
     if message_effect_id is not None:
-        fallback_payload["message_effect_id"] = message_effect_id
-    data = json.dumps(fallback_payload).encode("utf-8")
-    req = urllib.request.Request(
-        url, data=data, headers={"Content-Type": "application/json"}
-    )
-    try:
-        with urlopen_retrying(req, what="sendMessage") as resp:
-            body = json.loads(resp.read().decode("utf-8"))
-        if body.get("ok"):
-            return body["result"]["message_id"]
-        return None
-    except Exception as e:
-        logger.error("Fallback plain-text send also failed: %s", e)
-        return None
+        attempts.append(
+            ("html+effect", {**rich, "message_effect_id": message_effect_id})
+        )
+    attempts.append(("html", rich))
+    attempts.append(("plain", {**base, "text": text}))
+
+    for index, (what, payload) in enumerate(attempts):
+        message_id, refused = _post_message(url, payload, what=what)
+        if message_id is not None:
+            if index:
+                logger.info("Telegram send succeeded on the %s attempt", what)
+            return message_id
+        if not refused:
+            # Transport failure, already retried inside urlopen_retrying.
+            # Reshaping the payload cannot help.
+            return None
+    logger.error("Telegram refused every send variant for this chunk")
+    return None
 
 
 def send_telegram(

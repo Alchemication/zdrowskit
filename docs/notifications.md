@@ -165,13 +165,24 @@ significance out of consistency or effort, since the question presupposes an
 answer exists. Choosing from a closed list has no such failure, and naming
 anything not on the list is treated as declining.
 
+Every numeric bar is applied before the call, and the prompt says so, because a
+threshold enforced in prose is a threshold that varies between one run and the
+next. What the call gets instead is you: your profile and your recent journal.
+Its remaining job is the one no threshold can encode, which is whether
+announcing a true and qualified record is the right thing to do today. Somebody
+who has just written that they tore a calf on the run that set the record does
+not want to be congratulated for it. That is a narrow gate needing something
+actually written, not an inference about how the week looks.
+
 ### What has to be true before anything is claimed
 
 | Gate | Why |
 |---|---|
+| The nudge is a data sync | A record is news because it arrived with this sync. On a journal edit it is a non sequitur about something you did not just do |
 | A minimum comparison population, counted per activity | On a short history, "best recorded" mostly restates how little was recorded |
-| Set within the last few days | A record noticed five weeks late reads as the system noticing late |
-| A minimum margin over the previous best | A five-kilometre best beaten by a fraction of a second is real and hollow |
+| A minimum span of recorded history | Thirty sessions inside four months clears a count and still says nothing. "Ever" has to mean something |
+| Dated within the last few days | A record noticed five weeks late reads as the system noticing late |
+| A minimum margin over the previous best, separately for pace and for extent | A five-kilometre best beaten by a fraction of a second is real and hollow |
 | The plan frame is `full` | The same reason a progress bar stands down; a celebration is a verdict in its entirety |
 
 The population gate counts sessions rather than calendar months on purpose.
@@ -179,7 +190,19 @@ Recorded time and recorded evidence are only loosely related: someone training
 several times a week has a trustworthy comparison set inside a month, while
 someone who walks once a fortnight does not have one after a year. Each kind of
 fact counts its own population, so a profile can be eligible for run records
-and not yet for walks. `src/config.py` owns every threshold.
+and not yet for walks. The span gate then asks the separate question of whether
+the history is long enough for "best ever" to mean anything, because a count
+and a duration are different claims and a record needs both.
+
+Margins are split because pace and extent are not comparable and one number
+covering both is wrong in one direction or the other. Going ten percent further
+is adding two kilometres to a twenty kilometre long run, which happens in a
+normal progression. Running ten percent faster is a career-defining jump, so the
+same figure applied to pace would disable pace records permanently while letting
+routine distance increases through. `src/config.py` owns every threshold.
+
+A threshold crossing beats no previous best, so no margin applies to it. It
+needs the population, span and recency gates alone.
 
 ### Scarcity is the whole design
 

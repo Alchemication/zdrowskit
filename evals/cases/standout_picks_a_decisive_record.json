@@ -1,12 +1,12 @@
 {
   "id": "standout_picks_a_decisive_record",
   "feature": "standout",
-  "case_kind": "real_regression",
+  "case_kind": "synthetic_positive",
   "source_feedback_id": null,
   "source_llm_call_id": 1944,
   "derived_from": {
     "llm_call_id": 1944,
-    "hypothesis": "The picker is told that declining is the normal outcome and that most days nothing qualifies, which is correct and is also the instruction most likely to be over-learned. A picker that never picks passes every restraint case in the suite and scores clean, while the feature silently does nothing forever. Nothing else in the system would notice: a standout fires roughly monthly, so months of silence is indistinguishable from months of nothing qualifying. This case is the other half of standout_declines_an_ordinary_record and exists so that a clean 0/N cannot be mistaken for working restraint."
+    "hypothesis": "The picker is told scarcity matters, which is correct and is also the instruction most likely to be over-learned. A picker that never picks passes every restraint case in the suite and scores clean while the feature silently does nothing forever, and because a standout fires roughly monthly, months of silence is indistinguishable from months of nothing qualifying. Nothing else in the system would notice. This case is the other half of standout_declines_when_the_journal_says_not_to and exists so that a clean 0/N cannot be mistaken for working restraint."
   },
   "intent": "When a genuinely decisive record is on the table, pick something. Silence is the normal answer, not the only permitted one.",
   "fixture": {
@@ -23,15 +23,16 @@
         "margin_pct": 163.9
       },
       {
-        "key": "duration_hiit|2026-09-08|60.0000",
+        "key": "duration_hiit|2026-09-08|72.0000",
         "kind": "duration_hiit",
-        "headline": "Longest interval session in 6 years of tracking — **60 min**, past your previous **56 min**.",
+        "headline": "Longest interval session in 6 years of tracking — **72 min**, past your previous **64 min**.",
         "occurred_on": "2026-09-08",
         "population": 329,
         "span_days": 2457,
-        "margin_pct": 7.1
+        "margin_pct": 12.5
       }
-    ]
+    ],
+    "log": "# Weekly Log\n\n- 2026-09-06 — easy 6 km before work, legs felt fine\n\n- 2026-09-08 — long one out along the coast, good day for it\n"
   },
   "assertions": [
     {
@@ -39,8 +40,12 @@
       "name": "announces_something",
       "expect": "any",
       "offered": [
-        { "key": "distance_walk|2026-09-08|23.1610" },
-        { "key": "duration_hiit|2026-09-08|60.0000" }
+        {
+          "key": "distance_walk|2026-09-08|23.1610"
+        },
+        {
+          "key": "duration_hiit|2026-09-08|72.0000"
+        }
       ]
     }
   ],
@@ -50,5 +55,5 @@
       "statement": "The stated reason for the choice rests on the size of the improvement or the depth of the history behind it, and does not justify the pick by appeal to encouraging the person, to their goals needing motivation, or to it being the only remaining option."
     }
   ],
-  "notes": "Derived from the first real standout call, whose candidate set came from seven years of the operator profile. Dates are shifted forward so the fixture reads as something that just happened; the values, populations and spans are the real ones. The margin between the two candidates is deliberately wide: this case scores whether the picker fires at all, not how finely it discriminates.\n"
+  "notes": "The journal is deliberately unremarkable, so nothing licenses a decline. Both candidates clear the production gates, so this scores whether the picker fires at all rather than how finely it discriminates. Values, populations and spans come from the operator profile's real seven-year history; the dates are shifted forward so the fixture reads as something that just happened. Synthetic rather than a regression: call 1944 is a real standout call whose shape the fixture copies, as the convention for synthetic cases requires, but it succeeded — the failure this pins was found by this case, not captured from production.\n"
 }

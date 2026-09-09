@@ -186,7 +186,7 @@ flowchart TD
     queue["Queue trigger for later drain"]
     reportWindow{"Near scheduled report?"}
     rate{"Daily cap and min interval ok?"}
-    standout["Detect and pick a standout fact"]
+    standout["Detect and pick a standout fact (new data only)"]
     nudge["Run nudge LLM"]
     skip{"LLM returns SKIP?"}
     hasStandout{"Standout to announce?"}

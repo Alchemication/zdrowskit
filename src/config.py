@@ -542,17 +542,52 @@ Each generator counts its own population, so a profile can be eligible for run
 records and not yet for walks.
 """
 
-STANDOUT_MIN_MARGIN_PCT: float = 1.5
-"""How far a record must beat the previous best to be worth announcing.
+STANDOUT_MIN_SPAN_DAYS: int = 365
+"""How long the comparison history must run before "best ever" means anything.
+
+Population and span are different claims and only both together support a
+record. Thirty-three lift sessions inside four months clears a count-based
+floor while saying almost nothing: the person has not been doing this long
+enough for a best to be distinguishable from an early one. Fifty runs across
+seven years is a thin count and a real history, and its best genuinely is.
+
+A year because that is the shortest span containing a full seasonal cycle, so
+a record is not just the person's best summer. It sits alongside the population
+floor rather than replacing it; a candidate must clear both.
+
+This started life as a rule in the picker's prompt, which is how it was found
+to be arithmetic: the model applied it inconsistently across repeated runs
+because judging "barely past the floor" is a comparison, not a judgement.
+"""
+
+STANDOUT_MIN_MARGIN_PCT_PACE: float = 2.0
+"""How far a pace record must beat the previous best to be announced.
 
 A five-kilometre best improved by a fraction of a second is technically a
 record and emotionally hollow, and spending a month's budget on one is worse
-than staying silent. A percentage rather than an absolute margin because the
-same rule has to cover pace, distance and duration.
+than staying silent.
 
-One and a half percent is roughly five seconds on a twenty-five minute five
-kilometre, or half a kilometre on a thirty kilometre longest ride — visible
-improvements rather than measurement noise.
+Two percent is roughly thirty seconds off a twenty-five minute five kilometre.
+Against a history deep enough to qualify at all, that is a real step rather
+than a good day: paces converge as someone trains, so the gap between a best
+and a second-best narrows over years and a margin that stays wide is saying
+something.
+"""
+
+STANDOUT_MIN_MARGIN_PCT_EXTENT: float = 10.0
+"""How far a distance or duration record must beat the previous best.
+
+Five times the pace bar, because the two measures are not comparable and one
+number covering both is wrong in one direction or the other. Going ten percent
+further is adding two kilometres to a twenty kilometre long run, which happens
+in a normal progression. Running ten percent faster is a career-defining jump
+that almost nobody makes, so the same figure applied to pace would disable pace
+records permanently while letting routine distance increases through.
+
+The asymmetry is the point. It was found by measuring the operator profile:
+across seven years, its best five-kilometre stretch beat the second best by
+half a percent, while its longest walk beat the second longest by a hundred and
+sixty.
 """
 
 STANDOUT_RECENCY_DAYS: int = 3

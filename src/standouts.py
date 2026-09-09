@@ -50,8 +50,10 @@ from config import (
     STANDOUT_EFFECT_BY_KIND_PREFIX,
     STANDOUT_EFFECT_DEFAULT,
     STANDOUT_COOLDOWN_DAYS,
-    STANDOUT_MIN_MARGIN_PCT,
+    STANDOUT_MIN_MARGIN_PCT_EXTENT,
+    STANDOUT_MIN_MARGIN_PCT_PACE,
     STANDOUT_MIN_POPULATION,
+    STANDOUT_MIN_SPAN_DAYS,
     STANDOUT_RECENCY_DAYS,
     STANDOUT_VOLUME_STEP_KM,
     TELEGRAM_MESSAGE_EFFECTS,
@@ -206,10 +208,12 @@ def _pace_candidates(conn: sqlite3.Connection, today: date) -> list[Standout]:
         if not _is_recent(best["date"], today):
             continue
         margin = _margin_pct(best["pace"], runner_up["pace"])
-        if margin < STANDOUT_MIN_MARGIN_PCT:
+        if margin < STANDOUT_MIN_MARGIN_PCT_PACE:
             continue
 
         span = _span_days([row["date"] for row in rows])
+        if span < STANDOUT_MIN_SPAN_DAYS:
+            continue
         scope = _scope_phrase(len(rows), span, "runs")
         pace = format_pace(best["pace"])
         previous = format_pace(runner_up["pace"])
@@ -276,10 +280,12 @@ def _extreme_candidates(
         if not _is_recent(best["date"], today):
             continue
         margin = _margin_pct(best["value"], runner_up["value"])
-        if margin < STANDOUT_MIN_MARGIN_PCT:
+        if margin < STANDOUT_MIN_MARGIN_PCT_EXTENT:
             continue
 
         span = _span_days([row["date"] for row in rows])
+        if span < STANDOUT_MIN_SPAN_DAYS:
+            continue
         scope = _scope_phrase(len(rows), span, plural)
         value = f"{best['value']:.{decimals}f}"
         previous = f"{runner_up['value']:.{decimals}f}"
@@ -337,6 +343,8 @@ def _volume_candidates(conn: sqlite3.Connection, today: date) -> list[Standout]:
 
         threshold = crossed * step
         span = _span_days([row["first_date"], row["last_date"]])
+        if span < STANDOUT_MIN_SPAN_DAYS:
+            continue
         scope = _scope_phrase(row["sessions"], span, plural)
         found.append(
             Standout(
@@ -424,24 +432,30 @@ def effect_for(standout: Standout) -> str | None:
 
 
 def announced_keys(conn: sqlite3.Connection) -> set[str]:
-    """Return the keys of every achievement already announced."""
-    try:
-        rows = conn.execute("SELECT key FROM standout_announced").fetchall()
-    except sqlite3.Error as exc:
-        logger.warning("Standout ledger unavailable: %s", exc)
-        return set()
+    """Return the keys of every achievement already announced.
+
+    Raises:
+        sqlite3.Error: The ledger could not be read. Deliberately propagated
+            rather than answered with an empty set, which is indistinguishable
+            from a clean ledger and would re-announce everything. See
+            :func:`find_standout` for where it is caught.
+    """
+    rows = conn.execute("SELECT key FROM standout_announced").fetchall()
     return {row["key"] for row in rows}
 
 
 def last_announced_at(conn: sqlite3.Connection) -> datetime | None:
-    """Return when a standout was last announced, or None if never."""
-    try:
-        row = conn.execute(
-            "SELECT MAX(announced_at) AS latest FROM standout_announced"
-        ).fetchone()
-    except sqlite3.Error as exc:
-        logger.warning("Standout ledger unavailable: %s", exc)
-        return None
+    """Return when a standout was last announced, or None if never.
+
+    Raises:
+        sqlite3.Error: The ledger could not be read. An unreadable ledger must
+            not read as "nothing announced yet": that answer clears the
+            cooldown, and losing both suppressions at once is the one failure
+            that turns this feature into the thing it was built not to be.
+    """
+    row = conn.execute(
+        "SELECT MAX(announced_at) AS latest FROM standout_announced"
+    ).fetchone()
     if row is None or not row["latest"]:
         return None
     try:
@@ -454,7 +468,11 @@ def last_announced_at(conn: sqlite3.Connection) -> datetime | None:
 def cooldown_remaining_days(
     conn: sqlite3.Connection, *, now: datetime | None = None
 ) -> int:
-    """Return whole days left before another standout may fire."""
+    """Return whole days left before another standout may fire.
+
+    Raises:
+        sqlite3.Error: The ledger could not be read.
+    """
     moment = now or datetime.now(timezone.utc)
     last = last_announced_at(conn)
     if last is None:
@@ -492,23 +510,37 @@ def record_standout_announced(
                 ),
             )
     except sqlite3.Error as exc:
-        # Worst case the same record is offered again next sync. Never lose a
-        # nudge over the ledger.
-        logger.warning("Could not record announced standout: %s", exc)
+        # The message has already gone out, so this cannot fail closed the way
+        # the reads do. Logged at error rather than warning because the
+        # consequence is real: an unrecorded announcement leaves the cooldown
+        # unstarted, and the same fact is eligible again on the next nudge.
+        logger.error(
+            "Could not record announced standout %s; the cooldown did not "
+            "start and this fact may be announced again: %s",
+            standout.key,
+            exc,
+        )
 
 
 def build_standout_messages(
     candidates: list[Standout],
     *,
     me: str | None,
+    log: str | None,
     today: str,
     prompts_dir: Path = PROMPTS_DIR,
 ) -> list[dict[str, str]]:
     """Render the selection prompt over already-finished sentences.
 
+    Every numeric bar has been applied before this. What the call is given
+    instead is the person: the one thing that can make announcing a true,
+    qualified record the wrong move today, and the one thing no threshold in
+    `config.py` can encode.
+
     Args:
         candidates: Eligible facts, each already phrased and gated.
-        me: Contents of me.md, so "worth saying" can account for who this is.
+        me: Contents of me.md.
+        log: Recent entries from log.md, where a reason not to celebrate lives.
         today: ISO date the selection is for.
         prompts_dir: Directory holding the prompt file.
 
@@ -537,6 +569,7 @@ def build_standout_messages(
     content = template.format(
         candidates=rendered,
         me=me or "(not provided)",
+        log=log or "(nothing recent)",
         today=today,
         cooldown_days=STANDOUT_COOLDOWN_DAYS,
     )
@@ -647,7 +680,9 @@ def find_standout(
             )
             return None
 
-        messages = build_standout_messages(candidates, me=me, today=today.isoformat())
+        messages = build_standout_messages(
+            candidates, me=me, log=log, today=today.isoformat()
+        )
         route = resolve_model_route("standout", path=model_prefs_path).call_kwargs()
         result = call_llm(
             messages,
@@ -659,7 +694,10 @@ def find_standout(
             metadata={"today": today.isoformat(), "candidates": len(candidates)},
         )
     except Exception as exc:  # noqa: BLE001 - a standout must never block a nudge
-        logger.error("Standout detection failed: %s", exc)
+        # Includes an unreadable ledger, which is why the reads above raise
+        # rather than returning empty. Announcing nothing is always safe here;
+        # the nudge carrying it goes out regardless.
+        logger.error("Standout detection failed, announcing nothing: %s", exc)
         return None
 
     key = parse_standout_response(result.text, {item.key for item in candidates})

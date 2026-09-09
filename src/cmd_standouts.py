@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import argparse
 import logging
+import sqlite3
 from datetime import date
 from pathlib import Path
 
 from config import (
     STANDOUT_COOLDOWN_DAYS,
-    STANDOUT_MIN_MARGIN_PCT,
+    STANDOUT_MIN_MARGIN_PCT_EXTENT,
+    STANDOUT_MIN_MARGIN_PCT_PACE,
     STANDOUT_MIN_POPULATION,
+    STANDOUT_MIN_SPAN_DAYS,
     STANDOUT_RECENCY_DAYS,
 )
 from standouts import (
@@ -27,14 +30,22 @@ logger = logging.getLogger(__name__)
 _NO_CANDIDATES_HELP = f"""No standout is currently detectable. That is the normal state — the
 whole surface is budgeted at one announcement every {STANDOUT_COOLDOWN_DAYS} days.
 
-A fact has to clear all of these before it appears here:
+Every fact has to clear all three of these:
 
-  - at least {STANDOUT_MIN_POPULATION} comparable sessions to be ranked against
-  - set within the last {STANDOUT_RECENCY_DAYS} days, so it is still the thing that just happened
-  - beating the previous best by at least {STANDOUT_MIN_MARGIN_PCT:g}%
+  - ranked against at least {STANDOUT_MIN_POPULATION} comparable sessions
+  - drawn from at least {STANDOUT_MIN_SPAN_DAYS} days of recorded history, so "ever" means something
+  - dated within the last {STANDOUT_RECENCY_DAYS} days, so it is still the thing that just happened
 
-The population gate is the one a young profile fails, and it is deliberate: on
-a short history, "best recorded" mostly restates how little was recorded."""
+A record has to beat the previous best as well: by {STANDOUT_MIN_MARGIN_PCT_PACE:g}% for a pace,
+and by {STANDOUT_MIN_MARGIN_PCT_EXTENT:g}% for a distance or a duration. The two differ because
+running ten percent faster is a career-defining jump while going ten percent
+further is a normal progression. A lifetime-distance crossing beats no previous
+best, so no margin applies to it.
+
+Population and span are separate on purpose. Thirty sessions inside four months
+clears a count while still saying almost nothing, and a young profile failing
+the pair is exactly the intent: on a short history, "best recorded" mostly
+restates how little was recorded."""
 
 
 def _describe(item: Standout, *, announced: bool) -> str:
@@ -68,8 +79,21 @@ def cmd_standouts(args: argparse.Namespace) -> None:
     conn = open_db(Path(args.db))
     today = date.today()
 
-    remaining = cooldown_remaining_days(conn)
-    last = last_announced_at(conn)
+    try:
+        remaining = cooldown_remaining_days(conn)
+        last = last_announced_at(conn)
+        seen = announced_keys(conn)
+    except sqlite3.Error as exc:
+        print(
+            "Announcement ledger unreadable, so no standout can fire: "
+            f"{exc}\n\n"
+            "Suppression depends on it, and an unreadable ledger reads as "
+            "'nothing announced yet' — which would clear the cooldown and "
+            "re-announce everything. Detection fails closed instead. Run "
+            "'db migrate' if the table is missing.",
+        )
+        return
+
     if last is None:
         print("Cooldown: clear (nothing announced yet).")
     elif remaining:
@@ -86,7 +110,6 @@ def cmd_standouts(args: argparse.Namespace) -> None:
         print(_NO_CANDIDATES_HELP)
         return
 
-    seen = announced_keys(conn)
     fresh = [item for item in candidates if item.key not in seen]
 
     print()

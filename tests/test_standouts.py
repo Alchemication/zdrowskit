@@ -9,10 +9,10 @@ import pytest
 
 from config import (
     STANDOUT_COOLDOWN_DAYS,
-    TELEGRAM_MESSAGE_EFFECTS,
     STANDOUT_MIN_POPULATION,
     STANDOUT_RECENCY_DAYS,
     STANDOUT_VOLUME_STEP_KM,
+    TELEGRAM_MESSAGE_EFFECTS,
 )
 from standouts import (
     Standout,
@@ -24,6 +24,7 @@ from standouts import (
     cooldown_remaining_days,
     effect_for,
     find_candidates,
+    find_standout,
     last_announced_at,
     parse_standout_response,
     record_standout_announced,
@@ -78,7 +79,7 @@ def _fill_runs(
     count: int,
     pace: float,
     distance_km: float = 6.0,
-    first_day: date = date(2024, 1, 1),
+    first_day: date = date(2022, 1, 1),
 ) -> None:
     """Seed a comparison population of unremarkable, identical runs."""
     for offset in range(count):
@@ -400,3 +401,138 @@ class TestEffectSelection:
     ) -> None:
         monkeypatch.setattr("standouts.STANDOUT_EFFECT_DEFAULT", "not-an-effect")
         assert effect_for(self._standout("distance_run")) is None
+
+
+class TestLedgerFailsClosed:
+    """An unreadable ledger must silence standouts, never unleash them."""
+
+    def test_reads_raise_rather_than_reporting_a_clean_slate(
+        self, in_memory_db: sqlite3.Connection
+    ) -> None:
+        # Answering "nothing announced yet" would clear the cooldown and empty
+        # the once-ever set in one move, which is every suppression at once.
+        in_memory_db.execute("DROP TABLE standout_announced")
+        with pytest.raises(sqlite3.Error):
+            announced_keys(in_memory_db)
+        with pytest.raises(sqlite3.Error):
+            last_announced_at(in_memory_db)
+        with pytest.raises(sqlite3.Error):
+            cooldown_remaining_days(in_memory_db)
+
+    def test_find_standout_announces_nothing_when_the_ledger_is_gone(
+        self, in_memory_db: sqlite3.Connection, monkeypatch
+    ) -> None:
+        called: list[int] = []
+        monkeypatch.setattr(
+            "standouts.find_candidates", lambda *a, **k: called.append(1) or []
+        )
+        in_memory_db.execute("DROP TABLE standout_announced")
+        result = find_standout(
+            in_memory_db, me=None, log=None, history=None, today=TODAY
+        )
+        assert result is None
+        # It gave up before generating candidates, so no model call is possible.
+        assert called == []
+
+    def test_a_read_only_ledger_still_suppresses(
+        self, in_memory_db: sqlite3.Connection, monkeypatch
+    ) -> None:
+        def _boom(*args, **kwargs):
+            raise sqlite3.OperationalError("database is locked")
+
+        monkeypatch.setattr("standouts.last_announced_at", _boom)
+        assert (
+            find_standout(in_memory_db, me=None, log=None, history=None, today=TODAY)
+            is None
+        )
+
+    def test_a_failed_write_does_not_raise_into_the_nudge(
+        self, in_memory_db: sqlite3.Connection
+    ) -> None:
+        # The message has already gone out by then; the caller cannot act on it.
+        in_memory_db.execute("DROP TABLE standout_announced")
+        record_standout_announced(
+            in_memory_db,
+            Standout(
+                key="k",
+                kind="distance_run",
+                headline="h",
+                occurred_on="2026-09-08",
+                population=400,
+                span_days=900,
+            ),
+        )
+
+
+class TestSpanGate:
+    """Population and span are different claims; a record needs both."""
+
+    def test_a_deep_count_inside_a_short_history_is_not_a_record(
+        self, in_memory_db: sqlite3.Connection
+    ) -> None:
+        # Every session crammed into a few months: the count clears its floor
+        # while "ever" still means "since the spring".
+        _fill_runs(
+            in_memory_db,
+            count=STANDOUT_MIN_POPULATION + 5,
+            pace=6.0,
+            distance_km=10.0,
+            first_day=TODAY - timedelta(days=120),
+        )
+        _add_workout(in_memory_db, day=TODAY, category="run", distance_km=21.0)
+        assert find_candidates(in_memory_db, today=TODAY) == []
+
+    def test_the_same_record_across_years_is_one(
+        self, in_memory_db: sqlite3.Connection
+    ) -> None:
+        _fill_runs(
+            in_memory_db,
+            count=STANDOUT_MIN_POPULATION + 5,
+            pace=6.0,
+            distance_km=10.0,
+            first_day=TODAY - timedelta(days=1400),
+        )
+        _add_workout(in_memory_db, day=TODAY, category="run", distance_km=21.0)
+        kinds = {item.kind for item in find_candidates(in_memory_db, today=TODAY)}
+        assert "distance_run" in kinds
+
+
+class TestMarginFloorsDifferByMeasure:
+    """One number covering pace and distance is wrong in one direction."""
+
+    def test_a_pace_gain_too_small_for_distance_still_counts(
+        self, in_memory_db: sqlite3.Connection
+    ) -> None:
+        # Three percent off a pace is a real step and nowhere near the ten
+        # percent a distance record needs.
+        _fill_runs(
+            in_memory_db,
+            count=STANDOUT_MIN_POPULATION + 5,
+            pace=6.0,
+            distance_km=10.0,
+            first_day=TODAY - timedelta(days=1400),
+        )
+        _add_workout(
+            in_memory_db,
+            day=TODAY,
+            category="run",
+            distance_km=10.0,
+            splits=[6.0 * 0.97] * 6,
+        )
+        kinds = {item.kind for item in find_candidates(in_memory_db, today=TODAY)}
+        assert "pace_window_5" in kinds
+        assert "distance_run" not in kinds
+
+    def test_a_distance_gain_that_size_does_not(
+        self, in_memory_db: sqlite3.Connection
+    ) -> None:
+        _fill_runs(
+            in_memory_db,
+            count=STANDOUT_MIN_POPULATION + 5,
+            pace=6.0,
+            distance_km=10.0,
+            first_day=TODAY - timedelta(days=1400),
+        )
+        _add_workout(in_memory_db, day=TODAY, category="run", distance_km=10.3)
+        kinds = {item.kind for item in find_candidates(in_memory_db, today=TODAY)}
+        assert "distance_run" not in kinds
