@@ -25,6 +25,7 @@ if str(_SRC) not in sys.path:
 from config import (  # noqa: E402
     MAX_TOKENS_CHECKIN,
     MAX_TOKENS_PLAN_FRAME,
+    MAX_TOKENS_STANDOUT,
     MAX_TOKENS_TARGETS,
 )
 
@@ -138,6 +139,60 @@ def run_plan_frame_case(
         messages,
         feature="plan_frame",
         max_tokens=MAX_TOKENS_PLAN_FRAME,
+        model=model,
+        reasoning_effort=reasoning_effort,
+        temperature=temperature,
+        cache=cache,
+        refresh_cache=refresh_cache,
+    )
+
+
+def run_standout_case(
+    case: Any,
+    *,
+    model: str,
+    reasoning_effort: str | None,
+    temperature: float | None,
+    cache: Any = None,
+    refresh_cache: bool = False,
+) -> tuple[Any, str, dict[str, Any]]:
+    """Run one standout-selection case.
+
+    The fixture carries candidates that are already true and already phrased,
+    because that is all production ever hands this call. There is deliberately
+    nowhere to put raw health data: a model that could see the sessions would
+    start deciding whether something is remarkable, which is the generation
+    failure that selection exists to avoid.
+    """
+    from standouts import Standout, build_standout_messages
+
+    fixture = case.fixture
+    candidates = [
+        Standout(
+            key=str(entry["key"]),
+            kind=str(entry.get("kind", "unknown")),
+            headline=str(entry["headline"]),
+            occurred_on=str(entry.get("occurred_on", "2026-09-08")),
+            population=int(entry.get("population", 100)),
+            span_days=int(entry.get("span_days", 730)),
+            margin_pct=(
+                float(entry["margin_pct"])
+                if entry.get("margin_pct") is not None
+                else None
+            ),
+        )
+        for entry in fixture["candidates"]
+    ]
+    messages = build_standout_messages(
+        candidates,
+        me=fixture.get("me"),
+        today=str(fixture.get("today", "2026-09-09")),
+    )
+    return _single_call(
+        case,
+        messages,
+        feature="standout",
+        max_tokens=MAX_TOKENS_STANDOUT,
         model=model,
         reasoning_effort=reasoning_effort,
         temperature=temperature,

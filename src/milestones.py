@@ -9,7 +9,7 @@ from baselines import days_of_data
 from config import MILESTONE_LIFETIME_MIN_DAYS
 
 
-def _format_pace(value: float | None) -> str | None:
+def format_pace(value: float | None) -> str | None:
     """Format minutes/km as mm:ss/km."""
     if value is None:
         return None
@@ -175,7 +175,7 @@ def compute_milestones(conn: sqlite3.Connection) -> str:
         if row is None or row["pace_min_km"] is None:
             continue
         run_pr_lines.append(
-            f"- {label} PR: **{_format_pace(row['pace_min_km'])}** on {row['date']} ({_format_age_days(row['date'])})."
+            f"- {label} PR: **{format_pace(row['pace_min_km'])}** on {row['date']} ({_format_age_days(row['date'])})."
         )
 
     if run_pr_lines:

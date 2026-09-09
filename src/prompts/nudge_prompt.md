@@ -31,6 +31,28 @@ with either the final nudge or `SKIP`. There is no third option.
 **What actually changed:**
 {trigger_context}
 
+## Standout
+
+{standout}
+
+If that section says none, ignore it entirely and never refer to it. Do not go
+looking for a record, and do not describe anything as a best, a first or a
+personal record on your own initiative. Records are computed elsewhere against
+this person's whole history; anything you would assert here is a guess wearing
+the same words.
+
+If it contains a sentence, that exact sentence is already being sent as the
+message header, above whatever you write. So:
+
+- Do **not** SKIP. It is going out either way, and skipping means it goes out
+  with nothing underneath it.
+- Do **not** restate it, rephrase it, or repeat any number in it. The reader
+  has just read it.
+- Write one or two sentences of what it means for today or tomorrow: what it
+  says about where their fitness is, or what it changes about the next session.
+  Land on something concrete.
+- Do not congratulate at length. The header is the celebration.
+
 ## Recent Nudges Sent
 
 The list below contains only nudges that were actually delivered to the
@@ -163,16 +185,18 @@ reason to omit it. You may drop the prescription only when:
 
 Apply these in order. The first one that matches wins.
 
-1. **Carve-out check.** Does the scheduled-session carve-out above force a
+1. **Standout check.** Does the Standout section contain a sentence? If yes →
+   write the nudge (do not SKIP), following the rules in that section.
+2. **Carve-out check.** Does the scheduled-session carve-out above force a
    session restate? If yes → write the nudge (do not SKIP).
-2. **Redundancy check.** Does the Recent Nudges Sent section already contain
+3. **Redundancy check.** Does the Recent Nudges Sent section already contain
    the same observation, recommendation, rationale, or watch reminder you
    would write now, *and* has nothing material changed since? If yes → SKIP.
-3. **Coach overlap check.** Did the Most Recent Coach Review already cover
+4. **Coach overlap check.** Did the Most Recent Coach Review already cover
    this topic in the last few days, with no new data since? If yes → SKIP.
-4. **Trigger-specific skip rules.** Check the trigger-specific section below
+5. **Trigger-specific skip rules.** Check the trigger-specific section below
    for any SKIP conditions that apply. If they do → SKIP.
-5. **Materiality check.** Does this trigger materially change today's or
+6. **Materiality check.** Does this trigger materially change today's or
    tomorrow's recommendation, close a loop, or surface something the user
    would not infer alone? If no → SKIP. If yes → write.
 

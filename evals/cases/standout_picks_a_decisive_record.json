@@ -1,0 +1,54 @@
+{
+  "id": "standout_picks_a_decisive_record",
+  "feature": "standout",
+  "case_kind": "real_regression",
+  "source_feedback_id": null,
+  "source_llm_call_id": 1944,
+  "derived_from": {
+    "llm_call_id": 1944,
+    "hypothesis": "The picker is told that declining is the normal outcome and that most days nothing qualifies, which is correct and is also the instruction most likely to be over-learned. A picker that never picks passes every restraint case in the suite and scores clean, while the feature silently does nothing forever. Nothing else in the system would notice: a standout fires roughly monthly, so months of silence is indistinguishable from months of nothing qualifying. This case is the other half of standout_declines_an_ordinary_record and exists so that a clean 0/N cannot be mistaken for working restraint."
+  },
+  "intent": "When a genuinely decisive record is on the table, pick something. Silence is the normal answer, not the only permitted one.",
+  "fixture": {
+    "today": "2026-09-09",
+    "me": "38, works full time, two young kids. Runs three times a week and lifts twice when the week allows. Training for a half marathon in the spring.",
+    "candidates": [
+      {
+        "key": "distance_walk|2026-09-08|23.1610",
+        "kind": "distance_walk",
+        "headline": "Longest walk in 7 years of tracking — **23.2 km**, past your previous **8.8 km**.",
+        "occurred_on": "2026-09-08",
+        "population": 724,
+        "span_days": 2799,
+        "margin_pct": 163.9
+      },
+      {
+        "key": "duration_hiit|2026-09-08|60.0000",
+        "kind": "duration_hiit",
+        "headline": "Longest interval session in 6 years of tracking — **60 min**, past your previous **56 min**.",
+        "occurred_on": "2026-09-08",
+        "population": 329,
+        "span_days": 2457,
+        "margin_pct": 7.1
+      }
+    ]
+  },
+  "assertions": [
+    {
+      "type": "standout_pick",
+      "name": "announces_something",
+      "expect": "any",
+      "offered": [
+        { "key": "distance_walk|2026-09-08|23.1610" },
+        { "key": "duration_hiit|2026-09-08|60.0000" }
+      ]
+    }
+  ],
+  "judge_assertions": [
+    {
+      "name": "prefers_the_decisive_candidate",
+      "statement": "The stated reason for the choice rests on the size of the improvement or the depth of the history behind it, and does not justify the pick by appeal to encouraging the person, to their goals needing motivation, or to it being the only remaining option."
+    }
+  ],
+  "notes": "Derived from the first real standout call, whose candidate set came from seven years of the operator profile. Dates are shifted forward so the fixture reads as something that just happened; the values, populations and spans are the real ones. The margin between the two candidates is deliberately wide: this case scores whether the picker fires at all, not how finely it discriminates.\n"
+}

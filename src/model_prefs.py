@@ -34,6 +34,7 @@ from config import (
     DEFAULT_NUDGE_MODEL,
     DEFAULT_CHECKIN_MODEL,
     DEFAULT_PLAN_FRAME_MODEL,
+    DEFAULT_STANDOUT_MODEL,
     DEFAULT_TARGETS_MODEL,
     FALLBACK_FLASH_MODEL,
     FALLBACK_PRO_MODEL,
@@ -59,6 +60,7 @@ FLASH_FEATURES: tuple[str, ...] = (
     "memory",
     "targets",
     "plan_frame",
+    "standout",
     "checkin",
     "verification_rewrite",
 )
@@ -85,6 +87,7 @@ FEATURE_LABELS: dict[str, str] = {
     "memory": "Weekly memory",
     "targets": "Weekly targets",
     "plan_frame": "Plan frame",
+    "standout": "Standout picker",
     "checkin": "Weekly check-in",
     "verification": "Verifier",
     "verification_rewrite": "Verifier rewrite",
@@ -95,7 +98,15 @@ TELEGRAM_FEATURE_GROUPS: dict[str, tuple[str, ...]] = {
     "reports": ("insights",),
     "coach": ("coach",),
     "nudges": ("nudge",),
-    "utilities": ("notify", "add_clone", "memory", "targets", "plan_frame", "checkin"),
+    "utilities": (
+        "notify",
+        "add_clone",
+        "memory",
+        "targets",
+        "plan_frame",
+        "standout",
+        "checkin",
+    ),
 }
 
 # Capability tier shown next to each model in Telegram buttons. Helps users
@@ -178,6 +189,11 @@ def default_model_prefs() -> dict[str, Any]:
             "plan_frame": {
                 "profile": "flash",
                 "primary": DEFAULT_PLAN_FRAME_MODEL,
+                "temperature": None,
+            },
+            "standout": {
+                "profile": "flash",
+                "primary": DEFAULT_STANDOUT_MODEL,
                 "temperature": None,
             },
             "checkin": {

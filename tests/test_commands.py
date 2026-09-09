@@ -24,6 +24,8 @@ from cmd_llm_common import (
 from cmd_llm_log import cmd_llm_log
 from cmd_notify_interpreter import interpret_notify_request
 from cmd_nudge import cmd_nudge
+from standouts import Standout
+from config import TELEGRAM_MESSAGE_EFFECTS
 import commands as commands_module
 from commands import (
     ADVANCED_TELEGRAM_BOT_COMMANDS,
@@ -66,6 +68,17 @@ _NUDGE_MESSAGES: list[dict] = [
     {"role": "system", "content": "s"},
     {"role": "user", "content": "u"},
 ]
+# A detected standout, already computed and phrased. Nothing in the nudge path
+# is allowed to reword it, so the tests below compare against it verbatim.
+_STANDOUT = Standout(
+    key="distance_run|2026-09-08|21.2000",
+    kind="distance_run",
+    headline="Longest run in 7 years of tracking — **21.2 km**, past your previous **19.2 km**.",
+    occurred_on="2026-09-08",
+    population=1115,
+    span_days=2805,
+    margin_pct=10.4,
+)
 
 
 class TestSetupCommand:
@@ -1635,6 +1648,397 @@ class TestCmdNudge:
             cmd_nudge(args)
 
         assert send_telegram.call_args.args[0].startswith("**\U0001f4ca Data Sync**")
+
+    def test_a_standout_takes_the_header_and_pushes_the_ring_to_the_foot(
+        self,
+        in_memory_db,
+        capsys,
+    ) -> None:
+        """Two headers is one too many, but the week must not vanish either.
+
+        The session setting a record is almost always the session that moved a
+        ring, so this is exactly the message where dropping it would hurt.
+        """
+        args = SimpleNamespace(
+            db="ignored.db",
+            model=None,
+            months=1,
+            trigger="new_data",
+            telegram=False,
+        )
+        result = LLMResult(
+            text="That pace off a normal week says the base is holding.",
+            model="test-model",
+            input_tokens=1,
+            output_tokens=12,
+            total_tokens=13,
+            latency_s=0.1,
+            llm_call_id=30,
+        )
+
+        with (
+            patch("cmd_nudge.load_context", return_value={"prompt": "x", "soul": "y"}),
+            patch("cmd_nudge.open_db", return_value=in_memory_db),
+            patch("cmd_nudge.build_llm_data", return_value=_NUDGE_LLM_DATA),
+            patch("cmd_nudge.build_messages", return_value=_NUDGE_MESSAGES),
+            patch("cmd_nudge.call_llm", return_value=result),
+            patch("cmd_nudge._save_nudge"),
+            patch("cmd_nudge.find_standout", return_value=_STANDOUT),
+            patch(
+                "cmd_nudge.weekly_progress_nudge_line",
+                return_value=("Lifts \u25cf\u25cf", "fp-1"),
+            ),
+            patch("cmd_nudge.record_progress_line_shown") as ring_recorded,
+            patch("cmd_nudge.record_standout_announced") as recorded,
+            patch("cmd_nudge.send_telegram", return_value=123) as send_telegram,
+        ):
+            cmd_nudge(args)
+
+        sent_text = send_telegram.call_args.args[0]
+        # Quoted, so Telegram draws its bar down the left of the standout only.
+        assert sent_text.startswith(f"> {_STANDOUT.headline}")
+        assert "Data Sync" not in sent_text
+        assert "---" not in sent_text
+        # The ring is last, below the body, rather than stacked under the header.
+        assert sent_text.rstrip().endswith("Lifts \u25cf\u25cf")
+        assert sent_text.index("Lifts") > sent_text.index("base is holding")
+        ring_recorded.assert_called_once()
+        recorded.assert_called_once()
+
+    def test_the_verifier_is_told_what_the_header_already_said(
+        self,
+        in_memory_db,
+        capsys,
+        monkeypatch,
+    ) -> None:
+        """Otherwise a body leaning on the record reads as unsupported."""
+        args = SimpleNamespace(
+            db="ignored.db",
+            model=None,
+            months=1,
+            trigger="new_data",
+            telegram=False,
+        )
+        result = LLMResult(
+            text="That distance says the base is there. Keep tomorrow easy.",
+            model="test-model",
+            input_tokens=1,
+            output_tokens=9,
+            total_tokens=10,
+            latency_s=0.1,
+            llm_call_id=37,
+        )
+        seen: dict = {}
+
+        def _verify(**kwargs):
+            seen.update(kwargs)
+            return VerificationResult(verdict="pass", issues=[])
+
+        monkeypatch.setattr("cmd_llm_common.ENABLE_LLM_VERIFICATION", True)
+        monkeypatch.setattr("cmd_llm_common.VERIFY_NUDGE", True)
+        monkeypatch.setattr("cmd_llm_common.verify_and_rewrite", _verify)
+
+        with (
+            patch("cmd_nudge.load_context", return_value={"prompt": "x", "soul": "y"}),
+            patch("cmd_nudge.open_db", return_value=in_memory_db),
+            patch("cmd_nudge.build_llm_data", return_value=_NUDGE_LLM_DATA),
+            patch("cmd_nudge.build_messages", return_value=_NUDGE_MESSAGES),
+            patch("cmd_nudge.call_llm", return_value=result),
+            patch("cmd_nudge._save_nudge"),
+            patch("cmd_nudge.find_standout", return_value=_STANDOUT),
+            patch("cmd_nudge.weekly_progress_nudge_line", return_value=None),
+            patch("cmd_nudge.record_standout_announced"),
+            patch("cmd_nudge.send_telegram", return_value=123),
+        ):
+            cmd_nudge(args)
+
+        assert seen["evidence"]["standout_headline"] == _STANDOUT.headline
+
+    def test_an_ordinary_nudge_gives_the_verifier_no_headline(
+        self,
+        in_memory_db,
+        capsys,
+        monkeypatch,
+    ) -> None:
+        args = SimpleNamespace(
+            db="ignored.db",
+            model=None,
+            months=1,
+            trigger="new_data",
+            telegram=False,
+        )
+        result = LLMResult(
+            text="Keep tomorrow easy.",
+            model="test-model",
+            input_tokens=1,
+            output_tokens=4,
+            total_tokens=5,
+            latency_s=0.1,
+            llm_call_id=38,
+        )
+        seen: dict = {}
+
+        def _verify(**kwargs):
+            seen.update(kwargs)
+            return VerificationResult(verdict="pass", issues=[])
+
+        monkeypatch.setattr("cmd_llm_common.ENABLE_LLM_VERIFICATION", True)
+        monkeypatch.setattr("cmd_llm_common.VERIFY_NUDGE", True)
+        monkeypatch.setattr("cmd_llm_common.verify_and_rewrite", _verify)
+
+        with (
+            patch("cmd_nudge.load_context", return_value={"prompt": "x", "soul": "y"}),
+            patch("cmd_nudge.open_db", return_value=in_memory_db),
+            patch("cmd_nudge.build_llm_data", return_value=_NUDGE_LLM_DATA),
+            patch("cmd_nudge.build_messages", return_value=_NUDGE_MESSAGES),
+            patch("cmd_nudge.call_llm", return_value=result),
+            patch("cmd_nudge._save_nudge"),
+            patch("cmd_nudge.find_standout", return_value=None),
+            patch("cmd_nudge.weekly_progress_nudge_line", return_value=None),
+            patch("cmd_nudge.send_telegram", return_value=123),
+        ):
+            cmd_nudge(args)
+
+        assert seen["evidence"]["standout_headline"] is None
+
+    def test_a_standout_carries_a_message_effect(
+        self,
+        in_memory_db,
+        capsys,
+    ) -> None:
+        """The marker that costs no room in a message whose header is contested."""
+        args = SimpleNamespace(
+            db="ignored.db",
+            model=None,
+            months=1,
+            trigger="new_data",
+            telegram=True,
+        )
+        result = LLMResult(
+            text="Keep tomorrow easy.",
+            model="test-model",
+            input_tokens=1,
+            output_tokens=4,
+            total_tokens=5,
+            latency_s=0.1,
+            llm_call_id=35,
+        )
+
+        with (
+            patch("cmd_nudge.load_context", return_value={"prompt": "x", "soul": "y"}),
+            patch("cmd_nudge.open_db", return_value=in_memory_db),
+            patch("cmd_nudge.build_llm_data", return_value=_NUDGE_LLM_DATA),
+            patch("cmd_nudge.build_messages", return_value=_NUDGE_MESSAGES),
+            patch("cmd_nudge.call_llm", return_value=result),
+            patch("cmd_nudge._save_nudge"),
+            patch("cmd_nudge.find_standout", return_value=_STANDOUT),
+            patch("cmd_nudge.weekly_progress_nudge_line", return_value=None),
+            patch("cmd_nudge.record_standout_announced"),
+            patch("cmd_nudge.send_telegram", return_value=123) as send_telegram,
+        ):
+            cmd_nudge(args)
+
+        assert (
+            send_telegram.call_args.kwargs["message_effect_id"]
+            == (TELEGRAM_MESSAGE_EFFECTS["fire"])
+        )
+
+    def test_an_ordinary_nudge_carries_no_effect(
+        self,
+        in_memory_db,
+        capsys,
+    ) -> None:
+        """An effect on every nudge stops meaning anything inside a fortnight."""
+        args = SimpleNamespace(
+            db="ignored.db",
+            model=None,
+            months=1,
+            trigger="new_data",
+            telegram=True,
+        )
+        result = LLMResult(
+            text="Keep tomorrow easy.",
+            model="test-model",
+            input_tokens=1,
+            output_tokens=4,
+            total_tokens=5,
+            latency_s=0.1,
+            llm_call_id=36,
+        )
+
+        with (
+            patch("cmd_nudge.load_context", return_value={"prompt": "x", "soul": "y"}),
+            patch("cmd_nudge.open_db", return_value=in_memory_db),
+            patch("cmd_nudge.build_llm_data", return_value=_NUDGE_LLM_DATA),
+            patch("cmd_nudge.build_messages", return_value=_NUDGE_MESSAGES),
+            patch("cmd_nudge.call_llm", return_value=result),
+            patch("cmd_nudge._save_nudge"),
+            patch("cmd_nudge.find_standout", return_value=None),
+            patch("cmd_nudge.weekly_progress_nudge_line", return_value=None),
+            patch("cmd_nudge.send_telegram", return_value=123) as send_telegram,
+        ):
+            cmd_nudge(args)
+
+        assert send_telegram.call_args.kwargs["message_effect_id"] is None
+
+    def test_a_standout_ships_even_when_the_writer_skips(
+        self,
+        in_memory_db,
+        capsys,
+    ) -> None:
+        """The headline is a finished sentence, so it does not need a body."""
+        args = SimpleNamespace(
+            db="ignored.db",
+            model=None,
+            months=1,
+            trigger="new_data",
+            telegram=False,
+        )
+        result = LLMResult(
+            text="SKIP",
+            model="test-model",
+            input_tokens=1,
+            output_tokens=1,
+            total_tokens=2,
+            latency_s=0.1,
+            llm_call_id=31,
+        )
+
+        with (
+            patch("cmd_nudge.load_context", return_value={"prompt": "x", "soul": "y"}),
+            patch("cmd_nudge.open_db", return_value=in_memory_db),
+            patch("cmd_nudge.build_llm_data", return_value=_NUDGE_LLM_DATA),
+            patch("cmd_nudge.build_messages", return_value=_NUDGE_MESSAGES),
+            patch("cmd_nudge.call_llm", return_value=result),
+            patch("cmd_nudge._save_nudge"),
+            patch("cmd_nudge.find_standout", return_value=_STANDOUT),
+            patch("cmd_nudge.record_standout_announced") as recorded,
+            patch("cmd_nudge.send_telegram", return_value=123) as send_telegram,
+        ):
+            cmd_result = cmd_nudge(args)
+
+        assert send_telegram.call_args.args[0] == f"> {_STANDOUT.headline}"
+        assert cmd_result.text == f"> {_STANDOUT.headline}"
+        recorded.assert_called_once()
+
+    def test_a_skip_with_no_standout_still_sends_nothing(
+        self,
+        in_memory_db,
+        capsys,
+    ) -> None:
+        args = SimpleNamespace(
+            db="ignored.db",
+            model=None,
+            months=1,
+            trigger="new_data",
+            telegram=False,
+        )
+        result = LLMResult(
+            text="SKIP",
+            model="test-model",
+            input_tokens=1,
+            output_tokens=1,
+            total_tokens=2,
+            latency_s=0.1,
+            llm_call_id=32,
+        )
+
+        with (
+            patch("cmd_nudge.load_context", return_value={"prompt": "x", "soul": "y"}),
+            patch("cmd_nudge.open_db", return_value=in_memory_db),
+            patch("cmd_nudge.build_llm_data", return_value=_NUDGE_LLM_DATA),
+            patch("cmd_nudge.build_messages", return_value=_NUDGE_MESSAGES),
+            patch("cmd_nudge.call_llm", return_value=result),
+            patch("cmd_nudge._save_nudge") as save_nudge,
+            patch("cmd_nudge.find_standout", return_value=None),
+            patch("cmd_nudge.send_telegram") as send_telegram,
+        ):
+            cmd_result = cmd_nudge(args)
+
+        assert cmd_result.text is None
+        save_nudge.assert_not_called()
+        send_telegram.assert_not_called()
+
+    def test_a_failed_send_does_not_spend_the_standout_budget(
+        self,
+        in_memory_db,
+        capsys,
+    ) -> None:
+        """Recording a month of silence for a message nobody received."""
+        args = SimpleNamespace(
+            db="ignored.db",
+            model=None,
+            months=1,
+            trigger="new_data",
+            telegram=True,
+        )
+        result = LLMResult(
+            text="Keep tomorrow easy.",
+            model="test-model",
+            input_tokens=1,
+            output_tokens=4,
+            total_tokens=5,
+            latency_s=0.1,
+            llm_call_id=33,
+        )
+
+        with (
+            patch("cmd_nudge.load_context", return_value={"prompt": "x", "soul": "y"}),
+            patch("cmd_nudge.open_db", return_value=in_memory_db),
+            patch("cmd_nudge.build_llm_data", return_value=_NUDGE_LLM_DATA),
+            patch("cmd_nudge.build_messages", return_value=_NUDGE_MESSAGES),
+            patch("cmd_nudge.call_llm", return_value=result),
+            patch("cmd_nudge._save_nudge"),
+            patch("cmd_nudge.find_standout", return_value=_STANDOUT),
+            patch("cmd_nudge.record_standout_announced") as recorded,
+            patch("cmd_nudge.send_telegram", return_value=None),
+        ):
+            cmd_nudge(args)
+
+        recorded.assert_not_called()
+
+    def test_the_writer_is_told_what_the_standout_says(
+        self,
+        in_memory_db,
+        capsys,
+    ) -> None:
+        """Without it the model restates the header in its own eighty words."""
+        args = SimpleNamespace(
+            db="ignored.db",
+            model=None,
+            months=1,
+            trigger="new_data",
+            telegram=False,
+        )
+        result = LLMResult(
+            text="Keep tomorrow easy.",
+            model="test-model",
+            input_tokens=1,
+            output_tokens=4,
+            total_tokens=5,
+            latency_s=0.1,
+            llm_call_id=34,
+        )
+        seen: dict = {}
+
+        def _capture(context, *args_, **kwargs):
+            seen.update(context)
+            return _NUDGE_MESSAGES
+
+        with (
+            patch("cmd_nudge.load_context", return_value={"prompt": "x", "soul": "y"}),
+            patch("cmd_nudge.open_db", return_value=in_memory_db),
+            patch("cmd_nudge.build_llm_data", return_value=_NUDGE_LLM_DATA),
+            patch("cmd_nudge.build_messages", side_effect=_capture),
+            patch("cmd_nudge.call_llm", return_value=result),
+            patch("cmd_nudge._save_nudge"),
+            patch("cmd_nudge.find_standout", return_value=_STANDOUT),
+            patch("cmd_nudge.record_standout_announced"),
+            patch("cmd_nudge.send_telegram", return_value=123),
+        ):
+            cmd_nudge(args)
+
+        assert seen["standout"] == _STANDOUT.headline
 
     def test_nudge_passes_route_reasoning_effort(
         self,

@@ -17,6 +17,16 @@ For each issue:
 - `correction` is the bounded correction to apply.
 - `evidence` cites the specific source fact (tool_call result, evidence field, or shared fact), or null.
 
+When `evidence.standout_headline` is set, that sentence is already being sent
+as the message header, above this draft. It was computed from the person's own
+recorded history and is not under review. Judge only the text below it, and:
+
+- Materiality is settled. Do not fail the draft into silence for saying nothing
+  that stands alone; its job is to say what the header means for today.
+- Treat restating the header, or repeating any figure in it, as an issue.
+- A claim the draft makes about the achievement is supported by the headline.
+  Do not flag it as invented.
+
 Checklist:
 - There must be genuinely something worth sending.
 - It must not be redundant with recent nudges or the latest coach summary.

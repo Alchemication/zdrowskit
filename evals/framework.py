@@ -76,6 +76,7 @@ EVAL_FEATURE_TO_PRODUCTION_FEATURE = {
     "verification_judge": "verification",
     "targets": "targets",
     "plan_frame": "plan_frame",
+    "standout": "standout",
     "checkin": "checkin",
 }
 
@@ -550,12 +551,13 @@ def _execute_case(
             cache=cache,
             refresh_cache=refresh_cache,
         )
-    elif case.feature in {"targets", "plan_frame", "checkin"}:
+    elif case.feature in {"targets", "plan_frame", "standout", "checkin"}:
         from evals import run_small_calls
 
         runner = {
             "targets": run_small_calls.run_targets_case,
             "plan_frame": run_small_calls.run_plan_frame_case,
+            "standout": run_small_calls.run_standout_case,
             "checkin": run_small_calls.run_checkin_case,
         }[case.feature]
         execution, result.model, result.route = runner(
@@ -1172,6 +1174,18 @@ def _case_from_dict(raw: dict[str, Any], path: Path) -> EvalCase:
                 f"{path} plan_frame fixture must not carry measurements "
                 f"({forbidden}) — the call never sees them in production"
             )
+    elif feature == "standout":
+        candidates = fixture.get("candidates")
+        if not isinstance(candidates, list) or not candidates:
+            raise ValueError(f"{path} standout fixture must include candidates")
+        for entry in candidates:
+            missing = sorted({"key", "headline"} - set(entry))
+            if missing:
+                raise ValueError(
+                    f"{path} standout candidate is missing {missing} — the "
+                    "picker chooses between finished sentences, so a case "
+                    "without one is testing something production never does"
+                )
     elif feature == "checkin":
         if "sessions" not in fixture:
             raise ValueError(f"{path} checkin fixture must include sessions")
@@ -1767,6 +1781,8 @@ def _evaluate_assertion(
         return _assert_forbidden_opening(name, assertion, execution)
     if atype == "targets_slots":
         return _assert_targets_slots(name, assertion, execution, fixture or {})
+    if atype == "standout_pick":
+        return _assert_standout_pick(name, assertion, execution)
     if atype == "plan_frame_mode":
         return _assert_plan_frame_mode(name, assertion, execution)
     return AssertionResult(
@@ -1854,6 +1870,39 @@ def _assert_plan_frame_mode(
         name=name,
         passed=passed,
         detail=f"parsed mode {actual!r}, allowed {allowed}",
+    )
+
+
+def _assert_standout_pick(
+    name: str,
+    assertion: dict[str, Any],
+    execution: EvalExecution,
+) -> AssertionResult:
+    """Check what the picker's answer actually resolves to in production.
+
+    Parsed rather than pattern-matched, because the two failures that matter
+    both survive a regex: a key the model was never offered reads like a pick
+    and is treated as a decline, and a malformed object reads like nothing and
+    is also a decline. Scoring the raw text would call both of those a pick.
+
+    ``expect`` is ``"any"`` when the case is testing that something fires at
+    all, ``"none"`` when it is testing restraint, or a literal key.
+    """
+    from standouts import parse_standout_response
+
+    offered = {str(entry["key"]) for entry in assertion.get("offered", [])}
+    parsed = parse_standout_response(execution.text or "", offered)
+    expect = str(assertion.get("expect", "any"))
+    if expect == "any":
+        passed = parsed is not None
+    elif expect == "none":
+        passed = parsed is None
+    else:
+        passed = parsed == expect
+    return AssertionResult(
+        name=name,
+        passed=passed,
+        detail=f"parsed pick {parsed!r}, expected {expect!r}",
     )
 
 

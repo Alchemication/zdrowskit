@@ -87,13 +87,18 @@ Deterministic checks run first. Available types:
 `text_absent`, `text_without_chart_absent`, `memory_present`, `memory_contains`,
 `memory_absent`, `memory_bullet_max`, `word_count_max`,
 `visible_char_count_max`, `forbidden_opening`, `targets_slots`,
-`plan_frame_mode`.
+`plan_frame_mode`, `standout_pick`.
 
-`targets_slots` and `plan_frame_mode` score the **parsed** result rather than
+`targets_slots`, `plan_frame_mode` and `standout_pick` score the **parsed**
+result rather than
 the response text, because both features validate before anything reaches the
 user: a target naming a category the vocabulary rejects, or a suppression with
 no stated reason, produces nothing in production. Asserting on the raw JSON
-would pass a case whose answer never becomes a bar. `targets_slots` is given
+would pass a case whose answer never becomes a bar. `standout_pick` is the
+same guard against a different failure: a picker naming a key it was never
+offered has invented an achievement, and production reads that as declining, so
+a raw-text assertion would score an invention as a successful pick. It takes
+the `offered` keys and an `expect` of `any`, `none`, or a literal key. `targets_slots` is given
 the fixture's `activity_types` for the same reason — a target naming a workout
 type is legitimate only for a profile that has recorded it, and an assertion
 without that list rejects the correct answer. The optional `values` mapping
@@ -225,7 +230,8 @@ exhausted `max_tool_iterations` and was forced to answer with what it had. The
 leaderboard shows the average per row and expands to the full paths on click.
 
 Features with no tool loop — `memory`, `verification_judge`, `targets`,
-`plan_frame` and `checkin` are single calls by design — record this as unknown
+`plan_frame`, `standout` and `checkin` are single calls by design — record this
+as unknown
 rather than zero, so "was never given tools" cannot be read as "chose not to
 use them".
 
@@ -233,6 +239,19 @@ use them".
 targets, or progress. The production call is given life context and nothing
 about how the week is going, so a fixture able to smuggle the numbers in would
 be scoring a different question from the one that ships.
+
+`standout` fixtures are rejected at load time unless every candidate carries a
+key and a finished headline. The picker only ever chooses between sentences
+that were computed and phrased before the call, so a fixture handing it raw
+data would be testing generation — the exact thing the design removed.
+
+Standout cases come in pairs on purpose. A picker told that declining is the
+normal outcome can over-learn it and never fire again, and because the feature
+is budgeted at roughly one announcement a month, months of silence looks
+identical to months of nothing qualifying. Restraint cases alone would score
+that picker clean. So every restraint case is paired with one that must fire,
+and the pair is the only thing that distinguishes working restraint from a dead
+selector.
 
 ## Leaderboard
 

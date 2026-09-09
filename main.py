@@ -101,6 +101,7 @@ from cmd_models import cmd_models
 from cmd_nudge import cmd_nudge
 from cmd_notify import RESET_TARGETS as NOTIFY_RESET_TARGETS
 from cmd_notify import cmd_notify
+from cmd_standouts import cmd_standouts
 from cmd_targets import cmd_targets
 from config import GOOGLE_DRIVE_SERVICE_ACCOUNT
 from commands import (
@@ -469,6 +470,13 @@ def main() -> None:
         help="Drop this week's targets so the next notification re-derives them",
     )
 
+    # standouts
+    p_standouts = sub.add_parser(
+        "standouts",
+        help="Show the rare facts a nudge could currently announce",
+    )
+    _add_db(p_standouts)
+
     # models
     # Derived, never hand-listed: a duplicate of this list is how `memory`
     # shipped as a routable feature that `models set` could not reach.
@@ -611,6 +619,7 @@ def main() -> None:
         "llm-log",
         "events",
         "targets",
+        "standouts",
     }
     profile_path_commands = database_commands | {"context", "notify", "models"}
     if args.cmd in profile_path_commands:
@@ -687,6 +696,7 @@ def main() -> None:
         "llm-log": cmd_llm_log,
         "notify": cmd_notify,
         "targets": cmd_targets,
+        "standouts": cmd_standouts,
         "models": cmd_models,
         "events": cmd_events,
         "daemon-install": cmd_daemon_install,

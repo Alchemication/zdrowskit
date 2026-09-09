@@ -243,6 +243,7 @@ def _send_telegram_chunk(
     text: str,
     html_text: str,
     reply_markup: dict | None = None,
+    message_effect_id: str | None = None,
 ) -> int | None:
     """Send a single Telegram message chunk, falling back to plain text.
 
@@ -256,6 +257,8 @@ def _send_telegram_chunk(
         text: Original plain-text version (fallback).
         html_text: HTML-formatted version (preferred).
         reply_markup: Optional Telegram reply markup (e.g. inline keyboard).
+        message_effect_id: Optional animated effect played once on delivery.
+            Private chats only, which every profile is.
 
     Returns:
         The message_id of the sent message, or None on failure.
@@ -269,6 +272,8 @@ def _send_telegram_chunk(
     }
     if reply_markup is not None:
         payload["reply_markup"] = reply_markup
+    if message_effect_id is not None:
+        payload["message_effect_id"] = message_effect_id
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         url, data=data, headers={"Content-Type": "application/json"}
@@ -293,6 +298,10 @@ def _send_telegram_chunk(
     }
     if reply_markup is not None:
         fallback_payload["reply_markup"] = reply_markup
+    # The effect is carried into the fallback too. A message that lost its
+    # markup should not also silently lose the thing marking it as rare.
+    if message_effect_id is not None:
+        fallback_payload["message_effect_id"] = message_effect_id
     data = json.dumps(fallback_payload).encode("utf-8")
     req = urllib.request.Request(
         url, data=data, headers={"Content-Type": "application/json"}
@@ -315,6 +324,7 @@ def send_telegram(
     *,
     chat_id: str | None,
     bot_token: str | None = None,
+    message_effect_id: str | None = None,
 ) -> int | None:
     """Send the report via Telegram Bot API with HTML formatting.
 
@@ -331,6 +341,10 @@ def send_telegram(
             attached to the **last** chunk only.
         chat_id: Explicit profile destination; None aborts with a logged error.
         bot_token: Override bot token (defaults to env var).
+        message_effect_id: Optional animated effect, played on the **first**
+            chunk. The header is what the effect is marking, and the header is
+            at the top; on the last chunk it would fire against the tail of a
+            message the reader has already scrolled past.
 
     Returns:
         The message_id of the last sent chunk, or None on failure.
@@ -350,7 +364,10 @@ def send_telegram(
         plain = plain_chunks[i] if i < len(plain_chunks) else html
         is_last = i == len(html_chunks) - 1
         chunk_markup = reply_markup if is_last else None
-        msg_id = _send_telegram_chunk(url, chat_id, plain, html, chunk_markup)
+        chunk_effect = message_effect_id if i == 0 else None
+        msg_id = _send_telegram_chunk(
+            url, chat_id, plain, html, chunk_markup, chunk_effect
+        )
         if msg_id is None:
             logger.error("Aborting Telegram send at chunk %d", i + 1)
             return None

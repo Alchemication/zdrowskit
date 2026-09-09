@@ -508,6 +508,120 @@ more than the truncated words are worth. Sixteen fits every common name
 outright and leaves the bar, both numbers and the pace verdict on one line.
 """
 
+STANDOUT_COOLDOWN_DAYS: int = 28
+"""Minimum gap between two standout announcements.
+
+A standout is worth reading only in proportion to how rarely it arrives. The
+facts themselves are abundant — once several kinds of record and crossing are
+computed, something is true most weeks — so scarcity cannot come from the
+detection. It has to be imposed here, and roughly a month means a person gets
+about a dozen of these a year and remembers each one.
+
+This is deliberately far longer than any other suppression in the project. The
+progress line re-fires whenever it changes, and nudges run to a daily cap; a
+standout is the one surface where firing nothing for six weeks is a correct
+outcome rather than a fault.
+"""
+
+STANDOUT_MIN_POPULATION: int = 30
+"""Comparable sessions or days required before any standout may be claimed.
+
+Gating on recorded months was the obvious choice and the wrong one. Calendar
+time and evidence are only loosely related: someone training several times a
+week has a trustworthy comparison set inside a month, while someone who walks
+once a fortnight does not have one after a year. A month-based gate blocks the
+first unfairly and admits the second wrongly.
+
+Thirty is where "best of everything recorded" stops being a restatement of how
+little has been recorded. Below it, a first-ever walk is a record, and so is
+the second, and so is most of the next dozen — the cold-start failure this
+project has already hit once in `milestones.py`, where the only recorded run
+became a lifetime PR.
+
+Each generator counts its own population, so a profile can be eligible for run
+records and not yet for walks.
+"""
+
+STANDOUT_MIN_MARGIN_PCT: float = 1.5
+"""How far a record must beat the previous best to be worth announcing.
+
+A five-kilometre best improved by a fraction of a second is technically a
+record and emotionally hollow, and spending a month's budget on one is worse
+than staying silent. A percentage rather than an absolute margin because the
+same rule has to cover pace, distance and duration.
+
+One and a half percent is roughly five seconds on a twenty-five minute five
+kilometre, or half a kilometre on a thirty kilometre longest ride — visible
+improvements rather than measurement noise.
+"""
+
+STANDOUT_RECENCY_DAYS: int = 3
+"""How recently an achievement must have happened to still be news.
+
+A standout rides on a nudge that fires because data arrived, so the record has
+to belong to that data. Announcing a record set five weeks ago reads as the
+system noticing late, which is worse than not noticing.
+
+Three days rather than one because imports are not always same-day: a weekend
+long run can land on Monday, and it should still count as the thing that just
+happened.
+"""
+
+STANDOUT_VOLUME_STEP_KM: int = 250
+"""Spacing of the lifetime-distance thresholds worth remarking on.
+
+Cumulative distance is the one standout that needs no record and no comparison
+population, because crossing a round number is simply true. The step sets how
+often that can happen: at a few hundred kilometres a year, this lands roughly
+annually per activity, which suits a surface budgeted at one announcement a
+month across every kind.
+"""
+
+TELEGRAM_MESSAGE_EFFECTS: dict[str, str] = {
+    "fire": "5104841245755180586",
+    "confetti": "5046509860389126442",
+    "heart": "5159385139981059251",
+    "thumbs_up": "5107584321108051014",
+}
+"""Telegram animated message effects, by the emoji they play.
+
+Effect ids are opaque constants owned by Telegram, not something derivable, so
+they are listed once here rather than pasted at a call site. All four were
+confirmed working against the project's own bot on 2026-09-09. Effects require
+a private chat, which every profile is: each person gets their own bot.
+"""
+
+STANDOUT_EFFECT_DEFAULT: str = "fire"
+"""Effect played on a standout whose kind names no other one.
+
+The one marker that costs no space in the message. The header is already
+contested between the standout sentence and the weekly ring, so spending it on
+an icon would push the ring onto a second line — the wrapping problem the dots
+were introduced to solve. An animation marks the message without occupying it.
+
+Fire rather than confetti as the default because the surface is a training log.
+Confetti reads as a badge awarded by an app, which is the register this feature
+avoids; fire reads as effort.
+
+Safe at this frequency only because standouts are capped at one per
+`STANDOUT_COOLDOWN_DAYS`. An effect on an ordinary nudge would stop meaning
+anything inside a fortnight, which is why nothing else sets one.
+"""
+
+STANDOUT_EFFECT_BY_KIND_PREFIX: dict[str, str] = {"volume": "confetti"}
+"""Effects that suit one family of standout better than the default does.
+
+Matched on the kind's prefix, so every category's volume crossing is covered by
+one entry rather than one per sport. A crossing is the only standout that beats
+nothing: it marks an accumulation reaching a round number, which is the one
+occasion here that is actually party-shaped. Records of speed, distance and
+duration are efforts, and take the default.
+
+Deliberately small. Assigning a distinct animation to every kind would make the
+effect a taxonomy the reader has to learn, when its whole job is to say
+"this one is rare" before a word is read.
+"""
+
 QUIET_WEEK_BASELINE_WEEKS: int = 12
 """Completed weeks used to learn what a normal training week looks like.
 
@@ -716,6 +830,15 @@ MAX_TOKENS_PLAN_FRAME: int = _env_int("ZDROWSKIT_MAX_TOKENS_PLAN_FRAME", 256)
 The call emits one of three words and a sentence explaining it. Smaller than
 every other budget here because a longer answer would mean the model is
 reasoning in prose rather than deciding, and there is nothing for it to write.
+"""
+
+MAX_TOKENS_STANDOUT: int = _env_int("ZDROWSKIT_MAX_TOKENS_STANDOUT", 256)
+"""Output token budget for choosing which standout fact, if any, to announce.
+
+The call returns one candidate key and a short reason, or a null pick. Sized
+like the plan-frame decision for the same reason: the answer is a selection
+from a list it was handed, and a long one would mean the model started writing
+the announcement instead of choosing it.
 """
 
 MAX_TOKENS_TARGETS: int = _env_int("ZDROWSKIT_MAX_TOKENS_TARGETS", 512)
@@ -975,6 +1098,19 @@ Eval cases cover ordinary-week and newborn controls plus the original call-log
 regression. The original context exposed suppression drift; passing simplified
 controls alone does not establish reliability. See the eval leaderboard for
 current results. Reasoning stays off for this constrained classification.
+"""
+
+DEFAULT_STANDOUT_MODEL: str = os.environ.get(
+    "ZDROWSKIT_STANDOUT_MODEL",
+    OPENAI_LUNA_MODEL,
+)
+"""Default model for picking which standout fact is worth announcing.
+
+The call never establishes a fact and never phrases one. Every candidate it
+sees was computed, gated and rendered before the call, so the job is choosing
+between true sentences or declining all of them — a constrained selection of
+the same shape as target extraction and the plan-frame decision, and routed to
+the same tier for the same reason. Reasoning stays off.
 """
 
 DEFAULT_TARGETS_MODEL: str = os.environ.get(

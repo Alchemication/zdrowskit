@@ -31,6 +31,7 @@ from llm_context import build_messages, load_context, load_prompt_text
 from llm_health import build_llm_data, format_recent_nudges, render_health_data
 from llm_verify import extract_tool_evidence, slim_source_messages
 from notify import send_telegram
+from standouts import effect_for, find_standout, record_standout_announced
 from store import create_llm_trace, open_db
 from plan_frame import resolve_plan_frame
 from weekly_progress import (
@@ -135,15 +136,34 @@ def cmd_nudge(
     else:
         context["last_coach_summary"] = "(no recent coach review)"
 
-    messages = build_messages(
-        context,
-        health_data_text,
-        data_maturity=build_data_maturity(conn, context),
-    )
     trace_id = create_llm_trace(
         conn,
         "nudge",
         metadata={"trigger_type": _trigger},
+    )
+
+    # Resolved before the nudge is written, for two reasons. The writer needs
+    # to know a header is coming so it does not spend its eighty words
+    # restating it, and a nudge that would otherwise skip still has to ship the
+    # one rare thing worth interrupting for. The sentence itself is computed
+    # and gated in `standouts`; nothing here lets a model phrase it.
+    standout = find_standout(
+        conn,
+        me=context.get("me"),
+        log=context.get("log"),
+        history=context.get("history"),
+        today=datetime.now().date(),
+        trace_id=trace_id,
+        model_prefs_path=getattr(args, "model_prefs_path", None),
+    )
+    context["standout"] = (
+        standout.headline if standout else "(none — do not invent one)"
+    )
+
+    messages = build_messages(
+        context,
+        health_data_text,
+        data_maturity=build_data_maturity(conn, context),
     )
 
     from tools import execute_run_sql, run_sql_tool
@@ -317,48 +337,57 @@ def cmd_nudge(
                 "Nudge returned empty final text; treating as SKIP (trigger: %s)",
                 _trigger,
             )
-            return CommandResult(llm_call_id=result.llm_call_id)
 
-    # Check for SKIP as the entire response OR as a standalone line.
-    if raw_text.upper() == "SKIP" or "\nSKIP\n" in f"\n{raw_text}\n":
-        logger.info("Nudge skipped by LLM — nothing new to say (trigger: %s)", _trigger)
-        return CommandResult(llm_call_id=result.llm_call_id)
-
-    verified_text = apply_verification(
-        kind="nudge",
-        draft=raw_text,
-        evidence={
-            "health_data_text": health_data_text,
-            "recent_nudges_text": context.get("recent_nudges"),
-            "last_coach_summary": context.get("last_coach_summary"),
-            "trigger_type": _trigger,
-            "trigger_context": trigger_context_text,
-            "tool_calls": extract_tool_evidence(messages),
-        },
-        source_messages=slim_source_messages(messages, raw_text),
-        conn=conn,
-        metadata={
-            "source_llm_call_id": result.llm_call_id,
-            "trigger_type": _trigger,
-        },
-        trace_id=trace_id,
-        model_prefs_path=getattr(args, "model_prefs_path", None),
+    # A skip normally ends the run here. It does not when a standout is
+    # waiting: that headline is a complete sentence computed from the person's
+    # own history, so the rare message still ships even when the model had
+    # nothing to add underneath it.
+    skipped = (
+        not raw_text or raw_text.upper() == "SKIP" or "\nSKIP\n" in f"\n{raw_text}\n"
     )
-    if verified_text is None or verified_text.strip().upper() == "SKIP":
-        logger.info("Nudge skipped by verifier (trigger: %s)", _trigger)
+    if skipped and standout is None:
+        logger.info("Nudge skipped — nothing new to say (trigger: %s)", _trigger)
         return CommandResult(llm_call_id=result.llm_call_id)
-    raw_text = verified_text.strip()
 
+    verified_text: str | None = None
+    if not skipped:
+        verified_text = apply_verification(
+            kind="nudge",
+            draft=raw_text,
+            evidence={
+                "health_data_text": health_data_text,
+                "recent_nudges_text": context.get("recent_nudges"),
+                "last_coach_summary": context.get("last_coach_summary"),
+                "trigger_type": _trigger,
+                "trigger_context": trigger_context_text,
+                "tool_calls": extract_tool_evidence(messages),
+                # The verifier scores the body, but the body was written to sit
+                # underneath this. Without it, a sentence that only means
+                # something beside the header reads as unsupported, and a body
+                # restating the header reads as fine.
+                "standout_headline": standout.headline if standout else None,
+            },
+            source_messages=slim_source_messages(messages, raw_text),
+            conn=conn,
+            metadata={
+                "source_llm_call_id": result.llm_call_id,
+                "trigger_type": _trigger,
+            },
+            trace_id=trace_id,
+            model_prefs_path=getattr(args, "model_prefs_path", None),
+        )
     # Nudges no longer offer charts: the block cost a fifth of the prompt and
     # produced one in 652 messages. Any chart the model still emits is stripped
     # rather than rendered, so a stray block cannot reach the user as code.
-    nudge_text = strip_charts(raw_text).strip()
-    if not nudge_text:
-        logger.warning(
-            "Nudge final text was empty after chart stripping; treating as SKIP "
-            "(trigger: %s)",
-            _trigger,
-        )
+    nudge_body = ""
+    if verified_text is None or verified_text.strip().upper() == "SKIP":
+        if not skipped:
+            logger.info("Nudge body dropped by verifier (trigger: %s)", _trigger)
+    else:
+        nudge_body = strip_charts(verified_text.strip()).strip()
+
+    if not nudge_body and standout is None:
+        logger.warning("Nudge produced no deliverable text (trigger: %s)", _trigger)
         return CommandResult(llm_call_id=result.llm_call_id)
 
     # Trigger-specific emoji header for visual distinction in Telegram.
@@ -381,6 +410,9 @@ def cmd_nudge(
     # nudge is by now committed to being sent, so recording the line as shown
     # is truthful, and measured numbers never pass through a model that could
     # reword them.
+    # Resolved on the standout path too. The session that sets a record is
+    # almost always the session that moved a ring, so this is exactly the
+    # message where the week's state would otherwise go missing.
     frame = resolve_plan_frame(
         conn,
         me=context.get("me"),
@@ -405,8 +437,27 @@ def cmd_nudge(
     # says where the week stands and implies the trigger anyway. The label
     # returns whenever there is no ring to show, because a nudge with no
     # header at all loses the one line that says why the phone buzzed.
-    heading = f"**{progress}**" if progress else f"**{header}**"
-    nudge_text = f"{heading}\n\n{nudge_text}"
+    #
+    # A standout outranks both and takes the header. The ring then moves to the
+    # foot of the message rather than being dropped: stacked under the standout
+    # it would be a second header, and the wrapped header is the problem the
+    # dots were introduced to solve, but below the body it costs one short line
+    # and the week is still visible on the message read most closely.
+    #
+    # The standout sits in a quote block, which Telegram draws as a coloured
+    # bar down its left edge. It is a statement about years of history wedged
+    # into a message about today, and undivided the two read as one paragraph.
+    # The bar does that job without a horizontal rule, which would cost a line
+    # and split a message this short into three visible pieces.
+    footer = ""
+    if standout is not None:
+        heading = f"> {standout.headline}"
+        footer = progress or ""
+    elif progress:
+        heading = f"**{progress}**"
+    else:
+        heading = f"**{header}**"
+    nudge_text = "\n\n".join(part for part in (heading, nudge_body, footer) if part)
 
     _save_nudge(
         nudge_text,
@@ -427,13 +478,19 @@ def cmd_nudge(
             subject,
             reply_markup,
             chat_id=telegram_chat_id(args),
+            message_effect_id=(effect_for(standout) if standout is not None else None),
         )
 
     # Only now is the line something the person has actually seen. Recording
     # it at composition time would let a failed send suppress it from the next
     # nudge on the strength of a message that never arrived.
-    if progress_fingerprint and (telegram_message_id is not None or not use_telegram):
+    delivered = telegram_message_id is not None or not use_telegram
+    if progress_fingerprint and delivered:
         record_progress_line_shown(conn, progress_fingerprint, progress or "")
+    # Spending a month of budget on a message that never arrived would silence
+    # the next four weeks on the strength of nothing.
+    if standout is not None and delivered:
+        record_standout_announced(conn, standout)
 
     return CommandResult(
         text=nudge_text,

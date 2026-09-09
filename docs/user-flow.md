@@ -186,8 +186,10 @@ flowchart TD
     queue["Queue trigger for later drain"]
     reportWindow{"Near scheduled report?"}
     rate{"Daily cap and min interval ok?"}
+    standout["Detect and pick a standout fact"]
     nudge["Run nudge LLM"]
     skip{"LLM returns SKIP?"}
+    hasStandout{"Standout to announce?"}
     send["Send Telegram nudge + feedback button"]
     eventLog[(Events table)]
     state[(Daemon state file)]
@@ -217,12 +219,17 @@ flowchart TD
     reportWindow -- yes --> eventLog
     reportWindow -- no --> rate
     rate -- no --> eventLog
-    rate -- yes --> nudge
+    rate -- yes --> standout
+    standout --> db
+    standout --> llm
+    standout --> nudge
     nudge --> db
     nudge --> context
     nudge --> llm
     nudge --> skip
-    skip -- yes --> eventLog
+    skip -- yes --> hasStandout
+    hasStandout -- no --> eventLog
+    hasStandout -- yes --> send
     skip -- no --> send
     send --> telegram
     send --> state

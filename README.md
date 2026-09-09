@@ -9,6 +9,7 @@ Your watch collects thousands of data points a week. Apple shows you rings. zdro
 - **Reactive nudges** - new data synced or context changed? The coach notices and says something useful, or stays quiet if there is nothing to say
 - **Progress against your own goals** - nudges and weekly reports open with the week so far, measured against the numbers you actually stated in your strategy. Running, walking, cycling, strength, steps and sleep all count; nothing is assumed when you have set no goal. `/targets` shows their source and lets you pause or resume the strip
 - **Notices when a week goes quiet** - if fresh imports show training far below your own normal and nothing in your notes explains it, the coach asks once, on Friday, with buttons. One tap records why, and that answer changes how the following weeks judge you
+- **Rare milestones, and only rare ones** - when a session is the fastest or longest across your whole recorded history, a nudge leads with it. The fact is computed from your own data, never written by a model, and gated so at most one arrives a month. Most weeks nothing qualifies, which is what makes the ones that do worth reading
 - **Remembers you week to week** - a freeform journal captures why things happened, and after each weekly report a separate pass decides what is worth carrying forward, so later reports, nudges, and chat all build on it
 - **Ask anything about your data** - "What's my fastest 1km pace?", "How's my HRV trending since January?", "Do I sleep worse after evening runs?" If the data exists, it will find the answer and chart it
 - **Host a small family roster** - one daemon and bot route each private chat to an isolated database, context directory, preferences, and runtime state
@@ -102,6 +103,7 @@ uv run python main.py coach               # coaching review with plan/goal propo
 uv run python main.py nudge               # short reactive nudge
 uv run python main.py context             # show context files and their status
 uv run python main.py targets             # this week's goal targets + progress
+uv run python main.py standouts           # rare facts a nudge could announce now
 uv run python main.py models              # inspect/change model routing
 uv run python main.py telegram-setup      # register Telegram bot commands
 uv run python main.py daemon-install      # install the launchd daemon

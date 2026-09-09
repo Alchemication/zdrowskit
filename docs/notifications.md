@@ -10,6 +10,7 @@ do not call an LLM.
 | **Memory** | Decides what carries forward from an insights report | After every scheduled or manual insights report | Same as insights | A couple of bullets | none | Extracted bullets stored under the week in `history.md`; never sent to the user |
 | **Coach** | Strategy review, only when proposals exist | After scheduled insights, or manual `/coach` | Weekly when scheduled; manual on demand | A few paragraphs | `run_sql`, `update_context` for `strategy` only | `SKIP` if no changes warranted; bundled message with inline Accept/Reject buttons per edit |
 | **Nudge** | Short reactive next-action nudge | Data sync, file edit | Up to 2/day by default | One or two sentences | `run_sql` | `SKIP` if nothing changes; text only, no chart |
+| **Standout picker** | Chooses whether a rare fact about your own history is worth interrupting for | A nudge, only when the deterministic pass found a candidate | At most one announcement per `STANDOUT_COOLDOWN_DAYS` | None — picks a key, writes nothing | none | Declines by default; the sentence it picks was computed, not written |
 | **Targets** | Turns the prose goals in `strategy.md` into countable weekly targets | First notification of a new week, or an edit to the goal sections | Cached per week and goal text, including empty results | None — stored, not sent | none | Strict JSON against a closed metric vocabulary; drives the progress strip |
 | **Plan frame** | Decides how much of the progress strip this person's current life warrants | First notification after the journal changes, or when the last decision ages out | Cached until context changes or the decision expires | None — stored, not sent | none | Never shown the measurements, so it cannot hide an unflattering bar |
 | **Quiet-week check-in** | Asks what is going on when a week runs far below this person's own normal | Friday, deterministic detection | At most 1/week, and stops after two silences | One question plus four buttons | none | Answer is written to `log.md`, where the plan frame reads it |
@@ -113,6 +114,107 @@ outage rather than resuming cheerful bar-charts mid-bereavement.
 
 `uv run python main.py targets` reports the current decision, its reason, and
 the call id behind it, since a suppressed strip is invisible everywhere else.
+
+## Standouts
+
+A nudge answers what changed today. A standout answers something your phone
+cannot tell you at all: that this run was the fastest stretch across everything
+you have recorded, that this was the longest session of its kind, that your
+lifetime distance just crossed a round number. The Health app shows you the
+session. It does not rank the session against every other one you have done.
+
+These arrive as the header of an ordinary nudge, quoted so Telegram draws a
+coloured bar down the left of the claim, with the weekly ring moved to the
+foot of the message:
+
+```
+▌ Fastest 10 km stretch in 7 years of tracking — 5:02/km, ahead of your
+▌ previous 5:09/km.
+
+That pace off a normal week says the base is holding. Keep tomorrow easy.
+
+Runs ●●●○
+```
+
+The ring moves rather than disappearing. The session that sets a record is
+almost always the session that moved a ring, so this is precisely the message
+where the week's state would otherwise go missing. Stacking it under the
+standout would make a second header and wrap the line on a watch, which is the
+problem the dots were introduced to solve, so it goes below the body instead.
+
+The message also plays a Telegram animation on arrival. That is the one marker
+costing no room in a message whose header is already contested, and it is safe
+only because standouts are capped: an effect on every nudge stops meaning
+anything within a fortnight, which is why nothing else sets one. A threshold
+crossing gets confetti, since an accumulation reaching a round number is the
+one occasion here that is party-shaped. Records of speed, distance and duration
+get fire, because they are efforts. `src/config.py` owns the mapping, which is
+deliberately small: an animation per kind would be a taxonomy to learn, when
+its whole job is to say "this one is rare" before a word is read.
+
+Effects need a private chat, which every profile is, since each person gets
+their own bot.
+
+### Every fact is computed, never written
+
+The sentence is derived in SQL, checked, and rendered in full before any model
+sees it. One small call then chooses between finished sentences, or declines
+all of them. It is never asked whether an activity deserves a reward, because a
+model asked that finds a reason: on an unremarkable day it manufactures
+significance out of consistency or effort, since the question presupposes an
+answer exists. Choosing from a closed list has no such failure, and naming
+anything not on the list is treated as declining.
+
+### What has to be true before anything is claimed
+
+| Gate | Why |
+|---|---|
+| A minimum comparison population, counted per activity | On a short history, "best recorded" mostly restates how little was recorded |
+| Set within the last few days | A record noticed five weeks late reads as the system noticing late |
+| A minimum margin over the previous best | A five-kilometre best beaten by a fraction of a second is real and hollow |
+| The plan frame is `full` | The same reason a progress bar stands down; a celebration is a verdict in its entirety |
+
+The population gate counts sessions rather than calendar months on purpose.
+Recorded time and recorded evidence are only loosely related: someone training
+several times a week has a trustworthy comparison set inside a month, while
+someone who walks once a fortnight does not have one after a year. Each kind of
+fact counts its own population, so a profile can be eligible for run records
+and not yet for walks. `src/config.py` owns every threshold.
+
+### Scarcity is the whole design
+
+Once several kinds of record are computed, something is true most weeks, and a
+trophy arriving most weeks is worth nothing. So at most one standout is
+announced per `STANDOUT_COOLDOWN_DAYS`, across every kind, and the picker is
+told that declining is the normal outcome. Firing nothing for six weeks is a
+correct result rather than a fault.
+
+Two suppressions run together. Each achievement is announced once ever, so the
+same record re-derived on the next sync stops at its own ledger entry. On top
+of that sits the global cooldown. Both are recorded only after Telegram
+confirms delivery, so a failed send cannot spend a month of budget on a message
+nobody read.
+
+### The writer and the verifier both know about it
+
+Detection runs before the nudge is written, so the writer is shown the headline
+and told three things: do not skip, do not restate it or repeat a figure from
+it, and write what it means for today. Left unaware, it would spend its eighty
+words saying the header again.
+
+The verifier is given the headline too. Without it a body written to sit under
+the header scores badly on its own terms — a sentence that only means something
+beside the claim above reads as unsupported, and a body restating the header
+reads as fine.
+
+A standout is the one thing that overrides a `SKIP`. If the writer has nothing
+to add, the quoted header ships on its own, because it is already a complete
+sentence.
+
+`uv run python main.py standouts` prints every candidate currently detectable,
+the evidence behind each, which have already been announced, and how long the
+cooldown has left — the only practical way to see a feature that fires about
+once a month.
 
 ## Quiet-Week Check-In
 
