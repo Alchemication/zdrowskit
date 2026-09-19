@@ -11,388 +11,374 @@
   <meta name="description" content="A self-hosted coach that reads your Apple Health data alongside your goals, plan, injuries and journal, then talks to you in Telegram. About $10 a year.">
   <link rel="canonical" href="https://alchemication.github.io/zdrowskit/">
   <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="preload" href="assets/fonts/plex-sans-500.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="assets/fonts/plex-sans-400.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="assets/fonts/plex-mono-400.woff2" as="font" type="font/woff2" crossorigin>
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="zdrowskit">
   <meta property="og:title" content="Apple shows you rings. zdrowskit gives you a coach.">
-  <meta property="og:description" content="A private health coach you run yourself. It reads your Apple Health data alongside your goals, training plan, injuries and journal — then talks to you in Telegram. Open source, about $10 a year.">
+  <meta property="og:description" content="A private health coach you run yourself. It reads your Apple Health data alongside your goals, training plan, injuries and journal, then talks to you in Telegram. Open source, about $10 a year.">
   <meta property="og:url" content="https://alchemication.github.io/zdrowskit/">
-  <meta property="og:image" content="https://alchemication.github.io/zdrowskit/assets/people-triptych.webp">
-  <meta property="og:image:alt" content="Three dithered photographs: a man running in light rain, a woman asleep wearing a fitness watch, and an older woman training with a resistance band at home.">
+  <meta property="og:image" content="https://alchemication.github.io/zdrowskit/assets/og.png">
+  <meta property="og:image:alt" content="zdrowskit: Apple shows you rings. zdrowskit gives you a coach.">
   <meta name="twitter:card" content="summary_large_image">
   <style>
-/* The shared palette and site chrome (assets/base.css) are inlined in place of
-   the token below by marketing/build.py. Everything after it is specific to
-   this page. Opening index.html straight from disk therefore looks unstyled —
-   build the site to view it. */
+/* The shared palette, type and site chrome (assets/base.css) are inlined in
+   place of the token below by marketing/build.py. Everything after it is
+   specific to this page. Opening index.html straight from disk therefore
+   looks unstyled — build the site to view it. */
 {{BASE_CSS}}
 
-    body {
-      background:
-        radial-gradient(circle at 12% 9%, rgba(255,255,255,.6), transparent 22rem),
-        repeating-linear-gradient(0deg, rgba(21,25,15,.025) 0 1px, transparent 1px 4px),
-        var(--paper);
-    }
-
-    body::before {
-      content: "";
-      position: fixed;
-      inset: 0;
-      z-index: 20;
-      pointer-events: none;
-      opacity: .15;
-      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 160 160' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.95' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.25'/%3E%3C/svg%3E");
-      mix-blend-mode: multiply;
-    }
-
-    /* Two voices. Georgia carries headlines and every paragraph longer than a
-       label, because 13px mono is a readability tax on long copy. The mono
-       stays for kickers, buttons, data and UI chrome, which is where the
-       newsprint identity lives. */
-
+    /* ---- Type scale. One family for everything readable, the mono for
+       anything the machine says: labels, times, data, buttons. ---- */
     h1 {
       margin: 0;
-      font-family: Georgia, "Times New Roman", serif;
-      font-size: clamp(42px, 4.6vw, 64px);
+      font-size: clamp(38px, 4.2vw, 58px);
       font-weight: 500;
-      line-height: .95;
-      letter-spacing: -.055em;
+      line-height: 1;
+      letter-spacing: -.035em;
       text-wrap: balance;
     }
-
-    /* Each sentence gets its own line: the contrast between them is the
-       headline's whole argument, and it disappears when they share one. */
-    h1 em { display: block; color: var(--green-dark); font-style: italic; }
+    /* Setup and punchline. The first sentence is the small line, the second
+       is the headline, so the column stays two big lines at every width. */
+    h1 .lead {
+      display: block;
+      margin-bottom: 16px;
+      font-size: clamp(18px, 1.6vw, 23px);
+      font-weight: 400;
+      letter-spacing: 0;
+      line-height: 1.3;
+    }
 
     h2 {
       margin: 0;
-      font-family: Georgia, "Times New Roman", serif;
-      font-size: clamp(32px, 3.6vw, 50px);
+      font-size: clamp(28px, 3.2vw, 44px);
       font-weight: 500;
-      line-height: 1;
-      letter-spacing: -.04em;
+      line-height: 1.08;
+      letter-spacing: -.025em;
       text-wrap: balance;
+      max-width: 22ch;
     }
 
-    .dek { margin: 0; max-width: 520px; font-family: Georgia, serif; font-size: 19px; line-height: 1.5; }
-    .prose { margin: 0; font-family: Georgia, serif; font-size: 16px; line-height: 1.6; }
+    .dek { margin: 0; max-width: 52ch; font-size: 19px; line-height: 1.5; }
+    .prose { margin: 0; max-width: 60ch; font-size: 16px; line-height: 1.6; }
     .prose.muted { color: var(--muted); }
     .prose + .prose { margin-top: 14px; }
-    .prose a { color: inherit; }
+    .prose a { color: var(--green-dark); text-underline-offset: 3px; }
+    .note { margin: 0; color: var(--muted); font-family: var(--mono); font-size: 12.5px; line-height: 1.6; }
 
-    .section-label {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      font-size: 11px;
-      font-weight: 900;
-      letter-spacing: .14em;
-      text-transform: uppercase;
-    }
+    main > section, .band { padding: clamp(56px, 7vw, 96px) 0; }
+    .stack { display: flex; flex-direction: column; gap: 32px; }
+    .head { display: flex; flex-direction: column; gap: 18px; }
 
-    .section-label::after { content: ""; height: 2px; flex: 1; background: var(--ink); }
-
-    .stack { display: flex; flex-direction: column; gap: 28px; }
-    .illustrative { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
-
-    /* ---- Hero: the claim on the left, the product on the right. ---- */
-    /* Both columns start on the same line. Centring them looked accidental:
-       the thread is the taller of the two, so it began at the padding edge
-       while the copy floated a further 70-odd pixels down, giving the section
-       two different top edges and a hole under the masthead. */
+    /* ---- Hero: the claim on the left, the loop on the right. ---- */
     .hero {
       display: grid;
-      grid-template-columns: 1.1fr .9fr;
-      gap: clamp(32px, 4vw, 56px);
-      align-items: start;
-      padding: clamp(40px, 4vw, 56px) 0 clamp(56px, 6vw, 84px);
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: clamp(32px, 5vw, 72px);
+      align-items: center;
+      padding-top: clamp(28px, 3.5vw, 44px);
     }
-
     .hero-copy { display: flex; flex-direction: column; align-items: flex-start; gap: 26px; }
-    .hero .eyebrow { transform: rotate(-1deg); }
     .cta { display: flex; flex-wrap: wrap; gap: 12px; }
 
-    /* The three facts that decide whether someone reads on. They used to be
-       small muted print under the buttons. */
-    .facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; width: 100%; }
-    .fact { padding: 14px 16px; border: 2px solid var(--ink); background: rgba(255,255,255,.3); }
-    .fact b { display: block; font-family: Georgia, serif; font-size: 26px; font-weight: 500; letter-spacing: -.02em; line-height: 1; }
-    .fact span { display: block; margin-top: 6px; color: var(--muted); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
-
-    /* The Telegram thread. Not decoration: it is the product, shown above the
-       fold, and it claims to be a Telegram thread so it wears the real bot
-       avatar. */
-    .phone { border: 2px solid var(--ink); background: rgba(255,255,255,.28); box-shadow: var(--shadow); }
-    .phone-head {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 12px 16px;
-      background: var(--ink);
-      color: var(--paper);
-      font-size: 10px;
-      font-weight: 900;
-      letter-spacing: .1em;
-      text-transform: uppercase;
+    /* Three facts, as sentences with a rule above, not tiles with big numbers. */
+    .facts {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 18px;
+      width: 100%;
+      margin: 6px 0 0;
+      padding: 16px 0 0;
+      border-top: 2px solid var(--ink);
+      font-family: var(--mono);
+      font-size: 13px;
+      line-height: 1.5;
+      color: var(--muted);
     }
-    .phone-head .who { display: flex; align-items: center; gap: 8px; }
-    .phone-head img { border-radius: 50%; border: 1px solid var(--paper-2); }
-    /* The cards carry a 4px hard shadow down and to the right, which is part of
-       how they read, so it has to be counted as part of the card: the padding
-       and gap are stepped by 4px on those two sides to leave an even 18px of
-       ground on every side of every card. */
-    .phone-body { display: flex; flex-direction: column; gap: 22px; padding: 18px 22px 22px 18px; }
-    .live { display: inline-block; width: 8px; height: 8px; margin-right: 6px; background: var(--green); animation: pulse 1.6s infinite; }
+    .facts div { padding-right: 8px; }
+    .facts b { display: block; color: var(--ink); font-weight: 500; }
 
-    .message { padding: 16px; border: 2px solid var(--ink); background: var(--paper); box-shadow: 4px 4px 0 var(--green-dark); }
+    /* ---- The loop. One square, eight stations on a ring, a token walking
+       between them, and a screen in the middle showing what each station does.
+       All geometry is in container units so it scales with its column. ---- */
+    .loop {
+      position: relative;
+      width: min(100%, 500px);
+      aspect-ratio: 1;
+      margin: 0 auto;
+      container-type: inline-size;
+      font-family: var(--mono);
+      --r: 42cqw; /* ring radius; smaller on phones so the side labels fit */
+    }
+    .ring { position: absolute; left: 50%; top: 50%; width: calc(var(--r) * 2 / .84); height: calc(var(--r) * 2 / .84); transform: translate(-50%, -50%); overflow: visible; }
+    .ring circle { fill: none; }
+    .ring .track { stroke: var(--ink); stroke-width: 2px; vector-effect: non-scaling-stroke; }
+    /* Drawn in user units, not screen pixels: the dash is the lap, and
+       pathLength="100" makes the offset a plain percentage. */
+    .ring .progress {
+      stroke: var(--olive);
+      stroke-width: 1.1;
+      stroke-linecap: butt;
+      stroke-dasharray: 100;
+      stroke-dashoffset: calc(100 * (1 - var(--p, 0)));
+      transform: rotate(-90deg);
+      transform-origin: 50% 50%;
+      transition: stroke-dashoffset 1.1s cubic-bezier(.4, 0, .2, 1);
+    }
+    .loop.reset .progress { transition: none; }
+
+    .stations { list-style: none; margin: 0; padding: 0; }
+    .station {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 0;
+      height: 0;
+      transform: rotate(var(--a)) translateY(calc(-1 * var(--r))) rotate(calc(-1 * var(--a)));
+    }
+    .station i {
+      position: absolute;
+      left: -7px;
+      top: -7px;
+      width: 14px;
+      height: 14px;
+      background: var(--paper);
+      border: 2px solid var(--ink);
+      transform: rotate(45deg);
+      transition: background .3s ease, transform .3s ease;
+    }
+    .station span {
+      position: absolute;
+      white-space: nowrap;
+      font-size: 12.5px;
+      color: var(--muted);
+      transition: color .3s ease;
+    }
+    /* Label placement per station: outward from the ring. */
+    .station.n span { bottom: 14px; left: 50%; transform: translateX(-50%); }
+    .station.s span { top: 14px; left: 50%; transform: translateX(-50%); }
+    .station.e span { left: 16px; top: 50%; transform: translateY(-50%); }
+    .station.w span { right: 16px; top: 50%; transform: translateY(-50%); }
+    .station.ne span { left: 12px; bottom: 10px; }
+    .station.se span { left: 12px; top: 10px; }
+    .station.sw span { right: 12px; top: 10px; }
+    .station.nw span { right: 12px; bottom: 10px; }
+
+    .station.done i { background: var(--olive); }
+    .station.active i { background: var(--orange); border-color: var(--ink); transform: rotate(45deg) scale(1.25); }
+    .station.active span { color: var(--ink); }
+
+    .token {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 0;
+      height: 0;
+      transform: rotate(var(--t, 0deg)) translateY(calc(-1 * var(--r) + 24px)) rotate(calc(-1 * var(--t, 0deg)));
+      transition: transform 1.1s cubic-bezier(.4, 0, .2, 1);
+      opacity: 0;
+    }
+    .loop.live .token { opacity: 1; }
+    .token b {
+      position: absolute;
+      left: -11px;
+      top: -13px;
+      width: 22px;
+      height: 26px;
+      display: grid;
+      place-items: center;
+      color: var(--orange);
+      font-size: 17px;
+      font-weight: 500;
+      letter-spacing: -.1em;
+      line-height: 1;
+    }
+
+    /* The screen: what is happening at the current station. Panels are stacked
+       and cross-faded, so the box never changes size. */
+    .screen {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 60cqw;
+      height: 60cqw;
+      transform: translate(-50%, -50%);
+      display: grid;
+      place-items: center;
+    }
+    .panel {
+      grid-area: 1 / 1;
+      width: 100%;
+      opacity: 0;
+      visibility: hidden;
+      transform: translateY(6px);
+      transition: opacity .45s ease, transform .45s ease, visibility 0s linear .45s;
+      pointer-events: none;
+    }
+    .panel.on, .loop:not(.live) .panel.default { opacity: 1; visibility: visible; transform: none; transition-delay: 0s; }
+    .panel-status { text-align: center; padding: 0 6cqw; }
+    .panel-status b { display: block; margin-bottom: 8px; font-weight: 500; font-size: 12.5px; color: var(--orange); }
+    .panel-status p { margin: 0; font-family: var(--sans); font-size: clamp(15px, 3.4cqw, 19px); line-height: 1.4; }
+
+    .message { padding: 18px 18px 16px; --cut: 12px; }
     .message-type {
       display: flex;
       justify-content: space-between;
       gap: 10px;
-      padding-bottom: 9px;
-      border-bottom: 1px solid var(--ink);
-      color: var(--green-dark);
-      font-size: 10px;
-      font-weight: 900;
-      letter-spacing: .1em;
+      margin-bottom: 10px;
+      font-size: 11.5px;
+      color: var(--muted);
     }
-    .message h3 { margin: 12px 0 7px; font-family: Georgia, serif; font-size: 22px; font-weight: 500; line-height: 1.08; letter-spacing: -.02em; }
-    .message p { margin: 0; color: var(--muted); font-family: Georgia, serif; font-size: 14.5px; line-height: 1.5; }
+    .message-type b { font-weight: 500; color: var(--green-dark); }
+    .message h3 { margin: 0 0 6px; font-family: var(--sans); font-size: clamp(17px, 3.8cqw, 21px); font-weight: 500; line-height: 1.2; letter-spacing: -.01em; }
+    .message p { margin: 0; font-family: var(--sans); font-size: clamp(13px, 2.9cqw, 15px); line-height: 1.5; color: var(--muted); }
     .message .actions { display: flex; gap: 8px; margin-top: 14px; }
-    .pill { padding: 7px 10px; border: 1px solid var(--ink); font-size: 10px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
-    .pill-yes { background: var(--green); }
+    .pill { padding: 8px 12px; font-size: 12px; font-weight: 500; --cut: 8px; }
+    .pill-yes { --plate-fill: var(--ink); color: var(--paper); }
+    .loop[data-phase="you"] .pill-yes { animation: press .5s cubic-bezier(.4, 0, .2, 1) 1.4s both; }
+    .loop[data-phase="you"] .pill-no { animation: fade .5s ease 1.4s both; }
+    @keyframes press { 50% { transform: scale(.94); --plate-fill: var(--orange); } 100% { --plate-fill: var(--orange); } }
+    @keyframes fade { to { opacity: .35; } }
 
-    /* A flex item still claims a gap when its height is zero, so the collapsed
-       indicator would push the first two cards 44px apart against 22px
-       everywhere else. The negative bottom margin cancels the gap it is not
-       using; the animation returns it to zero while the dots are up. */
-    .typing { display: flex; gap: 5px; align-items: center; height: 0; margin-bottom: -22px; overflow: hidden; opacity: 0; padding-left: 4px; }
-    .typing i { width: 7px; height: 7px; background: var(--green-dark); border-radius: 50%; animation: dot 1s infinite; }
-    .typing i:nth-child(2) { animation-delay: .15s; }
-    .typing i:nth-child(3) { animation-delay: .3s; }
-
-    /* ---- How it knows: the dark stage. ---- */
-    .loop-stage { position: relative; padding: 74px 0 84px; color: var(--paper); background: var(--ink); overflow: hidden; }
-    .loop-stage::before {
-      content: "";
-      position: absolute;
-      inset: 0;
-      opacity: .06;
-      background: repeating-linear-gradient(90deg, transparent 0 34px, var(--paper) 34px 35px);
-      pointer-events: none;
+    .replay {
+      display: block;
+      margin: 18px auto 0;
+      padding: 6px 2px;
+      border: 0;
+      background: none;
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 13px;
+      text-decoration: underline;
+      text-underline-offset: 3px;
+      cursor: pointer;
+      visibility: hidden;
     }
-    .loop-stage .shell { position: relative; }
-    .loop-stage .section-label::after { background: var(--paper); }
-    .loop-stage .prose { color: #bcbeaa; }
-    .loop-intro { display: grid; grid-template-columns: 1fr 1.6fr; gap: 56px; align-items: end; }
-    .loop-intro h2 { color: var(--paper); }
-    .loop-intro .prose { max-width: 640px; }
+    .replay:hover { color: var(--orange); }
+    .loop.done + .replay { visibility: visible; }
 
-    /* The frame has to be tall enough that `cover` does not eat the subjects'
-       heads: the source is 16:9, so at shell width it is cropped by roughly a
-       third, and an even crop takes that off the top. Hence the height, and an
-       anchor above centre — the bottom of each scene sits under the caption
-       gradient anyway. */
-    .people {
-      position: relative;
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      min-height: 500px;
-      border: 2px solid var(--paper);
-      background: #0c1109;
-      box-shadow: 8px 8px 0 var(--orange);
-      isolation: isolate;
-    }
-    .people img { position: absolute; inset: 0; z-index: -1; width: 100%; height: 100%; object-fit: cover; object-position: center 32%; }
-    .person {
-      display: flex;
-      flex-direction: column;
-      justify-content: end;
-      padding: 60px 22px 20px;
-      border-right: 2px solid rgba(238,231,210,.8);
-      background: linear-gradient(180deg, transparent 45%, rgba(21,25,15,.9) 100%);
-    }
-    .person:last-child { border-right: 0; }
-    .person-kicker { color: var(--green); font-size: 11px; font-weight: 900; letter-spacing: .12em; }
-    .person strong { margin-top: 6px; font-family: Georgia, serif; font-size: 28px; font-weight: 500; }
-    .person small { margin-top: 4px; color: var(--paper-2); font-size: 12px; }
-
-    /* data + plan + journal + memory. A row, read left to right, in place of
-       the old diagram with its terminal and dashed downlinks. */
-    .context { display: grid; grid-template-columns: 1fr 40px 1fr 40px 1fr 40px 1fr; align-items: stretch; }
-    .context-item { padding: 24px; border: 2px solid var(--green); background: #11180d; }
-    .context-item b { display: block; color: var(--orange); font-size: 11px; letter-spacing: .12em; }
-    .context-item svg { display: block; margin: 16px 0 12px; color: var(--green); }
-    .context-item span { display: block; font-family: Georgia, serif; font-size: 24px; }
-    .context-item p { margin: 8px 0 0; color: #bcbeaa; font-family: Georgia, serif; font-size: 14.5px; line-height: 1.5; }
-    .plus { display: grid; place-items: center; color: var(--green); font-family: Georgia, serif; font-size: 34px; }
+    /* ---- What it reads: the dark band. ---- */
+    .band { background: var(--olive-deep); color: var(--paper); }
+    .band .marker { color: var(--green); }
+    .band .prose { color: #cfd2bb; }
+    .reads-intro { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: clamp(24px, 4vw, 64px); align-items: end; }
+    .reads { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+    .read { padding: 24px; --plate-stroke: var(--green); --plate-fill: var(--olive-deep); }
+    .read b { display: block; font-family: var(--mono); font-weight: 400; font-size: 12.5px; color: var(--green); }
+    .read svg { display: block; margin: 20px 0 14px; color: var(--orange); }
+    .read span { display: block; font-size: 22px; font-weight: 500; letter-spacing: -.015em; }
+    .read p { margin: 8px 0 0; color: #cfd2bb; font-size: 14.5px; line-height: 1.5; }
 
     /* ---- Ask it anything. ---- */
-    .ask { padding: 84px 0; }
-    .ask-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: clamp(28px, 5vw, 64px); align-items: start; }
+    .ask-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: clamp(28px, 5vw, 72px); align-items: start; }
     .ask-copy { display: flex; flex-direction: column; align-items: flex-start; gap: 22px; }
     .ask-copy .prose + .prose { margin-top: 0; }
 
-    .thread { border: 2px solid var(--ink); background: rgba(255,255,255,.28); box-shadow: var(--shadow); }
-    .turn { padding: 16px; border-bottom: 1px dashed rgba(21,25,15,.3); }
-    .turn:last-child { border-bottom: 0; }
-    .turn b { display: flex; align-items: center; gap: 7px; margin-bottom: 8px; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; }
+    .thread { --cut: 16px; }
+    .thread-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 12px 18px; border-bottom: 2px solid var(--ink); font-family: var(--mono); font-size: 12.5px; color: var(--muted); }
+    .thread-head .who { display: flex; align-items: center; gap: 8px; color: var(--ink); }
+    .thread-head img { border-radius: 50%; border: 1px solid var(--line); }
+    .turn { padding: 18px; }
+    .turn + .turn { border-top: 1px solid var(--line); }
+    .turn b { display: block; margin-bottom: 8px; font-family: var(--mono); font-weight: 500; font-size: 12px; }
     .turn.you b { color: var(--orange); }
     .turn.coach b { color: var(--green-dark); }
-    .turn b img { border-radius: 50%; border: 1px solid var(--line); }
-    .turn p { margin: 0; font-family: Georgia, serif; font-size: 15px; line-height: 1.55; }
+    .turn p { margin: 0; font-size: 15.5px; line-height: 1.55; max-width: 56ch; }
     .tool-call {
       margin: 0 0 12px;
-      padding: 9px 11px;
-      border: 1px solid rgba(21,25,15,.4);
+      padding: 10px 12px;
       background: var(--ink);
       color: var(--green);
-      font-size: 11px;
+      font-family: var(--mono);
+      font-size: 12px;
       line-height: 1.5;
       overflow-x: auto;
       white-space: pre;
     }
-    .chart-stub {
+    .chart {
       display: flex;
       align-items: end;
       justify-content: space-between;
       gap: 7px;
-      height: 118px;
+      height: 120px;
       margin: 0 0 6px;
       padding: 10px;
-      border: 1px solid rgba(21,25,15,.4);
-      background:
-        repeating-linear-gradient(0deg, rgba(21,25,15,.08) 0 1px, transparent 1px 22px),
-        rgba(255,255,255,.5);
+      border: 1px solid var(--line);
+      background: repeating-linear-gradient(0deg, rgba(21,25,15,.08) 0 1px, transparent 1px 24px);
     }
-    .chart-stub i { flex: 1; min-width: 0; background: var(--green-dark); }
-    .chart-caption { margin-bottom: 12px; color: var(--muted); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; }
+    .chart i { flex: 1; min-width: 0; height: var(--h); background: var(--olive); transform-origin: bottom; }
+    .chart-caption { margin-bottom: 12px; color: var(--muted); font-family: var(--mono); font-size: 11.5px; }
+    /* The one scroll-driven moment: the bars grow as the chart enters view. */
+    @supports (animation-timeline: view()) {
+      .chart i { animation: grow linear both; animation-timeline: view(); animation-range: entry 10% entry 60%; }
+    }
+    @keyframes grow { from { transform: scaleY(0); } to { transform: scaleY(1); } }
 
-    /* ---- Cost and trust, side by side: the two questions people ask next. ---- */
-    .facts-section, .routing-section, .setup { padding: 0 0 84px; }
-    .two-up { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 40px; align-items: start; }
+    /* ---- Cost and trust. ---- */
+    .two-up { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: clamp(24px, 4vw, 48px); align-items: start; }
+    .card { padding: 26px; --cut: 16px; }
+    .card > b { display: block; margin-bottom: 14px; font-family: var(--mono); font-weight: 500; font-size: 13px; color: var(--green-dark); }
+    .card .prose { color: var(--muted); font-size: 15px; }
 
-    .card { padding: 24px; border: 2px solid var(--ink); background: rgba(255,255,255,.22); box-shadow: var(--shadow); }
-    /* Direct child only: the card heading. A <b> inside a paragraph must stay
-       inline, or emphasised phrases break onto their own line. */
-    .card > b { display: block; margin-bottom: 14px; color: var(--green-dark); font-size: 11px; letter-spacing: .1em; text-transform: uppercase; }
-    .card .prose { color: var(--muted); }
-
-    /* Annual side-by-side: the yearly figures carry the contrast far better
-       than the monthly ones, which round to "about a dollar" either way. */
-    .compare { margin: 16px 0; }
-    .compare-row { display: flex; align-items: baseline; gap: 12px; padding: 12px 14px; border: 1px solid var(--line); }
+    .compare { margin: 18px 0; }
+    .compare-row { display: flex; align-items: baseline; gap: 14px; padding: 14px 16px; border: 1px solid var(--line); }
     .compare-row + .compare-row { border-top: 0; }
-    .compare-row b { min-width: 90px; font-family: Georgia, serif; font-size: 34px; font-weight: 500; letter-spacing: -.02em; }
-    .compare-row span { color: var(--muted); font-family: Georgia, serif; font-size: 14px; line-height: 1.4; }
-    .compare-row.win { border: 2px solid var(--ink); background: var(--green); }
-    .compare-row.win span { color: var(--ink); }
-    .compare-x { margin-top: 10px; color: var(--orange); font-size: 11px; font-weight: 900; letter-spacing: .12em; text-transform: uppercase; }
+    .compare-row b { min-width: 92px; font-size: 34px; font-weight: 500; letter-spacing: -.03em; line-height: 1; }
+    .compare-row span { color: var(--muted); font-size: 14px; line-height: 1.4; }
+    .compare-row.win { border: 2px solid var(--ink); background: var(--olive); color: var(--paper); }
+    .compare-row.win span { color: var(--paper); }
+    .compare-x { margin-top: 10px; color: var(--orange); font-family: var(--mono); font-size: 12.5px; font-weight: 500; }
 
     .boundaries { display: flex; flex-direction: column; gap: 14px; }
-    .boundary { padding: 16px 18px; border: 2px solid var(--ink); background: rgba(255,255,255,.2); box-shadow: 4px 4px 0 var(--ink); }
-    .boundary b { display: block; margin-bottom: 6px; color: var(--green-dark); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
-    .boundary p { margin: 0; color: var(--muted); font-family: Georgia, serif; font-size: 14.5px; line-height: 1.5; }
-    .boundary.warn { background: rgba(229,110,54,.12); border-color: var(--orange); box-shadow: 4px 4px 0 var(--orange); }
-    .boundary.warn b { color: #a8410f; }
-    .more { color: var(--muted); font-size: 11px; font-weight: 900; letter-spacing: .14em; text-transform: uppercase; }
+    .boundary { padding: 18px 20px; --cut: 12px; }
+    .boundary b { display: block; margin-bottom: 6px; font-size: 16px; font-weight: 500; }
+    .boundary p { margin: 0; color: var(--muted); font-size: 14.5px; line-height: 1.5; }
+    .boundary.warn { --plate-stroke: var(--orange); --plate-fill: #f1e0cc; }
+    .boundary.warn b { color: #9a3d0e; }
+    .more { color: var(--green-dark); font-family: var(--mono); font-size: 13px; }
 
-    /* ---- Routing: three scannable facts, one anecdote, no model IDs. ---- */
-    .routing-grid { display: grid; grid-template-columns: 1fr 1.3fr; gap: clamp(28px, 5vw, 64px); align-items: start; }
+    /* ---- Routing. ---- */
+    .routing-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: clamp(28px, 5vw, 72px); align-items: start; }
     .routing-copy { display: flex; flex-direction: column; gap: 20px; }
-    .routing-detail { display: flex; flex-direction: column; gap: 16px; }
-    .quote { padding-left: 18px; border-left: 5px solid var(--orange); }
-    .quote em { color: var(--ink); font-style: italic; }
-    .routes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
-    .route { padding: 22px; border: 2px solid var(--ink); background: rgba(255,255,255,.22); }
-    .route b { display: block; font-family: Georgia, serif; font-size: 34px; font-weight: 500; line-height: 1; letter-spacing: -.03em; }
-    .route span { display: block; margin-top: 10px; color: var(--muted); font-family: Georgia, serif; font-size: 14.5px; line-height: 1.5; }
+    .routing-detail { display: flex; flex-direction: column; gap: 18px; }
+    .quote { padding-left: 18px; border-left: 4px solid var(--orange); }
+    .quote em { color: var(--ink); font-style: normal; font-weight: 500; }
+    .routes { margin: 0; border-top: 2px solid var(--ink); }
+    .routes > div { display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 16px; padding: 16px 0; border-bottom: 1px solid var(--line); }
+    .routes dt { margin: 0; font-family: var(--mono); font-weight: 500; font-size: 14px; color: var(--green-dark); }
+    .routes dd { margin: 0; color: var(--muted); font-size: 15px; line-height: 1.5; }
 
-    /* ---- Get running. Setup comes last: value first, install second. ---- */
-    .setup { padding-bottom: 90px; }
-    .sequence { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 2px solid var(--ink); background: rgba(255,255,255,.18); box-shadow: var(--shadow); }
-    .step { padding: 20px; border-right: 2px solid var(--ink); }
-    .step:last-child { border-right: 0; }
-    .step-num { color: var(--orange); font-size: 11px; font-weight: 900; }
-    .step svg { display: block; margin: 16px 0 12px; }
-    .step-title { font-size: 13px; font-weight: 900; text-transform: uppercase; }
-    .step-note { margin-top: 7px; color: var(--muted); font-family: Georgia, serif; font-size: 14px; line-height: 1.5; }
-    .need { margin: 0; padding-left: 18px; font-family: Georgia, serif; font-size: 15px; line-height: 1.7; }
-    .closing { display: flex; flex-direction: column; align-items: flex-start; gap: 18px; padding-top: 6px; }
-    .closing h2 { font-size: clamp(30px, 3vw, 40px); }
+    /* ---- Get running. Numbered because it is a sequence. ---- */
+    .sequence { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+    .step { padding: 22px; --cut: 12px; }
+    .step-num { font-family: var(--mono); font-size: 12.5px; color: var(--orange); font-weight: 500; }
+    .step svg { display: block; margin: 18px 0 12px; color: var(--olive); }
+    .step-title { font-size: 17px; font-weight: 500; }
+    .step-note { margin-top: 6px; color: var(--muted); font-size: 14.5px; line-height: 1.5; }
+    .need { margin: 0; padding-left: 18px; font-size: 15px; line-height: 1.75; }
+    .closing { display: flex; flex-direction: column; align-items: flex-start; gap: 20px; }
+    .closing h2 { font-size: clamp(26px, 2.8vw, 36px); }
 
-    footer { padding: 22px 0 40px; }
-
-    /* ---- Motion. ----
-       On open: one staged reveal across the hero, then the thread arrives a
-       message at a time with a typing pause, so the page demonstrates the
-       product instead of describing it. On scroll: each block rises as it
-       enters the viewport, driven by the scroll position rather than a timer,
-       so nothing plays out of view. Browsers without scroll-driven animations
-       simply show the content. base.css collapses durations for
-       prefers-reduced-motion; the delays and scroll timeline are cleared here. */
-    @keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
-    @keyframes arrive { from { opacity: 0; transform: translateY(10px) scale(.985); } to { opacity: 1; transform: none; } }
-    @keyframes typing { 0% { height: 0; margin-bottom: -22px; opacity: 0; } 12% { height: 26px; margin-bottom: 0; opacity: 1; } 78% { height: 26px; margin-bottom: 0; opacity: 1; } 100% { height: 0; margin-bottom: -22px; opacity: 0; } }
-    @keyframes dot { 0%, 60%, 100% { transform: translateY(0); } 30% { transform: translateY(-4px); } }
-    @keyframes pulse { 50% { opacity: .35; } }
-
-    .reveal { animation: rise .7s cubic-bezier(.2,.7,.2,1) both; animation-delay: calc(var(--i, 0) * 110ms); }
-    .message { animation: arrive .55s cubic-bezier(.2,.7,.2,1) both; }
-    .message.m1 { animation-delay: 1s; }
-    .typing { animation: typing 1.5s ease both; animation-delay: 1.7s; }
-    .message.m2 { animation-delay: 2.9s; }
-    .message.m3 { animation-delay: 3.9s; }
-
-    @supports (animation-timeline: view()) {
-      .rise { animation: rise linear both; animation-timeline: view(); animation-range: entry 0% entry 30%; }
-    }
-
-    @media (prefers-reduced-motion: reduce) {
-      .reveal, .message, .typing { animation-delay: 0s !important; }
-      .rise { animation: none; }
-      .typing { display: none; }
-    }
-
-    @media (max-width: 900px) {
-      .hero, .loop-intro, .ask-grid, .two-up, .routing-grid { grid-template-columns: 1fr; }
-      .loop-intro { gap: 20px; align-items: start; }
-      .context { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-      .plus { display: none; }
-      .routes { grid-template-columns: 1fr; }
+    @media (max-width: 960px) {
+      .hero, .reads-intro, .ask-grid, .two-up, .routing-grid { grid-template-columns: 1fr; }
+      .reads { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .sequence { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .step:nth-child(2) { border-right: 0; }
-      .step:nth-child(-n+2) { border-bottom: 2px solid var(--ink); }
-      .people { min-height: 560px; }
-      .person { padding: 14px; }
-      .person strong { font-size: 20px; }
+      .hero { align-items: start; }
     }
 
     @media (max-width: 520px) {
-      .hero { padding-top: 36px; }
-      .hero-copy { gap: 18px; }
+      .hero-copy { gap: 22px; }
       .dek { font-size: 17px; }
-      .cta { flex-direction: column; align-items: stretch; }
+      .cta { width: 100%; flex-direction: column; align-items: stretch; }
       .cta .btn { text-align: center; }
-      .facts { gap: 8px; }
-      .fact { padding: 10px; }
-      .fact b { font-size: 20px; }
-      .fact span { font-size: 9px; letter-spacing: .04em; line-height: 1.3; }
-      .phone-body { gap: 18px; padding: 14px 18px 18px 14px; }
-      .typing { margin-bottom: -18px; }
+      .facts { grid-template-columns: 1fr; gap: 10px; }
+      .loop { --r: 37cqw; }
+      .station span { font-size: 11px; }
+      .screen { width: 62cqw; height: 62cqw; }
       .message { padding: 14px; }
-      .message h3 { font-size: 20px; }
-      .context { grid-template-columns: 1fr; }
-      .sequence { grid-template-columns: 1fr; box-shadow: 4px 4px 0 var(--ink); }
-      .step { border-right: 0; border-bottom: 2px solid var(--ink) !important; }
-      .step:last-child { border-bottom: 0 !important; }
-      /* One scene per row. The shared image is dropped and each person shows
-         its own third of the triptych instead. */
-      .people { grid-template-columns: 1fr; min-height: 0; }
-      .people img { display: none; }
-      .person { min-height: 300px; border-right: 0; border-bottom: 2px solid var(--paper); background-image: linear-gradient(180deg, transparent 45%, rgba(21,25,15,.9)), url("assets/people-triptych.webp"); background-size: 300% 100%; }
-      .person:nth-child(1) { background-position: left center; }
-      .person:nth-child(2) { background-position: center center; }
-      .person:nth-child(3) { background-position: right center; border-bottom: 0; }
+      .reads, .sequence { grid-template-columns: 1fr; }
+      .routes > div { grid-template-columns: 1fr; gap: 4px; }
     }
   </style>
 </head>
@@ -409,58 +395,74 @@
   <main>
     <section class="shell hero">
       <div class="hero-copy">
-        <div class="eyebrow reveal" style="--i: 0">Private · self-hosted · open source</div>
-        <h1 class="reveal" style="--i: 1">Apple shows you rings. <em>zdrowskit gives you a coach.</em></h1>
-        <p class="dek reveal" style="--i: 2">
+        <h1><span class="lead">Apple shows you rings.</span>zdrowskit gives you a coach.</h1>
+        <p class="dek">
           A health coach that runs on your own computer. It reads your Apple Health data
-          alongside your goals, training plan, injuries and journal, then talks to you in Telegram.
+          next to your goals, training plan, injuries and journal, then talks to you in Telegram.
         </p>
-        <div class="cta reveal" style="--i: 3">
-          <a class="btn btn-primary" href="docs/setup.html">Get started</a>
-          <a class="btn" href="https://github.com/Alchemication/zdrowskit">View source</a>
+        <div class="cta">
+          <a class="btn btn-primary plate" href="docs/setup.html">Get started</a>
+          <a class="btn plate" href="https://github.com/Alchemication/zdrowskit">View source</a>
         </div>
-        <div class="facts reveal" style="--i: 4">
-          <div class="fact"><b>~$10</b><span>a year in LLM spend</span></div>
-          <div class="fact"><b>0</b><span>accounts, servers, signups</span></div>
-          <div class="fact"><b>1–10</b><span>people you know, one host</span></div>
+        <div class="facts">
+          <div><b>About $10 a year</b>in model spend, measured over six weeks of real use.</div>
+          <div><b>No account, no server</b>and nothing to sign up for. Private, self-hosted, open source.</div>
+          <div><b>One host</b>for a handful of people you would trust with your health data.</div>
         </div>
       </div>
 
-      <div class="reveal" style="--i: 3">
-        <div class="phone" aria-label="Example Telegram thread from the coach">
-          <div class="phone-head">
-            <span class="who"><img src="assets/bot-avatar.webp" alt="" width="22" height="22">zdrowskit</span>
-            <span><i class="live" aria-hidden="true"></i>Telegram</span>
-          </div>
-          <div class="phone-body">
-            <article class="message m1">
-              <div class="message-type"><span>WEEKLY INSIGHT</span><span>MON 08:02</span></div>
-              <h3>Fitness held steady through a disrupted week.</h3>
-              <p>Your easy pace stayed near baseline despite two short nights. The missed interval session looks like sensible restraint, not lost momentum.</p>
-            </article>
-            <div class="typing" aria-hidden="true"><i></i><i></i><i></i></div>
-            <article class="message m2">
-              <div class="message-type"><span>TIMELY NUDGE</span><span>TODAY 11:14</span></div>
-              <h3>Keep today genuinely easy.</h3>
-              <p>HRV is below your normal range after yesterday’s harder run. The planned recovery session still fits; there is no need to “make up” Tuesday.</p>
-            </article>
-            <article class="message m3">
-              <div class="message-type"><span>COACH PROPOSAL</span><span>AWAITING YOU</span></div>
-              <h3>Move Friday strength to Thursday?</h3>
-              <p>This separates it from your long run and matches the pattern from your more consistent weeks.</p>
-              <div class="actions"><span class="pill pill-yes">Approve</span><span class="pill">Reject</span></div>
-            </article>
+      <div>
+        <div class="loop" id="loop" data-phase="telegram" aria-label="The coaching loop: your watch records the day, the phone exports it to your machine, the daemon files it, reads it with your plan, journal and memory, two models write and check a message, it arrives in Telegram, you reply, and the coach remembers.">
+          <svg class="ring" viewBox="0 0 100 100" aria-hidden="true">
+            <circle class="track" cx="50" cy="50" r="42"/>
+            <circle class="progress" cx="50" cy="50" r="42" pathLength="100"/>
+          </svg>
+          <ol class="stations" aria-hidden="true">
+            <li class="station n" style="--a: 0deg" data-phase="watch"><i></i><span>Watch</span></li>
+            <li class="station ne" style="--a: 45deg" data-phase="export"><i></i><span>Export</span></li>
+            <li class="station e" style="--a: 90deg" data-phase="import"><i></i><span>Daemon</span></li>
+            <li class="station se" style="--a: 135deg" data-phase="context"><i></i><span>Context</span></li>
+            <li class="station s" style="--a: 180deg" data-phase="model"><i></i><span>Models</span></li>
+            <li class="station sw" style="--a: 225deg" data-phase="telegram"><i></i><span>Telegram</span></li>
+            <li class="station w" style="--a: 270deg" data-phase="you"><i></i><span>You</span></li>
+            <li class="station nw" style="--a: 315deg" data-phase="memory"><i></i><span>Memory</span></li>
+          </ol>
+          <div class="token" aria-hidden="true"><b>//</b></div>
+          <div class="screen" aria-hidden="true">
+            <div class="panel panel-status" data-panel="watch"><b>Apple Watch</b><p>Records the day: pace, heart rate, sleep, HRV.</p></div>
+            <div class="panel panel-status" data-panel="export"><b>Auto Export</b><p>Overnight, your phone sends it to your own machine.</p></div>
+            <div class="panel panel-status" data-panel="import"><b>Daemon</b><p>Filed in one SQLite database per person. No account anywhere.</p></div>
+            <div class="panel panel-status" data-panel="context"><b>Context</b><p>Read next to your plan, your journal, and what the coach already remembers.</p></div>
+            <div class="panel panel-status" data-panel="model"><b>Two models</b><p>One writes. A cheaper one fact-checks it before anything is sent.</p></div>
+            <div class="panel default" data-panel="telegram">
+              <article class="message plate">
+                <div class="message-type"><b>Timely nudge</b><span>today 11:14</span></div>
+                <h3>Keep today genuinely easy.</h3>
+                <p>HRV is below your normal range after yesterday’s harder run. The planned recovery session still fits.</p>
+              </article>
+            </div>
+            <div class="panel" data-panel="you">
+              <article class="message plate">
+                <div class="message-type"><b>Coach proposal</b><span>awaiting you</span></div>
+                <h3>Move Friday strength to Thursday?</h3>
+                <p>It separates strength from your long run, like your more consistent weeks.</p>
+                <div class="actions"><span class="pill pill-yes plate">Approve</span><span class="pill pill-no plate">Reject</span></div>
+              </article>
+            </div>
+            <div class="panel panel-status" data-panel="memory"><b>Remembered</b><p>Plan updated. Next week’s report knows why.</p></div>
           </div>
         </div>
-        <p class="illustrative" style="margin-top: 14px">Illustrative examples, not output from a real person’s account.</p>
+        <button class="replay" type="button">Replay the loop</button>
       </div>
     </section>
 
-    <section class="loop-stage" aria-labelledby="loop-label">
+    <section class="band halftone" aria-labelledby="reads-label">
       <div class="shell stack">
-        <div class="section-label" id="loop-label">01 / How it knows what to say</div>
-        <div class="loop-intro rise">
-          <h2>Ordinary days, read with context.</h2>
+        <div class="reads-intro">
+          <div class="head">
+            <div class="marker" id="reads-label">What it reads</div>
+            <h2>Ordinary days, read with context.</h2>
+          </div>
           <p class="prose">
             Numbers alone cannot tell a short night from a hard week. The coach reads your
             health data next to what you planned, what you wrote down, and what it already
@@ -468,50 +470,28 @@
           </p>
         </div>
 
-        <div class="people rise" role="img" aria-label="Three scenes: a man running in light rain, a woman asleep wearing a fitness watch, and an older woman doing resistance-band training at home.">
-          <img src="assets/people-triptych.webp" alt="" width="1672" height="941" loading="lazy">
-          <div class="person">
-            <span class="person-kicker">07:12 / ACTIVITY</span>
-            <strong>A wet morning run.</strong>
-            <small>pace · heart rate · route</small>
-          </div>
-          <div class="person">
-            <span class="person-kicker">23:41 / RECOVERY</span>
-            <strong>An ordinary night.</strong>
-            <small>sleep · HRV · resting heart rate</small>
-          </div>
-          <div class="person">
-            <span class="person-kicker">17:30 / TRAINING</span>
-            <strong>Strength at home.</strong>
-            <small>workout · effort · consistency</small>
-          </div>
-        </div>
-
-        <div class="context rise">
-          <div class="context-item">
-            <b>01 / HEALTH DATA</b>
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="M2 12h4l2-6 4 12 2-6h8"/></svg>
+        <div class="reads">
+          <div class="read plate">
+            <b>Health data</b>
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="M2 12h4l2-6 4 12 2-6h8"/></svg>
             <span>What happened</span>
             <p>Metrics, workouts, routes, sleep and long-term baselines.</p>
           </div>
-          <div class="plus" aria-hidden="true">+</div>
-          <div class="context-item">
-            <b>02 / YOUR PLAN</b>
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><rect x="3" y="4" width="18" height="17"/><path d="M3 9h18M8 2v4M16 2v4"/></svg>
+          <div class="read plate">
+            <b>Your plan</b>
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><rect x="3" y="4" width="18" height="17"/><path d="M3 9h18M8 2v4M16 2v4"/></svg>
             <span>What you intended</span>
             <p>Training schedule, goals, diet and recovery targets.</p>
           </div>
-          <div class="plus" aria-hidden="true">+</div>
-          <div class="context-item">
-            <b>03 / YOUR JOURNAL</b>
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="M5 3h14v18H5zM9 3v18M12 8h4M12 12h4"/></svg>
+          <div class="read plate">
+            <b>Your journal</b>
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="M5 3h14v18H5zM9 3v18M12 8h4M12 12h4"/></svg>
             <span>Why it happened</span>
             <p>Travel, illness, workload, motivation and ordinary life.</p>
           </div>
-          <div class="plus" aria-hidden="true">+</div>
-          <div class="context-item">
-            <b>04 / MEMORY</b>
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+          <div class="read plate">
+            <b>Memory</b>
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
             <span>What came before</span>
             <p>Previous weeks, accepted changes and coaching history.</p>
           </div>
@@ -519,10 +499,10 @@
       </div>
     </section>
 
-    <section class="shell ask stack" aria-labelledby="ask-label">
-      <div class="section-label" id="ask-label">02 / Ask it anything</div>
-      <div class="ask-grid rise">
+    <section class="shell ask" aria-labelledby="ask-label">
+      <div class="ask-grid">
         <div class="ask-copy">
+          <div class="marker" id="ask-label">Ask it anything</div>
           <h2>It queries your whole history, then answers.</h2>
           <p class="prose muted">
             The coach writes SQL against your own database, so questions are not limited to
@@ -533,23 +513,23 @@
             If a chart makes the answer clearer, it renders one into the same thread. Reply
             to a report, update your goals mid-chat, ask a follow-up.
           </p>
-          <a class="btn" href="docs/user-flow.html">What a week looks like</a>
+          <a class="btn plate" href="docs/user-flow.html">See what a week looks like</a>
         </div>
-        <div class="thread">
-          <div class="phone-head"><span>Telegram</span><span>Chat</span></div>
+        <div class="thread plate">
+          <div class="thread-head"><span class="who"><img src="assets/bot-avatar.webp" alt="" width="22" height="22">zdrowskit</span><span>Telegram</span></div>
           <div class="turn you">
             <b>You</b>
             <p>How’s my HRV trending since January?</p>
           </div>
           <div class="turn coach">
-            <b><img src="assets/bot-avatar.webp" alt="" width="22" height="22">zdrowskit</b>
+            <b>zdrowskit</b>
             <div class="tool-call">query_health_db(
   "SELECT month, AVG(value) …"
 )</div>
-            <div class="chart-stub" aria-hidden="true">
-              <i style="height:38%"></i><i style="height:46%"></i><i style="height:41%"></i>
-              <i style="height:55%"></i><i style="height:62%"></i><i style="height:58%"></i>
-              <i style="height:71%"></i><i style="height:79%"></i>
+            <div class="chart" aria-hidden="true">
+              <i style="--h:38%"></i><i style="--h:46%"></i><i style="--h:41%"></i>
+              <i style="--h:55%"></i><i style="--h:62%"></i><i style="--h:58%"></i>
+              <i style="--h:71%"></i><i style="--h:79%"></i>
             </div>
             <div class="chart-caption">chart rendered and sent</div>
             <p>Up and to the right. The monthly average has climbed steadily since January, with the usual dip during your March illness.</p>
@@ -558,47 +538,50 @@
       </div>
     </section>
 
-    <section class="shell facts-section stack" aria-labelledby="facts-label">
-      <div class="section-label" id="facts-label">03 / What it costs, and where your data goes</div>
-      <div class="two-up rise">
-        <div class="card">
+    <section class="shell stack" aria-labelledby="facts-label">
+      <div class="head">
+        <div class="marker" id="facts-label">Cost and privacy</div>
+        <h2>What it costs, and where your data goes.</h2>
+      </div>
+      <div class="two-up">
+        <div class="card plate">
           <b>What it costs to run</b>
           <p class="prose">
-            LLM spend, measured over six weeks of real use on the default models.
+            Model spend, measured over six weeks of real use on the default models.
             Over a year, on the same workload:
           </p>
           <div class="compare">
-            <div class="compare-row win"><b>$10</b><span>a year, routed per task</span></div>
-            <div class="compare-row"><b>$290</b><span>a year, all on a frontier model like Claude&nbsp;Opus or GPT&#8209;Sol</span></div>
+            <div class="compare-row win"><b>$10</b><span>a year, each job routed to the model that measured best</span></div>
+            <div class="compare-row"><b>$290</b><span>a year, everything on a frontier model like Claude&nbsp;Opus or GPT&#8209;Sol</span></div>
             <div class="compare-x">about 28x</div>
           </div>
           <p class="prose">
             Nearer $4 if you mostly leave it alone, about $11 if you chat with it
-            daily. <a href="docs/llm.html">How that breaks down →</a>
+            daily. <a href="docs/llm.html">How that breaks down</a>
           </p>
         </div>
         <div class="boundaries">
-          <div class="boundary">
+          <div class="boundary plate">
             <b>Raw history stays local</b>
             <p>Each person’s Apple Health history lives in a separate SQLite database on your own machine. There is no zdrowskit server, no account, and no signup.</p>
           </div>
-          <div class="boundary warn">
-            <b>But your data does reach an LLM provider</b>
-            <p>Reports, nudges and answers send the relevant slice of your health data to whichever model provider you configure. If health data leaving your machine for an LLM API is a dealbreaker, this is not the tool for you.</p>
+          <div class="boundary warn plate">
+            <b>But your data does reach a model provider</b>
+            <p>Reports, nudges and answers send the relevant slice of your health data to whichever model provider you configure. If health data leaving your machine for a model API is a dealbreaker, this is not the tool for you.</p>
           </div>
-          <div class="boundary">
+          <div class="boundary plate">
             <b>The operator can read everything</b>
-            <p>Built for roughly 1–10 people who know each other. Profiles are added by hand-editing a TOML roster; whoever runs the host can read every hosted person’s database. Trust replaces the access controls a real multi-tenant service would need.</p>
+            <p>Built for roughly 1 to 10 people who know each other. Profiles are added by hand-editing a TOML roster; whoever runs the host can read every hosted person’s database. Trust replaces the access controls a real multi-tenant service would need.</p>
           </div>
-          <a class="more" href="docs/limitations.html">Full list of limitations →</a>
+          <a class="more" href="docs/limitations.html">Full list of limitations</a>
         </div>
       </div>
     </section>
 
-    <section class="shell routing-section stack" aria-labelledby="routing-label">
-      <div class="section-label" id="routing-label">04 / Every job gets its own model</div>
-      <div class="routing-grid rise">
+    <section class="shell" aria-labelledby="routing-label">
+      <div class="routing-grid">
         <div class="routing-copy">
+          <div class="marker" id="routing-label">Model routing</div>
           <h2>The model that writes your report is not the one that checks it.</h2>
           <p class="prose muted quote">
             The fact-checker ended up on a <em>budget</em> model rather than a premium one:
@@ -607,17 +590,17 @@
           </p>
         </div>
         <div class="routing-detail">
-          <div class="routes">
-            <div class="route"><b>4 jobs</b><span>Reports, nudges, chat and the fact-checker each run on their own model, at their own reasoning level.</span></div>
-            <div class="route"><b>1 test set</b><span>Frozen inputs with a known right answer, most recorded from real mistakes. Every candidate scores on the same cases and is routed to whatever measured best.</span></div>
-            <div class="route"><b>2 per route</b><span>Every job keeps a fallback model, so a provider having a bad morning degrades the answer rather than losing it.</span></div>
-          </div>
+          <dl class="routes">
+            <div><dt>Four jobs</dt><dd>Reports, nudges, chat and the fact-checker each run on their own model, at their own reasoning level.</dd></div>
+            <div><dt>One test set</dt><dd>Frozen inputs with a known right answer, most recorded from real mistakes. Every candidate scores on the same cases and is routed to whatever measured best.</dd></div>
+            <div><dt>Two per job</dt><dd>Every job keeps a fallback model, so a provider having a bad morning degrades the answer rather than losing it.</dd></div>
+          </dl>
           <p class="prose muted">
             The leaderboard publishes every score, including the bad ones: what was
             tested, what passed, and what is still unreliable.
-            <a href="evals/">Read the leaderboard →</a>
+            <a href="evals/">Read the leaderboard</a>
           </p>
-          <p class="illustrative">
+          <p class="note">
             Re-scored against {{EVAL_CASE_COUNT}} eval cases; last recorded
             {{EVAL_UPDATED}}.
           </p>
@@ -625,49 +608,52 @@
       </div>
     </section>
 
-    <section class="shell setup stack" aria-labelledby="setup-label">
-      <div class="section-label" id="setup-label">05 / Get running in an afternoon</div>
-      <div class="sequence rise">
-        <article class="step">
-          <div class="step-num">01</div>
+    <section class="shell stack" aria-labelledby="setup-label">
+      <div class="head">
+        <div class="marker" id="setup-label">Setup</div>
+        <h2>Get running in an afternoon.</h2>
+      </div>
+      <div class="sequence">
+        <article class="step plate">
+          <div class="step-num">Step 1</div>
           <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><rect x="3" y="4" width="18" height="7"/><rect x="3" y="13" width="18" height="7"/><path d="M7 7.5h1M7 16.5h1"/></svg>
           <div class="step-title">Set up the kit</div>
           <div class="step-note">One always-on Mac or Linux box. One Telegram bot.</div>
         </article>
-        <article class="step">
-          <div class="step-num">02</div>
+        <article class="step plate">
+          <div class="step-num">Step 2</div>
           <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><circle cx="8" cy="8" r="3.5"/><circle cx="17" cy="9" r="2.5"/><path d="M2 20c0-3.5 2.5-6 6-6s6 2.5 6 6M14.5 19.5c0-2.5 1.5-4.5 4-4.5s3.5 2 3.5 4.5"/></svg>
           <div class="step-title">Connect someone</div>
           <div class="step-note">A family member or friend you personally trust.</div>
         </article>
-        <article class="step">
-          <div class="step-num">03</div>
+        <article class="step plate">
+          <div class="step-num">Step 3</div>
           <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><rect x="3" y="7" width="8" height="10"/><path d="M5 7V4h4v3M5 17v3h4v-3M13 12h8M18 9l3 3-3 3"/></svg>
           <div class="step-title">Auto-export</div>
           <div class="step-note">Apple Health arrives quietly from their iPhone.</div>
         </article>
-        <article class="step">
-          <div class="step-num">04</div>
+        <article class="step plate">
+          <div class="step-num">Step 4</div>
           <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="M3 4h18v12H9l-5 4z"/><path d="M7 8h10M7 12h6"/></svg>
           <div class="step-title">Start a dialogue</div>
           <div class="step-note">Insights, nudges, and answers when you ask.</div>
         </article>
       </div>
-      <div class="two-up rise">
-        <div class="card" style="box-shadow: none">
+      <div class="two-up">
+        <div class="card plate">
           <b>What you need</b>
           <ul class="need">
-            <li>Apple Watch + iPhone</li>
+            <li>Apple Watch and iPhone</li>
             <li>An always-on macOS or Linux machine</li>
             <li>Python 3.12+ and uv, Tailscale on the host</li>
-            <li>A Telegram bot and an LLM provider API key</li>
+            <li>A Telegram bot and a model provider API key</li>
           </ul>
         </div>
         <div class="closing">
           <h2>Set it up once. Then share it with people you trust.</h2>
           <div class="cta">
-            <a class="btn btn-primary" href="docs/setup.html">Get started</a>
-            <a class="btn" href="docs/">Read the docs</a>
+            <a class="btn btn-primary plate" href="docs/setup.html">Get started</a>
+            <a class="btn plate" href="docs/">Read the docs</a>
           </div>
         </div>
       </div>
@@ -683,5 +669,84 @@
       <a href="https://github.com/Alchemication/zdrowskit">GitHub</a>
     </nav>
   </footer>
+
+  <script>
+  /* The loop. Walks the token station to station on a fixed timetable and
+     swaps the screen to match, once. It then rests with every station lit
+     and the nudge on screen, and offers a replay. Without JS, or with reduced
+     motion, the ring shows the same resting picture. Paused while the tab is
+     hidden or the loop is scrolled out of view, so nothing plays to an empty
+     room. */
+  (function () {
+    var loop = document.getElementById("loop");
+    if (!loop || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
+    var phases = [
+      ["watch", 2200], ["export", 2200], ["import", 2200], ["context", 2600],
+      ["model", 2600], ["telegram", 4400], ["you", 3600], ["memory", 2400]
+    ];
+    var replay = loop.nextElementSibling;
+    var stations = loop.querySelectorAll(".station");
+    var panels = loop.querySelectorAll(".panel");
+    var token = loop.querySelector(".token");
+    var index = -1, lap = 0, timer = null, tabVisible = !document.hidden, inView = true;
+
+    function show(i) {
+      var name = phases[i][0];
+      loop.dataset.phase = name;
+      stations.forEach(function (s, j) {
+        s.classList.toggle("active", j === i);
+        s.classList.toggle("done", j < i);
+      });
+      panels.forEach(function (p) { p.classList.toggle("on", p.dataset.panel === name); });
+      token.style.setProperty("--t", (lap * 360 + i * 45) + "deg");
+      if (i === 0) {
+        loop.classList.add("reset");
+        loop.style.setProperty("--p", "0");
+        void loop.offsetWidth;
+        loop.classList.remove("reset");
+      } else {
+        loop.style.setProperty("--p", String(i / phases.length));
+      }
+    }
+
+    function finish() {
+      lap += 1;
+      loop.dataset.phase = "done";
+      stations.forEach(function (s) { s.classList.remove("active"); s.classList.add("done"); });
+      panels.forEach(function (p) { p.classList.toggle("on", p.dataset.panel === "telegram"); });
+      token.style.setProperty("--t", (lap * 360) + "deg");
+      loop.style.setProperty("--p", "1");
+      loop.classList.add("done");
+      timer = null;
+    }
+
+    function step() {
+      index += 1;
+      if (index === phases.length) { finish(); return; }
+      show(index);
+      timer = setTimeout(step, phases[index][1]);
+    }
+
+    function running() { return timer !== null; }
+    function sync() {
+      var want = tabVisible && inView && !loop.classList.contains("done");
+      if (want && !running()) timer = setTimeout(step, index < 0 ? 900 : 600);
+      if (!want && running()) { clearTimeout(timer); timer = null; }
+    }
+
+    loop.classList.add("live");
+    replay.addEventListener("click", function () {
+      loop.classList.remove("done");
+      index = -1;
+      sync();
+    });
+    document.addEventListener("visibilitychange", function () { tabVisible = !document.hidden; sync(); });
+    if ("IntersectionObserver" in window) {
+      new IntersectionObserver(function (entries) { inView = entries[0].isIntersecting; sync(); }, { threshold: .2 }).observe(loop);
+    }
+    sync();
+  })();
+  </script>
 </body>
 </html>

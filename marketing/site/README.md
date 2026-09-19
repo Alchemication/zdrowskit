@@ -34,18 +34,29 @@ via `.github/workflows/pages.yml`.
 
 ## What lives here
 
-- `assets/base.css` — **the single source of truth for the palette and site
-  chrome.** Never linked with `<link>`; every page inlines it at build time so
-  each output file stays self-contained. Three consumers: the landing page
-  (`{{BASE_CSS}}`), the docs template in `marketing/build.py`, and
+- `assets/base.css` — **the single source of truth for the palette, the type
+  and the site chrome.** Never linked with `<link>`; every page inlines it at
+  build time so each output file stays self-contained. Three consumers: the
+  landing page (`{{BASE_CSS}}`), the docs template in `marketing/build.py`, and
   `evals/leaderboard/html.py`, which reads the file directly. Do not redeclare
   a colour token anywhere else — that is how the leaderboard drifted into
-  looking like a different product the first time.
+  looking like a different product the first time. It also defines the two
+  shared surfaces: `.plate`, the chamfered stroke-and-fill card, and
+  `.halftone`, the dot screen for dark panels.
+- `assets/fonts/` — IBM Plex Sans (400, 500) and Plex Mono (400, 500), subset
+  to Latin, about 70 KB in total. `base.css` names them from the site root;
+  pages below the root rewrite the `assets/` prefix for their depth when they
+  inline the stylesheet. Same-origin, so pages still make no external
+  requests.
 - `index.html` — the landing page. Page-specific CSS only; the shared chrome
   arrives via the token. Opening it straight from disk looks unstyled, which is
-  expected — build the site to view it.
-- `assets/people-triptych.webp` — generated hero imagery. The generation brief
-  is in `../image-prompt.txt`.
+  expected — build the site to view it. The hero's loop is a small inline
+  script; without JavaScript or with reduced motion it shows the ring with the
+  Telegram message, still.
+- `assets/og.png` — the link-preview image, a 1200×630 capture of the hero
+  at rest. Recapture it after a visible hero change.
+- `assets/bot-avatar.webp` — the Telegram bot's avatar, which the site's
+  palette and shapes are drawn from. Source and prompts in `../bot-avatar/`.
 - `assets/favicon.svg`.
 
 ## Build-time placeholders

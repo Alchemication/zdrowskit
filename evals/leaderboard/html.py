@@ -91,17 +91,23 @@ _BASE_CSS_PATH = (
 )
 
 
-def _load_base_css() -> str:
+def _load_base_css(nav_base: str) -> str:
     """Read the shared site stylesheet.
+
+    Args:
+        nav_base: Relative path from this page back to the site root. The
+            stylesheet names its font files from the root, so the prefix is
+            rewritten for the page's depth.
 
     Returns:
         The stylesheet text, or "" if it is missing, in which case the page
         still renders with its own rules and browser defaults.
     """
     try:
-        return _BASE_CSS_PATH.read_text(encoding="utf-8")
+        css = _BASE_CSS_PATH.read_text(encoding="utf-8")
     except OSError:
         return ""
+    return css.replace('url("assets/', f'url("{nav_base}assets/')
 
 
 def _site_chrome(nav_base: str) -> tuple[str, str]:
@@ -183,12 +189,12 @@ def render_leaderboard_html(
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{_TITLE} — zdrowskit</title>
   <meta name="description" content="Regression scores for every zdrowskit LLM feature, published in full — what was tested, what passed, and what is still flaky.">
-  <style>{_load_base_css()}{_STYLE}</style>
+  <style>{_load_base_css(nav_base or "")}{_STYLE}</style>
 </head>
 <body>
 {header}  <main class="page shell">
     <section class="hero">
-      <div class="eyebrow">Eval Leaderboard</div>
+      <div class="marker">Evals</div>
       <h1>{_TITLE}</h1>
       <div class="lede">{_NOTE}</div>
     </section>
@@ -245,13 +251,11 @@ _STYLE = """
     a { color: var(--green-dark); }
     .page { padding: clamp(28px, 3vw, 44px) 0 56px; }
     .hero { display: grid; gap: 12px; margin-bottom: 30px; }
-    .hero .eyebrow { justify-self: start; }
     h1 {
       margin: 0;
       font-size: clamp(34px, 5vw, 62px);
-      line-height: .95;
-      letter-spacing: -.04em;
-      font-family: Georgia, "Times New Roman", serif;
+      line-height: 1;
+      letter-spacing: -.035em;
       font-weight: 500;
     }
     .lede { max-width: 900px; color: var(--muted); line-height: 1.65; }
@@ -259,15 +263,13 @@ _STYLE = """
       padding: 20px 22px 6px;
       border: 2px solid var(--ink);
       background: rgba(255,255,255,.22);
-      box-shadow: var(--shadow);
     }
     .legend h2 {
       margin: 0 0 14px;
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: .1em;
+      font-family: var(--mono);
+      font-size: 13px;
       color: var(--green-dark);
-      font-weight: 900;
+      font-weight: 500;
     }
     .legend-grid {
       display: grid;
@@ -277,10 +279,9 @@ _STYLE = """
     }
     .legend-grid > div { padding: 9px 0; border-top: 1px solid var(--line); }
     .legend-grid dt {
-      font-size: 12px;
-      font-weight: 900;
-      letter-spacing: .05em;
-      text-transform: uppercase;
+      font-family: var(--mono);
+      font-size: 13px;
+      font-weight: 500;
     }
     .legend-grid dd {
       margin: 5px 0 0;
@@ -292,7 +293,6 @@ _STYLE = """
       margin: 40px 0 14px;
       padding-top: 18px;
       border-top: 2px solid var(--ink);
-      font-family: Georgia, serif;
       font-size: 30px;
       font-weight: 500;
       letter-spacing: -.02em;
@@ -306,24 +306,23 @@ _STYLE = """
     .prod-card {
       background: rgba(255,255,255,.22);
       border: 2px solid var(--ink);
-      box-shadow: var(--shadow);
       padding: 18px;
       display: grid;
       gap: 8px;
     }
-    .prod-card.missing { border-style: dashed; box-shadow: none; opacity: .8; }
+    .prod-card.missing { border-style: dashed; opacity: .8; }
     .prod-card h3 {
       margin: 0;
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: .1em;
+      font-family: var(--mono);
+      font-size: 13px;
+      font-weight: 500;
       color: var(--green-dark);
     }
     .prod-blurb { margin: -2px 0 4px; color: var(--muted); font-size: 12px; line-height: 1.5; }
     .prod-score { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
     .prod-headline {
-      font-family: Georgia, serif;
       font-size: 34px;
+      font-weight: 500;
       line-height: 1;
       letter-spacing: -.03em;
     }
@@ -336,10 +335,9 @@ _STYLE = """
     .prod-facts > div { display: grid; grid-template-columns: 74px minmax(0, 1fr); gap: 10px; }
     .prod-facts dt {
       color: var(--green-dark);
-      font-size: 10.5px;
-      font-weight: 900;
-      letter-spacing: .08em;
-      text-transform: uppercase;
+      font-family: var(--mono);
+      font-size: 12px;
+      font-weight: 500;
       padding-top: 2px;
     }
     .prod-facts dd { margin: 0; color: var(--muted); line-height: 1.5; }
@@ -349,7 +347,6 @@ _STYLE = """
       padding: 14px 16px;
       border: 2px solid var(--orange);
       background: rgba(229,110,54,.12);
-      box-shadow: 4px 4px 0 var(--orange);
       color: #7c3208;
       font-size: 12.5px;
       line-height: 1.6;
@@ -357,7 +354,6 @@ _STYLE = """
     .warning.bad {
       border-color: var(--bad);
       background: rgba(168,40,15,.10);
-      box-shadow: 4px 4px 0 var(--bad);
       color: #8d2010;
     }
     .layout {
@@ -370,17 +366,15 @@ _STYLE = """
     .sidebar, .content-card {
       background: rgba(255,255,255,.22);
       border: 2px solid var(--ink);
-      box-shadow: var(--shadow);
     }
     .sidebar, .content, .content-card, .table-wrap { min-width: 0; }
     .sidebar { position: sticky; top: 18px; padding: 20px; display: grid; gap: 18px; }
     .sidebar h2, .content-card h2 {
       margin: 0;
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: .1em;
+      font-family: var(--mono);
+      font-size: 13px;
       color: var(--green-dark);
-      font-weight: 900;
+      font-weight: 500;
     }
     .filter-grid { display: grid; gap: 14px; }
     .field { display: grid; gap: 6px; }
@@ -435,9 +429,9 @@ _STYLE = """
       top: 0;
       background: var(--ink);
       color: var(--paper);
-      text-transform: uppercase;
-      letter-spacing: .08em;
-      font-size: 10px;
+      font-family: var(--mono);
+      font-weight: 500;
+      font-size: 12px;
       padding: 12px 14px;
       text-align: left;
     }
@@ -447,7 +441,7 @@ _STYLE = """
       vertical-align: top;
       font-size: 12.5px;
     }
-    tbody tr:hover { background: rgba(183,219,82,.16); }
+    tbody tr:hover { background: rgba(77,91,61,.12); }
     tbody tr.is-production { background: rgba(46,74,37,.09); }
     .model-cell { display: grid; gap: 3px; }
     .model-cell strong { font-size: 13px; }
@@ -459,8 +453,8 @@ _STYLE = """
       border: 1px solid var(--ink);
       background: var(--paper-2);
       font-size: 11px;
-      font-weight: 800;
-      letter-spacing: .04em;
+      font-weight: 500;
+      font-family: var(--mono);
     }
     .pill.good { background: rgba(46,74,37,.16); color: var(--good); }
     .pill.warn { background: rgba(229,110,54,.22); color: var(--warn); }
@@ -494,8 +488,8 @@ _STYLE = """
       align-items: center;
       gap: 8px;
       font-size: 11px;
-      font-weight: 900;
-      letter-spacing: .04em;
+      font-weight: 500;
+      font-family: var(--mono);
       overflow-wrap: anywhere;
     }
     .traj-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
@@ -503,8 +497,8 @@ _STYLE = """
       min-width: 62px;
       color: var(--muted);
       font-size: 11px;
-      font-weight: 800;
-      letter-spacing: .04em;
+      font-weight: 500;
+      font-family: var(--mono);
     }
     .node {
       padding: 3px 8px;
@@ -533,9 +527,8 @@ _STYLE = """
       text-align: center;
       background: rgba(255,255,255,.22);
       border: 2px solid var(--ink);
-      box-shadow: var(--shadow);
     }
-    .empty-state h2 { margin-top: 0; font-family: Georgia, serif; font-weight: 500; }
+    .empty-state h2 { margin-top: 0; font-weight: 500; }
     .footnote { margin-top: 12px; color: var(--muted); font-size: 11.5px; line-height: 1.6; }
     @media (max-width: 1040px) {
       .layout { grid-template-columns: 1fr; }

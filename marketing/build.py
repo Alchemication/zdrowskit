@@ -224,6 +224,8 @@ def page_shell(
         A complete HTML document.
     """
     up = "../" * depth
+    # base.css names its font files from the site root; this page lives deeper.
+    base_css = base_css.replace('url("assets/', f'url("{up}assets/')
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -236,31 +238,32 @@ def page_shell(
 {base_css}
 /* Docs-specific: prose column and long-form typography. */
 body {{ line-height: 1.7; }}
-a {{ color: var(--green-dark); }}
+a {{ color: var(--green-dark); text-underline-offset: 3px; }}
 .shell {{ width: min(860px, calc(100% - 32px)); }}
 main {{ padding: 48px 0 80px; }}
 h1 {{
-  margin: 0 0 8px; font-family: Georgia, "Times New Roman", serif;
-  font-size: clamp(34px, 5vw, 52px); font-weight: 500; line-height: 1.02; letter-spacing: -.03em;
+  margin: 0 0 8px;
+  font-size: clamp(34px, 5vw, 52px); font-weight: 500; line-height: 1.05; letter-spacing: -.03em;
 }}
 h2 {{
-  margin: 44px 0 14px; padding-top: 18px; border-top: 2px solid var(--ink);
-  font-family: Georgia, serif; font-size: 26px; font-weight: 500; letter-spacing: -.02em;
+  margin: 48px 0 14px; padding-top: 18px; border-top: 2px solid var(--ink);
+  font-size: 26px; font-weight: 500; letter-spacing: -.02em; line-height: 1.2;
 }}
-h3 {{ margin: 30px 0 10px; font-size: 13px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }}
+h3 {{ margin: 32px 0 10px; font-size: 18px; font-weight: 500; }}
 p, li {{ color: #3c3f33; }}
 pre {{
-  overflow-x: auto; padding: 16px 18px; border: 2px solid var(--ink);
-  background: var(--ink); color: var(--paper); box-shadow: 4px 4px 0 var(--ink); line-height: 1.55;
+  overflow-x: auto; padding: 16px 18px;
+  background: var(--ink); color: var(--paper); line-height: 1.55; font-size: 13.5px;
+  clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px);
 }}
 pre code {{ padding: 0; border: 0; background: none; color: inherit; }}
 blockquote {{
   margin: 20px 0; padding: 4px 0 4px 18px;
-  border-left: 5px solid var(--orange); color: var(--muted);
+  border-left: 4px solid var(--orange); color: var(--muted);
 }}
-table {{ width: 100%; border-collapse: collapse; margin: 20px 0; font-size: 13px; }}
-th, td {{ padding: 9px 11px; border: 1px solid rgba(21,25,15,.3); text-align: left; vertical-align: top; }}
-th {{ background: rgba(21,25,15,.06); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }}
+table {{ width: 100%; border-collapse: collapse; margin: 20px 0; font-size: 14px; }}
+th, td {{ padding: 9px 11px; border: 1px solid var(--line); text-align: left; vertical-align: top; }}
+th {{ background: rgba(21,25,15,.06); font-family: var(--mono); font-weight: 500; font-size: 12.5px; }}
 .table-scroll {{ overflow-x: auto; }}
 /* Pre-rendered Mermaid, inlined as SVG. Flowcharts are much wider than a
    comfortable prose measure, so the figure breaks out of the text column to
@@ -276,7 +279,6 @@ th {{ background: rgba(21,25,15,.06); font-size: 11px; letter-spacing: .06em; te
   padding: 20px 18px;
   border: 2px solid var(--ink);
   background: rgba(255,255,255,.3);
-  box-shadow: var(--shadow);
 }}
 /* The SVG carries its intrinsic size, so small diagrams sit at natural scale
    and only oversized ones are scaled down to the frame. */
@@ -284,12 +286,12 @@ th {{ background: rgba(21,25,15,.06); font-size: 11px; letter-spacing: .06em; te
 .diagram .node rect, .diagram .node polygon,
 .diagram .node circle, .diagram .node path {{ stroke-width: 2px; }}
 .diagram .edgePath .path, .diagram .flowchart-link {{ stroke-width: 1.8px; }}
-.lede {{ margin: 0 0 34px; color: var(--muted); }}
+.lede {{ margin: 0 0 34px; color: var(--muted); font-size: 18px; }}
 .doc-list {{ list-style: none; margin: 0; padding: 0; }}
-.doc-list li {{ padding: 15px 0; border-bottom: 1px solid rgba(21,25,15,.22); }}
-.doc-list a {{ font-weight: 800; text-decoration: none; }}
+.doc-list li {{ padding: 15px 0; border-bottom: 1px solid var(--line); }}
+.doc-list a {{ font-weight: 500; text-decoration: none; }}
 .doc-list a:hover {{ color: var(--orange); }}
-.doc-list span {{ display: block; color: var(--muted); font-size: 12px; }}
+.doc-list span {{ display: block; color: var(--muted); font-size: 14px; }}
 </style>
 </head>
 <body>
