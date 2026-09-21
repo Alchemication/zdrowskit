@@ -33,6 +33,7 @@ from typing import TYPE_CHECKING, Iterator
 from config import (
     CONTEXT_DEBOUNCE_S,
     DATA_HEALTH_REALERT_S,
+    FUNNEL_DNS_CONFIRM_AFTER_MIN,
     FUNNEL_OUTAGE_ESCALATE_AFTER_H,
     GOOGLE_DRIVE_POLL_INTERVAL_S,
     GOOGLE_DRIVE_SERVICE_ACCOUNT,
@@ -148,6 +149,31 @@ def _format_date_ranges(days: list[date]) -> str:
     )
 
 
+def _parse_utc(moment: object) -> datetime | None:
+    """Parse an ISO timestamp into an aware UTC datetime.
+
+    Compares timestamps by instant rather than by text: the state file and the
+    ingest receipts are written by different code paths, and an offset that
+    differs by so much as its spelling makes a string comparison silently
+    wrong in whichever direction the characters happen to sort.
+
+    Args:
+        moment: ISO 8601 timestamp, or anything else.
+
+    Returns:
+        An aware datetime, or None when the value is missing or unparseable.
+    """
+    if not isinstance(moment, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(moment)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
 def _hours_since(moment: str | None, *, now: datetime) -> float | None:
     """Return how many hours have passed since an ISO timestamp.
 
@@ -219,6 +245,45 @@ def _recovery_message(
         f"Daily metrics for {still_missing} are still missing, so reports "
         "covering those days may be incomplete."
     )
+
+
+def _resolution_summary(
+    status: str | None,
+    *,
+    repair_note: str | None,
+    delivered: bool,
+    wrote_message: bool,
+    delivery: str,
+) -> str:
+    """Compose the event line recording that a sync alert has cleared.
+
+    Says what the user was told as well as what happened, because the two come
+    apart routinely: a backfilled gap resolves in silence by design, and a
+    muted profile resolves without hearing either. An event that recorded only
+    the fault clearing would make those three look identical afterwards.
+
+    Args:
+        status: The condition that had been alerted on.
+        repair_note: What the daemon attempted and observed, for pipe faults.
+        delivered: Whether Telegram accepted an all-clear.
+        wrote_message: Whether an all-clear was composed at all.
+        delivery: The preference decision — ``allowed`` or a suppression.
+
+    Returns:
+        A one-line human-readable summary.
+    """
+    opening = (
+        f"Uploads can get through again; {repair_note}."
+        if repair_note
+        else f"The {status or 'sync'} alert cleared; data is importing again."
+    )
+    if delivered:
+        return f"{opening} The all-clear was sent."
+    if not wrote_message:
+        return f"{opening} Nothing was sent: the gap backfilled completely."
+    if delivery != "allowed":
+        return f"{opening} Nothing was sent: the user has silenced sync alerts."
+    return f"{opening} The all-clear could not be delivered."
 
 
 # ---------------------------------------------------------------------------
@@ -1518,6 +1583,132 @@ class ProfileRuntime:
         )
         return "failed"
 
+    def _funnel_miss_confirmed(self, health, *, now: datetime) -> bool:
+        """Return whether a missing DNS record has persisted long enough to act on.
+
+        The record is read over DoH from outside the tailnet, and one failed
+        lookup is not an outage: a single miss on 2026-09-14 sat inside an
+        ordinary afternoon lull, resolved by the next check, and cost two
+        messages — the alert and its all-clear — for a fault that never
+        existed. Requiring the miss to survive ``FUNNEL_DNS_CONFIRM_AFTER_MIN``
+        delays a genuine outage by one scheduled check and removes that class.
+
+        An unconfirmed miss is not an all-clear either, which is why this
+        answers False rather than letting the caller fall through to the
+        freshness check: a standing alert must not be resolved by a blip.
+
+        Args:
+            health: The condition just assessed.
+            now: The moment of this assessment, in UTC.
+
+        Returns:
+            True when the caller should act on ``health``, False while a first
+            DNS miss is still unconfirmed.
+        """
+        if health.status != "funnel":
+            if self._state.pop("funnel_dns_miss", None) is not None:
+                self._save_state()
+            return True
+
+        seen = self._state.get("funnel_dns_miss")
+        if not isinstance(seen, dict):
+            # The first miss of this outage. Any other status clears the marker
+            # above, so a marker that survives to here was left by an unbroken
+            # run of failed lookups and needs no outage identity of its own.
+            self._state["funnel_dns_miss"] = {
+                "since": health.since,
+                "first_seen": now.isoformat(),
+            }
+            self._save_state()
+            logger.info(
+                "Funnel DNS record missing for %s; waiting %.0f min for a "
+                "second check before reporting it.",
+                self.profile.name if self.profile else "profile",
+                FUNNEL_DNS_CONFIRM_AFTER_MIN,
+            )
+            return False
+
+        held_h = _hours_since(seen.get("first_seen"), now=now)
+        if held_h is not None and held_h * 60 < FUNNEL_DNS_CONFIRM_AFTER_MIN:
+            return False
+        return True
+
+    def _data_has_resumed(self, alerted: object, health, *, now: datetime) -> bool:
+        """Return whether data has actually arrived since an alert was sent.
+
+        The fault clearing and the data returning are separate events, and
+        announcing the first as if it were the second is how "✅ Sync is working
+        again" reached the user twice while nothing was syncing: on 2026-09-15
+        23 hours before the next upload, and on 2026-09-21 with the phone 20
+        hours silent. Both times the Funnel's DNS record had come back, which is
+        all the funnel condition ever measured.
+
+        So the all-clear waits for an import newer than the alert. Every
+        condition is gated the same way — a stale gap closes by importing the
+        missing days, a stalled pipe by importing what it held — so one rule
+        covers them without a per-status exception to keep in step.
+
+        Args:
+            alerted: The recorded ``data_health_alert`` state entry.
+            health: The condition just assessed.
+            now: The moment of this assessment, in UTC.
+
+        Returns:
+            True when an import has succeeded since the alert was sent.
+        """
+        if not isinstance(alerted, dict):
+            return True
+        sent_at = alerted.get("sent_at")
+        alerted_at = _parse_utc(sent_at)
+        if alerted_at is None:
+            # A record written before this field existed, or a corrupted one.
+            # Clearing it is the safe reading: the alternative is an alert that
+            # can never resolve and therefore never fires again.
+            return True
+        imported_at = _parse_utc(health.last_import)
+        if imported_at is not None and imported_at > alerted_at:
+            return True
+
+        if not alerted.get("awaiting_data_since"):
+            alerted["awaiting_data_since"] = now.isoformat()
+            self._save_state()
+            logger.info(
+                "Ingest fault for %s cleared but nothing has imported since the "
+                "alert; holding the all-clear until data arrives.",
+                self.profile.name if self.profile else "profile",
+            )
+        return False
+
+    def _node_repair_attribution(self, *, now: datetime) -> str:
+        """Describe what the daemon attempted against a pipe fault, and what it saw.
+
+        Records what was attempted and what was observed, and stops there. An
+        earlier version wrote "1.0h after the re-assert", which reads as a cause
+        and was wrong: the re-assert had done nothing, and a hand-run app
+        restart the daemon never saw was what reconnected the node. Crediting
+        whichever command ran last is exactly how a fix that has never worked
+        stayed in the docs for weeks.
+
+        Args:
+            now: The moment of this assessment, in UTC.
+
+        Returns:
+            A clause naming the attempt and its observed outcome.
+        """
+        attempt = self._state.get("node_repair")
+        if not isinstance(attempt, dict):
+            return "no repair was attempted by the daemon"
+        since_attempt = _hours_since(attempt.get("attempted_at"), now=now)
+        when = (
+            f"{since_attempt:.1f}h earlier" if since_attempt is not None else "earlier"
+        )
+        if attempt.get("reconnected_at") is not None:
+            return f"the daemon restarted Tailscale {when} and saw the node come back online"
+        return (
+            f"the daemon restarted Tailscale {when} and never saw the node come "
+            "back online, so this recovery is not attributable to it"
+        )
+
     def _check_ingest_health(self, prefs: dict) -> None:
         """Report a sustained ingest failure once, and its recovery once.
 
@@ -1525,6 +1716,13 @@ class ProfileRuntime:
         stop pairing, and the only trace is a daemon log nobody reads. That is
         survivable for the operator and fatal for a hosted profile, whose owner
         would conclude the product is dead.
+
+        Both ends of that report are evidence-gated. A fault is not believed on
+        one failed DNS lookup (:meth:`_funnel_miss_confirmed`), and it is not
+        declared over until data has actually arrived again
+        (:meth:`_data_has_resumed`). Each message that does go out is written to
+        the events table, because the daemon log rotates within a week and the
+        alert history is what these thresholds have to be tuned against.
 
         Args:
             prefs: Raw notification preferences for this profile.
@@ -1596,9 +1794,17 @@ class ProfileRuntime:
         # wall-clock, so the recovery ping and the alert must agree on the time.
         now = assessment_now.astimezone()
 
+        if not self._funnel_miss_confirmed(health, now=assessment_now):
+            # A single failed DNS lookup is not yet an outage, and until it is
+            # confirmed it is not an all-clear either: falling through here on
+            # the first miss would let a blip resolve a standing alert.
+            return
+
         alerted = self._state.get("data_health_alert")
         if not health.is_alerting:
             if alerted:
+                if not self._data_has_resumed(alerted, health, now=assessment_now):
+                    return
                 recovery = evaluate_data_health_delivery(prefs, now=now)
                 if recovery["status"] == "deferred":
                     # Hold the record, not just the message: an alert the user
@@ -1630,48 +1836,44 @@ class ProfileRuntime:
                             )
                             return
                     message = _recovery_message(alerted, present_metric_dates)
-                if isinstance(alerted, dict) and alerted.get("status") in {
-                    "funnel",
-                    "node",
-                }:
-                    # Records what was attempted and what was observed, and
-                    # stops there. The previous version wrote "1.0h after the
-                    # re-assert", which reads as a cause and was wrong: the
-                    # re-assert had done nothing and a hand-run app restart the
-                    # daemon never saw was what reconnected the node. Crediting
-                    # whichever command ran last is exactly how a fix that has
-                    # never worked stayed in the docs for weeks.
-                    attempt = self._state.get("node_repair")
-                    outcome = "no repair was attempted by the daemon"
-                    if isinstance(attempt, dict):
-                        since_attempt = _hours_since(
-                            attempt.get("attempted_at"), now=assessment_now
-                        )
-                        verified = attempt.get("reconnected_at") is not None
-                        outcome = (
-                            "the daemon restarted Tailscale "
-                            + (
-                                f"{since_attempt:.1f}h earlier"
-                                if since_attempt is not None
-                                else "earlier"
-                            )
-                            + (
-                                " and saw the node come back online"
-                                if verified
-                                else " and never saw the node come back online, "
-                                "so this recovery is not attributable to it"
-                            )
-                        )
-                    self._record_event(
-                        "ingest",
-                        f"{alerted['status']}_recovered",
-                        f"Uploads can get through again; {outcome}.",
-                    )
+
+                status = alerted.get("status") if isinstance(alerted, dict) else None
+                repair_note: str | None = None
+                if status in {"funnel", "node"}:
+                    repair_note = self._node_repair_attribution(now=assessment_now)
                     self._state.pop("node_repair", None)
+                waited_h = _hours_since(
+                    alerted.get("awaiting_data_since")
+                    if isinstance(alerted, dict)
+                    else None,
+                    now=assessment_now,
+                )
                 self._state.pop("data_health_alert", None)
                 self._save_state()
+
+                delivered = False
                 if recovery["status"] == "allowed" and message:
-                    self._poller.send_reply(message)
+                    delivered = bool(self._poller.send_reply(message))
+                self._record_event(
+                    "ingest",
+                    "alert_resolved",
+                    _resolution_summary(
+                        status,
+                        repair_note=repair_note,
+                        delivered=delivered,
+                        wrote_message=message is not None,
+                        delivery=recovery["status"],
+                    ),
+                    {
+                        "status": status,
+                        "notified": delivered,
+                        "delivery": recovery["status"],
+                        "awaited_data_h": (
+                            round(waited_h, 2) if waited_h is not None else None
+                        ),
+                        "repair": repair_note,
+                    },
+                )
             return
 
         now_iso = now.astimezone(timezone.utc).isoformat()
@@ -1740,6 +1942,13 @@ class ProfileRuntime:
                 "Ingest health alert suppressed by prefs: %s",
                 decision.get("reason", "unknown"),
             )
+            self._record_event(
+                "ingest",
+                "alert_suppressed",
+                f"A {health.status} alert was due but the user has silenced "
+                f"sync alerts ({decision.get('reason', 'unknown')}).",
+                {"status": health.status, "reason": decision.get("reason")},
+            )
             _mark_alerted()
             return
         headings = {
@@ -1792,6 +2001,24 @@ class ProfileRuntime:
             "Say _mute sync alerts for a week_ to silence this."
         ):
             _mark_alerted()
+            # Recorded here rather than in the daemon log alone. The log is the
+            # only other trace and it rotates within about a week, so the
+            # question this channel exists to answer — how often does it fire,
+            # and was each one deserved — was unanswerable past the last few
+            # days. The events table keeps it for as long as the database does.
+            self._record_event(
+                "ingest",
+                "alert_sent",
+                f"{heading}. {health.detail}",
+                {
+                    "status": health.status,
+                    "missing_from": health.missing_from,
+                    "missing_to": health.missing_to,
+                    "escalated": escalating,
+                    "repair": repair,
+                    "since": health.since,
+                },
+            )
         else:
             logger.error(
                 "Ingest health alert for %s could not be delivered; "

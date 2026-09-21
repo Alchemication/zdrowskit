@@ -561,6 +561,36 @@ class TestIngestHealth:
         kwargs.setdefault("pair_window_s", _PAIR_WINDOW_S)
         return assess_ingest_health(profile, **kwargs)
 
+    def test_every_verdict_carries_the_last_successful_import(
+        self, tmp_path: Path
+    ) -> None:
+        """A healthy verdict has to say when data last landed, not just that
+        nothing is wrong. The caller decides whether to announce an all-clear on
+        it, and "the fault cleared" and "data is flowing" are different moments.
+        """
+        profile = _profile(tmp_path)
+        imported = self._at(1)
+        self._state(
+            profile,
+            {
+                "uploads": {
+                    "metrics": {"received_at": self._at(2)},
+                    "workouts": {"received_at": self._at(2)},
+                },
+                "last_imported_at": imported,
+                "receipts": [],
+            },
+        )
+
+        healthy = self._assess(profile)
+        assert healthy.status == "ok"
+        assert healthy.last_import == imported
+
+        # And on a fault, so a stale alert can be resolved on the same evidence.
+        stale = self._assess(profile, newest_data_date=self._current(4))
+        assert stale.status == "stale"
+        assert stale.last_import == imported
+
     def test_a_profile_that_never_uploaded_is_not_nagged(self, tmp_path: Path) -> None:
         profile = _profile(tmp_path)
         self._state(profile, {"uploads": {}, "receipts": []})

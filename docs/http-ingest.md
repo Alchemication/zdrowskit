@@ -484,6 +484,11 @@ are checked before any local upload-timing diagnosis, because a stalled import
 cannot clear itself while nothing can arrive, and an outage that begins during
 one would otherwise be permanently reported as that stall instead.
 
+A missing record has to survive a second lookup before it is reported, and the
+all-clear afterwards waits until a pair actually imports rather than firing when
+the record returns. The record coming back is not the phone uploading again:
+both were sent early enough to be wrong in September 2026, once by a day.
+
 **If it has not cleared in ~48h** it is no longer the usual pattern. Check
 **DNS -> HTTPS Certificates** in the Tailscale admin console, which gates public
 `.ts.net` names. If that is enabled and the record is still absent, it is a

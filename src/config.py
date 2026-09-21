@@ -296,6 +296,25 @@ quiet does cause a few lookups that return healthy; that costs one DoH request
 each and alerts nobody, which is the right trade against detecting a dead pipe
 a day late.
 """
+FUNNEL_DNS_CONFIRM_AFTER_MIN: float = 20
+"""How long a missing Funnel DNS record must persist before it is reported.
+
+One failed lookup is not an outage. On 2026-09-14 a single DoH miss landed in
+the middle of an ordinary six-hour afternoon lull, the next check 30 minutes
+later resolved cleanly, and the phone's uploads resumed untouched — but the
+alert and its all-clear had already been sent, two messages for a fault that
+never existed. Every genuine outage measured between 2026-08-29 and 2026-09-21
+ran twelve hours or longer, so waiting for the miss to survive one more check
+costs a real outage half an hour of notice and removes the blip class outright.
+
+Expressed as a duration rather than a count of failed checks so it stays
+correct if SCHEDULED_CHECK_INTERVAL_S changes: at any tick rate, any value
+above zero requires a second observation before the record is believed.
+
+Applies to the DNS record alone. A disconnected node is read from the local
+Tailscale CLI rather than inferred from a network lookup, and carries its own
+delay before a repair in NODE_OFFLINE_REPAIR_AFTER_MIN.
+"""
 TAILSCALE_BINARY: Path = Path(
     os.environ.get("ZDROWSKIT_TAILSCALE_BINARY", "/usr/local/bin/tailscale")
 ).expanduser()

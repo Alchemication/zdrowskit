@@ -3091,6 +3091,19 @@ class TestIngestHealthAlerts:
         """Return a stale condition covering a known range of missing days."""
         return self._health("stale", missing_from=missing_from, missing_to=missing_to)
 
+    def _resumed(self):
+        """Return a healthy condition whose last import lands after the alert.
+
+        The all-clear is gated on data actually arriving, so a bare ``ok`` is
+        not enough to close an alert — that is the whole point of the gate.
+        """
+        from datetime import datetime, timedelta, timezone
+
+        return self._health(
+            "ok",
+            last_import=(datetime.now(timezone.utc) + timedelta(minutes=1)).isoformat(),
+        )
+
     def test_alerts_once_then_stays_quiet_until_the_realert_window(
         self, tmp_path: Path
     ) -> None:
@@ -3170,7 +3183,7 @@ class TestIngestHealthAlerts:
             "http_ingest.assess_ingest_health", return_value=self._health("split")
         ):
             runtime._check_ingest_health(prefs)
-        with patch("http_ingest.assess_ingest_health", return_value=self._health("ok")):
+        with patch("http_ingest.assess_ingest_health", return_value=self._resumed()):
             runtime._check_ingest_health(prefs)
             runtime._check_ingest_health(prefs)
 
@@ -3200,7 +3213,7 @@ class TestIngestHealthAlerts:
                 "_metric_dates",
                 return_value={"2026-08-13"},
             ),
-            patch("http_ingest.assess_ingest_health", return_value=self._health("ok")),
+            patch("http_ingest.assess_ingest_health", return_value=self._resumed()),
         ):
             runtime._check_ingest_health(prefs)
 
@@ -3233,7 +3246,7 @@ class TestIngestHealthAlerts:
                 "_metric_dates",
                 return_value={"2026-08-13"},
             ),
-            patch("http_ingest.assess_ingest_health", return_value=self._health("ok")),
+            patch("http_ingest.assess_ingest_health", return_value=self._resumed()),
         ):
             runtime._check_ingest_health(prefs)
 
@@ -3263,7 +3276,7 @@ class TestIngestHealthAlerts:
                 "_metric_dates",
                 return_value={"2026-08-10", "2026-08-12"},
             ),
-            patch("http_ingest.assess_ingest_health", return_value=self._health("ok")),
+            patch("http_ingest.assess_ingest_health", return_value=self._resumed()),
         ):
             runtime._check_ingest_health(prefs)
 
@@ -3282,6 +3295,94 @@ class TestIngestHealthAlerts:
             runtime._check_ingest_health(prefs)
 
         runtime._poller.send_reply.assert_not_called()
+
+    def test_every_sent_alert_is_recorded_as_an_event(self, tmp_path: Path) -> None:
+        """The daemon log rotates within about a week; the events table does not.
+
+        Without this the only durable trace of a sync alert was a log line, so
+        "how often does this fire, and was each one deserved" could not be
+        answered past the last few days — which is exactly the question the
+        channel's thresholds have to be tuned against.
+        """
+        runtime = self._runtime(tmp_path, self._stale("2026-08-13", "2026-08-14"))
+        prefs = load_notification_prefs(runtime._notification_prefs_path)
+
+        with patch.object(runtime, "_record_event") as record:
+            with patch(
+                "http_ingest.assess_ingest_health",
+                return_value=self._stale("2026-08-13", "2026-08-14"),
+            ):
+                runtime._check_ingest_health(prefs)
+
+        record.assert_called_once()
+        category, kind, _summary, details = record.call_args.args
+        assert (category, kind) == ("ingest", "alert_sent")
+        assert details["status"] == "stale"
+        assert details["missing_from"] == "2026-08-13"
+        assert details["missing_to"] == "2026-08-14"
+
+    def test_an_undelivered_alert_records_nothing(self, tmp_path: Path) -> None:
+        """The event says the user was told, so a failed send must not write one."""
+        runtime = self._runtime(tmp_path, self._health("split"))
+        prefs = load_notification_prefs(runtime._notification_prefs_path)
+        runtime._poller.send_reply.return_value = False
+
+        with patch.object(runtime, "_record_event") as record:
+            with patch(
+                "http_ingest.assess_ingest_health", return_value=self._health("split")
+            ):
+                runtime._check_ingest_health(prefs)
+
+        record.assert_not_called()
+
+    def test_a_muted_alert_is_recorded_as_suppressed(self, tmp_path: Path) -> None:
+        runtime = self._runtime(tmp_path, self._health("split"))
+        prefs = load_notification_prefs(runtime._notification_prefs_path)
+        prefs["overrides"] = {"data_health": {"enabled": False}}
+
+        with patch.object(runtime, "_record_event") as record:
+            with patch(
+                "http_ingest.assess_ingest_health", return_value=self._health("split")
+            ):
+                runtime._check_ingest_health(prefs)
+
+        kinds = [call.args[1] for call in record.call_args_list]
+        assert kinds == ["alert_suppressed"]
+
+    def test_a_resolution_records_whether_the_user_heard_it(
+        self, tmp_path: Path
+    ) -> None:
+        """A backfilled gap resolves in silence by design.
+
+        Recording only that the fault cleared would make a silent resolution,
+        a delivered all-clear and a muted one indistinguishable afterwards.
+        """
+        runtime = self._runtime(tmp_path, self._stale("2026-08-13", "2026-08-13"))
+        prefs = load_notification_prefs(runtime._notification_prefs_path)
+
+        with (
+            patch.object(runtime, "_newest_data_date", return_value="2026-08-12"),
+            patch(
+                "http_ingest.assess_ingest_health",
+                return_value=self._stale("2026-08-13", "2026-08-13"),
+            ),
+        ):
+            runtime._check_ingest_health(prefs)
+
+        with (
+            patch.object(runtime, "_record_event") as record,
+            patch.object(runtime, "_newest_data_date", return_value="2026-08-14"),
+            patch.object(runtime, "_metric_dates", return_value={"2026-08-13"}),
+            patch("http_ingest.assess_ingest_health", return_value=self._resumed()),
+        ):
+            runtime._check_ingest_health(prefs)
+
+        category, kind, summary, details = record.call_args.args
+        assert (category, kind) == ("ingest", "alert_resolved")
+        assert details["status"] == "stale"
+        # The day came back, so nothing was sent — and the event says so.
+        assert details["notified"] is False
+        assert "backfilled" in summary
 
     def test_muting_suppresses_the_message_but_still_logs(
         self, tmp_path: Path, caplog
@@ -3356,7 +3457,9 @@ class TestIngestHealthAlerts:
                 patch.object(daemon_module, "datetime", fake_datetime),
                 patch(
                     "http_ingest.assess_ingest_health",
-                    return_value=self._health("ok"),
+                    return_value=self._health(
+                        "ok", last_import="2026-04-05T02:00:00+00:00"
+                    ),
                 ),
             ):
                 runtime._check_ingest_health(prefs)
@@ -3375,6 +3478,7 @@ class TestFunnelOutageAlerts:
 
     @pytest.fixture(autouse=True)
     def _no_quiet_hours(self):
+        import daemon as daemon_module
         import notification_prefs as notification_prefs_module
 
         with (
@@ -3384,6 +3488,10 @@ class TestFunnelOutageAlerts:
             patch.object(
                 notification_prefs_module, "DATA_HEALTH_QUIET_END_HHMM", "00:00"
             ),
+            # Zero leaves the rule that a miss must be seen twice while removing
+            # the wall-clock wait, so these tests exercise the confirmation
+            # without sleeping through it. The duration itself has its own test.
+            patch.object(daemon_module, "FUNNEL_DNS_CONFIRM_AFTER_MIN", 0),
         ):
             yield
 
@@ -3400,6 +3508,16 @@ class TestFunnelOutageAlerts:
         )
         runtime._chat._poller = MagicMock()
         return runtime
+
+    def _check(self, runtime, prefs, health, *, times: int = 1) -> None:
+        """Run the health check *times* times against one assessed condition."""
+        with patch("http_ingest.assess_ingest_health", return_value=health):
+            for _ in range(times):
+                runtime._check_ingest_health(prefs)
+
+    def _confirmed(self, runtime, prefs, health) -> None:
+        """Observe a DNS miss twice, which is what it takes to report one."""
+        self._check(runtime, prefs, health, times=2)
 
     def _funnel(self, hours_ago: float = 5.0):
         from datetime import datetime, timedelta, timezone
@@ -3461,10 +3579,7 @@ class TestFunnelOutageAlerts:
         runtime = self._runtime(tmp_path, operator=True)
         prefs = load_notification_prefs(runtime._notification_prefs_path)
 
-        with (
-            patch("http_ingest.assess_ingest_health", return_value=self._funnel(5)),
-        ):
-            runtime._check_ingest_health(prefs)
+        self._confirmed(runtime, prefs, self._funnel(5))
         # Well past the 24h re-alert window that governs the other conditions,
         # but still inside the band these outages clear in on their own.
         from datetime import datetime, timedelta, timezone
@@ -3472,10 +3587,7 @@ class TestFunnelOutageAlerts:
         runtime._state["data_health_alert"]["sent_at"] = (
             datetime.now(timezone.utc) - timedelta(hours=30)
         ).isoformat()
-        with (
-            patch("http_ingest.assess_ingest_health", return_value=self._funnel(35)),
-        ):
-            runtime._check_ingest_health(prefs)
+        self._check(runtime, prefs, self._funnel(35))
 
         assert runtime._poller.send_reply.call_count == 1
 
@@ -3483,21 +3595,119 @@ class TestFunnelOutageAlerts:
         runtime = self._runtime(tmp_path, operator=True)
         prefs = load_notification_prefs(runtime._notification_prefs_path)
 
-        with (
-            patch("http_ingest.assess_ingest_health", return_value=self._funnel(5)),
-        ):
-            runtime._check_ingest_health(prefs)
-        with (
-            patch("http_ingest.assess_ingest_health", return_value=self._funnel(50)),
-        ):
-            runtime._check_ingest_health(prefs)
-            runtime._check_ingest_health(prefs)
+        self._confirmed(runtime, prefs, self._funnel(5))
+        self._check(runtime, prefs, self._funnel(50), times=2)
 
         messages = [c.args[0] for c in runtime._poller.send_reply.call_args_list]
         assert len(messages) == 2
         assert "two days" in messages[1]
         assert "Tailscale" in messages[1]
         assert runtime._state["data_health_alert"]["escalated"] is True
+
+    def test_a_single_failed_lookup_is_not_reported(self, tmp_path: Path) -> None:
+        """One DoH miss inside an ordinary lull is not an outage.
+
+        On 2026-09-14 exactly this fired: a lookup failed at 16:37, the next
+        check 30 minutes later resolved, uploads resumed on their own — and the
+        operator had already been sent a warning and an all-clear for a fault
+        that never existed.
+        """
+        runtime = self._runtime(tmp_path, operator=True)
+        prefs = load_notification_prefs(runtime._notification_prefs_path)
+
+        self._check(runtime, prefs, self._funnel())
+        runtime._poller.send_reply.assert_not_called()
+        assert "data_health_alert" not in runtime._state
+
+        # The record comes back before the next check, as the blip did.
+        self._check(runtime, prefs, self._resumed())
+        runtime._poller.send_reply.assert_not_called()
+        assert "funnel_dns_miss" not in runtime._state
+
+    def test_a_miss_is_reported_once_a_later_check_still_sees_it(
+        self, tmp_path: Path
+    ) -> None:
+        runtime = self._runtime(tmp_path, operator=True)
+        prefs = load_notification_prefs(runtime._notification_prefs_path)
+
+        self._confirmed(runtime, prefs, self._funnel())
+
+        assert runtime._poller.send_reply.call_count == 1
+        assert runtime._state["data_health_alert"]["status"] == "funnel"
+
+    def test_the_confirmation_waits_out_its_configured_delay(
+        self, tmp_path: Path
+    ) -> None:
+        """Two checks are not enough if they land inside the delay.
+
+        The rule is a duration rather than a count so it stays correct if the
+        scheduler's tick rate changes; this is the half that a zeroed constant
+        cannot exercise.
+        """
+        import daemon as daemon_module
+
+        runtime = self._runtime(tmp_path, operator=True)
+        prefs = load_notification_prefs(runtime._notification_prefs_path)
+
+        with patch.object(daemon_module, "FUNNEL_DNS_CONFIRM_AFTER_MIN", 20):
+            self._check(runtime, prefs, self._funnel(), times=2)
+            runtime._poller.send_reply.assert_not_called()
+
+            from datetime import datetime, timedelta, timezone
+
+            runtime._state["funnel_dns_miss"]["first_seen"] = (
+                datetime.now(timezone.utc) - timedelta(minutes=21)
+            ).isoformat()
+            self._check(runtime, prefs, self._funnel())
+
+        assert runtime._poller.send_reply.call_count == 1
+
+    def _resumed(self):
+        """Return a healthy condition whose last import lands after the alert."""
+        from datetime import datetime, timedelta, timezone
+
+        from http_ingest import IngestHealth
+
+        return IngestHealth(
+            status="ok",
+            detail="fine",
+            last_import=(datetime.now(timezone.utc) + timedelta(minutes=1)).isoformat(),
+        )
+
+    def test_the_all_clear_waits_for_data_not_just_a_working_record(
+        self, tmp_path: Path
+    ) -> None:
+        """DNS coming back is not the phone uploading again.
+
+        Sent on 2026-09-15, 23 hours before the next upload, and again on
+        2026-09-21 with the phone 20 hours silent: both times the record had
+        returned, which is all the funnel condition ever measured.
+        """
+        from http_ingest import IngestHealth
+
+        runtime = self._runtime(tmp_path, operator=True)
+        prefs = load_notification_prefs(runtime._notification_prefs_path)
+
+        self._confirmed(runtime, prefs, self._funnel())
+        runtime._poller.send_reply.reset_mock()
+
+        # The record resolves again, but nothing has imported since the alert.
+        stale_import = IngestHealth(
+            status="ok",
+            detail="fine",
+            last_import="2020-01-01T00:00:00+00:00",
+        )
+        self._check(runtime, prefs, stale_import, times=3)
+
+        runtime._poller.send_reply.assert_not_called()
+        assert runtime._state["data_health_alert"]["status"] == "funnel"
+        assert runtime._state["data_health_alert"]["awaiting_data_since"]
+
+        # A pair finally imports, and only then is the wait over.
+        self._check(runtime, prefs, self._resumed())
+
+        assert "working again" in runtime._poller.send_reply.call_args.args[0]
+        assert "data_health_alert" not in runtime._state
 
     def _node(self, hours_ago: float = 5.0):
         from datetime import datetime, timedelta, timezone
@@ -3634,20 +3844,11 @@ class TestFunnelOutageAlerts:
         assert "needs a look" in message
 
     def test_recovery_sends_the_all_clear(self, tmp_path: Path) -> None:
-        from http_ingest import IngestHealth
-
         runtime = self._runtime(tmp_path, operator=True)
         prefs = load_notification_prefs(runtime._notification_prefs_path)
 
-        with (
-            patch("http_ingest.assess_ingest_health", return_value=self._funnel()),
-        ):
-            runtime._check_ingest_health(prefs)
-        with patch(
-            "http_ingest.assess_ingest_health",
-            return_value=IngestHealth(status="ok", detail="fine"),
-        ):
-            runtime._check_ingest_health(prefs)
+        self._confirmed(runtime, prefs, self._funnel())
+        self._check(runtime, prefs, self._resumed())
 
         messages = [c.args[0] for c in runtime._poller.send_reply.call_args_list]
         # Told there was nothing to do, so the message ending the wait is the

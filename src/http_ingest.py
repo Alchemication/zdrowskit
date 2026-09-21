@@ -18,7 +18,7 @@ import threading
 import urllib.error
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta, timezone
 from http import HTTPStatus
 from pathlib import Path
@@ -94,6 +94,14 @@ class IngestHealth:
     since: str | None = None
     missing_from: str | None = None
     missing_to: str | None = None
+    last_import: str | None = None
+    """When a pair last imported successfully, as recorded in the state file.
+
+    Carried on every condition, not just the faults, because the absence of a
+    fault is not the same as data arriving: a Funnel outage clears the moment
+    the DNS record returns, while the phone may stay silent for another day.
+    The caller needs this to tell those apart before announcing an all-clear.
+    """
 
     @property
     def is_alerting(self) -> bool:
@@ -853,6 +861,18 @@ def assess_ingest_health(
             ),
         )
 
+    # Read before any verdict is reached so every one of them can carry it.
+    # The caller distinguishes "the fault cleared" from "data is flowing again"
+    # on this field alone, and those are not the same moment.
+    last_import = _parse_iso(state.get("last_imported_at"))
+
+    def stamped(health: IngestHealth) -> IngestHealth:
+        """Attach the last successful import to a verdict."""
+        return replace(
+            health,
+            last_import=last_import.isoformat() if last_import else None,
+        )
+
     uploads = state.get("uploads")
     uploads = uploads if isinstance(uploads, dict) else {}
     arrivals = {
@@ -862,10 +882,9 @@ def assess_ingest_health(
     }
     arrivals = {kind: seen for kind, seen in arrivals.items() if seen is not None}
     if not arrivals:
-        return IngestHealth(status="ok", detail="No upload has ever arrived.")
+        return stamped(IngestHealth(status="ok", detail="No upload has ever arrived."))
 
     last_upload = max(arrivals.values())
-    last_import = _parse_iso(state.get("last_imported_at"))
     everything_imported = last_import is not None and last_upload <= last_import
 
     # Silence is the only state where the public DNS record can say something
@@ -888,18 +907,22 @@ def assess_ingest_health(
         if resolve_node_health is not None:
             connected, node_detail = resolve_node_health()
             if connected is False:
-                return IngestHealth(
-                    status="node",
-                    detail=node_detail,
-                    since=last_upload.isoformat(),
+                return stamped(
+                    IngestHealth(
+                        status="node",
+                        detail=node_detail,
+                        since=last_upload.isoformat(),
+                    )
                 )
         if resolve_funnel_dns is not None:
             resolves, dns_detail = resolve_funnel_dns()
             if resolves is False:
-                return IngestHealth(
-                    status="funnel",
-                    detail=dns_detail,
-                    since=last_upload.isoformat(),
+                return stamped(
+                    IngestHealth(
+                        status="funnel",
+                        detail=dns_detail,
+                        since=last_upload.isoformat(),
+                    )
                 )
 
     if not everything_imported:
@@ -913,21 +936,23 @@ def assess_ingest_health(
             now=now,
         )
         if pipe is not None:
-            return pipe
+            return stamped(pipe)
 
     if last_import is None:
         # An upload has landed but no pair has completed a cycle yet, so there is
         # nothing stored and nothing wrong with that: this is the first minutes
         # of onboarding. Waiting past the split threshold is a fault, and the
         # check above already owns that call.
-        return IngestHealth(status="ok", detail="No pair has imported yet.")
+        return stamped(IngestHealth(status="ok", detail="No pair has imported yet."))
 
     # The uploads that arrived have been consumed, so the mechanism is sound and
     # the only remaining question is whether they carried the days they owed.
-    return _assess_data_freshness(
-        newest_data_date,
-        stale_after_days=stale_after_days,
-        now=now,
+    return stamped(
+        _assess_data_freshness(
+            newest_data_date,
+            stale_after_days=stale_after_days,
+            now=now,
+        )
     )
 
 

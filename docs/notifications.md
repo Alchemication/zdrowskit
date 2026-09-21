@@ -14,7 +14,7 @@ do not call an LLM.
 | **Targets** | Turns the prose goals in `strategy.md` into countable weekly targets | First notification of a new week, or an edit to the goal sections | Cached per week and goal text, including empty results | None — stored, not sent | none | Strict JSON against a closed metric vocabulary; drives the progress strip |
 | **Plan frame** | Decides how much of the progress strip this person's current life warrants | First notification after the journal changes, or when the last decision ages out | Cached until context changes or the decision expires | None — stored, not sent | none | Never shown the measurements, so it cannot hide an unflattering bar |
 | **Quiet-week check-in** | Asks what is going on when a week runs far below this person's own normal | Friday, deterministic detection | At most 1/week, and stops after two silences | One question plus four buttons | none | Answer is written to `log.md`, where the plan frame reads it |
-| **Sync alerts** | Warns when an HTTP profile's metrics stop updating or its imports stall | Checked on the scheduler tick | At most 1/day per unchanged condition | Short deterministic message | none | Pipe-fault all-clear; unresolved dates named after stale recovery |
+| **Sync alerts** | Warns when an HTTP profile's metrics stop updating or its imports stall | Checked on the scheduler tick | At most 1/day per unchanged condition | Short deterministic message | none | All-clear once data imports again; unresolved dates named after stale recovery |
 | **Chat** | Interactive conversation: answer the current message, ask anything, get charts | Your Telegram message | On demand | Brief unless you ask for detail | `run_sql`, `update_context` for `me`, `strategy`, or `log` | Optional `<chart>`; context edits require confirmation by default |
 
 Exact length ceilings live with the thing that enforces them: the visible-report
@@ -491,7 +491,7 @@ in order of how specific they are about the cause:
 | Condition | Default | Meaning |
 |-----------|---------|---------|
 | `node` | 3h of silence | This Mac lost its Tailscale connection, so Tailscale stopped publishing the address phones upload to. **Operator only.** Repairable here: the daemon restarts Tailscale once per outage and reports whether the node actually came back. See [HTTP ingest](http-ingest.md#the-address-stops-resolving). |
-| `funnel` | 3h of silence | Tailscale stopped publishing that address for a Mac that is still connected — checked first, so this condition means the local side is verified healthy. **Operator only** — one Funnel serves every profile and nobody else can act on it. Past outages cleared themselves in 26-35 hours. See [HTTP ingest](http-ingest.md#the-address-stops-resolving). |
+| `funnel` | 3h of silence, then a second failed lookup | Tailscale stopped publishing that address for a Mac that is still connected — checked first, so this condition means the local side is verified healthy. **Operator only** — one Funnel serves every profile and nobody else can act on it. Past outages cleared themselves in 26-35 hours. See [HTTP ingest](http-ingest.md#the-address-stops-resolving). |
 | `error` | 6h stalled; immediate for unreadable state | The last import failed and none has succeeded while the pipe is stalled, or the ingest state file cannot be read. |
 | `split` | 6h | Uploads arrived and nothing imports. A strong signal while the phone is demonstrably reachable. Because a half now imports on its own once the pairing window lapses, a stall this long is a fault on this end whatever the arrival gap was; the message names the gap but never sends you after the automation schedules. Counted from when the un-imported upload landed, and never reported before the pair's import deadline — an overnight gap is hours with nothing to import, not hours of failing to import. |
 | `stale` | 2 days | The pipe looks fine but two completed days of daily metrics are missing. The catch-all: phone off, token revoked, app deleted, parser rejecting every payload. |
@@ -502,6 +502,23 @@ a stall stayed permanently mislabelled as `split`, and the 48-hour escalation
 that hangs off `funnel` never ran. The same logic separates `node` from
 `funnel`: on 2026-08-29 a disconnected Mac was reported as an outage to wait
 out for 55 hours, when restarting Tailscale fixed it in twelve seconds.
+
+### One failed lookup is not an outage
+
+The Funnel's public DNS record is read from outside the tailnet, and a single
+miss is not evidence of anything. It has to still be missing on a later check
+before it is reported, which at the scheduler's tick rate means a second
+observation. The wait is `FUNNEL_DNS_CONFIRM_AFTER_MIN` in `src/config.py`.
+
+That costs a genuine outage one tick of notice, against outages that have run
+twelve hours and up. What it removes is the blip: on 2026-09-14 one lookup
+failed inside an ordinary afternoon lull, the next resolved cleanly, uploads
+resumed untouched, and the operator had a warning and an all-clear for a fault
+that never existed.
+
+A disconnected node is not gated this way. It is read from the local Tailscale
+CLI rather than inferred from a network lookup, and the repair it triggers has
+its own delay in `NODE_OFFLINE_REPAIR_AFTER_MIN`.
 
 ### What a repair message may claim
 
@@ -561,6 +578,20 @@ are in the `DATA_HEALTH_*` docstrings in `src/config.py`.
 
 ### Recovery notices
 
+**An all-clear waits for data, not for the fault to clear.** No recovery notice
+is sent until a pair has imported since the alert went out. The two are not the
+same moment and routinely come apart: a `funnel` outage clears the instant the
+DNS record returns, which says nothing about whether the phone has uploaded.
+Sent on the old rule, "Sync is working again" reached the operator on
+2026-09-15 a full day before the next upload, and again on 2026-09-21 with the
+phone twenty hours silent.
+
+Every condition is gated the same way — a stale gap closes by importing the
+missing days, a stalled pipe by importing what it held — so there is no
+per-condition exception to keep in step. While the wait runs, the alert stays
+open rather than being re-sent, and if the silence lasts long enough to trip a
+different condition, that one alerts on its own terms.
+
 Each condition is reported once and then not again for 24 hours while it
 persists. What is sent when it clears depends on what the outage cost:
 
@@ -613,5 +644,21 @@ Alerts go to the affected profile, not to the operator, because the person who
 can fix it is the one holding the phone. They obey the same mute and disable
 machinery as everything else (`data_health`), and when suppressed the condition
 is still written to the daemon log at WARNING.
+
+### Every alert leaves a record
+
+Each sent alert, each one silenced by your preferences, and each resolution is
+written to the `events` table under the `ingest` category:
+
+| Kind | Written when |
+|------|--------------|
+| `alert_sent` | Telegram accepted an alert. A failed send writes nothing, matching the delivery rule above. |
+| `alert_suppressed` | The condition was real but your preferences silenced it. |
+| `alert_resolved` | The alert closed. The details say whether an all-clear was sent, and a resolution that was silent by design records that it was. |
+
+`uv run python main.py events --category ingest` reads them back. The daemon log
+holds the same story in more detail but rotates within about a week, which is
+short enough that the question these thresholds have to be tuned against — how
+often does this fire, and was each one deserved — could not be answered from it.
 
 For bot setup and interactive chat commands, see [Telegram](telegram.md).

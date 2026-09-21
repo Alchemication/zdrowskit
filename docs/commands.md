@@ -43,6 +43,7 @@ uv run python main.py llm-log --trace 7
 uv run python main.py targets refresh
 uv run python main.py targets clear
 uv run python main.py events --since 3d --category nudge
+uv run python main.py events --since 30d --category ingest   # sync-alert history
 uv run python main.py events --usage --since 30d
 uv run python main.py db status
 uv run python main.py db status --all
