@@ -520,6 +520,34 @@ A disconnected node is not gated this way. It is read from the local Tailscale
 CLI rather than inferred from a network lookup, and the repair it triggers has
 its own delay in `NODE_OFFLINE_REPAIR_AFTER_MIN`.
 
+### The DNS lookup is the wrong question, and is being replaced
+
+Resolving a name is not the same as reaching a receiver. On 2026-09-21 the
+record resolved for twenty hours while the TLS handshake died at the ingress,
+so the assessment read `ok`, nothing alerted, and an all-clear went out to a
+pipe that could not carry anything. See [HTTP
+ingest](http-ingest.md#the-address-resolves-and-nothing-connects).
+
+So a second check asks what a phone asks: it resolves the public address, then
+completes an HTTPS request to `/healthz` through it, with certificate
+validation left on. Connecting by address rather than by name is what keeps
+MagicDNS from answering locally and proving nothing. Every resolved address is
+tried before the endpoint is called unreachable, because they recover one at a
+time after a restart.
+
+**It is not alerting yet.** While `FUNNEL_PROBE_OBSERVE_ONLY` holds, the probe
+runs each cycle, writes a `funnel_probe` event whenever its verdict changes,
+and does nothing else; the DNS lookup still owns the `funnel` condition. It has
+one observation of each outcome — a failure that matched Auto Export's own
+error exactly, and a success from this host once the Funnel recovered — and one
+sample of each is not a false-positive rate. The events say how often it
+disagrees with the DNS check and how often it flaps while the pipe is fine;
+flip the flag once that record exists.
+
+Unlike the DNS lookup, it runs on every cycle rather than only after a stretch
+of silence, because the number worth measuring only exists in the cycles where
+uploads are arriving normally.
+
 ### What a repair message may claim
 
 A repair is only ever described by what the daemon watched happen. After
@@ -655,6 +683,7 @@ written to the `events` table under the `ingest` category:
 | `alert_sent` | Telegram accepted an alert. A failed send writes nothing, matching the delivery rule above. |
 | `alert_suppressed` | The condition was real but your preferences silenced it. |
 | `alert_resolved` | The alert closed. The details say whether an all-clear was sent, and a resolution that was silent by design records that it was. |
+| `funnel_probe` | The public-path probe changed its verdict. Carries what the DNS check said at the same moment, so a disagreement is findable. Nobody is messaged about these. |
 
 `uv run python main.py events --category ingest` reads them back. The daemon log
 holds the same story in more detail but rotates within about a week, which is

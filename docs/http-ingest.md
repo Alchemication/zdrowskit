@@ -489,6 +489,47 @@ all-clear afterwards waits until a pair actually imports rather than firing when
 the record returns. The record coming back is not the phone uploading again:
 both were sent early enough to be wrong in September 2026, once by a day.
 
+### The address resolves and nothing connects
+
+A second, distinct failure. The public DNS record is present and correct, TCP
+connects on 443, and the **TLS handshake dies at the ingress**. Auto Export
+reports *"A TLS error caused the secure connection to fail"*, not a missing
+hostname.
+
+Observed once, on 2026-09-21, lasting about twenty hours. Every local signal
+was green throughout — receiver 200 on loopback, `https://<name>/healthz` 200
+in 18ms over MagicDNS, Let's Encrypt certificate valid for another five weeks,
+node `Online: true` with `Health: []`, Funnel on and proxying, `netcheck` clean
+with DERP London at 18.9ms, `funnel-ports` granted for 443. Tailscale's status
+page reported no incident.
+
+Reproduce it from outside the tailnet, forcing the public address so MagicDNS
+cannot answer:
+
+```bash
+dig @1.1.1.1 <name> A +short          # record is present
+curl -sv --resolve "<name>:443:<public-ip>" https://<name>/healthz
+# connects, then: SSL_ERROR_SYSCALL in connection to <name>:443
+```
+
+Funnel ingress forwards the TLS stream by SNI to a node that terminates it
+locally. The node's own TLS demonstrably worked, so the broken leg was the
+ingress reaching the node — plausibly a stale ingress registration, though
+nothing readable from this side confirms that.
+
+**Restarting the Tailscale app cleared it.** One occurrence: the failure was
+continuously reproducible across 25 minutes of probing and 20 hours of upload
+silence, the node reconnected 3 seconds after the relaunch, the first ingress
+address answered 200 fifteen seconds later, and all three were answering within
+90 seconds. That is a far tighter attribution than the recoveries this document
+used to credit to whichever command had run last — but it is still one sample,
+so treat it as the leading candidate for this failure mode, not as the fix.
+
+Note what this rules out: the node reported `Online: true` for the whole outage,
+so the daemon's own node repair — which only runs on a disconnected node —
+would never have fired. A healthy control connection does not imply a healthy
+ingress registration.
+
 **If it has not cleared in ~48h** it is no longer the usual pattern. Check
 **DNS -> HTTPS Certificates** in the Tailscale admin console, which gates public
 `.ts.net` names. If that is enabled and the record is still absent, it is a
@@ -511,6 +552,7 @@ unless forced with `--min-validity`.
 | Local `/healthz` works, public URL does not | Run `tailscale funnel status`; port 443 must be a Funnel proxy to `http://127.0.0.1:8787`, not a private Tailscale Serve mapping. |
 | Public URL worked before and now does not | Check **both** record types: `dig @1.1.1.1 <name> A +short` and `... AAAA +short`. Either one answering means the name resolves; a resolver can hold a stale negative answer for one while serving the other, which was observed minutes after a record was republished. Do **not** test with plain `curl` or `dig` on a tailnet machine: MagicDNS answers locally with a `100.x` address, so both succeed while the phone cannot connect. Check the node's own connection first — see [The address stops resolving](#the-address-stops-resolving). |
 | Auto Export reports "A server with the specified hostname could not be found" | The public address is gone. Read the `Tailscale:` line of `main.py ingest status` before doing anything: `DISCONNECTED` means restart the Tailscale app, `connected` means wait. See [The address stops resolving](#the-address-stops-resolving). Do **not** recreate the Funnel — that has never been shown to republish a record. |
+| Auto Export reports "A TLS error caused the secure connection to fail" | A different fault: the record resolves and the handshake dies at the ingress. Every local signal stays green, including `Tailscale: connected`. See [The address resolves and nothing connects](#the-address-resolves-and-nothing-connects). |
 | `Tailscale: DISCONNECTED` | This Mac has lost its control connection, so Tailscale withdrew the public address. Restart the Tailscale app; it reconnects in seconds and the address follows within about ten minutes. The daemon does this on its own once per outage and reports whether it worked. |
 | `/` returns `404` | Expected. Production exposes `GET /healthz` and authenticated `POST /v1/auto-export`, not a directory listing. |
 | Auto Export gets `401` | Re-enter the exact `Bearer <token>` authorization value or rotate the profile token. |

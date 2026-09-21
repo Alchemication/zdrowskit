@@ -561,6 +561,79 @@ class TestIngestHealth:
         kwargs.setdefault("pair_window_s", _PAIR_WINDOW_S)
         return assess_ingest_health(profile, **kwargs)
 
+    def test_the_probe_reports_reachable_when_any_address_answers(self) -> None:
+        """After a node restart the ingress addresses recover one at a time.
+
+        Measured on 2026-09-21: one of three answered at 19:35:04 and all three
+        by 19:36:20. An address that has not caught up is not an outage.
+        """
+        from http_ingest import public_endpoint_health
+
+        attempts: list[str] = []
+
+        def _probe(address, dns_name, *, timeout_s):
+            attempts.append(address)
+            return (address == "203.0.113.2", f"{address}: probed")
+
+        with (
+            patch(
+                "http_ingest._resolve_public_addresses",
+                return_value=(["203.0.113.1", "203.0.113.2"], ""),
+            ),
+            patch("http_ingest._probe_funnel_address", side_effect=_probe),
+        ):
+            reachable, detail = public_endpoint_health("host.ts.net", timeout_s=5)
+
+        assert reachable is True
+        assert attempts == ["203.0.113.1", "203.0.113.2"]
+        assert "1 of 2 did not" in detail
+
+    def test_the_probe_reports_unreachable_only_when_every_address_fails(
+        self,
+    ) -> None:
+        from http_ingest import public_endpoint_health
+
+        with (
+            patch(
+                "http_ingest._resolve_public_addresses",
+                return_value=(["203.0.113.1", "203.0.113.2"], ""),
+            ),
+            patch(
+                "http_ingest._probe_funnel_address",
+                return_value=(False, "TLS died"),
+            ),
+        ):
+            reachable, detail = public_endpoint_health("host.ts.net", timeout_s=5)
+
+        assert reachable is False
+        assert "none of the 2 public addresses" in detail
+
+    def test_a_probe_that_could_not_run_is_never_a_fault(self) -> None:
+        """An unreachable resolver is not a broken Funnel."""
+        from http_ingest import public_endpoint_health
+
+        with patch(
+            "http_ingest._resolve_public_addresses",
+            return_value=(None, "could not reach the public resolver"),
+        ):
+            reachable, detail = public_endpoint_health("host.ts.net", timeout_s=5)
+
+        assert reachable is None
+        assert "resolver" in detail
+
+    def test_a_missing_record_is_unreachable_without_being_probed(self) -> None:
+        from http_ingest import public_endpoint_health
+
+        with (
+            patch("http_ingest._resolve_public_addresses", return_value=([], "")),
+            patch("http_ingest._probe_funnel_address") as probe,
+        ):
+            reachable, detail = public_endpoint_health("host.ts.net", timeout_s=5)
+
+        assert reachable is False
+        assert "no public DNS record" in detail
+        probe.assert_not_called()
+
     def test_every_verdict_carries_the_last_successful_import(
         self, tmp_path: Path
     ) -> None:

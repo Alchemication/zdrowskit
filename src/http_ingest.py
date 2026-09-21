@@ -13,6 +13,8 @@ import os
 import re
 import secrets
 import shutil
+import socket
+import ssl
 import subprocess
 import threading
 import urllib.error
@@ -692,6 +694,150 @@ def tailscale_node_health() -> tuple[bool | None, str]:
     )
 
 
+def _resolve_public_addresses(dns_name: str) -> tuple[list[str] | None, str]:
+    """Return the public addresses a name resolves to, from outside the tailnet.
+
+    A then AAAA, because a resolver can hold a stale negative answer for one
+    while already serving the other. Observed on 2026-08-16: minutes after the
+    record was republished, Cloudflare still returned NXDOMAIN for A while
+    answering AAAA, and the phone was uploading throughout. Asking only about
+    A would have raised an outage alert against a working pipe, which is the
+    fastest way to teach someone to ignore this check.
+
+    Args:
+        dns_name: Tailscale DNS name serving the Funnel.
+
+    Returns:
+        The addresses of the first record type that answered and an empty
+        string, or an empty list when the name demonstrably has no record, or
+        ``None`` and a reason when the lookup itself could not be completed.
+    """
+    unknown: str | None = None
+    for record_type, type_code in (("A", 1), ("AAAA", 28)):
+        query = urllib.parse.urlencode({"name": dns_name, "type": record_type})
+        request = urllib.request.Request(
+            f"{PUBLIC_DNS_RESOLVER_URL}?{query}",
+            headers={"accept": "application/dns-json"},
+        )
+        try:
+            with urllib.request.urlopen(
+                request, timeout=PUBLIC_DNS_TIMEOUT_S
+            ) as response:
+                payload = json.loads(response.read())
+        except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
+            unknown = f"could not reach the public resolver ({exc})"
+            continue
+        if not isinstance(payload, dict):
+            unknown = "the public resolver returned an unreadable answer"
+            continue
+        addresses = [
+            answer.get("data")
+            for answer in payload.get("Answer") or []
+            if isinstance(answer, dict) and answer.get("type") == type_code
+        ]
+        if addresses:
+            return addresses, ""
+    if unknown is not None:
+        return None, unknown
+    return [], ""
+
+
+def _probe_funnel_address(
+    address: str, dns_name: str, *, timeout_s: float
+) -> tuple[bool, str]:
+    """Complete one HTTPS request to the Funnel through a specific public address.
+
+    Connects to the address directly rather than by name so MagicDNS cannot
+    answer for it. On this host the name resolves to a ``100.x`` tailnet
+    address, which succeeds locally while proving nothing about the path a
+    phone takes — the trap that kept a day-long outage invisible.
+
+    Certificate validation is left on deliberately. The Funnel terminates TLS
+    on this node with its own Let's Encrypt certificate, so a handshake that
+    validates is evidence the ingress reached the node, which is the leg no
+    local signal covers.
+
+    Args:
+        address: Public IPv4 or IPv6 address to connect to.
+        dns_name: Name to use for SNI, the Host header and certificate checks.
+        timeout_s: Budget for the connect, handshake and response together.
+
+    Returns:
+        Whether the receiver answered, and a detail line naming what happened.
+    """
+    family = socket.AF_INET6 if ":" in address else socket.AF_INET
+    context = ssl.create_default_context()
+    try:
+        with socket.socket(family, socket.SOCK_STREAM) as raw:
+            raw.settimeout(timeout_s)
+            raw.connect((address, FUNNEL_HTTPS_PORT))
+            with context.wrap_socket(raw, server_hostname=dns_name) as tls:
+                tls.sendall(
+                    f"GET {HEALTH_PATH} HTTP/1.1\r\n"
+                    f"Host: {dns_name}\r\n"
+                    "User-Agent: zdrowskit-funnel-probe\r\n"
+                    "Connection: close\r\n\r\n".encode("ascii")
+                )
+                status_line = tls.recv(64).decode("ascii", "replace").split("\r\n")[0]
+    except OSError as exc:
+        # ssl.SSLError and socket.timeout are both OSError subclasses, so one
+        # clause covers a refused connection, a dead handshake and a stall.
+        return False, f"{address}: {type(exc).__name__}: {exc}"
+    if " 200" in status_line:
+        return True, f"{address}: {status_line.strip()}"
+    return False, f"{address}: answered {status_line.strip() or 'nothing'}"
+
+
+def public_endpoint_health(
+    dns_name: str, *, timeout_s: float
+) -> tuple[bool | None, str]:
+    """Check that a phone could actually reach the receiver right now.
+
+    ``public_dns_health`` asks whether the name resolves. That is the weaker
+    question, and on 2026-09-21 it gave the wrong answer: the record resolved,
+    TCP connected, and the TLS handshake died at the ingress, so Auto Export
+    reported "A TLS error caused the secure connection to fail" while the
+    assessment read ``ok`` and an all-clear went out to a pipe that had been
+    dead for twenty hours. Every local signal was green throughout — receiver,
+    certificate, node, Funnel config and DERP all healthy — because the broken
+    leg was the ingress reaching this node, which nothing here can see.
+
+    So this asks the question the phone asks, through the same public path.
+    Every resolved address is tried before the endpoint is called unreachable:
+    after a node restart the addresses recover one at a time, and one that has
+    not caught up yet is not an outage.
+
+    Args:
+        dns_name: Tailscale DNS name serving the Funnel.
+        timeout_s: Budget for each address's connect, handshake and response.
+
+    Returns:
+        Whether the receiver answered publicly and a detail line. ``None``
+        means the check could not run, which must never be read as a fault.
+    """
+    addresses, unknown = _resolve_public_addresses(dns_name)
+    if addresses is None:
+        return None, unknown
+    if not addresses:
+        return False, f"{dns_name} has no public DNS record, so nothing can connect."
+
+    failures = []
+    for address in addresses:
+        reachable, detail = _probe_funnel_address(
+            address, dns_name, timeout_s=timeout_s
+        )
+        if reachable:
+            others = (
+                f", {len(failures)} of {len(addresses)} did not" if failures else ""
+            )
+            return True, f"the receiver answered publicly via {detail}{others}"
+        failures.append(detail)
+    return False, (
+        f"none of the {len(addresses)} public addresses for {dns_name} reached "
+        f"the receiver ({'; '.join(failures)})"
+    )
+
+
 def public_dns_health(dns_name: str) -> tuple[bool | None, str]:
     """Check that the Funnel hostname resolves for anything outside the tailnet.
 
@@ -721,40 +867,11 @@ def public_dns_health(dns_name: str) -> tuple[bool | None, str]:
         ``None`` when the check could not run at all, which must not be
         reported as a failure — an offline laptop is not a missing record.
     """
-    unknown: str | None = None
-    # A then AAAA, because a resolver can hold a stale negative answer for one
-    # while already serving the other. Observed on 2026-08-16: minutes after the
-    # record was republished, Cloudflare still returned NXDOMAIN for A while
-    # answering AAAA, and the phone was uploading throughout. Asking only about
-    # A would have raised an outage alert against a working pipe, which is the
-    # fastest way to teach someone to ignore this check.
-    for record_type, type_code in (("A", 1), ("AAAA", 28)):
-        query = urllib.parse.urlencode({"name": dns_name, "type": record_type})
-        request = urllib.request.Request(
-            f"{PUBLIC_DNS_RESOLVER_URL}?{query}",
-            headers={"accept": "application/dns-json"},
-        )
-        try:
-            with urllib.request.urlopen(
-                request, timeout=PUBLIC_DNS_TIMEOUT_S
-            ) as response:
-                payload = json.loads(response.read())
-        except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
-            unknown = f"could not reach the public resolver ({exc})"
-            continue
-        if not isinstance(payload, dict):
-            unknown = "the public resolver returned an unreadable answer"
-            continue
-        addresses = [
-            answer.get("data")
-            for answer in payload.get("Answer") or []
-            if isinstance(answer, dict) and answer.get("type") == type_code
-        ]
-        if addresses:
-            return True, f"resolves to {', '.join(addresses)}"
-
-    if unknown is not None:
+    addresses, unknown = _resolve_public_addresses(dns_name)
+    if addresses is None:
         return None, unknown
+    if addresses:
+        return True, f"resolves to {', '.join(addresses)}"
     return False, (
         f"Tailscale has stopped publishing the address your phone uploads to "
         f"({dns_name}), so exports cannot get through. This Mac is still "

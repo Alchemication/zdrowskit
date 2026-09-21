@@ -3473,6 +3473,161 @@ class TestIngestHealthAlerts:
         assert "data_health_alert" not in runtime._state
 
 
+class TestFunnelReachabilityProbe:
+    """The probe that asks what a phone would get, while it is still on trial."""
+
+    @pytest.fixture(autouse=True)
+    def _no_quiet_hours(self):
+        import notification_prefs as notification_prefs_module
+
+        with (
+            patch.object(
+                notification_prefs_module, "DATA_HEALTH_QUIET_START_HHMM", "00:00"
+            ),
+            patch.object(
+                notification_prefs_module, "DATA_HEALTH_QUIET_END_HHMM", "00:00"
+            ),
+            patch("cmd_ingest._tailscale_dns_name", return_value="host.ts.net"),
+        ):
+            yield
+
+    def _runtime(self, tmp_path: Path, *, operator: bool = True) -> ProfileRuntime:
+        from profiles import Profile
+
+        runtime = _make_daemon(tmp_path)
+        runtime.profile = Profile(
+            name="adam" if operator else "anna",
+            telegram_id=11 if operator else 22,
+            root=tmp_path / "profiles" / ("adam" if operator else "anna"),
+            operator=operator,
+            import_source="http",
+        )
+        runtime._chat._poller = MagicMock()
+        return runtime
+
+    def _ok(self):
+        from http_ingest import IngestHealth
+
+        return IngestHealth(status="ok", detail="fine")
+
+    def _run(self, runtime, prefs, probe, *, health=None, times: int = 1):
+        """Run the health check with the probe stubbed to a fixed verdict."""
+        with (
+            patch("http_ingest.public_endpoint_health", return_value=probe),
+            patch(
+                "http_ingest.assess_ingest_health", return_value=health or self._ok()
+            ),
+        ):
+            for _ in range(times):
+                runtime._check_ingest_health(prefs)
+
+    def test_the_first_observation_is_recorded(self, tmp_path: Path) -> None:
+        runtime = self._runtime(tmp_path)
+        prefs = load_notification_prefs(runtime._notification_prefs_path)
+
+        with patch.object(runtime, "_record_event") as record:
+            self._run(runtime, prefs, (True, "the receiver answered"))
+
+        category, kind, _summary, details = record.call_args.args
+        assert (category, kind) == ("ingest", "funnel_probe")
+        assert details["reachable"] is True
+        assert details["observe_only"] is True
+
+    def test_an_unchanged_verdict_is_not_rewritten_every_cycle(
+        self, tmp_path: Path
+    ) -> None:
+        """A row every half hour would bury the transitions being measured."""
+        runtime = self._runtime(tmp_path)
+        prefs = load_notification_prefs(runtime._notification_prefs_path)
+
+        with patch.object(runtime, "_record_event") as record:
+            self._run(runtime, prefs, (True, "the receiver answered"), times=5)
+
+        assert record.call_count == 1
+
+    def test_a_change_of_verdict_is_recorded(self, tmp_path: Path) -> None:
+        runtime = self._runtime(tmp_path)
+        prefs = load_notification_prefs(runtime._notification_prefs_path)
+
+        self._run(runtime, prefs, (True, "the receiver answered"))
+        with patch.object(runtime, "_record_event") as record:
+            self._run(runtime, prefs, (False, "TLS died at the ingress"))
+
+        details = record.call_args.args[3]
+        assert details["reachable"] is False
+        assert details["previous"] is True
+
+    def test_a_disagreement_with_the_dns_check_is_flagged(self, tmp_path: Path) -> None:
+        """The 2026-09-21 case: the record resolved, nothing could connect.
+
+        This is the whole reason the probe exists, so the event has to make the
+        disagreement findable rather than leaving two verdicts side by side.
+        """
+        runtime = self._runtime(tmp_path)
+        prefs = load_notification_prefs(runtime._notification_prefs_path)
+
+        with patch.object(runtime, "_record_event") as record:
+            self._run(
+                runtime,
+                prefs,
+                (False, "TLS died at the ingress"),
+                health=self._ok(),
+            )
+
+        _c, _k, summary, details = record.call_args.args
+        assert details["agrees_with_dns_check"] is False
+        assert details["health_status"] == "ok"
+        assert "disagrees" in summary
+
+    def test_nothing_is_alerted_on_while_the_probe_is_observing(
+        self, tmp_path: Path
+    ) -> None:
+        runtime = self._runtime(tmp_path)
+        prefs = load_notification_prefs(runtime._notification_prefs_path)
+
+        self._run(runtime, prefs, (False, "TLS died at the ingress"), times=3)
+
+        runtime._poller.send_reply.assert_not_called()
+        assert "data_health_alert" not in runtime._state
+
+    def test_a_hosted_profile_never_probes(self, tmp_path: Path) -> None:
+        runtime = self._runtime(tmp_path, operator=False)
+        prefs = load_notification_prefs(runtime._notification_prefs_path)
+
+        with patch("http_ingest.public_endpoint_health") as probe:
+            with patch("http_ingest.assess_ingest_health", return_value=self._ok()):
+                runtime._check_ingest_health(prefs)
+
+        # One Funnel serves the host; N profiles must not mean N probes.
+        probe.assert_not_called()
+
+    def test_a_probe_that_raises_does_not_break_the_health_check(
+        self, tmp_path: Path
+    ) -> None:
+        """An observation on trial must never take the alerting path with it."""
+        runtime = self._runtime(tmp_path)
+        prefs = load_notification_prefs(runtime._notification_prefs_path)
+
+        with (
+            patch(
+                "http_ingest.public_endpoint_health", side_effect=RuntimeError("boom")
+            ),
+            patch(
+                "http_ingest.assess_ingest_health",
+                return_value=self._health_split(),
+            ),
+        ):
+            runtime._check_ingest_health(prefs)
+
+        # The split alert still went out.
+        assert runtime._poller.send_reply.call_count == 1
+
+    def _health_split(self):
+        from http_ingest import IngestHealth
+
+        return IngestHealth(status="split", detail="uploads are not importing")
+
+
 class TestFunnelOutageAlerts:
     """A Funnel DNS outage is the operator's to know about and nobody's to fix."""
 
@@ -3492,6 +3647,15 @@ class TestFunnelOutageAlerts:
             # the wall-clock wait, so these tests exercise the confirmation
             # without sleeping through it. The duration itself has its own test.
             patch.object(daemon_module, "FUNNEL_DNS_CONFIRM_AFTER_MIN", 0),
+            # These runtimes are the operator, so the shadow probe would
+            # otherwise shell out to the real Tailscale CLI and open a real
+            # socket to the live Funnel. The observation path still runs; only
+            # its two outside calls are stubbed.
+            patch("cmd_ingest._tailscale_dns_name", return_value="host.ts.net"),
+            patch(
+                "http_ingest.public_endpoint_health",
+                return_value=(True, "stubbed: the receiver answered"),
+            ),
         ):
             yield
 

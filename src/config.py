@@ -296,6 +296,34 @@ quiet does cause a few lookups that return healthy; that costs one DoH request
 each and alerts nobody, which is the right trade against detecting a dead pipe
 a day late.
 """
+FUNNEL_PROBE_TIMEOUT_S: float = 10
+"""Budget for one public-path probe: connect, TLS handshake and response.
+
+Runs on the scheduler thread, so it must never hang it. The healthy case is
+fast — 0.14s measured against the live Funnel on 2026-09-21 — and the failure
+this exists to catch is faster still, since a dead handshake is refused in
+about 0.03s rather than stalling. Ten seconds is therefore slack for a slow
+network rather than a value the check's behaviour depends on, and a probe that
+overruns it is recorded as unreachable, which is what a phone would conclude.
+"""
+FUNNEL_PROBE_OBSERVE_ONLY: bool = True
+"""Whether the public-path probe only records what it sees instead of alerting.
+
+The probe is strictly better evidence than the DNS lookup it will replace —
+it asks the question the phone asks — but "better" is not "measured". It has
+one observation of each outcome: it failed on 2026-09-21 in exact agreement
+with Auto Export's own "A TLS error caused the secure connection to fail", and
+answered 200 from this host once the Funnel recovered, which is what retires
+the concern that a probe run from a tailnet member cannot reach its own public
+address.
+
+One sample of each is not a false-positive rate. While this is true the probe
+writes a ``funnel_probe`` event whenever its verdict changes and alerts on
+nothing, so a few days of ordinary operation say how often it disagrees with
+the DNS check and how often it flaps on its own. Flip it once that record
+exists, not before — this file's other thresholds all name the sample they
+came from, and this one cannot yet.
+"""
 FUNNEL_DNS_CONFIRM_AFTER_MIN: float = 20
 """How long a missing Funnel DNS record must persist before it is reported.
 

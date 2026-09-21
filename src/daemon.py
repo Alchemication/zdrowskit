@@ -35,6 +35,8 @@ from config import (
     DATA_HEALTH_REALERT_S,
     FUNNEL_DNS_CONFIRM_AFTER_MIN,
     FUNNEL_OUTAGE_ESCALATE_AFTER_H,
+    FUNNEL_PROBE_OBSERVE_ONLY,
+    FUNNEL_PROBE_TIMEOUT_S,
     GOOGLE_DRIVE_POLL_INTERVAL_S,
     GOOGLE_DRIVE_SERVICE_ACCOUNT,
     HEALTH_DEBOUNCE_S,
@@ -1583,6 +1585,79 @@ class ProfileRuntime:
         )
         return "failed"
 
+    def _observe_funnel_reachability(self, health, *, now: datetime) -> None:
+        """Record what the public-path probe sees, without acting on it.
+
+        The probe asks the question the DNS lookup only approximates — can a
+        phone reach the receiver — and on 2026-09-21 the two disagreed for
+        twenty hours: the record resolved, the handshake died at the ingress,
+        and the assessment read ``ok`` while nothing could upload. It is better
+        evidence, and it is not yet measured evidence, so while
+        ``FUNNEL_PROBE_OBSERVE_ONLY`` holds it alerts on nothing and only
+        writes down what it saw.
+
+        Runs on every cycle rather than after a stretch of silence, unlike the
+        DNS lookup it shadows. The unknown worth measuring is how often it
+        reports a fault while the pipe is demonstrably fine, and that number
+        only exists in the cycles where uploads are arriving normally.
+
+        Only a change of verdict is recorded. A row every half hour would bury
+        the transitions in the same table the alert history now lives in, and
+        the transitions are the measurement.
+
+        Args:
+            health: The condition assessed this cycle, recorded alongside the
+                probe so a disagreement between them is visible afterwards.
+            now: The moment of this assessment, in UTC.
+        """
+        from cmd_ingest import _tailscale_dns_name
+        from http_ingest import public_endpoint_health
+
+        if not FUNNEL_PROBE_OBSERVE_ONLY:
+            # The probe is the funnel resolver now, so its verdict is already
+            # the assessment and shadowing it would only double the requests.
+            return
+        if self.profile is None or not self.profile.operator:
+            return
+
+        dns_name = _tailscale_dns_name()
+        if not dns_name:
+            return
+        try:
+            reachable, detail = public_endpoint_health(
+                dns_name, timeout_s=FUNNEL_PROBE_TIMEOUT_S
+            )
+        except Exception:  # noqa: BLE001 - an observation must never break a check
+            logger.exception("Funnel reachability probe failed to run")
+            return
+
+        previous = self._state.get("funnel_probe")
+        last = previous.get("reachable") if isinstance(previous, dict) else None
+        if isinstance(previous, dict) and reachable is last:
+            return
+
+        self._state["funnel_probe"] = {
+            "reachable": reachable,
+            "changed_at": now.isoformat(),
+            "detail": detail[:300],
+        }
+        self._save_state()
+        verdict = {True: "reachable", False: "unreachable", None: "unknown"}[reachable]
+        agrees = (reachable is not False) == (health.status != "funnel")
+        self._record_event(
+            "ingest",
+            "funnel_probe",
+            f"The public path is {verdict}: {detail}"
+            + ("" if agrees else f" The DNS check disagrees ({health.status})."),
+            {
+                "reachable": reachable,
+                "previous": last,
+                "health_status": health.status,
+                "agrees_with_dns_check": agrees,
+                "observe_only": True,
+            },
+        )
+
     def _funnel_miss_confirmed(self, health, *, now: datetime) -> bool:
         """Return whether a missing DNS record has persisted long enough to act on.
 
@@ -1732,6 +1807,7 @@ class ProfileRuntime:
             assess_ingest_health,
             newest_expected_day,
             public_dns_health,
+            public_endpoint_health,
             tailscale_node_health,
         )
         from notification_prefs import (
@@ -1758,13 +1834,30 @@ class ProfileRuntime:
                 return None, "the Tailscale DNS name could not be determined"
             return public_dns_health(dns_name)
 
+        def resolve_funnel_endpoint() -> tuple[bool | None, str]:
+            """Ask whether a phone could reach the receiver, not whether a name resolves.
+
+            Same signature as the DNS resolver so it drops into the same slot;
+            which one is used is `FUNNEL_PROBE_OBSERVE_ONLY`.
+            """
+            dns_name = _tailscale_dns_name()
+            if not dns_name:
+                return None, "the Tailscale DNS name could not be determined"
+            return public_endpoint_health(dns_name, timeout_s=FUNNEL_PROBE_TIMEOUT_S)
+
         # One Funnel serves every profile on this host, so the record is checked
         # once and reported to the operator alone. Assessing it per profile
         # would send N people the same alert about one fault that only the
         # operator can act on, and spend N lookups to do it. A hosted profile
         # loses nothing by not hearing: the rolling exports re-send the backlog
         # once the record returns.
-        funnel_resolver = resolve_funnel_dns if self.profile.operator else None
+        funnel_resolver = None
+        if self.profile.operator:
+            funnel_resolver = (
+                resolve_funnel_dns
+                if FUNNEL_PROBE_OBSERVE_ONLY
+                else resolve_funnel_endpoint
+            )
         # Same reasoning as the Funnel record, and the same owner: one Mac holds
         # one Tailscale connection for every profile on it, so asking per
         # profile would spend N probes on one answer only the operator can act
@@ -1789,6 +1882,8 @@ class ProfileRuntime:
         except (OSError, sqlite3.Error):
             logger.exception("Could not assess ingest health for %s", self.profile.name)
             return
+
+        self._observe_funnel_reachability(health, now=assessment_now)
 
         # One local now for every delivery decision below: quiet-hours gating is
         # wall-clock, so the recovery ping and the alert must agree on the time.
