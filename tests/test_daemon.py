@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import daemon as daemon_module
+import daemon_ingest_health
 from daemon_data import changed_workout_ids
 import notification_prefs as notification_prefs_module
 import daemon_runners as daemon_runners_module
@@ -3113,9 +3114,9 @@ class TestIngestHealthAlerts:
         with patch(
             "http_ingest.assess_ingest_health", return_value=self._health("split")
         ):
-            runtime._check_ingest_health(prefs)
-            runtime._check_ingest_health(prefs)
-            runtime._check_ingest_health(prefs)
+            runtime._ingest_health.check(prefs)
+            runtime._ingest_health.check(prefs)
+            runtime._ingest_health.check(prefs)
 
         sent = runtime._poller.send_reply.call_args_list
         assert len(sent) == 1
@@ -3139,10 +3140,10 @@ class TestIngestHealthAlerts:
         with patch(
             "http_ingest.assess_ingest_health", return_value=self._health("split")
         ):
-            runtime._check_ingest_health(prefs)
+            runtime._ingest_health.check(prefs)
             assert "data_health_alert" not in runtime._state
             # The next tick must try again rather than treat it as told.
-            runtime._check_ingest_health(prefs)
+            runtime._ingest_health.check(prefs)
 
         assert runtime._poller.send_reply.call_count == 2
 
@@ -3154,8 +3155,8 @@ class TestIngestHealthAlerts:
         with patch(
             "http_ingest.assess_ingest_health", return_value=self._health("split")
         ):
-            runtime._check_ingest_health(prefs)
-            runtime._check_ingest_health(prefs)
+            runtime._ingest_health.check(prefs)
+            runtime._ingest_health.check(prefs)
 
         assert runtime._poller.send_reply.call_count == 1
         assert runtime._state["data_health_alert"]["status"] == "split"
@@ -3167,11 +3168,11 @@ class TestIngestHealthAlerts:
         with patch(
             "http_ingest.assess_ingest_health", return_value=self._health("split")
         ):
-            runtime._check_ingest_health(prefs)
+            runtime._ingest_health.check(prefs)
         with patch(
             "http_ingest.assess_ingest_health", return_value=self._health("error")
         ):
-            runtime._check_ingest_health(prefs)
+            runtime._ingest_health.check(prefs)
 
         assert runtime._poller.send_reply.call_count == 2
 
@@ -3182,10 +3183,10 @@ class TestIngestHealthAlerts:
         with patch(
             "http_ingest.assess_ingest_health", return_value=self._health("split")
         ):
-            runtime._check_ingest_health(prefs)
+            runtime._ingest_health.check(prefs)
         with patch("http_ingest.assess_ingest_health", return_value=self._resumed()):
-            runtime._check_ingest_health(prefs)
-            runtime._check_ingest_health(prefs)
+            runtime._ingest_health.check(prefs)
+            runtime._ingest_health.check(prefs)
 
         messages = [call.args[0] for call in runtime._poller.send_reply.call_args_list]
         # The user was told to go fix something, so the all-clear answers an
@@ -3199,23 +3200,27 @@ class TestIngestHealthAlerts:
         prefs = load_notification_prefs(runtime._notification_prefs_path)
 
         with (
-            patch.object(runtime, "_newest_data_date", return_value="2026-08-12"),
+            patch.object(
+                runtime._ingest_health, "_newest_data_date", return_value="2026-08-12"
+            ),
             patch(
                 "http_ingest.assess_ingest_health",
                 return_value=self._stale("2026-08-13", "2026-08-13"),
             ),
         ):
-            runtime._check_ingest_health(prefs)
+            runtime._ingest_health.check(prefs)
         with (
-            patch.object(runtime, "_newest_data_date", return_value="2026-08-14"),
             patch.object(
-                runtime,
+                runtime._ingest_health, "_newest_data_date", return_value="2026-08-14"
+            ),
+            patch.object(
+                runtime._ingest_health,
                 "_metric_dates",
                 return_value={"2026-08-13"},
             ),
             patch("http_ingest.assess_ingest_health", return_value=self._resumed()),
         ):
-            runtime._check_ingest_health(prefs)
+            runtime._ingest_health.check(prefs)
 
         # Auto Export caught up on the day it missed. Nothing was lost, so the
         # recovery is not news — announcing it just doubles the message count.
@@ -3231,24 +3236,28 @@ class TestIngestHealthAlerts:
         prefs = load_notification_prefs(runtime._notification_prefs_path)
 
         with (
-            patch.object(runtime, "_newest_data_date", return_value="2026-08-10"),
+            patch.object(
+                runtime._ingest_health, "_newest_data_date", return_value="2026-08-10"
+            ),
             patch(
                 "http_ingest.assess_ingest_health",
                 return_value=self._stale("2026-08-11", "2026-08-13"),
             ),
         ):
-            runtime._check_ingest_health(prefs)
+            runtime._ingest_health.check(prefs)
         # Uploads resumed and only the last of the three days came back.
         with (
-            patch.object(runtime, "_newest_data_date", return_value="2026-08-14"),
             patch.object(
-                runtime,
+                runtime._ingest_health, "_newest_data_date", return_value="2026-08-14"
+            ),
+            patch.object(
+                runtime._ingest_health,
                 "_metric_dates",
                 return_value={"2026-08-13"},
             ),
             patch("http_ingest.assess_ingest_health", return_value=self._resumed()),
         ):
-            runtime._check_ingest_health(prefs)
+            runtime._ingest_health.check(prefs)
 
         messages = [call.args[0] for call in runtime._poller.send_reply.call_args_list]
         assert len(messages) == 2
@@ -3262,23 +3271,27 @@ class TestIngestHealthAlerts:
         prefs = load_notification_prefs(runtime._notification_prefs_path)
 
         with (
-            patch.object(runtime, "_newest_data_date", return_value="2026-08-09"),
+            patch.object(
+                runtime._ingest_health, "_newest_data_date", return_value="2026-08-09"
+            ),
             patch(
                 "http_ingest.assess_ingest_health",
                 return_value=self._stale("2026-08-10", "2026-08-13"),
             ),
         ):
-            runtime._check_ingest_health(prefs)
+            runtime._ingest_health.check(prefs)
         with (
-            patch.object(runtime, "_newest_data_date", return_value="2026-08-14"),
             patch.object(
-                runtime,
+                runtime._ingest_health, "_newest_data_date", return_value="2026-08-14"
+            ),
+            patch.object(
+                runtime._ingest_health,
                 "_metric_dates",
                 return_value={"2026-08-10", "2026-08-12"},
             ),
             patch("http_ingest.assess_ingest_health", return_value=self._resumed()),
         ):
-            runtime._check_ingest_health(prefs)
+            runtime._ingest_health.check(prefs)
 
         # Exact presence wins over a newer maximum: the missing dates need not
         # form one trailing range.
@@ -3292,7 +3305,7 @@ class TestIngestHealthAlerts:
         prefs = load_notification_prefs(runtime._notification_prefs_path)
 
         with patch("http_ingest.assess_ingest_health", return_value=self._health("ok")):
-            runtime._check_ingest_health(prefs)
+            runtime._ingest_health.check(prefs)
 
         runtime._poller.send_reply.assert_not_called()
 
@@ -3312,7 +3325,7 @@ class TestIngestHealthAlerts:
                 "http_ingest.assess_ingest_health",
                 return_value=self._stale("2026-08-13", "2026-08-14"),
             ):
-                runtime._check_ingest_health(prefs)
+                runtime._ingest_health.check(prefs)
 
         record.assert_called_once()
         category, kind, _summary, details = record.call_args.args
@@ -3331,7 +3344,7 @@ class TestIngestHealthAlerts:
             with patch(
                 "http_ingest.assess_ingest_health", return_value=self._health("split")
             ):
-                runtime._check_ingest_health(prefs)
+                runtime._ingest_health.check(prefs)
 
         record.assert_not_called()
 
@@ -3344,7 +3357,7 @@ class TestIngestHealthAlerts:
             with patch(
                 "http_ingest.assess_ingest_health", return_value=self._health("split")
             ):
-                runtime._check_ingest_health(prefs)
+                runtime._ingest_health.check(prefs)
 
         kinds = [call.args[1] for call in record.call_args_list]
         assert kinds == ["alert_suppressed"]
@@ -3361,21 +3374,27 @@ class TestIngestHealthAlerts:
         prefs = load_notification_prefs(runtime._notification_prefs_path)
 
         with (
-            patch.object(runtime, "_newest_data_date", return_value="2026-08-12"),
+            patch.object(
+                runtime._ingest_health, "_newest_data_date", return_value="2026-08-12"
+            ),
             patch(
                 "http_ingest.assess_ingest_health",
                 return_value=self._stale("2026-08-13", "2026-08-13"),
             ),
         ):
-            runtime._check_ingest_health(prefs)
+            runtime._ingest_health.check(prefs)
 
         with (
             patch.object(runtime, "_record_event") as record,
-            patch.object(runtime, "_newest_data_date", return_value="2026-08-14"),
-            patch.object(runtime, "_metric_dates", return_value={"2026-08-13"}),
+            patch.object(
+                runtime._ingest_health, "_newest_data_date", return_value="2026-08-14"
+            ),
+            patch.object(
+                runtime._ingest_health, "_metric_dates", return_value={"2026-08-13"}
+            ),
             patch("http_ingest.assess_ingest_health", return_value=self._resumed()),
         ):
-            runtime._check_ingest_health(prefs)
+            runtime._ingest_health.check(prefs)
 
         category, kind, summary, details = record.call_args.args
         assert (category, kind) == ("ingest", "alert_resolved")
@@ -3397,7 +3416,7 @@ class TestIngestHealthAlerts:
             with patch(
                 "http_ingest.assess_ingest_health", return_value=self._health("split")
             ):
-                runtime._check_ingest_health(prefs)
+                runtime._ingest_health.check(prefs)
 
         runtime._poller.send_reply.assert_not_called()
         # The operator can still find it in the log even when the user muted it.
@@ -3423,13 +3442,13 @@ class TestIngestHealthAlerts:
             patch.object(
                 notification_prefs_module, "DATA_HEALTH_QUIET_END_HHMM", "08:00"
             ),
-            patch.object(daemon_module, "datetime", fake_datetime),
+            patch.object(daemon_ingest_health, "datetime", fake_datetime),
             patch(
                 "http_ingest.assess_ingest_health",
                 return_value=self._health("split"),
             ),
         ):
-            runtime._check_ingest_health(prefs)
+            runtime._ingest_health.check(prefs)
 
         runtime._poller.send_reply.assert_not_called()
         assert "data_health_alert" not in runtime._state
@@ -3454,7 +3473,7 @@ class TestIngestHealthAlerts:
                 patch.object(
                     notification_prefs_module, "DATA_HEALTH_QUIET_END_HHMM", "08:00"
                 ),
-                patch.object(daemon_module, "datetime", fake_datetime),
+                patch.object(daemon_ingest_health, "datetime", fake_datetime),
                 patch(
                     "http_ingest.assess_ingest_health",
                     return_value=self._health(
@@ -3462,7 +3481,7 @@ class TestIngestHealthAlerts:
                     ),
                 ),
             ):
-                runtime._check_ingest_health(prefs)
+                runtime._ingest_health.check(prefs)
 
         _tick(3)
         runtime._poller.send_reply.assert_not_called()
@@ -3478,7 +3497,6 @@ class TestUnreachableEndpointRepair:
 
     @pytest.fixture(autouse=True)
     def _isolated(self):
-        import daemon as daemon_module
         import notification_prefs as notification_prefs_module
 
         with (
@@ -3488,7 +3506,7 @@ class TestUnreachableEndpointRepair:
             patch.object(
                 notification_prefs_module, "DATA_HEALTH_QUIET_END_HHMM", "00:00"
             ),
-            patch.object(daemon_module, "INSTANCE_NAME", ""),
+            patch.object(daemon_ingest_health, "INSTANCE_NAME", ""),
             patch("cmd_ingest._tailscale_dns_name", return_value="host.ts.net"),
         ):
             yield
@@ -3529,8 +3547,8 @@ class TestUnreachableEndpointRepair:
         runtime = self._runtime(tmp_path)
         self._unreachable_for(runtime, 10)
 
-        with patch.object(runtime, "_restart_tailscale_app") as restart:
-            runtime._maybe_repair_unreachable_endpoint(now=self._now())
+        with patch.object(runtime._ingest_health, "_restart_tailscale_app") as restart:
+            runtime._ingest_health._maybe_repair_unreachable_endpoint(now=self._now())
 
         restart.assert_not_called()
 
@@ -3542,7 +3560,9 @@ class TestUnreachableEndpointRepair:
 
         with (
             patch.object(
-                runtime, "_restart_tailscale_app", return_value=(True, "")
+                runtime._ingest_health,
+                "_restart_tailscale_app",
+                return_value=(True, ""),
             ) as restart,
             patch("http_ingest.tailscale_node_health", return_value=(True, "online")),
             patch(
@@ -3551,9 +3571,9 @@ class TestUnreachableEndpointRepair:
             ),
             patch.object(runtime, "_record_event") as record,
         ):
-            runtime._maybe_repair_unreachable_endpoint(now=self._now())
+            runtime._ingest_health._maybe_repair_unreachable_endpoint(now=self._now())
             # A second cycle inside the same outage must not restart again.
-            runtime._maybe_repair_unreachable_endpoint(now=self._now())
+            runtime._ingest_health._maybe_repair_unreachable_endpoint(now=self._now())
 
         assert restart.call_count == 1
         assert record.call_args.args[1] == "endpoint_repair_recovered"
@@ -3567,28 +3587,31 @@ class TestUnreachableEndpointRepair:
         self._unreachable_for(runtime, 60)
 
         with (
-            patch.object(runtime, "_restart_tailscale_app") as restart,
+            patch.object(runtime._ingest_health, "_restart_tailscale_app") as restart,
             patch("http_ingest.tailscale_node_health", return_value=(False, "offline")),
         ):
-            runtime._maybe_repair_unreachable_endpoint(now=self._now())
+            runtime._ingest_health._maybe_repair_unreachable_endpoint(now=self._now())
 
         restart.assert_not_called()
 
     def test_a_restart_that_fixed_nothing_says_so(self, tmp_path: Path) -> None:
         """Crediting a restart by what recovered later is how a fake fix
         stayed in the docs for weeks."""
-        import daemon as daemon_module
 
         runtime = self._runtime(tmp_path)
         self._unreachable_for(runtime, 60)
 
         with (
-            patch.object(daemon_module, "FUNNEL_REPAIR_VERIFY_TIMEOUT_S", 0),
-            patch.object(runtime, "_restart_tailscale_app", return_value=(True, "")),
+            patch.object(daemon_ingest_health, "FUNNEL_REPAIR_VERIFY_TIMEOUT_S", 0),
+            patch.object(
+                runtime._ingest_health,
+                "_restart_tailscale_app",
+                return_value=(True, ""),
+            ),
             patch("http_ingest.tailscale_node_health", return_value=(True, "online")),
             patch.object(runtime, "_record_event") as record,
         ):
-            runtime._maybe_repair_unreachable_endpoint(now=self._now())
+            runtime._ingest_health._maybe_repair_unreachable_endpoint(now=self._now())
 
         kind, summary = record.call_args.args[1], record.call_args.args[2]
         assert kind == "endpoint_repair_failed"
@@ -3602,8 +3625,8 @@ class TestUnreachableEndpointRepair:
             "changed_at": "2020-01-01T00:00:00+00:00",
         }
 
-        with patch.object(runtime, "_restart_tailscale_app") as restart:
-            runtime._maybe_repair_unreachable_endpoint(now=self._now())
+        with patch.object(runtime._ingest_health, "_restart_tailscale_app") as restart:
+            runtime._ingest_health._maybe_repair_unreachable_endpoint(now=self._now())
 
         restart.assert_not_called()
 
@@ -3613,24 +3636,23 @@ class TestUnreachableEndpointRepair:
         runtime = self._runtime(tmp_path, operator=False)
         self._unreachable_for(runtime, 60)
 
-        with patch.object(runtime, "_restart_tailscale_app") as restart:
-            runtime._maybe_repair_unreachable_endpoint(now=self._now())
+        with patch.object(runtime._ingest_health, "_restart_tailscale_app") as restart:
+            runtime._ingest_health._maybe_repair_unreachable_endpoint(now=self._now())
 
         restart.assert_not_called()
 
     def test_a_named_instance_never_restarts_a_machine_wide_service(
         self, tmp_path: Path
     ) -> None:
-        import daemon as daemon_module
 
         runtime = self._runtime(tmp_path)
         self._unreachable_for(runtime, 60)
 
         with (
-            patch.object(daemon_module, "INSTANCE_NAME", "lab"),
-            patch.object(runtime, "_restart_tailscale_app") as restart,
+            patch.object(daemon_ingest_health, "INSTANCE_NAME", "lab"),
+            patch.object(runtime._ingest_health, "_restart_tailscale_app") as restart,
         ):
-            runtime._maybe_repair_unreachable_endpoint(now=self._now())
+            runtime._ingest_health._maybe_repair_unreachable_endpoint(now=self._now())
 
         restart.assert_not_called()
 
@@ -3681,7 +3703,7 @@ class TestFunnelReachabilityProbe:
             ),
         ):
             for _ in range(times):
-                runtime._check_ingest_health(prefs)
+                runtime._ingest_health.check(prefs)
 
     def test_the_first_observation_is_recorded(self, tmp_path: Path) -> None:
         runtime = self._runtime(tmp_path)
@@ -3758,7 +3780,7 @@ class TestFunnelReachabilityProbe:
 
         with patch("http_ingest.public_endpoint_health") as probe:
             with patch("http_ingest.assess_ingest_health", return_value=self._ok()):
-                runtime._check_ingest_health(prefs)
+                runtime._ingest_health.check(prefs)
 
         # One Funnel serves the host; N profiles must not mean N probes.
         probe.assert_not_called()
@@ -3779,7 +3801,7 @@ class TestFunnelReachabilityProbe:
                 return_value=self._health_split(),
             ),
         ):
-            runtime._check_ingest_health(prefs)
+            runtime._ingest_health.check(prefs)
 
         # The split alert still went out.
         assert runtime._poller.send_reply.call_count == 1
@@ -3795,7 +3817,6 @@ class TestFunnelOutageAlerts:
 
     @pytest.fixture(autouse=True)
     def _no_quiet_hours(self):
-        import daemon as daemon_module
         import notification_prefs as notification_prefs_module
 
         with (
@@ -3808,7 +3829,7 @@ class TestFunnelOutageAlerts:
             # Zero leaves the rule that a miss must be seen twice while removing
             # the wall-clock wait, so these tests exercise the confirmation
             # without sleeping through it. The duration itself has its own test.
-            patch.object(daemon_module, "FUNNEL_DNS_CONFIRM_AFTER_MIN", 0),
+            patch.object(daemon_ingest_health, "FUNNEL_DNS_CONFIRM_AFTER_MIN", 0),
             # These runtimes are the operator, so the shadow probe would
             # otherwise shell out to the real Tailscale CLI and open a real
             # socket to the live Funnel. The observation path still runs; only
@@ -3839,7 +3860,7 @@ class TestFunnelOutageAlerts:
         """Run the health check *times* times against one assessed condition."""
         with patch("http_ingest.assess_ingest_health", return_value=health):
             for _ in range(times):
-                runtime._check_ingest_health(prefs)
+                runtime._ingest_health.check(prefs)
 
     def _confirmed(self, runtime, prefs, health) -> None:
         """Observe a DNS miss twice, which is what it takes to report one."""
@@ -3863,7 +3884,7 @@ class TestFunnelOutageAlerts:
 
         with patch("http_ingest.assess_ingest_health") as assess:
             assess.return_value = self._funnel()
-            runtime._check_ingest_health(prefs)
+            runtime._ingest_health.check(prefs)
 
         # One Funnel serves the whole host, so only the operator's runtime pays
         # for the lookup. Sending N people one host's fault is noise they cannot
@@ -3876,7 +3897,7 @@ class TestFunnelOutageAlerts:
 
         with patch("http_ingest.assess_ingest_health") as assess:
             assess.return_value = self._funnel()
-            runtime._check_ingest_health(prefs)
+            runtime._ingest_health.check(prefs)
 
         assert assess.call_args.kwargs["resolve_funnel_dns"] is not None
 
@@ -3887,11 +3908,11 @@ class TestFunnelOutageAlerts:
 
         with (
             patch("http_ingest.assess_ingest_health", return_value=health),
-            patch.object(runtime, "_attempt_node_repair") as repair,
+            patch.object(runtime._ingest_health, "_attempt_node_repair") as repair,
         ):
-            runtime._check_ingest_health(prefs)
-            runtime._check_ingest_health(prefs)
-            runtime._check_ingest_health(prefs)
+            runtime._ingest_health.check(prefs)
+            runtime._ingest_health.check(prefs)
+            runtime._ingest_health.check(prefs)
 
         # Nothing local is attempted for a genuine Funnel outage: the node is
         # connected and its Funnel is on, and three measured occurrences showed
@@ -3970,12 +3991,11 @@ class TestFunnelOutageAlerts:
         scheduler's tick rate changes; this is the half that a zeroed constant
         cannot exercise.
         """
-        import daemon as daemon_module
 
         runtime = self._runtime(tmp_path, operator=True)
         prefs = load_notification_prefs(runtime._notification_prefs_path)
 
-        with patch.object(daemon_module, "FUNNEL_DNS_CONFIRM_AFTER_MIN", 20):
+        with patch.object(daemon_ingest_health, "FUNNEL_DNS_CONFIRM_AFTER_MIN", 20):
             self._check(runtime, prefs, self._funnel(), times=2)
             runtime._poller.send_reply.assert_not_called()
 
@@ -4053,7 +4073,6 @@ class TestFunnelOutageAlerts:
         return (datetime.now(timezone.utc) - timedelta(hours=hours_ago)).isoformat()
 
     def test_the_node_repair_runs_once_per_outage(self, tmp_path: Path) -> None:
-        import daemon as daemon_module
 
         runtime = self._runtime(tmp_path, operator=True)
         completed = SimpleNamespace(returncode=0, stdout="", stderr="")
@@ -4061,19 +4080,20 @@ class TestFunnelOutageAlerts:
         second = self._offline_since(2)
 
         with (
-            patch.object(daemon_module.subprocess, "run", return_value=completed),
+            patch.object(
+                daemon_ingest_health.subprocess, "run", return_value=completed
+            ),
             patch(
                 "http_ingest.tailscale_node_health",
                 return_value=(True, "connected"),
             ),
         ):
-            assert runtime._attempt_node_repair(first) == "reconnected"
-            assert runtime._attempt_node_repair(first) is None
+            assert runtime._ingest_health._attempt_node_repair(first) == "reconnected"
+            assert runtime._ingest_health._attempt_node_repair(first) is None
             # A new outage is a new attempt.
-            assert runtime._attempt_node_repair(second) == "reconnected"
+            assert runtime._ingest_health._attempt_node_repair(second) == "reconnected"
 
     def test_a_brief_disconnection_is_left_alone(self, tmp_path: Path) -> None:
-        import daemon as daemon_module
         from datetime import datetime, timedelta, timezone
 
         runtime = self._runtime(tmp_path, operator=True)
@@ -4082,15 +4102,14 @@ class TestFunnelOutageAlerts:
         # Tailscale drops and re-establishes its control connection on wake and
         # on network changes, almost always recovering in seconds. Restarting
         # the app during one of those interrupts a tailnet to fix nothing.
-        with patch.object(daemon_module.subprocess, "run") as run:
-            assert runtime._attempt_node_repair(recent) is None
+        with patch.object(daemon_ingest_health.subprocess, "run") as run:
+            assert runtime._ingest_health._attempt_node_repair(recent) is None
 
         run.assert_not_called()
 
     def test_a_restart_that_does_not_reconnect_reports_failure(
         self, tmp_path: Path
     ) -> None:
-        import daemon as daemon_module
 
         runtime = self._runtime(tmp_path, operator=True)
         completed = SimpleNamespace(returncode=0, stdout="", stderr="")
@@ -4099,41 +4118,50 @@ class TestFunnelOutageAlerts:
         # stays offline must not be reported as a fix. Claiming one is how a
         # repair that has never worked stayed in the docs.
         with (
-            patch.object(daemon_module.subprocess, "run", return_value=completed),
-            patch.object(daemon_module, "TAILSCALE_RECONNECT_TIMEOUT_S", 0.1),
+            patch.object(
+                daemon_ingest_health.subprocess, "run", return_value=completed
+            ),
+            patch.object(daemon_ingest_health, "TAILSCALE_RECONNECT_TIMEOUT_S", 0.1),
             patch(
                 "http_ingest.tailscale_node_health",
                 return_value=(False, "still offline"),
             ),
         ):
-            assert runtime._attempt_node_repair(self._offline_since(5)) == "failed"
+            assert (
+                runtime._ingest_health._attempt_node_repair(self._offline_since(5))
+                == "failed"
+            )
 
     def test_a_relaunch_that_fails_is_reported_not_waited_on(
         self, tmp_path: Path
     ) -> None:
-        import daemon as daemon_module
 
         runtime = self._runtime(tmp_path, operator=True)
         failed = SimpleNamespace(
             returncode=1, stdout="", stderr="Unable to find application"
         )
 
-        with patch.object(daemon_module.subprocess, "run", return_value=failed):
-            assert runtime._attempt_node_repair(self._offline_since(5)) == "failed"
+        with patch.object(daemon_ingest_health.subprocess, "run", return_value=failed):
+            assert (
+                runtime._ingest_health._attempt_node_repair(self._offline_since(5))
+                == "failed"
+            )
 
     def test_a_named_instance_never_restarts_the_shared_tailscale(
         self, tmp_path: Path
     ) -> None:
         """Tailscale is machine-wide; a lab restarting it drops the live host."""
-        import daemon as daemon_module
 
         runtime = self._runtime(tmp_path, operator=True)
 
         with (
-            patch.object(daemon_module, "INSTANCE_NAME", "lab"),
-            patch.object(daemon_module.subprocess, "run") as run,
+            patch.object(daemon_ingest_health, "INSTANCE_NAME", "lab"),
+            patch.object(daemon_ingest_health.subprocess, "run") as run,
         ):
-            assert runtime._attempt_node_repair(self._offline_since(5)) is None
+            assert (
+                runtime._ingest_health._attempt_node_repair(self._offline_since(5))
+                is None
+            )
 
         run.assert_not_called()
 
@@ -4145,9 +4173,13 @@ class TestFunnelOutageAlerts:
 
         with (
             patch("http_ingest.assess_ingest_health", return_value=self._node()),
-            patch.object(runtime, "_attempt_node_repair", return_value="reconnected"),
+            patch.object(
+                runtime._ingest_health,
+                "_attempt_node_repair",
+                return_value="reconnected",
+            ),
         ):
-            runtime._check_ingest_health(prefs)
+            runtime._ingest_health.check(prefs)
 
         message = runtime._poller.send_reply.call_args.args[0]
         assert "dropped off Tailscale" in message
@@ -4161,9 +4193,11 @@ class TestFunnelOutageAlerts:
 
         with (
             patch("http_ingest.assess_ingest_health", return_value=self._node()),
-            patch.object(runtime, "_attempt_node_repair", return_value="failed"),
+            patch.object(
+                runtime._ingest_health, "_attempt_node_repair", return_value="failed"
+            ),
         ):
-            runtime._check_ingest_health(prefs)
+            runtime._ingest_health.check(prefs)
 
         message = runtime._poller.send_reply.call_args.args[0]
         assert "did not reconnect" in message
