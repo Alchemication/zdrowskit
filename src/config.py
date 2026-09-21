@@ -306,6 +306,32 @@ about 0.03s rather than stalling. Ten seconds is therefore slack for a slow
 network rather than a value the check's behaviour depends on, and a probe that
 overruns it is recorded as unreachable, which is what a phone would conclude.
 """
+FUNNEL_UNREACHABLE_REPAIR_AFTER_MIN: float = 45
+"""How long the public path must stay dead before Tailscale is restarted.
+
+Deliberately longer than FUNNEL_DNS_CONFIRM_AFTER_MIN, which only gates a
+message. This gates a machine-wide restart on a probe whose false-positive rate
+is not yet measured, so it asks for several consecutive failures at the
+scheduler's tick rate rather than two. A flap must not interrupt a working
+tailnet to fix nothing.
+
+Sized against the fault, not the tolerance: the one measured occurrence ran
+twenty hours, and no observed Funnel outage of any class has cleared on its own
+in under twenty-six. Forty-five minutes is therefore free — it sits far below
+anything real and far above anything transient.
+"""
+FUNNEL_REPAIR_VERIFY_TIMEOUT_S: float = 180
+"""Seconds to watch the public path before judging a restart's effect.
+
+Measured 2026-09-21: the node reconnected three seconds after the relaunch, the
+first ingress address answered fifteen seconds later, and all three were
+answering within ninety. Three minutes clears that with room for a slower
+propagation while still ending in a verdict rather than a wait.
+
+A restart that overruns this is recorded as having fixed nothing. Crediting it
+to whatever recovered later is exactly how a repair that has never worked
+stayed in the documentation for weeks.
+"""
 FUNNEL_PROBE_OBSERVE_ONLY: bool = True
 """Whether the public-path probe only records what it sees instead of alerting.
 

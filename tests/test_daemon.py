@@ -3473,6 +3473,168 @@ class TestIngestHealthAlerts:
         assert "data_health_alert" not in runtime._state
 
 
+class TestUnreachableEndpointRepair:
+    """The repair for a Funnel that is dead while the node insists it is fine."""
+
+    @pytest.fixture(autouse=True)
+    def _isolated(self):
+        import daemon as daemon_module
+        import notification_prefs as notification_prefs_module
+
+        with (
+            patch.object(
+                notification_prefs_module, "DATA_HEALTH_QUIET_START_HHMM", "00:00"
+            ),
+            patch.object(
+                notification_prefs_module, "DATA_HEALTH_QUIET_END_HHMM", "00:00"
+            ),
+            patch.object(daemon_module, "INSTANCE_NAME", ""),
+            patch("cmd_ingest._tailscale_dns_name", return_value="host.ts.net"),
+        ):
+            yield
+
+    def _runtime(self, tmp_path: Path, *, operator: bool = True) -> ProfileRuntime:
+        from profiles import Profile
+
+        runtime = _make_daemon(tmp_path)
+        runtime.profile = Profile(
+            name="adam" if operator else "anna",
+            telegram_id=11 if operator else 22,
+            root=tmp_path / "profiles" / ("adam" if operator else "anna"),
+            operator=operator,
+            import_source="http",
+        )
+        runtime._chat._poller = MagicMock()
+        return runtime
+
+    def _unreachable_for(self, runtime, minutes: float) -> None:
+        from datetime import datetime, timedelta, timezone
+
+        runtime._state["funnel_probe"] = {
+            "reachable": False,
+            "changed_at": (
+                datetime.now(timezone.utc) - timedelta(minutes=minutes)
+            ).isoformat(),
+            "detail": "TLS died at the ingress",
+        }
+
+    def _now(self):
+        from datetime import datetime, timezone
+
+        return datetime.now(timezone.utc)
+
+    def test_a_brief_outage_does_not_restart_a_working_tailnet(
+        self, tmp_path: Path
+    ) -> None:
+        runtime = self._runtime(tmp_path)
+        self._unreachable_for(runtime, 10)
+
+        with patch.object(runtime, "_restart_tailscale_app") as restart:
+            runtime._maybe_repair_unreachable_endpoint(now=self._now())
+
+        restart.assert_not_called()
+
+    def test_a_sustained_outage_draws_one_restart_and_verifies_it(
+        self, tmp_path: Path
+    ) -> None:
+        runtime = self._runtime(tmp_path)
+        self._unreachable_for(runtime, 60)
+
+        with (
+            patch.object(
+                runtime, "_restart_tailscale_app", return_value=(True, "")
+            ) as restart,
+            patch("http_ingest.tailscale_node_health", return_value=(True, "online")),
+            patch(
+                "http_ingest.public_endpoint_health",
+                return_value=(True, "the receiver answered"),
+            ),
+            patch.object(runtime, "_record_event") as record,
+        ):
+            runtime._maybe_repair_unreachable_endpoint(now=self._now())
+            # A second cycle inside the same outage must not restart again.
+            runtime._maybe_repair_unreachable_endpoint(now=self._now())
+
+        assert restart.call_count == 1
+        assert record.call_args.args[1] == "endpoint_repair_recovered"
+        assert runtime._state["endpoint_repair"]["recovered_at"]
+
+    def test_a_disconnected_node_is_left_to_the_other_repair(
+        self, tmp_path: Path
+    ) -> None:
+        """One fault must not draw two restarts, nor confuse the attribution."""
+        runtime = self._runtime(tmp_path)
+        self._unreachable_for(runtime, 60)
+
+        with (
+            patch.object(runtime, "_restart_tailscale_app") as restart,
+            patch("http_ingest.tailscale_node_health", return_value=(False, "offline")),
+        ):
+            runtime._maybe_repair_unreachable_endpoint(now=self._now())
+
+        restart.assert_not_called()
+
+    def test_a_restart_that_fixed_nothing_says_so(self, tmp_path: Path) -> None:
+        """Crediting a restart by what recovered later is how a fake fix
+        stayed in the docs for weeks."""
+        import daemon as daemon_module
+
+        runtime = self._runtime(tmp_path)
+        self._unreachable_for(runtime, 60)
+
+        with (
+            patch.object(daemon_module, "FUNNEL_REPAIR_VERIFY_TIMEOUT_S", 0),
+            patch.object(runtime, "_restart_tailscale_app", return_value=(True, "")),
+            patch("http_ingest.tailscale_node_health", return_value=(True, "online")),
+            patch.object(runtime, "_record_event") as record,
+        ):
+            runtime._maybe_repair_unreachable_endpoint(now=self._now())
+
+        kind, summary = record.call_args.args[1], record.call_args.args[2]
+        assert kind == "endpoint_repair_failed"
+        assert "fixed nothing" in summary
+        assert "recovered_at" not in runtime._state["endpoint_repair"]
+
+    def test_a_reachable_endpoint_is_never_repaired(self, tmp_path: Path) -> None:
+        runtime = self._runtime(tmp_path)
+        runtime._state["funnel_probe"] = {
+            "reachable": True,
+            "changed_at": "2020-01-01T00:00:00+00:00",
+        }
+
+        with patch.object(runtime, "_restart_tailscale_app") as restart:
+            runtime._maybe_repair_unreachable_endpoint(now=self._now())
+
+        restart.assert_not_called()
+
+    def test_a_hosted_profile_never_restarts_the_host_s_tailscale(
+        self, tmp_path: Path
+    ) -> None:
+        runtime = self._runtime(tmp_path, operator=False)
+        self._unreachable_for(runtime, 60)
+
+        with patch.object(runtime, "_restart_tailscale_app") as restart:
+            runtime._maybe_repair_unreachable_endpoint(now=self._now())
+
+        restart.assert_not_called()
+
+    def test_a_named_instance_never_restarts_a_machine_wide_service(
+        self, tmp_path: Path
+    ) -> None:
+        import daemon as daemon_module
+
+        runtime = self._runtime(tmp_path)
+        self._unreachable_for(runtime, 60)
+
+        with (
+            patch.object(daemon_module, "INSTANCE_NAME", "lab"),
+            patch.object(runtime, "_restart_tailscale_app") as restart,
+        ):
+            runtime._maybe_repair_unreachable_endpoint(now=self._now())
+
+        restart.assert_not_called()
+
+
 class TestFunnelReachabilityProbe:
     """The probe that asks what a phone would get, while it is still on trial."""
 

@@ -548,6 +548,31 @@ Unlike the DNS lookup, it runs on every cycle rather than only after a stretch
 of silence, because the number worth measuring only exists in the cycles where
 uploads are arriving normally.
 
+### The repair the daemon could not reach
+
+`_attempt_node_repair` only ever runs on a node Tailscale reports as *offline*.
+On 2026-09-21 the node reported online, healthy and well-connected for twenty
+hours while no phone could complete a handshake, so the one repair the daemon
+owns could never have fired — and restarting the app cleared it in fifteen
+seconds. A healthy control connection does not imply a healthy ingress
+registration.
+
+So a second repair watches the public path instead. It restarts Tailscale once
+per outage when the probe has read unreachable for
+`FUNNEL_UNREACHABLE_REPAIR_AFTER_MIN` **and** the node reports itself online —
+a disconnected node is the first repair's to own, and one fault must not draw
+two restarts.
+
+It is gated harder than any alert, because the action is machine-wide and the
+evidence is a probe whose false-positive rate is not yet measured. The delay
+asks for several consecutive failures rather than two, and sits far below the
+shortest outage ever observed (26h) and far above anything transient.
+
+Afterwards it watches **the public path**, not the node, for up to
+`FUNNEL_REPAIR_VERIFY_TIMEOUT_S`, and records `endpoint_repair_recovered` or
+`endpoint_repair_failed` accordingly. A restart that changed nothing says so;
+nothing here credits a repair by whatever recovered later.
+
 ### What a repair message may claim
 
 A repair is only ever described by what the daemon watched happen. After

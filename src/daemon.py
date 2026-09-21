@@ -37,6 +37,8 @@ from config import (
     FUNNEL_OUTAGE_ESCALATE_AFTER_H,
     FUNNEL_PROBE_OBSERVE_ONLY,
     FUNNEL_PROBE_TIMEOUT_S,
+    FUNNEL_REPAIR_VERIFY_TIMEOUT_S,
+    FUNNEL_UNREACHABLE_REPAIR_AFTER_MIN,
     GOOGLE_DRIVE_POLL_INTERVAL_S,
     GOOGLE_DRIVE_SERVICE_ACCOUNT,
     HEALTH_DEBOUNCE_S,
@@ -1453,6 +1455,163 @@ class ProfileRuntime:
         finally:
             conn.close()
 
+    def _restart_tailscale_app(self) -> tuple[bool, str]:
+        """Quit and relaunch Tailscale, without judging whether it helped.
+
+        Shared by both repairs, which differ only in what they watch afterwards:
+        a disconnected node watches its own connection state, an unreachable
+        Funnel watches the public path. Neither may infer success from this
+        returning True — relaunching the app is an action, not an outcome.
+
+        Returns:
+            Whether the relaunch command succeeded, and a reason when it did not.
+        """
+        try:
+            subprocess.run(
+                ["osascript", "-e", f'quit app "{TAILSCALE_APP_NAME}"'],
+                capture_output=True,
+                text=True,
+                timeout=TAILSCALE_RESTART_TIMEOUT_S,
+                check=False,
+            )
+            completed = subprocess.run(
+                ["open", "-a", TAILSCALE_APP_NAME],
+                capture_output=True,
+                text=True,
+                timeout=TAILSCALE_RESTART_TIMEOUT_S,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            logger.exception("Could not restart %s", TAILSCALE_APP_NAME)
+            return False, str(exc)[:200]
+        if completed.returncode != 0:
+            detail = (completed.stderr or completed.stdout or "").strip()[:200]
+            logger.error(
+                "Could not relaunch %s (exit %d): %s",
+                TAILSCALE_APP_NAME,
+                completed.returncode,
+                detail,
+            )
+            return False, (
+                f"Relaunching {TAILSCALE_APP_NAME} exited "
+                f"{completed.returncode}. {detail}".strip()
+            )
+        return True, ""
+
+    def _maybe_repair_unreachable_endpoint(self, *, now: datetime) -> None:
+        """Restart Tailscale when the public path is dead and the node says it is fine.
+
+        The gap this closes: ``_attempt_node_repair`` only ever runs on a node
+        Tailscale reports as *offline*. On 2026-09-21 the node reported
+        ``Online: true`` with ``Health: []`` and a clean DERP path for twenty
+        hours while no phone could complete a TLS handshake to the Funnel, so
+        the one repair the daemon owns could never have fired. Restarting the
+        app cleared it in fifteen seconds. A healthy control connection does
+        not imply a healthy ingress registration.
+
+        Gated harder than the alert it shadows, because the evidence is younger
+        and the action is machine-wide. The probe must have read unreachable
+        continuously for ``FUNNEL_UNREACHABLE_REPAIR_AFTER_MIN`` — several
+        consecutive failures at the scheduler's tick rate, so one flap cannot
+        restart a working tailnet — and one outage still draws one attempt.
+
+        Verified against the public path rather than the node, since the node
+        was never the thing that was broken. The restart is credited only if
+        the endpoint answers afterwards, and the event says plainly when it did
+        not.
+
+        Args:
+            now: The moment of this assessment, in UTC.
+        """
+        from cmd_ingest import _tailscale_dns_name
+        from http_ingest import public_endpoint_health, tailscale_node_health
+
+        if INSTANCE_NAME:
+            # Same reasoning as the node repair: Tailscale is machine-wide and
+            # a lab instance must not restart it for the default installation.
+            return
+        if self.profile is None or not self.profile.operator:
+            return
+
+        seen = self._state.get("funnel_probe")
+        if not isinstance(seen, dict) or seen.get("reachable") is not False:
+            return
+        unreachable_since = seen.get("changed_at")
+        held_h = _hours_since(unreachable_since, now=now)
+        if held_h is None or held_h * 60 < FUNNEL_UNREACHABLE_REPAIR_AFTER_MIN:
+            return
+
+        previous = self._state.get("endpoint_repair")
+        if isinstance(previous, dict) and previous.get("since") == unreachable_since:
+            return
+
+        connected, _node_detail = tailscale_node_health()
+        if connected is not True:
+            # A disconnected node is the other repair's to own, and it explains
+            # an unreachable endpoint outright. Restarting twice for one fault
+            # would double the interruption and confuse the attribution.
+            return
+
+        self._state["endpoint_repair"] = {
+            "since": unreachable_since,
+            "attempted_at": now.isoformat(),
+        }
+        self._save_state()
+        logger.warning(
+            "The Funnel has been unreachable for %.1fh while the node reports "
+            "online; restarting %s.",
+            held_h,
+            TAILSCALE_APP_NAME,
+        )
+
+        restarted, failure = self._restart_tailscale_app()
+        if not restarted:
+            self._record_event("ingest", "endpoint_repair_failed", failure)
+            return
+
+        dns_name = _tailscale_dns_name()
+        deadline = time.monotonic() + FUNNEL_REPAIR_VERIFY_TIMEOUT_S
+        reachable: bool | None = None
+        detail = "the Tailscale DNS name could not be determined"
+        while dns_name and time.monotonic() < deadline:
+            reachable, detail = public_endpoint_health(
+                dns_name, timeout_s=FUNNEL_PROBE_TIMEOUT_S
+            )
+            if reachable is True:
+                break
+            if self._stop_event.wait(10):
+                break
+
+        took = FUNNEL_REPAIR_VERIFY_TIMEOUT_S - max(deadline - time.monotonic(), 0)
+        if reachable is True:
+            self._state["endpoint_repair"]["recovered_at"] = datetime.now(
+                timezone.utc
+            ).isoformat()
+            self._save_state()
+            logger.info("The Funnel answered %.0fs after the restart", took)
+            self._record_event(
+                "ingest",
+                "endpoint_repair_recovered",
+                f"Restarted {TAILSCALE_APP_NAME} after {held_h:.1f}h unreachable; "
+                f"the public path answered {took:.0f}s later. {detail}",
+                {"unreachable_h": round(held_h, 2), "recovered_after_s": round(took)},
+            )
+            return
+
+        logger.error(
+            "The Funnel was still unreachable %.0fs after restarting %s",
+            took,
+            TAILSCALE_APP_NAME,
+        )
+        self._record_event(
+            "ingest",
+            "endpoint_repair_failed",
+            f"Restarted {TAILSCALE_APP_NAME} after {held_h:.1f}h unreachable, and "
+            f"the public path was still not answering {took:.0f}s later, so this "
+            f"restart fixed nothing. {detail}",
+            {"unreachable_h": round(held_h, 2)},
+        )
+
     def _attempt_node_repair(self, outage_since: str | None) -> str | None:
         """Restart Tailscale once per outage and verify whether it reconnected.
 
@@ -1513,39 +1672,9 @@ class ProfileRuntime:
             f"{offline_h:.1f}h" if offline_h is not None else "a while",
             TAILSCALE_APP_NAME,
         )
-        try:
-            subprocess.run(
-                ["osascript", "-e", f'quit app "{TAILSCALE_APP_NAME}"'],
-                capture_output=True,
-                text=True,
-                timeout=TAILSCALE_RESTART_TIMEOUT_S,
-                check=False,
-            )
-            completed = subprocess.run(
-                ["open", "-a", TAILSCALE_APP_NAME],
-                capture_output=True,
-                text=True,
-                timeout=TAILSCALE_RESTART_TIMEOUT_S,
-                check=False,
-            )
-        except (OSError, subprocess.SubprocessError) as exc:
-            logger.exception("Could not restart %s", TAILSCALE_APP_NAME)
-            self._record_event("ingest", "node_repair_failed", str(exc)[:200])
-            return "failed"
-        if completed.returncode != 0:
-            detail = (completed.stderr or completed.stdout or "").strip()[:200]
-            logger.error(
-                "Could not relaunch %s (exit %d): %s",
-                TAILSCALE_APP_NAME,
-                completed.returncode,
-                detail,
-            )
-            self._record_event(
-                "ingest",
-                "node_repair_failed",
-                f"Relaunching {TAILSCALE_APP_NAME} exited "
-                f"{completed.returncode}. {detail}".strip(),
-            )
+        restarted, failure = self._restart_tailscale_app()
+        if not restarted:
+            self._record_event("ingest", "node_repair_failed", failure)
             return "failed"
 
         deadline = time.monotonic() + TAILSCALE_RECONNECT_TIMEOUT_S
@@ -1884,6 +2013,7 @@ class ProfileRuntime:
             return
 
         self._observe_funnel_reachability(health, now=assessment_now)
+        self._maybe_repair_unreachable_endpoint(now=assessment_now)
 
         # One local now for every delivery decision below: quiet-hours gating is
         # wall-clock, so the recovery ping and the alert must agree on the time.

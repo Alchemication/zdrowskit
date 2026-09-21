@@ -530,6 +530,11 @@ so the daemon's own node repair — which only runs on a disconnected node —
 would never have fired. A healthy control connection does not imply a healthy
 ingress registration.
 
+The daemon now covers this case too: a public path that stays unreachable while
+the node reports online draws one Tailscale restart per outage, verified
+against the public path afterwards. See [sync
+alerts](notifications.md#the-repair-the-daemon-could-not-reach).
+
 **If it has not cleared in ~48h** it is no longer the usual pattern. Check
 **DNS -> HTTPS Certificates** in the Tailscale admin console, which gates public
 `.ts.net` names. If that is enabled and the record is still absent, it is a
