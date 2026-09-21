@@ -12,7 +12,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -188,6 +188,94 @@ class TestValidateUpload:
 
         with pytest.raises(IngestError, match="invalid coordinates"):
             validate_upload(_headers("workouts"), json.dumps(payload).encode())
+
+
+class TestUploadArrivalCallback:
+    """Every arrival is reported, because liveness is read off this stream."""
+
+    def _manager(self, tmp_path: Path, seen: list):
+        profile = _profile(tmp_path)
+        return HttpIngestManager(
+            {"adam": profile},
+            pair_window_s=600,
+            on_pair_ready=lambda name, digest: None,
+            on_upload=lambda *args: seen.append(args),
+        )
+
+    def test_each_half_is_reported_with_its_own_gap(self, tmp_path: Path) -> None:
+        """Per half, not per pair.
+
+        When the 2026-09-21 outage began Metrics was 20.7h stale and Workouts
+        already 50.3h — a 29-hour head start that pair-level events could never
+        have shown, and exactly the asymmetry a threshold has to survive.
+        """
+        seen: list = []
+        manager = self._manager(tmp_path, seen)
+
+        manager.accept(
+            "adam",
+            validate_upload(_headers("metrics"), _body("metrics")),
+            _body("metrics"),
+        )
+        manager.accept(
+            "adam",
+            validate_upload(_headers("workouts"), _body("workouts")),
+            _body("workouts"),
+        )
+
+        assert [(kind, gap) for _p, kind, gap, _d in seen] == [
+            ("metrics", None),
+            ("workouts", None),
+        ]
+
+    def test_a_second_upload_of_a_kind_carries_the_elapsed_seconds(
+        self, tmp_path: Path
+    ) -> None:
+        seen: list = []
+        manager = self._manager(tmp_path, seen)
+        body = _body("metrics")
+
+        manager.accept("adam", validate_upload(_headers("metrics"), body), body)
+        manager.accept("adam", validate_upload(_headers("metrics"), body), body)
+
+        _profile_name, kind, gap_s, duplicate = seen[-1]
+        assert kind == "metrics"
+        assert gap_s is not None and gap_s >= 0
+        # An unchanged body still proves the phone ran the automation, which is
+        # the only thing this measurement is about.
+        assert duplicate is True
+
+    def test_a_failing_recorder_never_rejects_an_upload(self, tmp_path: Path) -> None:
+        """Bookkeeping must not turn a healthy upload into a 5xx."""
+        profile = _profile(tmp_path)
+        manager = HttpIngestManager(
+            {"adam": profile},
+            pair_window_s=600,
+            on_pair_ready=lambda name, digest: None,
+            on_upload=MagicMock(side_effect=RuntimeError("db is gone")),
+        )
+
+        accepted = manager.accept(
+            "adam",
+            validate_upload(_headers("metrics"), _body("metrics")),
+            _body("metrics"),
+        )
+
+        assert accepted.kind == "metrics"
+
+    def test_a_receiver_without_a_recorder_still_works(self, tmp_path: Path) -> None:
+        profile = _profile(tmp_path)
+        manager = HttpIngestManager(
+            {"adam": profile}, pair_window_s=600, on_pair_ready=lambda n, d: None
+        )
+
+        accepted = manager.accept(
+            "adam",
+            validate_upload(_headers("metrics"), _body("metrics")),
+            _body("metrics"),
+        )
+
+        assert accepted.pair_ready is False
 
 
 class TestHttpIngestManager:

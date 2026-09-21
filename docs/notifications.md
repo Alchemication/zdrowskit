@@ -593,6 +593,31 @@ Once a pair has imported, a profile for which no daily metrics have ever been
 stored alerts on the next scheduler check instead of waiting two days, because
 that points to a parser or payload problem rather than ordinary delivery lag.
 
+### Measuring what the phone can actually manage
+
+Auto Export's automations are configured in minutes — the setup recommends five
+— and iOS delivers them whenever it permits a background run. Those are not the
+same number, and only the second one matters to anything that watches for
+silence. Nothing recorded it: arrivals were logged at DEBUG, and the events
+table saw completed pairs rather than halves.
+
+So every accepted upload now writes an `upload_received` event carrying the gap
+since the previous upload of the same kind. Per half, because the halves are
+not alike: when the 2026-09-21 outage began, Metrics was 20.7 hours stale and
+Workouts already 50.3 — a 29-hour head start that pair-level events could never
+have shown, and the reason a single threshold across both would have to be
+sized for the slower one.
+
+```bash
+uv run python main.py events --category ingest --kind upload_received --since 7d
+```
+
+This is the measurement a liveness check needs before it can exist. A phone
+that is still uploading is a phone that is still reachable, so the upload
+stream is already the heartbeat — provided its real cadence is tight enough to
+threshold on, which is the open question these events answer. A dedicated beat
+on a separate mechanism only earns its place if the answer is no.
+
 ### Why staleness is counted in days of data, not hours of silence
 
 Auto Export uploads in unpredictable bursts, so silence proves nothing: a long
@@ -709,6 +734,8 @@ written to the `events` table under the `ingest` category:
 | `alert_suppressed` | The condition was real but your preferences silenced it. |
 | `alert_resolved` | The alert closed. The details say whether an all-clear was sent, and a resolution that was silent by design records that it was. |
 | `funnel_probe` | The public-path probe changed its verdict. Carries what the DNS check said at the same moment, so a disagreement is findable. Nobody is messaged about these. |
+| `upload_received` | One half arrived, with the seconds since the previous upload of that kind. Nobody is messaged about these either; they exist so a liveness threshold can be set against the cadence the phone actually achieves. |
+| `endpoint_repair_recovered` / `endpoint_repair_failed` | A restart was attempted against an unreachable Funnel, and whether the public path answered afterwards. |
 
 `uv run python main.py events --category ingest` reads them back. The daemon log
 holds the same story in more detail but rotates within about a week, which is

@@ -34,12 +34,52 @@ class DaemonHttpIngestHandler:
                 profiles,
                 pair_window_s=HTTP_INGEST_PAIR_WINDOW_S,
                 on_pair_ready=self._queue_pair,
+                on_upload=self._record_upload,
             )
             if profiles
             else None
         )
         self._registry = TokenRegistry(HTTP_INGEST_TOKEN_FILE) if profiles else None
         self._server: HttpIngestServer | None = None
+
+    def _record_upload(
+        self, profile_name: str, kind: str, gap_s: float | None, duplicate: bool
+    ) -> None:
+        """Record one upload's arrival, so the real cadence can be measured.
+
+        Liveness is about to be read off this stream instead of being inferred
+        from pair formation, and a threshold needs the distribution it is being
+        set against. The configured schedule is no guide: the automations are
+        set to five minutes and iOS delivers them whenever it allows a
+        background run, so only the arrivals themselves say what is achievable.
+
+        Written per half rather than per pair because that is the asymmetry
+        that matters — when the 2026-09-21 outage began, Metrics was 20.7h
+        stale and Workouts already 50.3h, a 29-hour head start that pair-level
+        events could never have shown.
+
+        Args:
+            profile_name: Profile the upload belongs to.
+            kind: ``metrics`` or ``workouts``.
+            gap_s: Seconds since the previous upload of this kind, or None for
+                the first one ever seen.
+            duplicate: Whether the body was identical to the previous upload.
+        """
+        runtime = self._daemon.runtimes.get(profile_name)
+        if runtime is None:
+            return
+        gap = f"{gap_s / 60:.1f} min after the previous one" if gap_s else "first seen"
+        runtime._record_event(
+            "ingest",
+            "upload_received",
+            f"{kind.capitalize()} upload arrived, {gap}"
+            + (" (identical body)" if duplicate else ""),
+            {
+                "kind": kind,
+                "gap_s": round(gap_s) if gap_s is not None else None,
+                "duplicate": duplicate,
+            },
+        )
 
     def _queue_pair(self, profile_name: str, pair_digest: str) -> None:
         """Queue one complete pair on its profile's serialized worker."""

@@ -1252,11 +1252,23 @@ class HttpIngestManager:
         *,
         pair_window_s: int,
         on_pair_ready: Callable[[str, str], None],
+        on_upload: Callable[[str, str, float | None, bool], None] | None = None,
     ) -> None:
-        """Initialize profile caches and the complete-pair callback."""
+        """Initialize profile caches and the upload and complete-pair callbacks.
+
+        Args:
+            profiles: Profiles this receiver accepts uploads for.
+            pair_window_s: How long a staged half waits for its partner.
+            on_pair_ready: Called with the profile and digest of a complete pair.
+            on_upload: Called for every accepted upload with the profile, kind,
+                seconds since the previous upload of that kind, and whether the
+                body was identical to it. Optional so the receiver stays usable
+                without a database behind it.
+        """
         self.profiles = profiles
         self.pair_window_s = pair_window_s
         self.on_pair_ready = on_pair_ready
+        self.on_upload = on_upload
         self._lock = threading.RLock()
         self._inflight: dict[tuple[str, str], dict[str, str]] = {}
 
@@ -1497,6 +1509,17 @@ class HttpIngestManager:
             duplicate = (
                 isinstance(previous, dict) and previous.get("sha256") == upload.sha256
             )
+            # How long this automation actually went between runs. Auto Export
+            # is configured in minutes and delivered by iOS whenever it feels
+            # like it, so the configured schedule says nothing about the real
+            # cadence — and the real cadence is what any liveness threshold has
+            # to be built on. Nothing recorded it before: arrivals were visible
+            # only at DEBUG, and the events table saw pairs rather than halves.
+            previous_arrival = (
+                _parse_iso(previous.get("received_at"))
+                if isinstance(previous, dict)
+                else None
+            )
             _atomic_write(self._payload_path(profile, upload.kind), body)
             received_at = _utc_now()
             # Stamped before this upload is recorded, so it marks when the
@@ -1538,6 +1561,18 @@ class HttpIngestManager:
             upload.size,
             ", identical to the previous one" if duplicate else "",
         )
+        if self.on_upload is not None:
+            gap_s = (
+                (_parse_iso(received_at) - previous_arrival).total_seconds()
+                if previous_arrival is not None
+                else None
+            )
+            try:
+                self.on_upload(profile_name, upload.kind, gap_s, duplicate)
+            except Exception:  # noqa: BLE001 - bookkeeping must not reject an upload
+                logger.exception(
+                    "Could not record the arrival of a %s upload", upload.kind
+                )
         if pair_ready:
             logger.info("Complete pair staged for %s; queuing import", profile_name)
         elif pair_state == "split":
