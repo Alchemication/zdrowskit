@@ -991,6 +991,64 @@ class TestChatRunner:
         assert raw_garbage in validation.detail
 
 
+class TestNudgeRunnerContext:
+    """The nudge eval must render the same prompt production renders."""
+
+    def test_no_placeholder_is_left_unfilled(self) -> None:
+        """An unfilled placeholder renders as "(not provided)" and scores anyway.
+
+        `build_messages` fills missing keys from a defaultdict, so a
+        placeholder the runner forgets never raises — it just quietly swaps
+        production's wording for a generic one and the suite keeps reporting a
+        number. That is how the Standout section, added to the prompt on
+        2026-09-09, went two weeks reading "(not provided)" in every nudge
+        eval: neither "none" nor a sentence, which is exactly the question the
+        decision ladder asks about it.
+        """
+        from datetime import date
+
+        import llm_context
+
+        from evals.run_nudge import _build_context, _health_data_text
+
+        cases = [case for case in load_cases() if case.feature == "nudge"]
+        assert cases, "no nudge cases found"
+
+        for case in cases:
+            fixture = case.fixture
+            today = date.fromisoformat(str(fixture["today"]))
+            messages = llm_context.build_messages(
+                _build_context(fixture),
+                health_data_text=_health_data_text(fixture, today=today),
+                today=today,
+                data_maturity=fixture.get("data_maturity"),
+            )
+
+            assert "(not provided)" not in messages[1]["content"], (
+                f"{case.id} renders an unfilled placeholder"
+            )
+
+    def test_standout_section_matches_production_wording(self) -> None:
+        from datetime import date
+
+        import llm_context
+        from standouts import NO_STANDOUT_NOTICE
+
+        from evals.run_nudge import _build_context, _health_data_text
+
+        case = next(case for case in load_cases() if case.feature == "nudge")
+        fixture = case.fixture
+        today = date.fromisoformat(str(fixture["today"]))
+        messages = llm_context.build_messages(
+            _build_context(fixture),
+            health_data_text=_health_data_text(fixture, today=today),
+            today=today,
+            data_maturity=fixture.get("data_maturity"),
+        )
+
+        assert NO_STANDOUT_NOTICE in messages[1]["content"]
+
+
 class TestInsightsRunner:
     def test_insights_case_runs_sql_loop_and_scores_the_short_report(
         self,

@@ -65,6 +65,15 @@ logger = logging.getLogger(__name__)
 
 STANDOUT_PROMPT = "standout_prompt.md"
 
+NO_STANDOUT_NOTICE = "(none — do not invent one)"
+"""What the nudge prompt's Standout section says when no standout fired.
+
+It has to be a phrase the writer can act on, because the decision ladder asks
+whether that section holds a sentence. Anything vaguer — a blank, or the
+generic "(not provided)" a missing placeholder renders — leaves the model
+guessing, so the evals import this rather than spelling it again.
+"""
+
 # Contiguous split windows worth ranking. One kilometre is excluded on purpose:
 # a single fast kilometre is a sprint finish or a downhill, and calling it a
 # record rewards terrain rather than fitness.

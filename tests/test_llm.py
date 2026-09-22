@@ -37,6 +37,7 @@ from llm import (
     LLMResult,
     _call_with_retry,
     _completion_kwargs_for_model,
+    _effective_params_for_model,
     _fallback_chain,
     _is_network_error,
     _is_overloaded,
@@ -2091,6 +2092,189 @@ class TestCallWithRetry:
         assert kwargs["messages"][0]["role"] == "system"
         assert "x" in kwargs["messages"][0]["content"]
         assert kwargs["messages"][1] == {"role": "user", "content": "What?"}
+
+    def test_gpt5_attempt_drops_a_temperature_it_would_reject(self) -> None:
+        """A rejected temperature silently moves the call to another provider.
+
+        litellm raises before the request leaves the process, and because that
+        arrives as a BadRequest the chain answers from Luna's fallback — every
+        word written by DeepSeek while the route, the logs and the leaderboard
+        all still say Luna. Telegram /models offers 0.0, 0.3 and 0.7.
+        """
+        kwargs = _completion_kwargs_for_model(
+            {
+                "model": "openai/gpt-5.6-luna",
+                "messages": [],
+                "max_tokens": 10,
+                "temperature": 0.0,
+                "reasoning_effort": "high",
+            },
+            "openai/gpt-5.6-luna",
+        )
+
+        assert "temperature" not in kwargs
+        assert kwargs["reasoning_effort"] == "high"
+
+    def test_gpt5_attempt_keeps_temperature_when_reasoning_is_off(self) -> None:
+        """The rule is scoped to engaged reasoning, not to the model."""
+        kwargs = _completion_kwargs_for_model(
+            {
+                "model": "openai/gpt-5.6-luna",
+                "messages": [],
+                "max_tokens": 10,
+                "temperature": 0.3,
+                "reasoning_effort": None,
+            },
+            "openai/gpt-5.6-luna",
+        )
+
+        assert kwargs["temperature"] == 0.3
+
+    def test_gpt5_attempt_keeps_temperature_one(self) -> None:
+        kwargs = _completion_kwargs_for_model(
+            {
+                "model": "openai/gpt-5.6-luna",
+                "messages": [],
+                "max_tokens": 10,
+                "temperature": 1.0,
+                "reasoning_effort": "high",
+            },
+            "openai/gpt-5.6-luna",
+        )
+
+        assert kwargs["temperature"] == 1.0
+
+    def test_dropped_temperature_is_visible_in_logged_params(self) -> None:
+        params = _effective_params_for_model(
+            model="openai/gpt-5.6-luna",
+            max_tokens=10,
+            temperature=0.0,
+            reasoning_effort="high",
+            response_format=None,
+            extra_body=None,
+            requested_model="openai/gpt-5.6-luna",
+        )
+
+        assert "temperature" not in params
+        assert params["requested_temperature"] == 0.0
+        assert params["temperature_omitted_for_model"] is True
+
+    def test_non_openai_models_keep_their_temperature(self) -> None:
+        """DeepSeek and Anthropic have their own rules; this one is not theirs."""
+        kwargs = _completion_kwargs_for_model(
+            {
+                "model": DEEPSEEK_FLASH_MODEL,
+                "messages": [],
+                "max_tokens": 10,
+                "temperature": 0.0,
+                "reasoning_effort": "high",
+            },
+            DEEPSEEK_FLASH_MODEL,
+        )
+
+        assert kwargs["temperature"] == 0.0
+
+    def test_zai_attempt_carries_thinking_effort_in_extra_body(self) -> None:
+        """GLM takes its effort in extra_body, not reasoning_effort.
+
+        litellm rejects ``reasoning_effort`` for Z.ai outright, and the
+        top-level ``thinking`` param it advertises instead reaches the
+        OpenAI-compatible client as an unexpected keyword. extra_body is the
+        only shape that arrives.
+        """
+        for requested, expected in (
+            ("high", "high"),
+            ("max", "max"),
+            ("medium", "low"),
+            ("low", "low"),
+        ):
+            kwargs = _completion_kwargs_for_model(
+                {
+                    "model": "zai/glm-5.3-flash",
+                    "messages": [],
+                    "max_tokens": 10,
+                    "reasoning_effort": requested,
+                },
+                "zai/glm-5.3-flash",
+            )
+
+            assert "reasoning_effort" not in kwargs
+            assert kwargs["extra_body"] == {
+                "thinking": {"type": "enabled", "effort": expected}
+            }
+
+    def test_zai_attempt_without_effort_sends_no_thinking(self) -> None:
+        """GLM thinks anyway; there is no effort to state and none to invent."""
+        for requested in (None, "none"):
+            kwargs = _completion_kwargs_for_model(
+                {
+                    "model": "zai/glm-5.3-flash",
+                    "messages": [],
+                    "max_tokens": 10,
+                    "reasoning_effort": requested,
+                },
+                "zai/glm-5.3-flash",
+            )
+
+            assert "extra_body" not in kwargs
+
+    def test_zai_attempt_lets_caller_extra_body_win(self) -> None:
+        kwargs = _completion_kwargs_for_model(
+            {
+                "model": "zai/glm-5.3-flash",
+                "messages": [],
+                "max_tokens": 10,
+                "reasoning_effort": "high",
+                "extra_body": {"thinking": {"type": "enabled", "effort": "max"}},
+            },
+            "zai/glm-5.3-flash",
+        )
+
+        assert kwargs["extra_body"] == {
+            "thinking": {"type": "enabled", "effort": "max"}
+        }
+
+    def test_zai_logged_params_record_the_thinking_body(self) -> None:
+        """llm-log is the debugging surface; it must show what was really sent."""
+        params = _effective_params_for_model(
+            model="zai/glm-5.3-flash",
+            max_tokens=10,
+            temperature=None,
+            reasoning_effort="high",
+            response_format=None,
+            extra_body=None,
+            requested_model="zai/glm-5.3-flash",
+        )
+
+        assert params["reasoning_effort"] == "high"
+        assert params["extra_body"] == {
+            "thinking": {"type": "enabled", "effort": "high"}
+        }
+
+    def test_zai_attempt_drops_response_format_but_keeps_the_schema(self) -> None:
+        """Z.ai 400s on response_format, so the schema has to ride the prompt.
+
+        Dropping the parameter without injecting the hint would leave the
+        structured surfaces — /notify parsing, /add — asking for JSON with
+        nothing telling the model what shape to produce.
+        """
+
+        class VerdictSchema(BaseModel):
+            verdict: str
+
+        kwargs = _completion_kwargs_for_model(
+            {
+                "model": "zai/glm-5.3-flash",
+                "messages": [{"role": "user", "content": "Is sky blue?"}],
+                "max_tokens": 10,
+                "response_format": VerdictSchema,
+            },
+            "zai/glm-5.3-flash",
+        )
+
+        assert "response_format" not in kwargs
+        assert "verdict" in kwargs["messages"][0]["content"]
+        assert kwargs["messages"][1] == {"role": "user", "content": "Is sky blue?"}
 
     def test_anthropic_attempt_omits_extra_body(self) -> None:
         kwargs = _completion_kwargs_for_model(

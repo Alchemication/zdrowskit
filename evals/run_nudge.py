@@ -21,6 +21,7 @@ if str(_SRC) not in sys.path:
 import llm_context  # noqa: E402
 import llm_health  # noqa: E402
 from config import MAX_TOKENS_NUDGE, PROMPTS_DIR  # noqa: E402
+from standouts import NO_STANDOUT_NOTICE  # noqa: E402
 from tools import run_sql_tool  # noqa: E402
 
 # Context keys cmd_nudge injects beyond the context files themselves. A nudge
@@ -31,6 +32,7 @@ _NUDGE_CONTEXT_DEFAULTS = {
     "trigger_type": "new_data",
     "trigger_context": "(no additional detail)",
     "last_coach_summary": "(no recent coach review)",
+    "standout": NO_STANDOUT_NOTICE,
 }
 
 

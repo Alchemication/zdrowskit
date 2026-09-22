@@ -8,7 +8,7 @@ All health-data commands are profile-scoped. Use `--profile NAME`; omission
 means the operator profile from `profiles.toml`. An explicit `--db` is only for
 existing experimental databases and must never create one implicitly.
 
-`src/llm.py`: `reasoning_effort` is the single reasoning knob — Anthropic gets it natively; DeepSeek translates `high`/`max` into `extra_body={"thinking": {"type": "enabled"}}` and treats anything else as off. Translation lives in `_completion_kwargs_for_model` so per-attempt fallback handles each provider correctly. Per-feature reasoning is set via `main.py models` / `src/model_prefs.py`.
+`src/llm.py`: `reasoning_effort` is the single reasoning knob — Anthropic gets it natively; DeepSeek translates `high`/`max` into `extra_body={"thinking": {"type": "enabled"}}` and treats anything else as off; Z.ai (GLM) thinks on every request and takes the effort as `extra_body={"thinking": {"type": "enabled", "effort": ...}}`, with no `medium` and no way to switch it off. Translation lives in `_completion_kwargs_for_model` so per-attempt fallback handles each provider correctly. Per-feature reasoning is set via `main.py models` / `src/model_prefs.py`.
 
 Open known DBs via `store.open_db()` or `store.connect_db(..., migrate=True)` —
 these auto-apply pending migrations. Resolve user-facing paths through

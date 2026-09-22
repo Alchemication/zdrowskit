@@ -4,7 +4,7 @@ Regression scorecard for zdrowskit evals. A case is one frozen input plus checks
 
 ## What ships today
 
-The most recent scored run for each feature, on the model it actually runs on, against the 36 cases in `evals/cases` today.
+The most recent scored run for each feature, on the model it actually runs on, against the 39 cases in `evals/cases` today.
 
 | Feature | Route | Cases | Strict | Attempt | Flaky | Repeat | Tool calls | Avg Latency | Cost/run | Commit | Recorded |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
@@ -13,11 +13,14 @@ The most recent scored run for each feature, on the model it actually runs on, a
 | insights | gpt-5.6-luna (high) | 3/3 | 66.7% | 66.7% | 0 | 3 | 2.2 avg (3 cases, 1-6), 1 varied | 23.81s | $0.0139 | 2bfda76* | 2026-08-12 |
 | memory | gpt-5.6-luna | 3/3 | 100.0% | 100.0% | 0 | 3 | - | 1.15s | $0.0007 | 2bfda76* | 2026-08-12 |
 | nudge | gpt-5.6-luna (high) | 6/6 | 100.0% | 100.0% | 0 | 3 | 0.1 avg (1 case, up to 1), 1 varied | 5.88s | $0.0084 | 2bfda76* | 2026-08-12 |
-| plan_frame | gpt-5.6-luna | 2/3 | 100.0% | 100.0% | 0 | 5 | - | 1.27s | $0.0004 | a2fba5f | 2026-09-05 |
+| plan_frame | gpt-5.6-luna | 2/4 | 100.0% | 100.0% | 0 | 5 | - | 1.27s | $0.0004 | a2fba5f | 2026-09-05 |
+| standout | _never recorded_ | 0/2 | - | - | - | - | - | - | - | - | - |
 | targets | gpt-5.6-luna | 2/2 | 100.0% | 100.0% | 0 | 5 | - | 1.37s | $0.0003 | a2fba5f* | 2026-09-05 |
 | verification_judge | deepseek-v4-flash (high) | 7/7 | 85.7% | 90.5% | 1 | 3 | - | 65.96s | $0.0227 | 2bfda76* | 2026-08-12 |
 
-**`plan_frame` was last measured before 1 case(s) existed**, so its score does not cover: `plan_frame_preserves_original_ordinary_week`
+**Never measured on the model it ships with:** `standout`. Whatever the rows above say, they say nothing about these.
+
+**`plan_frame` was last measured before 2 case(s) existed**, so its score does not cover: `plan_frame_keeps_full_for_a_tracking_error`, `plan_frame_preserves_original_ordinary_week`
 
 **`targets` was last measured before 2 case(s) existed**, so its score does not cover: `targets_names_and_counts_recorded_sport`, `targets_preserves_stated_values`
 
@@ -27,13 +30,14 @@ Answering your questions in Telegram, including the SQL it writes.
 
 | Model | Reasoning | Repeat | Cases | Strict | Attempt | Flaky | Tool calls | Avg Latency | Cost/run | Commit | Not passing |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
+| gpt-5.6-luna | high | 3 | 11/11 | 90.9% | 90.9% | 0 | 0.9 avg (7 cases, 1-4), 2 varied | 9.83s | $0.0166 | 01eca8f* | `chat_tempo_short_warmup_negative` 0/3 |
 | **gpt-5.6-luna** (ships today) | high | 3 | 11/11 | 81.8% | 87.9% | 1 | - | 6.40s | $0.0108 | 760d8b6 | `chat_strategy_change_updates_weekly_plan` 2/3<br>`chat_tempo_short_warmup_negative` 0/3 |
 | **gpt-5.6-luna** (ships today) | high | 3 | 11/11 | 81.8% | 87.9% | 1 | - | 7.82s | $0.0132 | adc9c5e* | `chat_running_speed_trend_chart_text_independent` 2/3<br>`chat_tempo_short_warmup_negative` 0/3 |
 | **gpt-5.6-luna** (ships today) | high | 3 | 11/11 | 63.6% | 81.8% | 3 | 0.8 avg (7 cases, 1-3), 3 varied | 7.12s | $0.0168 | 2bfda76* | `chat_log_entry_token_format` 2/3<br>`chat_running_speed_trend_chart_text_independent` 2/3<br>`chat_strategy_change_updates_weekly_plan` 2/3<br>`chat_tempo_short_warmup_negative` 0/3 |
+| glm-5.3-flash | high | 3 | 11/11 | 63.6% | 66.7% | 1 | 1.2 avg (7 cases, up to 4), 2 varied | 33.14s | $0.0206 | 01eca8f* | `chat_running_speed_trend_chart_text_independent` 0/3<br>`chat_strategy_change_updates_weekly_plan` 0/3<br>`chat_tempo_progressive_positive` 1/3<br>`chat_tempo_short_warmup_negative` 0/3 |
 
 Leading row (`gpt-5.6-luna`, repeat=3) per-case stability:
 
-- `chat_strategy_change_updates_weekly_plan` 2/3 FLAKY — weekly_plan_mentions_four_runs
 - `chat_tempo_short_warmup_negative` 0/3 fail — treats_shortened_session_as_not_meeting_the_prescription
 
 ## checkin · 1 cases
@@ -53,6 +57,8 @@ The weekly report.
 | Model | Reasoning | Repeat | Cases | Strict | Attempt | Flaky | Tool calls | Avg Latency | Cost/run | Commit | Not passing |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
 | **claude-opus-5** (ships today) | high | 3 | 3/3 | 100.0% | 100.0% | 0 | - | 22.90s | $0.5787 | 760d8b6 | - |
+| gpt-5.6-luna | high | 3 | 3/3 | 66.7% | 88.9% | 1 | 1.7 avg (3 cases, 1-3) | 24.80s | $0.0141 | 01eca8f* | `insights_does_not_contradict_the_stated_hrv_trend` 2/3 |
+| glm-5.3-flash | high | 3 | 3/3 | 66.7% | 88.9% | 1 | 3.9 avg (3 cases, up to 7), 3 varied | 178.04s | $0.0190 | 01eca8f* | `insights_does_not_label_a_post_week_run_with_the_wrong_day` 2/3 |
 | **gpt-5.6-luna** (ships today) | high | 3 | 3/3 | 66.7% | 66.7% | 0 | 2.2 avg (3 cases, 1-6), 1 varied | 23.81s | $0.0139 | 2bfda76* | `insights_does_not_contradict_the_stated_hrv_trend` 0/3 |
 | claude-opus-5 | high | 5 | 3/3 | 33.3% | 86.7% | 2 | - | 24.54s | $0.5852 | 760d8b6* | `insights_does_not_contradict_the_stated_hrv_trend` 4/5<br>`insights_fits_a_phone_notification_w31` 4/5 |
 | gpt-5.6-luna | high | 5 | 3/3 | 33.3% | 73.3% | 2 | - | 19.58s | $0.0117 | 760d8b6* | `insights_does_not_contradict_the_stated_hrv_trend` 2/5<br>`insights_fits_a_phone_notification_w31` 4/5 |
@@ -83,16 +89,18 @@ Short, timely messages during the day.
 | **gpt-5.6-luna** (ships today) | high | 3 | 6/6 | 100.0% | 100.0% | 0 | - | 4.51s | $0.0054 | 760d8b6 | - |
 | **gpt-5.6-luna** (ships today) | high | 3 | 6/6 | 100.0% | 100.0% | 0 | 0.1 avg (1 case, up to 1), 1 varied | 5.88s | $0.0084 | 2bfda76* | - |
 | **gpt-5.6-luna** (ships today) | high | 3 | 6/6 | 100.0% | 100.0% | 0 | - | 5.19s | $0.0095 | adc9c5e* | - |
+| gpt-5.6-luna | high | 3 | 6/6 | 66.7% | 83.3% | 2 | none used | 5.49s | $0.0083 | 01eca8f* | `nudge_respects_constraints_the_user_logged` 1/3<br>`nudge_writes_when_a_session_lands` 2/3 |
+| glm-5.3-flash | high | 3 | 6/6 | 50.0% | 72.2% | 3 | 0.5 avg (4 cases, up to 2), 3 varied | 81.05s | $0.0207 | 01eca8f* | `nudge_says_a_missing_reading_is_missing` 2/3<br>`nudge_week_totals_match_logged_workouts_w21` 1/3<br>`nudge_writes_when_a_session_lands` 1/3 |
 
 Leading row (`gpt-5.6-luna`) passed every case on every attempt.
 
-## plan_frame · 3 cases
+## plan_frame · 4 cases
 
 Deciding whether this is a week to be measured at all, or one where a progress bar would be the wrong thing to show.
 
 | Model | Reasoning | Repeat | Cases | Strict | Attempt | Flaky | Tool calls | Avg Latency | Cost/run | Commit | Not passing |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
-| **gpt-5.6-luna** (ships today) | none | 5 | 2/3 | 100.0% | 100.0% | 0 | - | 1.27s | $0.0004 | a2fba5f | - |
+| **gpt-5.6-luna** (ships today) | none | 5 | 2/4 | 100.0% | 100.0% | 0 | - | 1.27s | $0.0004 | a2fba5f | - |
 
 Leading row (`gpt-5.6-luna`) passed every case on every attempt.
 

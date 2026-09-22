@@ -261,6 +261,12 @@ def _is_openai_model(model: str) -> bool:
     )
 
 
+def _is_zai_model(model: str) -> bool:
+    """Return True when a LiteLLM model id targets Z.ai (the GLM family)."""
+    normalized = model.lower()
+    return normalized.startswith("zai/") or normalized.startswith("openrouter/z-ai/")
+
+
 def _is_openai_reasoning_model(model: str) -> bool:
     """Return True for OpenAI models that require an explicit reasoning effort.
 
@@ -270,6 +276,26 @@ def _is_openai_reasoning_model(model: str) -> bool:
     this is unreachable without the explicit value.
     """
     return _is_openai_model(model) and "gpt-5" in model.lower()
+
+
+def _rejects_temperature(
+    model: str, reasoning_effort: str | None, temperature: float
+) -> bool:
+    """Return True when *model* would 400 on this temperature.
+
+    GPT-5 models accept only ``temperature=1`` once reasoning is engaged.
+    Sending anything else raises before the request leaves the process, and
+    because that surfaces as a BadRequest the chain answers from the fallback
+    provider instead — the route still says Luna while DeepSeek writes every
+    word. Telegram `/models` offers 0.0, 0.3 and 0.7, so this is reachable
+    without touching any code. Dropping the parameter keeps the requested model
+    answering, which is the lesser of the two wrong outcomes.
+    """
+    if not _is_openai_reasoning_model(model):
+        return False
+    if reasoning_effort in (None, _OPENAI_REASONING_OFF):
+        return False
+    return temperature != 1.0
 
 
 def _is_budget_model(model: str) -> bool:
@@ -286,6 +312,17 @@ def _is_budget_model(model: str) -> bool:
 # extra_body. Anything else (low/medium/none/None) sends no extra_body, leaving
 # thinking off. Anthropic models receive reasoning_effort natively.
 _DEEPSEEK_THINKING_ENABLED: dict[str, Any] = {"thinking": {"type": "enabled"}}
+
+# GLM always thinks and refuses to be switched off; the only knob is an effort
+# level, and it has no "medium". It has to travel in extra_body because this
+# litellm version advertises a top-level `thinking` param for Z.ai that its
+# OpenAI-compatible client then rejects as an unexpected keyword argument.
+_ZAI_THINKING_EFFORTS: dict[str, str] = {
+    "low": "low",
+    "medium": "low",
+    "high": "high",
+    "max": "max",
+}
 
 _OPENAI_REASONING_OFF = "none"
 """Effort OpenAI reasoning models take to mean "do not think"."""
@@ -309,8 +346,9 @@ def _reasoning_engaged(model: str, reasoning_effort: str | None) -> bool:
     """Return True when *reasoning_effort* actually engages reasoning on *model*.
 
     For Anthropic, any non-None / non-"none" effort engages extended thinking.
-    For DeepSeek, only "high" or "max" engages thinking mode. Other providers
-    ignore reasoning entirely.
+    For DeepSeek, only "high" or "max" engages thinking mode. GLM thinks on
+    every request whatever the effort, so any stated effort counts. Other
+    providers ignore reasoning entirely.
     """
     if reasoning_effort in (None, "none"):
         return False
@@ -318,12 +356,19 @@ def _reasoning_engaged(model: str, reasoning_effort: str | None) -> bool:
         return True
     if _is_deepseek_model(model):
         return reasoning_effort in {"high", "max"}
+    if _is_zai_model(model):
+        return True
     return False
 
 
 def _model_accepts_response_format(model: str) -> bool:
-    """Return True when we should pass structured response hints."""
-    return True
+    """Return True when the provider accepts a ``response_format`` parameter.
+
+    Z.ai rejects it outright — litellm raises ``UnsupportedParamsError`` before
+    the request leaves the process — so a structured call there carries its
+    schema in the prompt instead.
+    """
+    return not _is_zai_model(model)
 
 
 def _model_supports_json_schema(model: str) -> bool:
@@ -463,7 +508,9 @@ def _completion_kwargs_for_model(kwargs: dict, model: str) -> dict:
         effective_temperature = (
             1.0 if anthropic_reasoning is not None else requested_temperature
         )
-        if effective_temperature is not None:
+        if effective_temperature is not None and not _rejects_temperature(
+            model, requested_reasoning, effective_temperature
+        ):
             adjusted["temperature"] = effective_temperature
     if anthropic_reasoning is not None:
         if _uses_output_config_effort(model):
@@ -471,23 +518,35 @@ def _completion_kwargs_for_model(kwargs: dict, model: str) -> dict:
             adjusted["output_config"] = {"effort": anthropic_reasoning}
         else:
             adjusted["reasoning_effort"] = anthropic_reasoning
-    if requested_response_format is not None and _model_accepts_response_format(model):
+    if requested_response_format is not None:
+        accepts_response_format = _model_accepts_response_format(model)
         is_pydantic = isinstance(requested_response_format, type) and issubclass(
             requested_response_format, BaseModel
         )
         if is_pydantic and not _model_supports_json_schema(model):
-            adjusted["response_format"] = {"type": "json_object"}
+            if accepts_response_format:
+                adjusted["response_format"] = {"type": "json_object"}
             adjusted["messages"] = _inject_schema_hint(
                 adjusted.get("messages", []),
                 _pydantic_schema_hint(requested_response_format),
             )
-        else:
+        elif accepts_response_format:
             adjusted["response_format"] = requested_response_format
     if _is_deepseek_model(model):
         if requested_extra_body is not None:
             adjusted["extra_body"] = requested_extra_body
         elif _reasoning_engaged(model, requested_reasoning):
             adjusted["extra_body"] = dict(_DEEPSEEK_THINKING_ENABLED)
+    if _is_zai_model(model):
+        if requested_extra_body is not None:
+            adjusted["extra_body"] = requested_extra_body
+        elif requested_reasoning in _ZAI_THINKING_EFFORTS:
+            adjusted["extra_body"] = {
+                "thinking": {
+                    "type": "enabled",
+                    "effort": _ZAI_THINKING_EFFORTS[requested_reasoning],
+                }
+            }
     if _is_openai_reasoning_model(model):
         # Never drop to omitted here: GPT-5.6 rejects a tool call without an
         # explicit effort, so the surfaces that carry tools would fail over on
@@ -511,22 +570,30 @@ def _effective_params_for_model(
     params: dict[str, Any] = {"max_tokens": max_tokens}
     anthropic_reasoning = reasoning_effort if _is_anthropic_model(model) else None
     if temperature is not None:
-        params["temperature"] = 1.0 if anthropic_reasoning is not None else temperature
+        effective_temperature = 1.0 if anthropic_reasoning is not None else temperature
+        if _rejects_temperature(model, reasoning_effort, effective_temperature):
+            params["requested_temperature"] = temperature
+            params["temperature_omitted_for_model"] = True
+        else:
+            params["temperature"] = effective_temperature
     if reasoning_effort is not None:
         # Always record the requested effort; transport differs by provider.
         params["reasoning_effort"] = reasoning_effort
     if response_format is not None:
-        if _model_accepts_response_format(model):
-            is_pydantic = isinstance(response_format, type) and issubclass(
-                response_format, BaseModel
-            )
-            if is_pydantic and not _model_supports_json_schema(model):
+        accepts_response_format = _model_accepts_response_format(model)
+        is_pydantic = isinstance(response_format, type) and issubclass(
+            response_format, BaseModel
+        )
+        if is_pydantic and not _model_supports_json_schema(model):
+            if accepts_response_format:
                 params["response_format"] = {"type": "json_object"}
-                params["pydantic_schema_injected"] = _response_format_for_log(
-                    response_format
-                )
             else:
-                params["response_format"] = _response_format_for_log(response_format)
+                params["response_format_omitted_for_model"] = True
+            params["pydantic_schema_injected"] = _response_format_for_log(
+                response_format
+            )
+        elif accepts_response_format:
+            params["response_format"] = _response_format_for_log(response_format)
         else:
             params["requested_response_format"] = _response_format_for_log(
                 response_format
@@ -538,6 +605,16 @@ def _effective_params_for_model(
             effective_extra_body = extra_body
         elif _reasoning_engaged(model, reasoning_effort):
             effective_extra_body = dict(_DEEPSEEK_THINKING_ENABLED)
+    elif _is_zai_model(model):
+        if extra_body is not None:
+            effective_extra_body = extra_body
+        elif reasoning_effort in _ZAI_THINKING_EFFORTS:
+            effective_extra_body = {
+                "thinking": {
+                    "type": "enabled",
+                    "effort": _ZAI_THINKING_EFFORTS[reasoning_effort],
+                }
+            }
     elif extra_body is not None:
         params["requested_extra_body"] = extra_body
         params["extra_body_omitted_for_model"] = True

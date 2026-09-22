@@ -33,6 +33,7 @@ from llm_health import build_llm_data, format_recent_nudges, render_health_data
 from llm_verify import extract_tool_evidence, slim_source_messages
 from notify import send_telegram
 from standouts import (
+    NO_STANDOUT_NOTICE,
     effect_for,
     find_standout,
     record_standout_announced,
@@ -188,9 +189,7 @@ def cmd_nudge(
                 exc,
             )
             standout = None
-    context["standout"] = (
-        standout.headline if standout else "(none — do not invent one)"
-    )
+    context["standout"] = standout.headline if standout else NO_STANDOUT_NOTICE
 
     messages = build_messages(
         context,

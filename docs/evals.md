@@ -148,8 +148,17 @@ uv run python -m evals.run --repeat 3 --concurrency 12  # 3 samples per case, in
 uv run python -m evals.run --repeat 3 --concurrency 12 --record   # …and publish it
 ```
 
-Some models reject `temperature` (`claude-opus-5`, for one). Pass
-`--no-temperature` to omit it.
+Some models reject the `temperature` the runner sends: Anthropic's thinking
+models accept only 1.0, and GPT-5 models accept only 1.0 once reasoning is
+engaged. `call_llm` adjusts or omits the parameter for those routes rather than
+letting the call fail, so a comparison no longer has to remember
+`--no-temperature`. Pass it anyway when you want the parameter left out
+entirely.
+
+A rejected parameter used to surface as a BadRequest, which the fallback chain
+answered from the other provider — scoring a model that never ran. When that
+happens for any reason the leaderboard names the cases under **Answered by a
+fallback model**; read that line before trusting a row.
 
 ### One run is one sample
 
