@@ -2054,6 +2054,7 @@ class TelegramChatHandler:
         from llm_context import build_messages, load_context
         from llm_health import (
             build_llm_data,
+            format_last_coach_summary,
             format_recent_nudges,
             render_health_data,
         )
@@ -2069,12 +2070,10 @@ class TelegramChatHandler:
         ctx["recent_nudges"] = format_recent_nudges(recent, empty_text="(none yet)")
 
         # Inject last coach review for cross-message awareness.
-        coach_summary = self._daemon._state.get("last_coach_summary", "")
-        coach_date = self._daemon._state.get("last_coach_summary_date", "")
-        if coach_summary:
-            ctx["last_coach_summary"] = f"[{coach_date}] {coach_summary}"
-        else:
-            ctx["last_coach_summary"] = "(no recent coach review)"
+        ctx["last_coach_summary"] = format_last_coach_summary(
+            self._daemon._state.get("last_coach_summary", ""),
+            self._daemon._state.get("last_coach_summary_date", ""),
+        )
 
         health_data = build_llm_data(conn, months=3)
 

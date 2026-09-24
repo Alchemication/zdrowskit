@@ -17,7 +17,8 @@ def _days_ago(n: int) -> str:
 class TestComputeBaselines:
     def test_empty_db(self, in_memory_db: sqlite3.Connection) -> None:
         result = compute_baselines(in_memory_db)
-        assert "Baselines" in result
+        # The calling prompt owns the heading; a second one duplicated it.
+        assert "Baselines" not in result
         assert "No rolling averages yet" in result
         # Nothing may be presented as a rolling average or a training volume.
         assert "30-day avg" not in result
@@ -175,6 +176,38 @@ class TestComputeBaselines:
         assert "Lift sessions" in result
         assert "Lift duration" in result
 
+    def test_lift_sessions_follow_counts_as_lift(
+        self, in_memory_db: sqlite3.Connection
+    ) -> None:
+        """Short functional sessions are not lifts here, as in the week totals."""
+        snapshots = []
+        for i in range(28):
+            d = _days_ago(i)
+            snapshot = DailySnapshot(date=d)
+            if i % 7 == 0:
+                snapshot.workouts = [
+                    WorkoutSnapshot(
+                        type="Traditional Strength Training",
+                        category="lift",
+                        start_utc=f"{d}T17:00:00Z",
+                        duration_min=50.0,
+                    ),
+                    WorkoutSnapshot(
+                        type="Functional Strength Training",
+                        category="lift",
+                        start_utc=f"{d}T18:00:00Z",
+                        duration_min=9.0,
+                    ),
+                ]
+            snapshots.append(snapshot)
+        store_snapshots(in_memory_db, snapshots)
+
+        result = compute_baselines(in_memory_db)
+
+        # Four counted lifts over four weeks, 50 minutes each.
+        assert "| Lift sessions | 1.0 /week |" in result
+        assert "| Lift duration | 50.0 min/week |" in result
+
     def test_best_pace(self, in_memory_db: sqlite3.Connection) -> None:
         # A best needs a field to be best of, so seed enough runs to clear the
         # minimum-sample floor. The fastest is 30min/5km = 6:00 min/km.
@@ -198,7 +231,50 @@ class TestComputeBaselines:
         store_snapshots(in_memory_db, snapshots)
         result = compute_baselines(in_memory_db)
         assert "6:00" in result
-        assert "Best pace" in result
+        assert "Fastest run pace" in result
+
+    def test_best_pace_ignores_short_runs(
+        self, in_memory_db: sqlite3.Connection
+    ) -> None:
+        """A 1 km jog after a walk is not the month's fastest run."""
+        snapshots = []
+        for i in range(5):
+            d = _days_ago(5 + i)
+            snapshots.append(
+                DailySnapshot(
+                    date=d,
+                    workouts=[
+                        WorkoutSnapshot(
+                            type="Outdoor Run",
+                            category="run",
+                            start_utc=f"{d}T07:00:00Z",
+                            duration_min=30.0 + i,
+                            gpx_distance_km=5.0,
+                        ),
+                    ],
+                )
+            )
+        jog_day = _days_ago(2)
+        snapshots.append(
+            DailySnapshot(
+                date=jog_day,
+                workouts=[
+                    WorkoutSnapshot(
+                        type="Outdoor Run",
+                        category="run",
+                        start_utc=f"{jog_day}T07:00:00Z",
+                        duration_min=5.0,
+                        gpx_distance_km=1.0,
+                    ),
+                ],
+            )
+        )
+        store_snapshots(in_memory_db, snapshots)
+
+        result = compute_baselines(in_memory_db)
+
+        assert "6:00/km" in result
+        assert "5:00/km" not in result
 
     def test_best_pace_suppressed_below_sample_floor(
         self, in_memory_db: sqlite3.Connection
@@ -225,7 +301,7 @@ class TestComputeBaselines:
 
         result = compute_baselines(in_memory_db)
 
-        assert "Best pace" not in result
+        assert "Fastest run pace" not in result
 
     def test_no_runs_no_pace(self, in_memory_db: sqlite3.Connection) -> None:
         d = _days_ago(5)
@@ -242,7 +318,7 @@ class TestComputeBaselines:
         )
         store_snapshots(in_memory_db, [snap])
         result = compute_baselines(in_memory_db)
-        assert "Best pace" not in result
+        assert "Fastest run pace" not in result
 
     def test_yoy_window_with_single_sample_is_suppressed(
         self, in_memory_db: sqlite3.Connection
@@ -259,26 +335,6 @@ class TestComputeBaselines:
 
         # The suppressed YoY value must not render as a numeric baseline.
         assert "0.26" not in result
-
-    def test_yoy_window_ignores_zero_padded_sleep_rows(
-        self, in_memory_db: sqlite3.Connection
-    ) -> None:
-        """Apple writes sleep_total_h=0 for untracked nights — ignore those."""
-        snapshots = [
-            DailySnapshot(date=_days_ago(i), sleep_total_h=7.0) for i in range(10)
-        ]
-        # A year ago: 20 zero-tracked nights plus one real 6.5 hr night. If the
-        # guard only checked IS NOT NULL, AVG would collapse toward zero.
-        for i in range(20):
-            snapshots.append(DailySnapshot(date=_days_ago(360 + i), sleep_total_h=0.0))
-        snapshots.append(DailySnapshot(date=_days_ago(365), sleep_total_h=6.5))
-        store_snapshots(in_memory_db, snapshots)
-
-        result = compute_baselines(in_memory_db)
-
-        # Neither a drag-to-zero value nor a single-sample 6.5 should render.
-        assert "0.31" not in result
-        assert "6.50" not in result
 
     def test_year_over_year_and_seasonal_sections(
         self, in_memory_db: sqlite3.Connection

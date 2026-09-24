@@ -499,6 +499,21 @@ holding three days of data reports a twelve-week average built from three days
 Requiring most of the window to be present makes the average mean what its
 label says.
 """
+BEST_RECENT_PACE_MIN_KM: float = 3.0
+"""Shortest run allowed to set the "fastest run pace (30d)" baseline line.
+
+Without a floor the fastest pace in a month was a 0.97 km jog tacked on after a
+walk, which reads to the model as race fitness the person does not have. Three
+kilometres keeps real easy and tempo runs in and cool-down fragments out.
+"""
+COACH_SUMMARY_MAX_AGE_DAYS: int = 14
+"""Age after which the last coach review is no longer shown as current context.
+
+The weekly coach usually answers SKIP, which leaves the last written review in
+place indefinitely — in September 2026 every nudge and chat still carried an
+April review as "the user's last coaching touchpoint". Two weekly cycles keeps a
+fresh review visible for the week it covers and the one after, then drops it.
+"""
 WORKOUT_SPLIT_MIN_SAMPLE_COVERAGE: float = 0.6
 """Fraction of a kilometre split that must carry samples to report a value for it.
 

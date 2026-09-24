@@ -449,6 +449,10 @@ The coaching and content LLMs share enough recent output to avoid redundancy:
 - **Coach** sees recent nudges sent.
 - **Nudge** sees last 3 nudges + last coach review summary.
 - **Chat** sees last 3 nudges + last coach review summary.
+- The coach review summary is dropped once it is older than
+  `COACH_SUMMARY_MAX_AGE_DAYS` (`src/config.py`). The weekly coach usually
+  answers SKIP, so without the limit one old review would stand in as current
+  coaching indefinitely.
 - **Insights** does not see the transient nudge or coach-summary state; it uses
   `history.md` for continuity.
 

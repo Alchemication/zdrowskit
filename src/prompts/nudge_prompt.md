@@ -192,7 +192,7 @@ Apply these in order. The first one that matches wins.
 3. **Redundancy check.** Does the Recent Nudges Sent section already contain
    the same observation, recommendation, rationale, or watch reminder you
    would write now, *and* has nothing material changed since? If yes → SKIP.
-4. **Coach overlap check.** Did the Most Recent Coach Review already cover
+4. **Coach overlap check.** Did the Latest Coach Session already cover
    this topic in the last few days, with no new data since? If yes → SKIP.
 5. **Trigger-specific skip rules.** Check the trigger-specific section below
    for any SKIP conditions that apply. If they do → SKIP.
@@ -219,10 +219,11 @@ already knows, and one clear action beats three vague ones.
 
 ### Sleep tracking compliance
 
-Use `sleep_nights_tracked` / `sleep_nights_total` from the summary for
-compliance. `today.sleep_status` is `"tracked"`, `"not_tracked"`, or
-`"pending"` (data may not have synced yet — don't flag as missing). Only
-mention a tracking gap if 3+ consecutive nights were missed.
+Use the `N/M nights tracked` figure in the Target Week Summary for
+compliance. Each day card's `Sleep (night before)` line reads tracked values,
+`not tracked`, or `pending sync` — pending means the data may not have
+synced yet, so don't flag it as missing. Only mention a tracking gap if 3+
+consecutive nights were missed.
 
 ### Trigger-specific rules
 

@@ -14,7 +14,11 @@ from __future__ import annotations
 
 import sqlite3
 
-from config import BASELINE_MIN_SAMPLES, BASELINE_MIN_WINDOW_COVERAGE
+from config import (
+    BASELINE_MIN_SAMPLES,
+    BASELINE_MIN_WINDOW_COVERAGE,
+    BEST_RECENT_PACE_MIN_KM,
+)
 
 
 _DAILY_METRICS = [
@@ -31,18 +35,6 @@ _DAILY_METRICS = [
     ("REM Sleep", "sleep_rem_h", "hr", 2),
 ]
 
-# Columns where a literal 0 means "not tracked" rather than a real observation.
-# Apple Health writes zero-valued sleep rows for untracked nights, which would
-# otherwise drag baselines toward zero.
-_ZERO_IS_NO_DATA = {
-    "sleep_total_h",
-    "sleep_in_bed_h",
-    "sleep_efficiency_pct",
-    "sleep_deep_h",
-    "sleep_core_h",
-    "sleep_rem_h",
-    "sleep_awake_h",
-}
 
 _TRAINING_VOLUME_QUERIES = [
     (
@@ -66,7 +58,7 @@ _TRAINING_VOLUME_QUERIES = [
         "/week",
         "SELECT COUNT(*) AS value "
         "FROM workout "
-        "WHERE category = 'lift' "
+        "WHERE counts_as_lift = 1 "
         "AND date >= date('now', ?)",
     ),
     (
@@ -74,7 +66,7 @@ _TRAINING_VOLUME_QUERIES = [
         "min/week",
         "SELECT SUM(duration_min) AS value "
         "FROM workout "
-        "WHERE category = 'lift' AND duration_min IS NOT NULL "
+        "WHERE counts_as_lift = 1 AND duration_min IS NOT NULL "
         "AND date >= date('now', ?)",
     ),
 ]
@@ -103,12 +95,11 @@ def _query_daily_avg(
     """
     start_expr = "date('now'" + "".join(", ?" for _ in start_modifiers) + ")"
     end_expr = "date('now'" + "".join(", ?" for _ in end_modifiers) + ")"
-    zero_filter = f" AND {column} != 0" if column in _ZERO_IS_NO_DATA else ""
     row = conn.execute(
         f"""
         SELECT AVG({column}) AS value, COUNT({column}) AS n
         FROM daily
-        WHERE {column} IS NOT NULL{zero_filter}
+        WHERE {column} IS NOT NULL
           AND date BETWEEN {start_expr} AND {end_expr}
         """,  # noqa: S608
         (*start_modifiers, *end_modifiers),
@@ -138,12 +129,11 @@ def _metric_counts(conn: sqlite3.Connection, days: int) -> list[tuple[str, str, 
     """Return (label, column, readings) for every daily metric in a window."""
     counts: list[tuple[str, str, int]] = []
     for label, column, _unit, _decimals in _DAILY_METRICS:
-        zero_filter = f" AND {column} != 0" if column in _ZERO_IS_NO_DATA else ""
         row = conn.execute(
             f"""
             SELECT COUNT({column}) AS n
             FROM daily
-            WHERE {column} IS NOT NULL{zero_filter}
+            WHERE {column} IS NOT NULL
               AND date >= date('now', ?)
             """,  # noqa: S608
             (f"-{days} days",),
@@ -499,17 +489,20 @@ def _append_pace_curve(lines: list[str], conn: sqlite3.Connection) -> None:
 
 
 def _append_best_recent_pace(lines: list[str], conn: sqlite3.Connection) -> None:
-    """Append the recent best pace summary line.
+    """Append the fastest recent whole-run pace.
 
     "Best" needs a field to be best of. With one or two runs in the window the
-    number is simply the most recent run wearing a superlative.
+    number is simply the most recent run wearing a superlative. Runs shorter
+    than ``BEST_RECENT_PACE_MIN_KM`` are left out, so a short jog after a walk
+    cannot pass for the month's fastest run.
     """
     row = conn.execute(
         "SELECT MIN(duration_min / gpx_distance_km) AS pace_min_km, "
         "  COUNT(*) AS runs "
         "FROM workout "
-        "WHERE category = 'run' AND gpx_distance_km > 0 "
-        "AND date >= date('now', '-30 days')"
+        "WHERE category = 'run' AND gpx_distance_km >= ? "
+        "AND date >= date('now', '-30 days')",
+        (BEST_RECENT_PACE_MIN_KM,),
     ).fetchone()
     if not row or row["pace_min_km"] is None:
         return
@@ -522,7 +515,10 @@ def _append_best_recent_pace(lines: list[str], conn: sqlite3.Connection) -> None
     if pace_sec == 60:
         pace_min += 1
         pace_sec = 0
-    lines.append(f"\n**Best pace (30d):** {pace_min}:{pace_sec:02d} min/km")
+    lines.append(
+        f"\n**Fastest run pace (30d, runs of {BEST_RECENT_PACE_MIN_KM:g} km or more):** "
+        f"{pace_min}:{pace_sec:02d}/km"
+    )
 
 
 def compute_baselines(conn: sqlite3.Connection) -> str:
@@ -535,7 +531,8 @@ def compute_baselines(conn: sqlite3.Connection) -> str:
         A formatted markdown string with rolling, seasonal, and split-derived
         baseline tables.
     """
-    lines = ["## Baselines (auto-computed from your data)\n"]
+    # The calling prompt owns the section heading.
+    lines: list[str] = []
     _append_daily_metrics(lines, conn)
     _append_sleep_compliance(lines, conn)
     _append_training_volume(lines, conn)
@@ -543,4 +540,4 @@ def compute_baselines(conn: sqlite3.Connection) -> str:
     _append_seasonal_training_volume(lines, conn)
     _append_pace_curve(lines, conn)
     _append_best_recent_pace(lines, conn)
-    return "\n".join(lines)
+    return "\n".join(lines).strip()

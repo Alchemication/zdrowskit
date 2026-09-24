@@ -11,6 +11,7 @@
 **workout_all** — one row per session, FK: `date`, with `source` (`'import'` or `'manual'`)
 
 - Identity: `type`, `category` (`run` / `lift` / `walk` / `cycle` / `hiit` / `other`)
+- `counts_as_lift` (0/1): whether the session counts as a strength session. Short functional-strength sessions are `category = 'lift'` but `counts_as_lift = 0`. Count strength sessions with `counts_as_lift = 1` — that is what every weekly total in the prompt counts, and `category = 'lift'` will disagree with it.
 - Core fields: `duration_min`, `hr_min`, `hr_avg`, `hr_max`, `active_energy_kj`, `intensity_kcal_per_hr_kg`
 - Environment: `temperature_c`, `humidity_pct`
 - Location: `location_id`, `location_label`, `location_locality`, `location_region`, `location_country`, `location_country_code` (route workouts only; locality-level, not precise GPS)
@@ -32,6 +33,7 @@
 **sleep_all** — sleep rows keyed by `date`, with `source` (`'import'` or `'manual'`)
 
 - Columns: `sleep_total_h`, `sleep_in_bed_h`, `sleep_efficiency_pct`, `sleep_deep_h`, `sleep_core_h`, `sleep_rem_h`, `sleep_awake_h`
-- Stored under **night-start date**
+- Stored under **night-start date**: Monday night's sleep is `date = Monday`. The day cards above show it on the morning it ended instead, as "Sleep (night before)" on Tuesday. The night before a workout on day D is `sleep_all.date = date(D, '-1 day')`; joining on the same date gives the night after it.
+- A NULL row or a missing date means the night was not tracked, not that there was no sleep.
 - If both `import` and `manual` rows exist for the same date, prefer the `manual` row.
 - Stage columns are NULL for manual entries

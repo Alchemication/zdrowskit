@@ -199,6 +199,11 @@ def parse_metrics_payload(data: dict) -> dict[str, dict[str, float]]:
             #         sleepStart/sleepEnd, date.
             for entry in metric.get("data", []):
                 total = entry.get("totalSleep", 0.0)
+                # Auto Export emits zero-hour entries for nights the watch was
+                # not worn. Storing them makes an untracked night look like a
+                # night without sleep to every average and every SQL query.
+                if not total or total <= 0:
+                    continue
                 deep = entry.get("deep", 0.0)
                 core = entry.get("core", 0.0)
                 rem = entry.get("rem", 0.0)

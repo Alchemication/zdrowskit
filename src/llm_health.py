@@ -14,7 +14,7 @@ import sqlite3
 from datetime import date, datetime, timedelta
 
 from aggregator import summarise
-from config import SLEEP_SYNC_CUTOFF_HOUR
+from config import COACH_SUMMARY_MAX_AGE_DAYS, SLEEP_SYNC_CUTOFF_HOUR
 from report import group_by_week, to_dict
 from store import load_date_range, load_snapshots
 
@@ -156,6 +156,12 @@ def _format_workout_line(workout: dict) -> str:
     if splits_text:
         parts.append(f"splits {splits_text}")
 
+    # A short functional session is logged as a lift but is not counted as one
+    # in the week totals. Unlabelled, the card and the totals disagree and the
+    # model — or the verifier — "corrects" the count upward.
+    if workout.get("category") == "lift" and workout.get("counts_as_lift") is False:
+        parts.append("short session, not counted as a lift")
+
     if parts:
         return f"{name} ({'; '.join(parts)})"
     return name
@@ -238,6 +244,10 @@ def _render_day_block(day: dict, withheld: frozenset[str] = frozenset()) -> str:
     else:
         lines.append("- Recovery: unavailable.")
 
+    # Sleep is shifted onto the morning it ends in (see _shift_sleep_forward),
+    # while SQL stores it under the night-start date. The label says which
+    # night so the card and a query cannot be read as the same date.
+    sleep_label = "Sleep (night before)"
     sleep_status = day.get("sleep_status")
     if sleep_status == "tracked":
         sleep_parts: list[str] = []
@@ -260,15 +270,15 @@ def _render_day_block(day: dict, withheld: frozenset[str] = frozenset()) -> str:
         if stage_parts:
             sleep_parts.append(", ".join(stage_parts))
         if sleep_parts:
-            lines.append(f"- Sleep: {'; '.join(sleep_parts)}.")
+            lines.append(f"- {sleep_label}: {'; '.join(sleep_parts)}.")
         else:
-            lines.append("- Sleep: tracked, details unavailable.")
+            lines.append(f"- {sleep_label}: tracked, details unavailable.")
     elif sleep_status == "pending":
-        lines.append("- Sleep: pending sync.")
+        lines.append(f"- {sleep_label}: pending sync.")
     elif sleep_status == "not_tracked":
-        lines.append("- Sleep: not tracked.")
+        lines.append(f"- {sleep_label}: not tracked.")
     else:
-        lines.append("- Sleep: unavailable.")
+        lines.append(f"- {sleep_label}: unavailable.")
 
     workouts = day.get("workouts") or []
     if workouts:
@@ -376,8 +386,6 @@ def _render_week_summary_block(summary: dict, *, prompt_kind: str) -> str:
     hrv_trend = summary.get("hrv_trend")
     if hrv_trend:
         lines.append(f"- HRV trend: {hrv_trend}.")
-    else:
-        lines.append("- HRV trend: unavailable.")
 
     sleep_total = int(summary.get("sleep_nights_total", 0) or 0)
     sleep_tracked = summary.get("sleep_nights_tracked")
@@ -513,6 +521,43 @@ def format_recent_nudges(
         body = _clean_nudge_text(str(entry.get("text", ""))) or "(empty)"
         blocks.append(f"{index}. [{timestamp} / {trigger}]\n{body}")
     return "\n\n".join(blocks)
+
+
+def format_last_coach_summary(
+    summary: str,
+    summary_date: str,
+    *,
+    today: date | None = None,
+) -> str:
+    """Render the last coach review, or say there is no recent one.
+
+    The weekly coach usually answers SKIP, which leaves its last written review
+    in daemon state indefinitely. Past ``COACH_SUMMARY_MAX_AGE_DAYS`` that review
+    describes a different training block, so it is withheld rather than shown
+    as the user's latest coaching touchpoint.
+
+    Args:
+        summary: Stored text of the last written coach review.
+        summary_date: ISO date the review was written.
+        today: Override for the current date.
+
+    Returns:
+        ``[date] summary`` when the review is recent, otherwise a placeholder.
+    """
+    if not summary:
+        return "(no recent coach review)"
+    if today is None:
+        today = date.today()
+    try:
+        age_days = (today - date.fromisoformat(summary_date)).days
+    except ValueError:
+        return "(no recent coach review)"
+    if age_days > COACH_SUMMARY_MAX_AGE_DAYS:
+        return (
+            f"(no coach review in the last {COACH_SUMMARY_MAX_AGE_DAYS} days "
+            "— the weekly coach found no strategy change worth proposing)"
+        )
+    return f"[{summary_date}] {summary}"
 
 
 # ---------------------------------------------------------------------------
@@ -903,8 +948,11 @@ def build_llm_data(
     current_snaps = load_snapshots(conn, start=sleep_start, end=week_end)
 
     history_end = (date.fromisoformat(week_start) - timedelta(days=1)).isoformat()
+    # Round forward to a Monday: a window cut mid-week renders its first week
+    # as two days reading "0 run, 1 lift", indistinguishable from a real week.
+    history_start_day = date.fromisoformat(week_start) - timedelta(days=30 * months)
     history_start = (
-        date.fromisoformat(week_start) - timedelta(days=30 * months)
+        history_start_day + timedelta(days=-history_start_day.weekday() % 7)
     ).isoformat()
     history_snaps = load_snapshots(conn, start=history_start, end=history_end)
     history_weeks = group_by_week(history_snaps)

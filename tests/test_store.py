@@ -835,7 +835,7 @@ class TestMigrations:
 
         applied = apply_migrations(conn)
 
-        assert len(applied) == 22
+        assert len(applied) == 23
         statuses = list_migrations(conn)
         assert all(status.status == "applied" for status in statuses)
         schema = get_live_schema(conn)
@@ -855,6 +855,44 @@ class TestMigrations:
         assert "CREATE TABLE target_derivation" in schema
         assert "CREATE TABLE progress_preference" in schema
         assert "note_prompt_id" in schema
+
+    def test_untracked_sleep_migration_clears_zero_nights(
+        self, in_memory_db: sqlite3.Connection
+    ) -> None:
+        """Zero-hour nights become missing; real nights and other columns stay."""
+        import importlib.util
+
+        in_memory_db.executemany(
+            "INSERT INTO daily (date, steps, sleep_total_h, sleep_in_bed_h, "
+            "sleep_efficiency_pct, respiratory_rate, imported_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [
+                ("2024-01-01", 5000, 0.0, 0.0, 0.0, 14.5, "2024-01-02T00:00:00"),
+                ("2024-01-02", 6000, 7.2, 7.5, 96.0, 15.0, "2024-01-03T00:00:00"),
+            ],
+        )
+        path = (
+            Path(__file__).parent.parent
+            / "src/db/migrations/20260924_120000__023_null_untracked_sleep.py"
+        )
+        spec = importlib.util.spec_from_file_location("m023", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        module.upgrade(in_memory_db)
+
+        rows = {
+            row["date"]: row
+            for row in in_memory_db.execute(
+                "SELECT date, steps, sleep_total_h, sleep_efficiency_pct, "
+                "respiratory_rate FROM daily"
+            )
+        }
+        assert rows["2024-01-01"]["sleep_total_h"] is None
+        assert rows["2024-01-01"]["sleep_efficiency_pct"] is None
+        assert rows["2024-01-01"]["steps"] == 5000
+        assert rows["2024-01-01"]["respiratory_rate"] == 14.5
+        assert rows["2024-01-02"]["sleep_total_h"] == 7.2
 
     def test_adopts_legacy_schema_and_applies_missing(self) -> None:
         conn = sqlite3.connect(":memory:")

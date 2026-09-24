@@ -83,6 +83,32 @@ class TestOvernightMetrics:
         path.write_text(json.dumps({"data": {"metrics": metrics}}))
         return parse_metrics_file(path)
 
+    def test_zero_hour_sleep_entry_is_not_stored(self, tmp_path: Path) -> None:
+        """An untracked night arrives as zero hours and must stay missing."""
+        result = self._parse(
+            tmp_path,
+            [
+                {
+                    "name": "sleep_analysis",
+                    "units": "hr",
+                    "data": [
+                        {
+                            "date": "2026-03-10 07:00:00 +0000",
+                            "sleepStart": "2026-03-09 23:30:00 +0000",
+                            "sleepEnd": "2026-03-10 07:00:00 +0000",
+                            "totalSleep": 0.0,
+                            "deep": 0.0,
+                            "core": 0.0,
+                            "rem": 0.0,
+                            "awake": 0.0,
+                        }
+                    ],
+                }
+            ],
+        )
+
+        assert "sleep_total_h" not in result.get("2026-03-09", {})
+
     def test_samples_either_side_of_midnight_share_one_night(
         self, tmp_path: Path
     ) -> None:

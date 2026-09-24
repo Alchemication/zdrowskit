@@ -29,7 +29,12 @@ from config import (
 from data_maturity import build_data_maturity
 from llm import call_llm
 from llm_context import build_messages, load_context, load_prompt_text
-from llm_health import build_llm_data, format_recent_nudges, render_health_data
+from llm_health import (
+    build_llm_data,
+    format_last_coach_summary,
+    format_recent_nudges,
+    render_health_data,
+)
 from llm_verify import extract_tool_evidence, slim_source_messages
 from notify import send_telegram
 from standouts import (
@@ -137,12 +142,10 @@ def cmd_nudge(
     context["trigger_context"] = trigger_context_text or "(no additional detail)"
 
     # Cross-message awareness: inject last coach review
-    coach_summary = getattr(args, "last_coach_summary", "")
-    coach_date = getattr(args, "last_coach_summary_date", "")
-    if coach_summary:
-        context["last_coach_summary"] = f"[{coach_date}] {coach_summary}"
-    else:
-        context["last_coach_summary"] = "(no recent coach review)"
+    context["last_coach_summary"] = format_last_coach_summary(
+        getattr(args, "last_coach_summary", ""),
+        getattr(args, "last_coach_summary_date", ""),
+    )
 
     trace_id = create_llm_trace(
         conn,

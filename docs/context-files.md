@@ -10,7 +10,7 @@ independent copy; `--profile NAME` selects it in the CLI.
 | `me.md` | you or chat | Your profile: age, body, injuries, what you already do |
 | `strategy.md` | you, chat, or coach | Goals + weekly training schedule + diet + sleep targets, all in one file. Numbers stated in the goal and plan sections also become the weekly progress bars |
 | `log.md` | you or chat | Freeform weekly journal: why things happened, such as travel, illness, or life |
-| `baselines.md` | auto | Rolling + seasonal baselines computed from the DB by `insights` and `coach` |
+| `baselines.md` | auto | Rolling + seasonal baselines computed from the DB by `insights`, `coach`, and chat |
 | `history.md` | auto | Rolling memory: what a separate call after each weekly report chose to carry forward |
 | `coach_feedback.md` | auto | Accept/reject history for coach and chat suggestions, including optional rejection reasons |
 
@@ -93,6 +93,9 @@ volume needs `BASELINE_MIN_WINDOW_COVERAGE` of its window present before the
 window is divided, and sections with nothing to say are omitted rather than
 rendered as a grid of dashes. A mature profile is unaffected; a two-day-old
 one no longer gets three days of data printed under a "90-day avg" heading.
+Lift sessions are counted the same way as the weekly totals, so a short
+functional-strength session is not a lift in either. The fastest recent run
+pace ignores runs shorter than `BEST_RECENT_PACE_MIN_KM`.
 
 `coach_feedback.md` is retained as a full audit log on disk. Prompt context is
 filtered to recent strategy/coach-relevant entries so ordinary chat log appends
