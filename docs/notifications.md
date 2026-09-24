@@ -439,6 +439,20 @@ message from being sent.
 | Health data synced via iCloud | 3 min debounce | Imports the settled files, then reacts |
 | `log.md` / `strategy.md` / `me.md` edited | 60 sec | Acknowledges the change, flags tension, or confirms it |
 
+## How a New Run Compares
+
+When a sync brings in a run, the nudge is handed a computed comparison with the
+person's own earlier runs of similar distance and pace, rather than being asked
+to query for one. With pace held in a band, heart rate is what gets compared:
+the nudge sees the median heart rate of those similar runs and how many this
+run came in above and below. A run with fewer than `BASELINE_MIN_SAMPLES`
+similar runs gets no comparison, and the nudge is told not to call its heart
+rate high or low. The bands, the look-back window, and the shortest run
+compared are `RUN_COMPARISON_*` in `src/config.py`.
+
+The nudge keeps `run_sql` for questions the prompt cannot answer, but is no
+longer told to run a query before deciding to skip.
+
 ## Cross-Message Awareness
 
 The coaching and content LLMs share enough recent output to avoid redundancy:

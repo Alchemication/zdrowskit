@@ -31,6 +31,18 @@ with either the final nudge or `SKIP`. There is no third option.
 **What actually changed:**
 {trigger_context}
 
+## How This Run Compares
+
+{run_comparison}
+
+Each line compares a run from this sync with this person's own runs of similar
+distance and pace, computed from the database and gated on sample count. With
+pace held in a band, heart rate is the figure that moves: a run near the top of
+its peers cost more than usual for that pace, one near the bottom cost less. A
+run in the middle of its peers is an ordinary run — not a finding. Quote the
+figures as given; where a line says there are too few similar runs, make no
+heart-rate comparison for that run at all.
+
 ## Standout
 
 {standout}
@@ -108,20 +120,17 @@ historical comparisons beyond this compact view.
 
 The compact view holds this week and weekly rollups — the user already sees
 all of that in the Health app. What they cannot see is how today compares to
-the same situation before: the last several runs the morning after a short
-night, this month's easy pace against the same month a year ago, whether a
-late-run fade is new or has been there for months. That comparison is the
-main thing a nudge can offer that the phone cannot, and it lives in the
-database, not in the summary above.
+the same situation before. For a new run, that comparison is already computed
+in `How This Run Compares` above; do not re-derive it.
 
-So before you SKIP for lack of materiality, it is worth one query along
-those lines. One query, then write or `SKIP` — do not go fishing.
+Use `run_sql` only for a question neither that section nor the health data
+answers, and only when the answer would change what you write — at most one
+query. Data already in this prompt is never a reason to query.
 
 A pattern is only worth stating if it holds across **at least 5 comparable
 sessions or days**. Below that you are reading noise, and the user will
-notice. Quote the figures the query returned so they can check it. If the
-rows do not support a clean statement, `SKIP` — a forced pattern is worse
-than silence.
+notice. Quote the figures so they can check them. If the rows do not support
+a clean statement, `SKIP` — a forced pattern is worse than silence.
 
 If you need `run_sql`, call it directly — no pre-tool sentence like "Let
 me check…". After the tool result, output only the final nudge or `SKIP`.
@@ -192,6 +201,10 @@ Apply these in order. The first one that matches wins.
 3. **Redundancy check.** Does the Recent Nudges Sent section already contain
    the same observation, recommendation, rationale, or watch reminder you
    would write now, *and* has nothing material changed since? If yes → SKIP.
+   A run that How This Run Compares places above or below at least four in
+   five of its similar runs is material and new, even when the advice it
+   leads to repeats an earlier nudge — unless a nudge above already reported
+   that comparison. Lead with it.
 4. **Coach overlap check.** Did the Latest Coach Session already cover
    this topic in the last few days, with no new data since? If yes → SKIP.
 5. **Trigger-specific skip rules.** Check the trigger-specific section below

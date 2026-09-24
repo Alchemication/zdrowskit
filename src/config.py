@@ -506,6 +506,33 @@ Without a floor the fastest pace in a month was a 0.97 km jog tacked on after a
 walk, which reads to the model as race fitness the person does not have. Three
 kilometres keeps real easy and tempo runs in and cool-down fragments out.
 """
+RUN_COMPARISON_WINDOW_DAYS: int = 180
+"""How far back a new run looks for similar runs to compare its heart rate with.
+
+Half a year holds 30 to 50 matches for a runner doing three 5 km runs a week,
+comfortably above the sample floor, while staying inside one fitness block. A
+year back would compare this autumn with last winter's fitness.
+"""
+RUN_COMPARISON_DISTANCE_RATIO: float = 0.2
+"""Fractional distance band, either side, for a run to count as similar.
+
+Heart rate drifts upward over a run, so a 10 km average is not comparable with
+a 5 km one. Twenty percent keeps a 5 km run with the 4–6 km runs around it.
+"""
+RUN_COMPARISON_PACE_BAND_MIN: float = 0.25
+"""Pace band, in minutes per km either side, for a run to count as similar.
+
+Fifteen seconds per km is roughly the difference between an easy and a steady
+effort for one person. Matching on pace is what makes the heart-rate figure
+mean something: the same heart rate at a faster pace is the finding.
+"""
+RUN_COMPARISON_MIN_KM: float = 3.0
+"""Shortest run given a comparison.
+
+Below this a "run" is often a jog with a child or a cool-down fragment after a
+walk — a 1.5 km run at 10:13/km sits in the operator history — and its average
+heart rate says nothing about fitness.
+"""
 COACH_SUMMARY_MAX_AGE_DAYS: int = 14
 """Age after which the last coach review is no longer shown as current context.
 

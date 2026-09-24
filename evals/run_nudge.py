@@ -21,6 +21,7 @@ if str(_SRC) not in sys.path:
 import llm_context  # noqa: E402
 import llm_health  # noqa: E402
 from config import MAX_TOKENS_NUDGE, PROMPTS_DIR  # noqa: E402
+from run_comparison import NO_RUN_COMPARISON  # noqa: E402
 from standouts import NO_STANDOUT_NOTICE  # noqa: E402
 from tools import run_sql_tool  # noqa: E402
 
@@ -33,6 +34,7 @@ _NUDGE_CONTEXT_DEFAULTS = {
     "trigger_context": "(no additional detail)",
     "last_coach_summary": "(no recent coach review)",
     "standout": NO_STANDOUT_NOTICE,
+    "run_comparison": NO_RUN_COMPARISON,
 }
 
 
