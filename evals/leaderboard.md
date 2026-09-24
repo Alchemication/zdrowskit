@@ -31,9 +31,11 @@ Answering your questions in Telegram, including the SQL it writes.
 | Model | Reasoning | Repeat | Cases | Strict | Attempt | Flaky | Tool calls | Avg Latency | Cost/run | Commit | Not passing |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
 | gpt-5.6-luna | high | 3 | 11/11 | 90.9% | 90.9% | 0 | 0.9 avg (7 cases, 1-4), 2 varied | 9.83s | $0.0166 | 01eca8f* | `chat_tempo_short_warmup_negative` 0/3 |
+| gpt-5.6-luna | high | 5 | 11/11 | 81.8% | 89.1% | 1 | 0.9 avg (7 cases, 1-3), 3 varied | 6.77s | $0.0146 | cdaa5d2* | `chat_running_speed_trend_chart_text_independent` 4/5<br>`chat_tempo_short_warmup_negative` 0/5 |
 | **gpt-5.6-luna** (ships today) | high | 3 | 11/11 | 81.8% | 87.9% | 1 | - | 6.40s | $0.0108 | 760d8b6 | `chat_strategy_change_updates_weekly_plan` 2/3<br>`chat_tempo_short_warmup_negative` 0/3 |
 | **gpt-5.6-luna** (ships today) | high | 3 | 11/11 | 81.8% | 87.9% | 1 | - | 7.82s | $0.0132 | adc9c5e* | `chat_running_speed_trend_chart_text_independent` 2/3<br>`chat_tempo_short_warmup_negative` 0/3 |
 | **gpt-5.6-luna** (ships today) | high | 3 | 11/11 | 63.6% | 81.8% | 3 | 0.8 avg (7 cases, 1-3), 3 varied | 7.12s | $0.0168 | 2bfda76* | `chat_log_entry_token_format` 2/3<br>`chat_running_speed_trend_chart_text_independent` 2/3<br>`chat_strategy_change_updates_weekly_plan` 2/3<br>`chat_tempo_short_warmup_negative` 0/3 |
+| gpt-6-luna | high | 5 | 11/11 | 63.6% | 80.0% | 3 | 0.9 avg (7 cases, 1-3), 3 varied | 9.29s | $0.0068 | cdaa5d2* | `chat_log_entry_token_format` 3/5<br>`chat_running_speed_trend_chart_text_independent` 3/5<br>`chat_tempo_progressive_positive` 3/5<br>`chat_tempo_short_warmup_negative` 0/5 |
 | glm-5.3-flash | high | 3 | 11/11 | 63.6% | 66.7% | 1 | 1.2 avg (7 cases, up to 4), 2 varied | 33.14s | $0.0206 | 01eca8f* | `chat_running_speed_trend_chart_text_independent` 0/3<br>`chat_strategy_change_updates_weekly_plan` 0/3<br>`chat_tempo_progressive_positive` 1/3<br>`chat_tempo_short_warmup_negative` 0/3 |
 
 Leading row (`gpt-5.6-luna`, repeat=3) per-case stability:
@@ -59,9 +61,11 @@ The weekly report.
 | **claude-opus-5** (ships today) | high | 3 | 3/3 | 100.0% | 100.0% | 0 | - | 22.90s | $0.5787 | 760d8b6 | - |
 | gpt-5.6-luna | high | 3 | 3/3 | 66.7% | 88.9% | 1 | 1.7 avg (3 cases, 1-3) | 24.80s | $0.0141 | 01eca8f* | `insights_does_not_contradict_the_stated_hrv_trend` 2/3 |
 | glm-5.3-flash | high | 3 | 3/3 | 66.7% | 88.9% | 1 | 3.9 avg (3 cases, up to 7), 3 varied | 178.04s | $0.0190 | 01eca8f* | `insights_does_not_label_a_post_week_run_with_the_wrong_day` 2/3 |
+| gpt-6-luna | high | 5 | 3/3 | 66.7% | 73.3% | 1 | 1.2 avg (3 cases, 1-2), 1 varied | 38.56s | $0.0057 | cdaa5d2* | `insights_does_not_contradict_the_stated_hrv_trend` 1/5 |
 | **gpt-5.6-luna** (ships today) | high | 3 | 3/3 | 66.7% | 66.7% | 0 | 2.2 avg (3 cases, 1-6), 1 varied | 23.81s | $0.0139 | 2bfda76* | `insights_does_not_contradict_the_stated_hrv_trend` 0/3 |
 | claude-opus-5 | high | 5 | 3/3 | 33.3% | 86.7% | 2 | - | 24.54s | $0.5852 | 760d8b6* | `insights_does_not_contradict_the_stated_hrv_trend` 4/5<br>`insights_fits_a_phone_notification_w31` 4/5 |
 | gpt-5.6-luna | high | 5 | 3/3 | 33.3% | 73.3% | 2 | - | 19.58s | $0.0117 | 760d8b6* | `insights_does_not_contradict_the_stated_hrv_trend` 2/5<br>`insights_fits_a_phone_notification_w31` 4/5 |
+| gpt-5.6-luna | high | 5 | 3/3 | 33.3% | 73.3% | 2 | 2.2 avg (3 cases, 1-8), 1 varied | 28.22s | $0.0139 | cdaa5d2* | `insights_does_not_contradict_the_stated_hrv_trend` 3/5<br>`insights_fits_a_phone_notification_w31` 3/5 |
 | deepseek-v4-flash | high | 5 | 3/3 | 33.3% | 66.7% | 2 | - | 56.22s | $0.0076 | 760d8b6* | `insights_does_not_label_a_post_week_run_with_the_wrong_day` 3/5<br>`insights_fits_a_phone_notification_w31` 2/5 |
 | **claude-opus-5** (ships today) | high | 3 | 1/3 | 0.0% | 66.7% | 1 | - | 28.95s | $0.3072 | adc9c5e* | `insights_fits_a_phone_notification_w31` 2/3 |
 | deepseek-v4-pro | high | 5 | 3/3 | 0.0% | 53.3% | 2 | - | 56.88s | $0.0204 | 760d8b6* | `insights_does_not_contradict_the_stated_hrv_trend` 4/5<br>`insights_does_not_label_a_post_week_run_with_the_wrong_day` 4/5<br>`insights_fits_a_phone_notification_w31` 0/5 |
@@ -89,6 +93,9 @@ Short, timely messages during the day.
 | **gpt-5.6-luna** (ships today) | high | 3 | 6/6 | 100.0% | 100.0% | 0 | - | 4.51s | $0.0054 | 760d8b6 | - |
 | **gpt-5.6-luna** (ships today) | high | 3 | 6/6 | 100.0% | 100.0% | 0 | 0.1 avg (1 case, up to 1), 1 varied | 5.88s | $0.0084 | 2bfda76* | - |
 | **gpt-5.6-luna** (ships today) | high | 3 | 6/6 | 100.0% | 100.0% | 0 | - | 5.19s | $0.0095 | adc9c5e* | - |
+| gpt-6-luna | high | 5 | 6/6 | 83.3% | 90.0% | 1 | 0.6 avg (5 cases, up to 1), 3 varied | 22.49s | $0.0066 | cdaa5d2* | `nudge_respects_constraints_the_user_logged` 2/5 |
+| gpt-5.6-luna | high | 10 | 6/6 | 66.7% | 90.0% | 2 | 0.0 avg (1 case, up to 1), 1 varied | 6.97s | $0.0057 | cdaa5d2 | `nudge_respects_constraints_the_user_logged` 6/10<br>`nudge_writes_when_a_session_lands` 8/10 |
+| gpt-5.6-luna | high | 5 | 6/6 | 66.7% | 90.0% | 2 | none used | 6.22s | $0.0069 | cdaa5d2* | `nudge_respects_constraints_the_user_logged` 3/5<br>`nudge_writes_when_a_session_lands` 4/5 |
 | gpt-5.6-luna | high | 3 | 6/6 | 66.7% | 83.3% | 2 | none used | 5.49s | $0.0083 | 01eca8f* | `nudge_respects_constraints_the_user_logged` 1/3<br>`nudge_writes_when_a_session_lands` 2/3 |
 | glm-5.3-flash | high | 3 | 6/6 | 50.0% | 72.2% | 3 | 0.5 avg (4 cases, up to 2), 3 varied | 81.05s | $0.0207 | 01eca8f* | `nudge_says_a_missing_reading_is_missing` 2/3<br>`nudge_week_totals_match_logged_workouts_w21` 1/3<br>`nudge_writes_when_a_session_lands` 1/3 |
 

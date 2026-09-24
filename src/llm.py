@@ -267,15 +267,26 @@ def _is_zai_model(model: str) -> bool:
     return normalized.startswith("zai/") or normalized.startswith("openrouter/z-ai/")
 
 
-def _is_openai_reasoning_model(model: str) -> bool:
-    """Return True for OpenAI models that require an explicit reasoning effort.
+_OPENAI_REASONING_SERIES: tuple[str, ...] = ("gpt-5", "gpt-6")
+"""Name markers of the OpenAI reasoning series, matching litellm's own list."""
 
-    GPT-5.6 rejects a tool-carrying request unless ``reasoning_effort`` is
-    stated outright — omitting the parameter and passing ``None`` both fail with
-    the same 400. Chat sends tools on every turn, so a routed model matching
-    this is unreachable without the explicit value.
+
+def _is_openai_reasoning_model(model: str) -> bool:
+    """Return True for OpenAI reasoning-series models (GPT-5 and GPT-6).
+
+    Two rules hang off this. GPT-5.6 rejects a tool-carrying request unless
+    ``reasoning_effort`` is stated outright — omitting the parameter and passing
+    ``None`` both fail with the same 400 — so the effort is always sent. GPT-6
+    does not need that, but "no effort" still has to mean "reasoning off" for
+    both, or the extraction routes would silently start thinking. And both
+    reject any temperature but 1 once reasoning is engaged; see
+    ``_rejects_temperature``. A new series missing from this tuple escapes both
+    rules, and the second one fails over to another provider without a word.
     """
-    return _is_openai_model(model) and "gpt-5" in model.lower()
+    normalized = model.lower()
+    return _is_openai_model(model) and any(
+        marker in normalized for marker in _OPENAI_REASONING_SERIES
+    )
 
 
 def _rejects_temperature(
@@ -283,7 +294,8 @@ def _rejects_temperature(
 ) -> bool:
     """Return True when *model* would 400 on this temperature.
 
-    GPT-5 models accept only ``temperature=1`` once reasoning is engaged.
+    GPT-5 and GPT-6 models accept only ``temperature=1`` once reasoning is
+    engaged.
     Sending anything else raises before the request leaves the process, and
     because that surfaces as a BadRequest the chain answers from the fallback
     provider instead — the route still says Luna while DeepSeek writes every

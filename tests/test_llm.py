@@ -2115,6 +2115,39 @@ class TestCallWithRetry:
         assert "temperature" not in kwargs
         assert kwargs["reasoning_effort"] == "high"
 
+    def test_gpt6_attempt_gets_the_same_reasoning_rules_as_gpt5(self) -> None:
+        """GPT-6 rejects temperature under reasoning exactly as GPT-5 does.
+
+        The rules keyed on the substring "gpt-5", so a GPT-6 route escaped
+        both: temperature went through, litellm rejected it, and the call was
+        answered by DeepSeek under Luna's name.
+        """
+        kwargs = _completion_kwargs_for_model(
+            {
+                "model": "openai/gpt-6-luna",
+                "messages": [],
+                "max_tokens": 10,
+                "temperature": 0.0,
+                "reasoning_effort": "high",
+            },
+            "openai/gpt-6-luna",
+        )
+
+        assert "temperature" not in kwargs
+        assert kwargs["reasoning_effort"] == "high"
+
+        off = _completion_kwargs_for_model(
+            {
+                "model": "openai/gpt-6-luna",
+                "messages": [],
+                "max_tokens": 10,
+                "reasoning_effort": None,
+            },
+            "openai/gpt-6-luna",
+        )
+
+        assert off["reasoning_effort"] == "none"
+
     def test_gpt5_attempt_keeps_temperature_when_reasoning_is_off(self) -> None:
         """The rule is scoped to engaged reasoning, not to the model."""
         kwargs = _completion_kwargs_for_model(
