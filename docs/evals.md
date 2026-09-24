@@ -133,7 +133,7 @@ the failure surface migrates from mechanical to semantic as you converge.
 
 Omit `judge_assertions` and no judge call is made. The judge answers into a
 Pydantic schema; invalid structured output fails the case. Default judge model
-is `anthropic/claude-sonnet-4-6`, overridable with `ZDROWSKIT_EVAL_JUDGE_MODEL`.
+is `anthropic/claude-opus-5-5`, overridable with `ZDROWSKIT_EVAL_JUDGE_MODEL`.
 
 ## Running them
 

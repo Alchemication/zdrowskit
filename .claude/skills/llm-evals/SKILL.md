@@ -138,7 +138,7 @@ Execution rules:
 - Missing `judge_assertions` means no judge call.
 - Judge output uses a Pydantic response schema; invalid structured output fails the judge path.
 - All deterministic and judge assertions must pass for the case to pass.
-- Default judge model is `anthropic/claude-sonnet-4-6`; override with `ZDROWSKIT_EVAL_JUDGE_MODEL`.
+- Default judge model is `anthropic/claude-opus-5-5`; override with `ZDROWSKIT_EVAL_JUDGE_MODEL`.
 
 Template:
 

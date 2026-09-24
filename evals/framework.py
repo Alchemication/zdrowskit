@@ -44,9 +44,12 @@ DEFAULT_MODEL = llm.DEFAULT_MODEL
 DEFAULT_CACHE_PATH = Path(__file__).resolve().parent / ".cache.sqlite"
 EVAL_CACHE_SCHEMA_VERSION = 5
 EVAL_TEMPERATURE = 0.0
-DEFAULT_JUDGE_MODEL = "anthropic/claude-sonnet-4-6"
+DEFAULT_JUDGE_MODEL = "anthropic/claude-opus-5-5"
 EVAL_JUDGE_MAX_TOKENS = 800
-EVAL_JUDGE_TEMPERATURE = 0.0
+# Omitted rather than pinned to 0.0: the Opus 5.5 judge accepts only
+# temperature=1 and rejects anything else before the request is sent. Judge
+# verdicts are therefore sampled, which --repeat already measures.
+EVAL_JUDGE_TEMPERATURE: float | None = None
 PRODUCTION_EFFORT = "production"
 """Sentinel asking a case to inherit its route's reasoning effort.
 
