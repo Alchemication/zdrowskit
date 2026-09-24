@@ -149,8 +149,8 @@ uv run python -m evals.run --repeat 3 --concurrency 12 --record   # …and publi
 ```
 
 Some models reject the `temperature` the runner sends: Anthropic's thinking
-models accept only 1.0, and GPT-5 and GPT-6 models accept only 1.0 once
-reasoning is engaged. `call_llm` adjusts or omits the parameter for those routes
+models, and its newer models (Opus 5 and later) at all times, accept only 1.0,
+and GPT-5 and GPT-6 models accept only 1.0 once reasoning is engaged. `call_llm` adjusts or omits the parameter for those routes
 rather than letting the call fail, so a comparison no longer has to remember
 `--no-temperature`. Pass it anyway when you want the parameter left out
 entirely.

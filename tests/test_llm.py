@@ -2194,6 +2194,62 @@ class TestCallWithRetry:
         assert "temperature" not in kwargs
         assert kwargs["reasoning_effort"] == "high"
 
+    @pytest.mark.parametrize(
+        "model",
+        ["anthropic/claude-opus-5-5", "anthropic/claude-opus-5"],
+    )
+    def test_anthropic_model_without_sampling_drops_temperature(
+        self, model: str
+    ) -> None:
+        """Opus 5.x rejects temperature=0.0 even with reasoning off.
+
+        litellm raises before the request is sent, and the chain would answer
+        from the fallback provider under the requested model's name.
+        """
+        kwargs = _completion_kwargs_for_model(
+            {"model": model, "messages": [], "max_tokens": 10, "temperature": 0.0},
+            model,
+        )
+
+        assert "temperature" not in kwargs
+
+        params = _effective_params_for_model(
+            model=model,
+            max_tokens=10,
+            temperature=0.0,
+            reasoning_effort=None,
+            response_format=None,
+            extra_body=None,
+            requested_model=model,
+        )
+
+        assert params["temperature_omitted_for_model"] is True
+
+    def test_anthropic_model_with_sampling_keeps_temperature(self) -> None:
+        kwargs = _completion_kwargs_for_model(
+            {
+                "model": "anthropic/claude-sonnet-4-6",
+                "messages": [],
+                "max_tokens": 10,
+                "temperature": 0.0,
+            },
+            "anthropic/claude-sonnet-4-6",
+        )
+
+        assert kwargs["temperature"] == 0.0
+
+    def test_litellm_sampling_check_matches_the_models_we_route(self) -> None:
+        """Pins the private litellm check _rejects_temperature relies on.
+
+        If an upgrade renames it or changes its answers, this fails here
+        instead of a route silently falling back in production.
+        """
+        from litellm.llms.anthropic.common_utils import AnthropicModelInfo
+
+        assert AnthropicModelInfo._supports_sampling_params("claude-opus-5-5") is False
+        assert AnthropicModelInfo._supports_sampling_params("claude-opus-5") is False
+        assert AnthropicModelInfo._supports_sampling_params("claude-sonnet-4-6") is True
+
     def test_gpt6_attempt_gets_the_same_reasoning_rules_as_gpt5(self) -> None:
         """GPT-6 rejects temperature under reasoning exactly as GPT-5 does.
 

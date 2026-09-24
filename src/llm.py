@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import litellm
+from litellm.llms.anthropic.common_utils import AnthropicModelInfo
 from pydantic import BaseModel
 
 from config import (
@@ -302,7 +303,18 @@ def _rejects_temperature(
     word. Telegram `/models` offers 0.0, 0.3 and 0.7, so this is reachable
     without touching any code. Dropping the parameter keeps the requested model
     answering, which is the lesser of the two wrong outcomes.
+
+    Anthropic's newer models (Opus 5, Opus 5.5, Sonnet 5, Fable) accept only
+    ``temperature=1`` whether or not they are thinking, and fail the same way.
+    Which ones is litellm's decision — it is litellm that raises — so this asks
+    litellm, passing the bare model name as its request path does; with the
+    ``anthropic/`` prefix still on, its lookup misses and answers True.
     """
+    if _is_anthropic_model(model):
+        bare_model = model.rsplit("/", 1)[-1]
+        return temperature != 1.0 and not AnthropicModelInfo._supports_sampling_params(
+            bare_model
+        )
     if not _is_openai_reasoning_model(model):
         return False
     if reasoning_effort in (None, _OPENAI_REASONING_OFF):
