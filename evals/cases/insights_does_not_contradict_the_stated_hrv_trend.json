@@ -871,7 +871,8 @@
   "judge_assertions": [
     {
       "name": "does_not_call_an_improving_hrv_trend_flat",
-      "statement": "The report does not describe HRV as flat, unchanged, stagnant, or static. The week summary supplied to the writer states that the HRV trend is improving. Not commenting on the HRV trend at all satisfies this; describing it as improving also satisfies it. Only language asserting no change or a decline is the failure."
+      "statement": "The week summary states the HRV trend is improving: across the week's days HRV rose, from about 40 ms early in the week to 57 ms by Sunday. The report must not describe HRV's direction — how it moved through the week or over recent weeks — as flat, unchanged, stagnant or declining, as in 'HRV, which has been broadly flat'. Comparing the week's average level with a baseline or with last week is a different claim and is fine, including saying the average was close to its baseline (48.1 vs 48.2 ms) or up on last week. Describing the rise, or not mentioning HRV, also satisfies this."
     }
-  ]
+  ],
+  "notes": "Judge statement revised 2026-09-25: the original forbade any 'unchanged' wording, which also failed a true level claim — the week's average (48.1 ms) sat on the 30-day baseline (48.2 ms) — and the case swung between 0 and 100% on which comparison the writer chose. The defect it was seeded from is a direction claim about the within-week trend, so the statement now targets that and allows level comparisons."
 }
