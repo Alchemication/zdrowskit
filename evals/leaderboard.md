@@ -11,7 +11,7 @@ The most recent scored run for each feature, on the model it actually runs on, a
 | chat | gpt-5.6-luna (high) | 12/12 | 83.3% | 88.9% | 2 | 3 | 0.9 avg (8 cases, 1-3), 3 varied | 9.31s | $0.0181 | a722d28 | 2026-09-25 |
 | checkin | gpt-5.6-luna | 1/1 | 100.0% | 100.0% | 0 | 3 | - | 1.09s | $0.0002 | 51fb250 | 2026-09-25 |
 | coach | gpt-5.6-luna (high) | 6/6 | 83.3% | 94.4% | 1 | 3 | 0.8 avg (5 cases, up to 1), 1 varied | 15.15s | $0.0175 | a722d28 | 2026-09-25 |
-| insights | gpt-5.6-luna (high) | 7/7 | 71.4% | 85.7% | 2 | 3 | 3.2 avg (7 cases, 1-6), 5 varied | 32.26s | $0.0378 | a722d28 | 2026-09-25 |
+| insights | gpt-5.6-luna (high) | 7/7 | 100.0% | 100.0% | 0 | 3 | 3.0 avg (7 cases, 1-8), 4 varied | 26.83s | $0.0335 | 0406b8c | 2026-09-25 |
 | memory | gpt-5.6-luna | 3/3 | 100.0% | 100.0% | 0 | 3 | - | 1.39s | $0.0007 | a722d28 | 2026-09-25 |
 | nudge | gpt-5.6-luna (high) | 11/11 | 100.0% | 100.0% | 0 | 3 | none used | 4.91s | $0.0070 | 51fb250* | 2026-09-25 |
 | plan_frame | gpt-5.6-luna | 4/4 | 100.0% | 100.0% | 0 | 3 | - | 1.23s | $0.0007 | a722d28 | 2026-09-25 |
@@ -68,6 +68,7 @@ The weekly report.
 
 | Model | Reasoning | Repeat | Cases | Strict | Attempt | Flaky | Tool calls | Avg Latency | Cost/run | Commit | Not passing |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
+| **gpt-5.6-luna** (ships today) | high | 3 | 7/7 | 100.0% | 100.0% | 0 | 3.0 avg (7 cases, 1-8), 4 varied | 26.83s | $0.0335 | 0406b8c | - |
 | **claude-opus-5** (ships today) | high | 3 | 3/7 | 100.0% | 100.0% | 0 | - | 22.90s | $0.5787 | 760d8b6 | - |
 | **gpt-5.6-luna** (ships today) | high | 3 | 7/7 | 71.4% | 85.7% | 2 | 3.2 avg (7 cases, 1-6), 5 varied | 32.26s | $0.0378 | a722d28 | `insights_does_not_reissue_last_weeks_priority` 1/3<br>`insights_does_not_restate_the_progress_strip` 2/3 |
 | gpt-5.6-luna | high | 3 | 3/7 | 66.7% | 88.9% | 1 | 1.7 avg (3 cases, 1-3) | 24.80s | $0.0141 | 01eca8f* | `insights_does_not_contradict_the_stated_hrv_trend` 2/3 |
@@ -81,7 +82,7 @@ The weekly report.
 | **claude-opus-5** (ships today) | high | 3 | 1/7 | 0.0% | 66.7% | 1 | - | 28.95s | $0.3072 | adc9c5e* | `insights_fits_a_phone_notification_w31` 2/3 |
 | deepseek-v4-pro | high | 5 | 3/7 | 0.0% | 53.3% | 2 | - | 56.88s | $0.0204 | 760d8b6* | `insights_does_not_contradict_the_stated_hrv_trend` 4/5<br>`insights_does_not_label_a_post_week_run_with_the_wrong_day` 4/5<br>`insights_fits_a_phone_notification_w31` 0/5 |
 
-Leading row (`claude-opus-5`) passed every case on every attempt.
+Leading row (`gpt-5.6-luna`) passed every case on every attempt.
 
 ## memory · 3 cases
 
