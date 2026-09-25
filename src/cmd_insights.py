@@ -276,6 +276,35 @@ def cmd_insights(
         unestablished=unestablished_metrics(conn, METRIC_TRUST_WINDOW_DAYS),
     )
 
+    trace_id = create_llm_trace(
+        conn,
+        "insights",
+        metadata={"week": REPORT_WEEK, "months": args.months},
+    )
+
+    # The progress strip sits above the report in the delivered message. It is
+    # measured by code and never reworded; the writer is shown it only so the
+    # report does not open by restating the same counts.
+    report_day = _report_day(health_data)
+    frame = resolve_plan_frame(
+        conn,
+        me=context.get("me"),
+        log=context.get("log"),
+        history=context.get("history"),
+        today=report_day.isoformat(),
+        trace_id=trace_id,
+        model_prefs_path=getattr(args, "model_prefs_path", None),
+    )
+    progress_block = weekly_progress_block(
+        conn,
+        strategy_md=context.get("strategy"),
+        today=report_day,
+        trace_id=trace_id,
+        model_prefs_path=getattr(args, "model_prefs_path", None),
+        frame=frame,
+    )
+    context["progress_strip"] = progress_block or "(no progress strip this week)"
+
     try:
         messages = build_messages(
             context,
@@ -288,12 +317,6 @@ def cmd_insights(
     except (KeyError, ValueError) as e:
         logger.error("Failed to render insights_prompt.md template: %s", e)
         sys.exit(1)
-
-    trace_id = create_llm_trace(
-        conn,
-        "insights",
-        metadata={"week": REPORT_WEEK, "months": args.months},
-    )
 
     from tools import execute_run_sql, run_sql_tool
 
@@ -539,28 +562,9 @@ def cmd_insights(
 
     # The weekly report is where the full strip earns its space: it arrives
     # once a week, it is the message the week is actually reviewed in, and it
-    # is the only surface with room for three bars above the analysis. Built
-    # after verification and after memory extraction — these are measured
-    # numbers, so no model gets to reword them and none of them belongs in
-    # history.md.
-    report_day = _report_day(health_data)
-    frame = resolve_plan_frame(
-        conn,
-        me=context.get("me"),
-        log=context.get("log"),
-        history=context.get("history"),
-        today=report_day.isoformat(),
-        trace_id=trace_id,
-        model_prefs_path=getattr(args, "model_prefs_path", None),
-    )
-    progress_block = weekly_progress_block(
-        conn,
-        strategy_md=context.get("strategy"),
-        today=report_day,
-        trace_id=trace_id,
-        model_prefs_path=getattr(args, "model_prefs_path", None),
-        frame=frame,
-    )
+    # is the only surface with room for three bars above the analysis. It is
+    # attached here, after verification and memory extraction — measured
+    # numbers, so no model rewords them and none of them belongs in history.md.
     delivered_report = (
         f"{progress_block}\n\n{visible_report}" if progress_block else visible_report
     )
