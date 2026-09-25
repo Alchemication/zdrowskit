@@ -49,7 +49,7 @@ from config import (
     CHALLENGE_PARTIAL_SHARE,
     CHALLENGE_PROPOSAL_TTL_DAYS,
 )
-from weekly_progress import measure_target, ring_label
+from weekly_progress import measure_target, ring_label, workouts_count_toward
 from weekly_targets import (
     SPEC_BY_KEY,
     TARGET_SPECS,
@@ -555,34 +555,6 @@ def describe_active(conn: sqlite3.Connection, *, today: date) -> str | None:
 NO_CHALLENGE_NEWS = "(no challenge news in this sync — do not mention any challenge)"
 
 
-def _sync_moves_challenge(
-    conn: sqlite3.Connection, challenge: Challenge, workout_ids: set[str]
-) -> bool:
-    """Return whether any workout from this sync counts toward the challenge."""
-    if challenge.metric not in {"sessions_week", "distance_km_week"} or not workout_ids:
-        return False
-    ids = sorted(workout_ids)
-    placeholders = ", ".join("?" for _ in ids)
-    rows = conn.execute(
-        f"SELECT type, category, counts_as_lift, gpx_distance_km FROM workout_all "
-        f"WHERE start_utc IN ({placeholders})",  # noqa: S608
-        ids,
-    ).fetchall()
-    wanted = challenge.category
-    for row in rows:
-        if challenge.metric == "distance_km_week" and not row["gpx_distance_km"]:
-            continue
-        if wanted == "any":
-            return True
-        if wanted == "lift" and row["counts_as_lift"]:
-            return True
-        if wanted.startswith("type:") and row["type"] == wanted[len("type:") :]:
-            return True
-        if wanted not in {"lift", "any"} and row["category"] == wanted:
-            return True
-    return False
-
-
 def nudge_challenge_text(
     conn: sqlite3.Connection, *, workout_ids: set[str], today: date
 ) -> str:
@@ -601,7 +573,7 @@ def nudge_challenge_text(
         return NO_CHALLENGE_NEWS
     if date.fromisoformat(active.start_week) > today:
         return NO_CHALLENGE_NEWS
-    moved = _sync_moves_challenge(conn, active, workout_ids)
+    moved = workouts_count_toward(conn, active.stored_target, workout_ids)
     week_ending = active.metric not in {"sessions_week", "distance_km_week"} and (
         6 - today.weekday() < CHALLENGE_NUDGE_WEEK_END_DAYS
     )

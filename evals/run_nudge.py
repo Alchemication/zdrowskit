@@ -25,6 +25,7 @@ from challenges import NO_CHALLENGE_NEWS  # noqa: E402
 from run_comparison import NO_RUN_COMPARISON  # noqa: E402
 from standouts import NO_STANDOUT_NOTICE  # noqa: E402
 from tools import run_sql_tool  # noqa: E402
+from weekly_progress import NO_TARGET_NEWS  # noqa: E402
 
 # Context keys cmd_nudge injects beyond the context files themselves. A nudge
 # reacts to what just happened and to what it already said, so an eval that
@@ -37,6 +38,7 @@ _NUDGE_CONTEXT_DEFAULTS = {
     "standout": NO_STANDOUT_NOTICE,
     "run_comparison": NO_RUN_COMPARISON,
     "challenge": NO_CHALLENGE_NEWS,
+    "target_news": NO_TARGET_NEWS,
 }
 
 

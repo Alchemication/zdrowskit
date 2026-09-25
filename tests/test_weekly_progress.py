@@ -967,3 +967,101 @@ class TestNeutralProgress:
             [ring], week_start=WEEK_START, week_complete=True
         )
         assert "10 short" in completed
+
+
+class TestTargetsCompletedBy:
+    """The nudge learns in code, not from prose, which target a sync finished."""
+
+    WED_RUN = "2026-09-02T07:00:00Z"
+    TUE_LIFT = "2026-09-01T17:00:00Z"
+
+    @pytest.fixture(autouse=True)
+    def _stored_targets(
+        self, in_memory_db: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self.strategy = "## Goals\n- 2 runs + 2 lifts a week\n"
+        monkeypatch.setattr(
+            "weekly_targets.derive_targets",
+            lambda *a, **k: pytest.fail("cached targets must not re-derive"),
+        )
+        save_targets(
+            in_memory_db,
+            WEEK_START,
+            [
+                _target("sessions_week", 2, category="run"),
+                _target("sessions_week", 2, category="lift"),
+            ],
+        )
+        digest = goals_digest(extract_goal_text(self.strategy))
+        in_memory_db.execute("UPDATE weekly_target SET strategy_hash = ?", (digest,))
+        in_memory_db.commit()
+        _seed_week(in_memory_db)
+
+    def _news(self, conn: sqlite3.Connection, ids: set[str]) -> str:
+        from weekly_progress import targets_completed_by
+
+        return targets_completed_by(
+            conn, strategy_md=self.strategy, workout_ids=ids, today=WEDNESDAY
+        )
+
+    def test_the_run_that_completes_the_runs_target_is_news(
+        self, in_memory_db: sqlite3.Connection
+    ) -> None:
+        assert self._news(in_memory_db, {self.WED_RUN}) == (
+            "- Runs: 2/2 sessions — completed by this sync."
+        )
+
+    def test_a_workout_that_leaves_its_target_open_is_not_news(
+        self, in_memory_db: sqlite3.Connection
+    ) -> None:
+        from weekly_progress import NO_TARGET_NEWS
+
+        assert self._news(in_memory_db, {self.TUE_LIFT}) == NO_TARGET_NEWS
+
+    def test_no_workouts_no_news(self, in_memory_db: sqlite3.Connection) -> None:
+        from weekly_progress import NO_TARGET_NEWS
+
+        assert self._news(in_memory_db, set()) == NO_TARGET_NEWS
+
+
+class TestWorkoutsCountToward:
+    def test_counting_rules(self, in_memory_db: sqlite3.Connection) -> None:
+        from weekly_progress import workouts_count_toward
+
+        _seed_week(in_memory_db)
+        store_snapshots(
+            in_memory_db,
+            [
+                DailySnapshot(
+                    date="2026-09-03",
+                    workouts=[
+                        WorkoutSnapshot(
+                            type="Functional Strength Training",
+                            category="lift",
+                            start_utc="2026-09-03T07:00:00Z",
+                            duration_min=9.0,
+                        ),
+                        WorkoutSnapshot(
+                            type="Treadmill Run",
+                            category="run",
+                            start_utc="2026-09-03T18:00:00Z",
+                            duration_min=30.0,
+                        ),
+                    ],
+                )
+            ],
+        )
+        short_lift = {"2026-09-03T07:00:00Z"}
+        treadmill = {"2026-09-03T18:00:00Z"}
+        lifts = _target("sessions_week", 2, category="lift")
+        runs = _target("sessions_week", 3, category="run")
+        run_km = _target("distance_km_week", 15, category="run")
+        sleep = _target("sleep_nights_week", 5, threshold=7)
+
+        assert not workouts_count_toward(in_memory_db, lifts, short_lift)
+        assert workouts_count_toward(in_memory_db, runs, treadmill)
+        assert not workouts_count_toward(in_memory_db, run_km, treadmill)
+        assert not workouts_count_toward(in_memory_db, sleep, treadmill)
+        assert workouts_count_toward(
+            in_memory_db, _target("sessions_week", 5, category="any"), short_lift
+        )

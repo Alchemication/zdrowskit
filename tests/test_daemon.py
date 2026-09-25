@@ -4485,3 +4485,51 @@ class TestMissingDayNote:
         assert missing_day_note("2026-09-20").startswith(
             "Data note: Sunday 20 Sep, the last day of the reported week"
         )
+
+
+class TestRecentNudgesWithinWindow:
+    NOW = datetime(2026, 9, 25, 12, 0)
+
+    def _entry(self, days_ago: float) -> dict:
+        ts = (self.NOW - timedelta(days=days_ago)).isoformat()
+        return {"ts": ts, "trigger": "new_data", "text": f"{days_ago}d"}
+
+    def test_keeps_the_whole_week(self) -> None:
+        from daemon_runners import recent_nudges_within_window
+
+        entries = [self._entry(d) for d in (0.1, 1, 2, 3, 4, 5, 6.5, 8, 9)]
+
+        kept = recent_nudges_within_window(entries, self.NOW)
+
+        assert [e["text"] for e in kept] == [
+            "0.1d",
+            "1d",
+            "2d",
+            "3d",
+            "4d",
+            "5d",
+            "6.5d",
+        ]
+
+    def test_a_quiet_week_still_keeps_the_last_three(self) -> None:
+        """Fewer nudges must not mean less history than the old last-three rule."""
+        from daemon_runners import recent_nudges_within_window
+
+        entries = [self._entry(d) for d in (2, 10, 15, 20)]
+
+        kept = recent_nudges_within_window(entries, self.NOW)
+
+        assert [e["text"] for e in kept] == ["2d", "10d", "15d"]
+
+    def test_capped_and_unreadable_timestamps_dropped(self) -> None:
+        from config import RECENT_NUDGES_MAX
+        from daemon_runners import recent_nudges_within_window
+
+        entries = [{"ts": "not a date", "text": "x"}] + [
+            self._entry(d / 10) for d in range(30)
+        ]
+
+        kept = recent_nudges_within_window(entries, self.NOW)
+
+        assert len(kept) == RECENT_NUDGES_MAX
+        assert all(e["text"] != "x" for e in kept)

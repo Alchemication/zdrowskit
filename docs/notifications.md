@@ -472,6 +472,23 @@ database and end on their own.
 
 All tunables live in `src/config.py`.
 
+## When a Nudge Speaks
+
+A logged session is not news by itself — your phone already showed it — and
+neither is the advice that follows almost any session ("rest tomorrow", "keep it
+easy"). A data-sync nudge writes only when the sync brings something the phone
+cannot tell you:
+
+- a run that sits near the top or bottom of your similar runs (below),
+- challenge news,
+- a weekly target the sync just completed — computed by code: the target is
+  now met and a workout from this sync counts toward it,
+- recovery or sleep bad enough to change the next step,
+- a Standout, or a reply to something you logged or edited.
+
+Most syncs are therefore silent. Advice, when there is any, has to tell you
+something you would not do anyway.
+
 ## How a New Run Compares
 
 When a sync brings in a run, the nudge is handed a computed comparison with the
@@ -532,8 +549,13 @@ The coaching and content LLMs share enough recent output to avoid redundancy:
 - **Memory** reads the existing history so it does not store the same thread
   twice.
 - **Coach** sees recent nudges sent.
-- **Nudge** sees last 3 nudges + last coach review summary.
-- **Chat** sees last 3 nudges + last coach review summary.
+- **Nudge** sees recent nudges + last coach review summary.
+- **Chat** sees recent nudges + last coach review summary.
+- "Recent nudges" means every nudge delivered in the last
+  `RECENT_NUDGES_WINDOW_DAYS`, never fewer than `RECENT_NUDGES_MIN` however old
+  and never more than `RECENT_NUDGES_MAX`. The nudge's redundancy check covers
+  the whole window, so advice given on Tuesday is not repeated after Thursday's
+  session.
 - The coach review summary is dropped once it is older than
   `COACH_SUMMARY_MAX_AGE_DAYS` (`src/config.py`). The weekly coach usually
   answers SKIP, so without the limit one old review would stand in as current

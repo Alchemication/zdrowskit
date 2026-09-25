@@ -648,6 +648,28 @@ report with reasoning on runs one to two minutes — and a request that has not
 answered by then hands over to the fallback model instead of retrying the same
 one.
 """
+RECENT_NUDGES_WINDOW_DAYS: int = 7
+"""How far back the nudge, chat and coach see the nudges already delivered.
+
+It used to be the last three. At about one nudge a day that is three days, so a
+recommendation repeated across a fortnight — "keep tomorrow recovery-only" on
+three days out of four in August — was invisible to the model repeating it. A
+week covers the rhythm of a training week, which is where repetition shows.
+"""
+RECENT_NUDGES_MIN: int = 3
+"""Delivered nudges always kept, however old, even when the window holds fewer.
+
+Once receipts stop, a quiet week may hold one nudge or none; the window alone
+would then show less history than the old last-three rule did. The three most
+recent stay visible regardless, so a quiet week still knows what was last said.
+"""
+RECENT_NUDGES_MAX: int = 12
+"""Cap on the delivered nudges kept within the window, newest first.
+
+Nudges are rationed to a few a day, so a week rarely holds more than ten; the
+cap only stops an unusually busy week from bloating every prompt that shows
+them.
+"""
 COACH_SUMMARY_MAX_AGE_DAYS: int = 14
 """Age after which the last coach review is no longer shown as current context.
 

@@ -26,6 +26,9 @@ from config import (
     COACH_SUPPRESSION_S,
     MAX_REPORT_ATTEMPTS_PER_DAY,
     MIN_NUDGE_INTERVAL_S,
+    RECENT_NUDGES_MAX,
+    RECENT_NUDGES_MIN,
+    RECENT_NUDGES_WINDOW_DAYS,
     REPORT_MISSING_DAY_CUTOFF_HHMM,
 )
 from daemon_data import changed_workout_ids, data_snapshot
@@ -38,6 +41,34 @@ if TYPE_CHECKING:
     from daemon import ProfileRuntime
 
 logger = logging.getLogger(__name__)
+
+
+def recent_nudges_within_window(entries: list[dict], now: datetime) -> list[dict]:
+    """Keep delivered nudges from the last ``RECENT_NUDGES_WINDOW_DAYS``, newest first.
+
+    Never fewer than ``RECENT_NUDGES_MIN``: in a quiet week the most recent
+    older nudges are kept too. Entries without a readable timestamp are dropped.
+
+    Args:
+        entries: Nudge entries with an ISO ``ts``, newest first.
+        now: The current time, naive local like the stored timestamps.
+
+    Returns:
+        Between ``RECENT_NUDGES_MIN`` (when that many exist) and
+        ``RECENT_NUDGES_MAX`` entries.
+    """
+    cutoff = now - timedelta(days=RECENT_NUDGES_WINDOW_DAYS)
+    kept: list[dict] = []
+    for entry in entries:
+        try:
+            ts = datetime.fromisoformat(str(entry.get("ts", "")))
+        except ValueError:
+            continue
+        if ts.tzinfo is not None:
+            ts = ts.astimezone().replace(tzinfo=None)
+        if ts >= cutoff or len(kept) < RECENT_NUDGES_MIN:
+            kept.append(entry)
+    return kept[:RECENT_NUDGES_MAX]
 
 
 class DaemonRunnerHandler:
@@ -193,7 +224,7 @@ class DaemonRunnerHandler:
         entry = {"ts": now.isoformat(), "trigger": trigger, "text": text}
         recent: list[dict] = self._d._state.get("recent_nudges", [])
         recent.insert(0, entry)
-        self._d._state["recent_nudges"] = recent[:3]  # Keep last 3
+        self._d._state["recent_nudges"] = recent_nudges_within_window(recent, now)
 
         self._d._save_state()
 

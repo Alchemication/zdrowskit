@@ -51,6 +51,7 @@ from store import create_llm_trace, open_db
 from plan_frame import resolve_plan_frame
 from weekly_progress import (
     record_progress_line_shown,
+    targets_completed_by,
     weekly_progress_nudge_line,
 )
 
@@ -200,6 +201,14 @@ def cmd_nudge(
     except sqlite3.Error as exc:
         logger.warning("Run comparison failed; nudging without it: %s", exc)
         context["run_comparison"] = NO_RUN_COMPARISON
+    context["target_news"] = targets_completed_by(
+        conn,
+        strategy_md=context.get("strategy"),
+        workout_ids=eligible_workout_ids,
+        today=datetime.now().date(),
+        trace_id=trace_id,
+        model_prefs_path=getattr(args, "model_prefs_path", None),
+    )
     try:
         context["challenge"] = nudge_challenge_text(
             conn, workout_ids=eligible_workout_ids, today=datetime.now().date()

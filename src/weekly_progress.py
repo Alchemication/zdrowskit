@@ -28,6 +28,8 @@ Public API:
     pick_headline_ring      — the one ring a nudge should lead with.
     weekly_progress_block   — end-to-end block for a report, or None.
     weekly_progress_nudge_line — the nudge's line, when it has news.
+    workouts_count_toward   — whether workouts move a session or distance target.
+    targets_completed_by    — the targets a sync just completed, for the nudge.
     record_progress_line_shown — mark a line delivered, after it is sent.
 """
 
@@ -539,6 +541,99 @@ def _rings_for(
         model_prefs_path=model_prefs_path,
     )
     return measure_week(conn, targets, week_start=week_start, today=today), week_start
+
+
+NO_TARGET_NEWS = "(no weekly target was completed by this sync)"
+
+
+def workouts_count_toward(
+    conn: sqlite3.Connection, item: StoredTarget, workout_ids: set[str]
+) -> bool:
+    """Return whether any of these workouts counts toward a session or distance target.
+
+    Uses the same definitions as the measurement: a strength session is what
+    ``counts_as_lift`` says, a distance target needs a GPS distance, and a
+    ``type:`` category matches the recorded workout type. Other metrics — sleep
+    nights, step days, exercise minutes — are not moved by a workout and return
+    False.
+
+    Args:
+        conn: Open database connection.
+        item: The target, from the weekly targets or a challenge.
+        workout_ids: ``start_utc`` of the workouts in question.
+
+    Returns:
+        True when at least one of them counts.
+    """
+    key = item.spec.key
+    if key not in {"sessions_week", "distance_km_week"} or not workout_ids:
+        return False
+    ids = sorted(workout_ids)
+    placeholders = ", ".join("?" for _ in ids)
+    rows = conn.execute(
+        f"SELECT type, category, counts_as_lift, gpx_distance_km FROM workout_all "
+        f"WHERE start_utc IN ({placeholders})",  # noqa: S608
+        ids,
+    ).fetchall()
+    wanted = item.category
+    activity_type = activity_type_of(wanted)
+    for row in rows:
+        if key == "distance_km_week" and not row["gpx_distance_km"]:
+            continue
+        if wanted == "any":
+            return True
+        if activity_type is not None:
+            if row["type"] == activity_type:
+                return True
+            continue
+        if wanted == "lift":
+            if row["counts_as_lift"]:
+                return True
+            continue
+        if row["category"] == wanted:
+            return True
+    return False
+
+
+def targets_completed_by(
+    conn: sqlite3.Connection,
+    *,
+    strategy_md: str | None,
+    workout_ids: set[str],
+    today: date,
+    trace_id: int | None = None,
+    model_prefs_path: Path | None = None,
+) -> str:
+    """Describe the weekly targets this sync just completed, for the nudge.
+
+    A target is just completed when it is now met and a workout from this sync
+    counts toward it. That is news a nudge can carry; the model cannot work it
+    out from strategy prose, which does not say what the weekly bars count.
+
+    Returns:
+        One line per completed target, or ``NO_TARGET_NEWS``.
+    """
+    if not workout_ids:
+        return NO_TARGET_NEWS
+    try:
+        rings, _ = _rings_for(
+            conn,
+            strategy_md=strategy_md,
+            today=today,
+            trace_id=trace_id,
+            model_prefs_path=model_prefs_path,
+        )
+        lines = [
+            f"- {ring_label(ring.target)}: {_value_text(ring)} "
+            f"{ring.target.spec.unit} — completed by this sync."
+            for ring in rings
+            if ring.status == STATUS_DONE
+            and workouts_count_toward(conn, ring.target, workout_ids)
+        ]
+    except Exception as exc:  # noqa: BLE001 - never block a notification
+        logger.warning("Completed-target check failed: %s", exc)
+        return NO_TARGET_NEWS
+    return "\n".join(lines) or NO_TARGET_NEWS
 
 
 def weekly_progress_block(

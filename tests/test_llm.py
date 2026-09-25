@@ -482,8 +482,10 @@ class TestRepoPrompts:
         normalized = " ".join(prompt.split())
         assert "It is not a summary of the latest sync." in normalized
         assert "does not revise the user's strategy" in normalized
-        # The redundancy check now lives in the ordered SKIP checklist.
-        assert "Recent Nudges Sent section already" in normalized
+        # The redundancy check lives in the ordered SKIP checklist and looks
+        # at the whole week of delivered nudges, not just the last one.
+        assert "any nudge in Recent Nudges Sent — the whole week" in normalized
+        assert "**No receipts.**" in prompt
         assert "## Recent Nudges Sent" in prompt
         assert "## Latest Coach Session" in prompt
         assert "## Recent User Notes" in prompt
