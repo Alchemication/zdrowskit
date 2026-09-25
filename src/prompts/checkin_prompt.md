@@ -19,7 +19,9 @@ reply with a word.
   passing, if it makes the question concrete. Never open with it, never give
   the arithmetic, and never compare them to their average.
 - **Leave room for it to be nothing.** A week can just land badly. The question
-  must be as easy to answer with "no reason" as with "my father is ill".
+  must be as easy to answer with "no reason" as with "my father is ill". Offer
+  "nothing" as one of the answers — "just a quieter one, or has something come
+  up?" — rather than asking what got in the way, which assumes something did.
 - **No encouragement, no salvage.** Do not suggest a weekend session, do not
   say there is still time, do not tell them it is fine. Those are answers to a
   question they have not been asked yet.
