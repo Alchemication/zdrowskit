@@ -387,6 +387,7 @@ class ProfileRuntime:
         )
         from daemon_add_flow import AddFlowHandler
         from daemon_drive import GoogleDrivePollHandler
+        from daemon_coach_flow import CoachScheduleFlow
         from daemon_model_flow import ModelFlowHandler
         from daemon_notify_flow import NotifyFlowHandler
         from daemon_runners import DaemonRunnerHandler
@@ -395,6 +396,7 @@ class ProfileRuntime:
         self._add_flow = AddFlowHandler(self)
         self._notify_flow = NotifyFlowHandler(self)
         self._model_flow = ModelFlowHandler(self)
+        self._coach_flow = CoachScheduleFlow(self)
         self._ingest_health = IngestHealthHandler(self)
         self._chat = TelegramChatHandler(self)
         self._runners = DaemonRunnerHandler(self)
@@ -438,6 +440,7 @@ class ProfileRuntime:
         from notification_prefs import (
             active_temporary_mutes,
             effective_notification_prefs,
+            schedule_text,
         )
         from store import load_date_range, open_db
 
@@ -472,12 +475,8 @@ class ProfileRuntime:
                 f"{'on' if effective['nudges']['enabled'] else 'off'} "
                 f"(not before {effective['nudges']['earliest_time']})"
             ),
-            (
-                "- Weekly report: "
-                f"{'on' if effective['weekly_insights']['enabled'] else 'off'} "
-                f"({effective['weekly_insights']['weekday'].title()} "
-                f"{effective['weekly_insights']['time']})"
-            ),
+            f"- Weekly report: {schedule_text(effective, 'weekly_insights')}",
+            f"- Weekly coach review: {schedule_text(effective, 'weekly_coach')}",
         ]
 
         telegram = self._chat.telegram_status()
@@ -1118,6 +1117,10 @@ class ProfileRuntime:
 
         if scheduled_report_due(prefs, "weekly_insights", now=now):
             self._runners._run_weekly_report()
+        try:
+            self._coach_flow.check(now, prefs)
+        except Exception:
+            logger.warning("Scheduled coach check failed", exc_info=True)
 
         self._ingest_health.check(prefs)
         self._maybe_send_checkin(prefs, now=now)

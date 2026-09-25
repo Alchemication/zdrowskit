@@ -8,7 +8,7 @@ do not call an LLM.
 |---------|---------|---------|-----------|--------|-------|----------------|
 | **Insights** | Full weekly report | Scheduled, default Monday 10:00, or manual `/review` | Weekly when scheduled; manual on demand | A single Telegram message | `run_sql` | Exactly 1 `<chart>`, skipped when it would mislead |
 | **Memory** | Decides what carries forward from an insights report | After every scheduled or manual insights report | Same as insights | A couple of bullets | none | Extracted bullets stored under the week in `history.md`; never sent to the user |
-| **Coach** | Strategy review, only when proposals exist | After scheduled insights, or manual `/coach` | Weekly when scheduled; manual on demand | A few paragraphs | `run_sql`, `update_context` for `strategy` only | `SKIP` if no changes warranted, unless the goal check requires a review; bundled message with inline Accept/Reject buttons per edit |
+| **Coach** | Strategy review, only when proposals exist | Scheduled Sunday evening (default 19:00), or manual `/coach` | Weekly when scheduled; manual on demand | A few paragraphs | `run_sql`, `update_context` for `strategy` only | `SKIP` if no changes warranted, unless the goal check requires a review; bundled message with inline Accept/Reject buttons per edit |
 | **Nudge** | Short reactive next-action nudge | Data sync, file edit | Up to 2/day by default | One or two sentences | `run_sql` | `SKIP` if nothing changes; text only, no chart |
 | **Standout picker** | Checks a qualified rare fact against explicit recording contradictions in your journal | A data-sync nudge, only when the triggering import changed a qualifying workout | At most one announcement per `STANDOUT_COOLDOWN_DAYS` | None — picks a key, writes nothing | none | Normally picks; the sentence was computed, not written |
 | **Targets** | Turns the prose goals in `strategy.md` into countable weekly targets | First notification of a new week, or an edit to the goal sections | Cached per week and goal text, including empty results | None — stored, not sent | none | Strict JSON against a closed metric vocabulary; drives the progress strip |
@@ -397,6 +397,7 @@ Examples:
 - `/notify`
 - `/notify no nudges before 11am`
 - `/notify send weekly insights on Tuesday at 8`
+- `/notify move the coach review to 8pm`
 - `/notify mute sync alerts for a week`
 - `/notify only warn me about sync after two days`
 - `/notify mute nudges today`
@@ -485,6 +486,22 @@ compared are `RUN_COMPARISON_*` in `src/config.py`.
 The nudge keeps `run_sql` for questions the prompt cannot answer, but is no
 longer told to run a query before deciding to skip.
 
+## The Sunday Coach Review
+
+The coach proposes changes for the coming week, so it runs on Sunday evening
+(`weekly_coach` in `/notify`, default Sunday 19:00), before the week starts. The
+weekly report stays on Monday, when the whole week has synced, and it is shown
+the active challenge and the latest coach review so its one priority builds on
+them rather than competing.
+
+On Sunday the week under review is not quite over. The goal check counts it
+through today, marked "so far", and the coach is told that anything not yet
+synced is missing; it does not recap the week. If nothing has synced that day
+the coach does not guess: it asks, with three buttons — run now (told that
+today is missing), check again in `COACH_POSTPONE_MINUTES`, or run on Monday at
+`COACH_MONDAY_FALLBACK_HHMM` on the complete week. A postponement survives a
+daemon restart.
+
 ## The Coach's Goal Check
 
 Each coach review is handed a goal check computed from the stored weekly
@@ -532,8 +549,8 @@ The coaching and content LLMs share enough recent output to avoid redundancy:
 - **Report suppression:** nudges are suppressed +/- 1 hour around scheduled reports because the report already covers the big picture.
 - **Rate limits:** max 2 nudges/day by default, min 3 hours apart.
 - **LLM SKIP:** the nudge LLM can respond `SKIP` if there is nothing genuinely new to say.
-- **Coach:** the scheduled path runs at most once per calendar day. Manual
-  `/coach` calls can rerun it on demand.
+- **Coach:** the scheduled review runs once per week at its Sunday slot, and
+  at most once per calendar day. Manual `/coach` calls can rerun it on demand.
 - **No replay after mute:** skipped nudges/reports are not replayed after a temporary mute expires.
 - **Failed reports:** a scheduled report that fails on a passing fault — the
   network dropped, the provider was down — is retried on later ticks that same

@@ -97,13 +97,19 @@ def _fmt(value: float, decimals: int) -> str:
     return f"{value:.{decimals}f}"
 
 
-def _completed_target_weeks(conn: sqlite3.Connection, today: date) -> list[str]:
-    """Return recent completed weeks that had stored targets, newest first."""
+def _target_weeks(
+    conn: sqlite3.Connection, today: date, *, include_current: bool
+) -> list[str]:
+    """Return recent weeks that had stored targets, newest first.
+
+    Completed weeks only, unless *include_current* adds this week as well.
+    """
     current_monday = week_start_for(today)
+    comparison = "<=" if include_current else "<"
     try:
         rows = conn.execute(
             "SELECT DISTINCT week_start FROM weekly_target "
-            "WHERE week_start < ? ORDER BY week_start DESC LIMIT ?",
+            f"WHERE week_start {comparison} ? ORDER BY week_start DESC LIMIT ?",  # noqa: S608
             (current_monday, ADHERENCE_WINDOW_WEEKS),
         ).fetchall()
     except sqlite3.Error as exc:
@@ -113,17 +119,18 @@ def _completed_target_weeks(conn: sqlite3.Connection, today: date) -> list[str]:
 
 
 def _adherence(
-    conn: sqlite3.Connection, weeks: list[str]
+    conn: sqlite3.Connection, weeks: list[str], today: date
 ) -> tuple[
     dict[tuple[str, str], list[_WeekResult]], dict[tuple[str, str], StoredTarget]
 ]:
-    """Measure each week's stored targets over the whole of that week."""
+    """Measure each week's stored targets, a week in progress through today."""
     results: dict[tuple[str, str], list[_WeekResult]] = {}
     latest: dict[tuple[str, str], StoredTarget] = {}
     for week_start in weeks:
         targets = load_targets(conn, week_start)
         sunday = date.fromisoformat(week_start) + timedelta(days=6)
-        for ring in measure_week(conn, targets, week_start=week_start, today=sunday):
+        through = min(sunday, today)
+        for ring in measure_week(conn, targets, week_start=week_start, today=through):
             slot = ring.target.slot
             results.setdefault(slot, []).append(
                 _WeekResult(week_start, ring.actual, ring.target.target)
@@ -168,6 +175,7 @@ def build_goal_check(
     strategy_md: str | None,
     *,
     today: date,
+    include_current_week: bool = False,
 ) -> GoalCheck:
     """Compute goal adherence facts and the triggers that force a review.
 
@@ -175,6 +183,9 @@ def build_goal_check(
         conn: Open database connection.
         strategy_md: Current strategy.md text, for its review dates.
         today: The day the coach runs.
+        include_current_week: Count this week too, measured through today. The
+            Sunday-evening review sets this: the week is effectively over, but
+            anything not yet synced is missing, and the text says so.
 
     Returns:
         The prompt section and any triggers that fired, cooldowns applied.
@@ -183,17 +194,34 @@ def build_goal_check(
     triggers: list[Trigger] = []
     all_met_most_weeks = False
 
-    weeks = _completed_target_weeks(conn, today)
+    weeks = _target_weeks(conn, today, include_current=include_current_week)
+    current_monday = week_start_for(today)
+    in_progress = include_current_week and bool(weeks) and weeks[0] == current_monday
+
+    def week_tag(week_start: str) -> str:
+        label = _week_label(week_start)
+        return (
+            f"{label} so far" if in_progress and week_start == current_monday else label
+        )
+
     if not weeks:
         lines.append("No completed weeks with weekly targets yet.")
     else:
-        results, latest = _adherence(conn, weeks)
+        results, latest = _adherence(conn, weeks, today)
         span = f"{_week_label(weeks[-1])}–{_week_label(weeks[0])}"
         noun = "week" if len(weeks) == 1 else "weeks"
-        lines.append(
-            f"Weekly targets over the last {len(weeks)} completed {noun} "
-            f"with targets ({span}), oldest first:"
-        )
+        if in_progress:
+            lines.append(
+                f"Weekly targets over the last {len(weeks)} {noun} with targets "
+                f"({span}), oldest first. {_week_label(current_monday)} is this "
+                f"week, counted through today ({today.strftime('%A')}): anything "
+                "not yet synced is missing from it."
+            )
+        else:
+            lines.append(
+                f"Weekly targets over the last {len(weeks)} completed {noun} "
+                f"with targets ({span}), oldest first:"
+            )
         most_recent = weeks[0]
         current_shares: list[float] = []
         for slot, history in results.items():
@@ -202,7 +230,7 @@ def build_goal_check(
             decimals = item.spec.decimals
             met = sum(1 for r in history if r.met)
             per_week = ", ".join(
-                f"{_week_label(r.week_start)} {_fmt(r.actual, decimals)}"
+                f"{week_tag(r.week_start)} {_fmt(r.actual, decimals)}"
                 f"/{_fmt(r.target, decimals)}"
                 for r in history
             )

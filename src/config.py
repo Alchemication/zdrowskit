@@ -616,6 +616,19 @@ Nearly every sync brings a new sleep night or step count, so for those metrics
 challenge must not become. The weekend is when the week's count is decided and
 one mention can still change it.
 """
+COACH_POSTPONE_MINUTES: int = 15
+"""Delay behind the "In 15 min" button when the Sunday coach finds no data.
+
+Long enough to open the export app and let a sync land, short enough that the
+review still arrives in the same Sunday evening.
+"""
+COACH_MONDAY_FALLBACK_HHMM: str = "08:00"
+"""When a Sunday coach review postponed to Monday runs, local time.
+
+Early enough that a challenge accepted from it still starts the same week
+(accepting by Tuesday starts this week), and by then the finished week has
+synced overnight, so the review sees all of it.
+"""
 COACH_SUMMARY_MAX_AGE_DAYS: int = 14
 """Age after which the last coach review is no longer shown as current context.
 

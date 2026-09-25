@@ -57,13 +57,13 @@ class DaemonRunnerHandler:
 
     def _is_report_imminent(self) -> bool:
         """Check if a scheduled report will fire within COACH_SUPPRESSION_S."""
-        from notification_prefs import effective_notification_prefs
+        from notification_prefs import SCHEDULED_REPORTS, effective_notification_prefs
 
         now = datetime.now().astimezone()
         prefs = self._d._load_notification_prefs(now=now)
         effective = effective_notification_prefs(prefs)
 
-        for report_type in ("weekly_insights",):
+        for report_type in SCHEDULED_REPORTS:
             report = effective[report_type]
             if now.strftime("%A").lower() != report["weekday"]:
                 continue
@@ -417,6 +417,8 @@ class DaemonRunnerHandler:
             explain=False,
             data_dir=None,
             reasoning_effort="medium",
+            last_coach_summary=self._d._state.get("last_coach_summary", ""),
+            last_coach_summary_date=self._d._state.get("last_coach_summary_date", ""),
         )
         with _capture_last_error() as cap:
             try:
@@ -493,6 +495,8 @@ class DaemonRunnerHandler:
             explain=False,
             data_dir=None,
             reasoning_effort="medium",
+            last_coach_summary=self._d._state.get("last_coach_summary", ""),
+            last_coach_summary_date=self._d._state.get("last_coach_summary_date", ""),
         )
         with _capture_last_error() as cap:
             try:
@@ -509,7 +513,6 @@ class DaemonRunnerHandler:
                     {"kind": "weekly"},
                     llm_call_id=result.llm_call_id,
                 )
-                self._d._run_coach(week="last", skip_import=True)
             except InsufficientWeekData as exc:
                 # A profile onboarded mid-week has no complete week yet. That
                 # resolves itself, so record a skip and stay quiet rather than
@@ -779,6 +782,7 @@ class DaemonRunnerHandler:
         week: str = "last",
         skip_import: bool = False,
         force: bool = False,
+        data_note: str = "",
     ) -> None:
         """Run a coaching review and send proposals via Telegram.
 
@@ -792,6 +796,8 @@ class DaemonRunnerHandler:
             week: Which week to review (``"last"`` or ``"current"``).
             skip_import: Skip the pre-run import pass (used when a caller
                 has already imported, e.g. the weekly report path).
+            data_note: A sentence for the coach about data freshness, e.g.
+                that nothing has synced today.
             force: Bypass the "already ran today" guard. Set by manual
                 triggers like the ``/coach`` Telegram command so the user
                 can re-run on demand.
@@ -824,6 +830,7 @@ class DaemonRunnerHandler:
             months=3,
             recent_nudges=self._d._state.get("recent_nudges", []),
             reasoning_effort="medium",
+            data_note=data_note,
         )
         with _capture_last_error() as cap:
             try:

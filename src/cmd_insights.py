@@ -32,7 +32,13 @@ from config import (
 )
 from llm import LLMResult, _reasoning_engaged, call_llm
 from llm_context import append_history, build_messages, load_context, load_prompt_text
-from llm_health import build_llm_data, build_review_facts, render_health_data
+from challenges import challenge_status_text
+from llm_health import (
+    build_llm_data,
+    build_review_facts,
+    format_last_coach_summary,
+    render_health_data,
+)
 from llm_verify import extract_tool_evidence, slim_source_messages
 from memory_writer import write_memory
 from milestones import compute_milestones
@@ -252,6 +258,16 @@ def cmd_insights(
         context,
         week_complete=week_complete,
         unestablished=unestablished_metrics(conn, METRIC_TRUST_WINDOW_DAYS),
+    )
+    # What the Sunday coach set up for the week this report looks back on, so
+    # the report's one priority builds on it instead of competing with it.
+    coach_summary = format_last_coach_summary(
+        getattr(args, "last_coach_summary", "") or "",
+        getattr(args, "last_coach_summary_date", "") or "",
+    )
+    context["coach_plan"] = (
+        f"{challenge_status_text(conn, today=date.today())}\n\n"
+        f"Latest coach review: {coach_summary}"
     )
     health_data_text = render_health_data(
         health_data,

@@ -208,8 +208,18 @@ def cmd_coach(
     # Computed adherence and the triggers that forbid a SKIP. The coach used
     # to skip every week because it was handed no evidence anything was off.
     today = date.today()
-    goal_check = build_goal_check(conn, context.get("strategy"), today=today)
+    # Reviewing the current week (the Sunday-evening run) counts it through
+    # today, marked as in progress, so the coach sees the week it plans after.
+    goal_check = build_goal_check(
+        conn,
+        context.get("strategy"),
+        today=today,
+        include_current_week=week == "current",
+    )
     context["goal_check"] = goal_check.text
+    data_note = (getattr(args, "data_note", "") or "").strip()
+    if data_note:
+        context["goal_check"] += f"\n\n{data_note}"
     # Code decides when a challenge is due; the model only decides which.
     challenge_open = goal_check.challenge_due
     context["challenge_status"] = challenge_status_text(conn, today=today)

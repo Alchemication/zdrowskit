@@ -46,7 +46,10 @@ DEFAULT_CACHE_PATH = Path(__file__).resolve().parent / ".cache.sqlite"
 EVAL_CACHE_SCHEMA_VERSION = 5
 EVAL_TEMPERATURE = 0.0
 DEFAULT_JUDGE_MODEL = "anthropic/claude-opus-5-5"
-EVAL_JUDGE_MAX_TOKENS = 800
+# Room for a reason per assertion. At 800 the Opus 5.5 judge ran out mid-JSON on
+# cases with four statements, and the truncated answer failed validation — the
+# case then scored as a model failure whatever the model had written.
+EVAL_JUDGE_MAX_TOKENS = 4000
 # Omitted rather than pinned to 0.0: the Opus 5.5 judge accepts only
 # temperature=1 and rejects anything else before the request is sent. Judge
 # verdicts are therefore sampled, which --repeat already measures.

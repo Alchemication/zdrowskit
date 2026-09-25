@@ -100,6 +100,10 @@ def _build_context(fixture: dict[str, Any]) -> dict[str, str]:
     context["conduct"] = llm_context.load_prompt_text(llm_context.CONDUCT_PROMPT)
     if "review_facts" in fixture:
         context["review_facts"] = str(fixture["review_facts"])
+    context.setdefault(
+        "coach_plan",
+        "No challenge is active.\n\nLatest coach review: (no recent coach review)",
+    )
     return context
 
 

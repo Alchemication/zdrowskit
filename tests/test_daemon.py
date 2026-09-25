@@ -46,7 +46,8 @@ def _make_daemon(tmp_path: Path) -> ProfileRuntime:
 
 
 class TestWeeklyReportScheduling:
-    def test_weekly_report_runs_coach_after_insights(self, tmp_path: Path) -> None:
+    def test_weekly_report_no_longer_runs_the_coach(self, tmp_path: Path) -> None:
+        """The coach moved to its own Sunday-evening slot, before the week."""
         daemon = _make_daemon(tmp_path)
         events: list[str] = []
 
@@ -74,7 +75,7 @@ class TestWeeklyReportScheduling:
         ):
             daemon._run_weekly_report()
 
-        assert events == ["insights", "record", "coach:last:True"]
+        assert events == ["insights", "record"]
 
     def test_weekly_report_failure_suppresses_same_day_retry(
         self, tmp_path: Path

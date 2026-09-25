@@ -34,6 +34,10 @@ flagged before, and whether it held up.
 
 {history}
 
+## This Week's Plan From the Coach
+
+{coach_plan}
+
 ## Health Data
 
 A compact rendering of the reported week plus prior-week summaries. Use
@@ -87,8 +91,12 @@ genuinely needs two lines:
    report's reason to exist. If nothing is interesting, say the week was
    unremarkable and stop; a padded observation is worse than none.
 3. **What to do** — at most one priority, pitched at the week, not the day.
-   "Get the tempo in this week", not "do a tempo on Wednesday" — daily
-   prescription is the nudge's job and it has fresher data than you.
+   "Protect the three-run rhythm this week", not "run on Wednesday" — daily
+   prescription is the nudge's job and it has fresher data than you. When
+   This Week's Plan shows a challenge that is active or awaiting the user's
+   decision, or a coach review from the last day or two, the priority builds
+   on it: name it in a clause rather than inventing a competing one, and do
+   not restate its numbers — the user saw them last night.
 
 ### Tool-call discipline
 

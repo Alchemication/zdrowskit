@@ -5,7 +5,7 @@
 Your watch collects thousands of data points a week. Apple shows you rings. zdrowskit gives you a coach.
 
 - **Personalised weekly reports** - not generic summaries, but analysis that knows your goals, your plan, your injuries, your journal, and how this season compares to prior years
-- **Coaching proposals** - after the scheduled weekly report (Monday by default), the coach reviews the completed week and proposes concrete changes to your training plan or goals, with diff-first Approve/Reject buttons in Telegram. It must speak up when a target keeps being missed or the goals' review date passes
+- **Coaching proposals** - on Sunday evening (by default), before the new week starts, the coach reviews the week and proposes concrete changes to your training plan or goals, with diff-first Approve/Reject buttons in Telegram; the Monday report then reviews the finished week against that plan. It must speak up when a target keeps being missed or the goals' review date passes
 - **Short challenges** - the coach can also propose a temporary challenge tied to one of your goals, such as four runs a week for two weeks. You accept or reject it; code measures it and announces the result when it ends. `/challenge` shows progress or drops it
 - **Reactive nudges** - new data synced or context changed? The coach notices and says something useful, or stays quiet if there is nothing to say
 - **Progress against your own goals** - nudges and weekly reports open with the week so far, measured against the numbers you actually stated in your strategy. Running, walking, cycling, strength, steps and sleep all count; nothing is assumed when you have set no goal. `/targets` shows their source and lets you pause or resume the strip

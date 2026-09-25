@@ -1734,6 +1734,10 @@ class TelegramChatHandler:
             handle_targets(self, data.split(":", 1)[1], msg_id)
             return
 
+        if data.startswith("coachrun:"):
+            self._daemon._coach_flow.handle_callback(cb_id, data, msg_id)
+            return
+
         if data.startswith("chal:"):
             from telegram_challenge import handle_challenge_callback
 

@@ -47,6 +47,9 @@ SETTABLE_PATHS = {
     "weekly_insights.enabled",
     "weekly_insights.weekday",
     "weekly_insights.time",
+    "weekly_coach.enabled",
+    "weekly_coach.weekday",
+    "weekly_coach.time",
     "data_health.enabled",
     "data_health.stale_after_days",
     "data_health.split_after_h",
@@ -54,10 +57,12 @@ SETTABLE_PATHS = {
 RESETTABLE_PATHS = SETTABLE_PATHS | {
     "nudges",
     "weekly_insights",
+    "weekly_coach",
     "data_health",
     "all",
 }
-MUTE_TARGETS = {"all", "nudges", "weekly_insights", "data_health"}
+MUTE_TARGETS = {"all", "nudges", "weekly_insights", "weekly_coach", "data_health"}
+SCHEDULED_REPORTS = ("weekly_insights", "weekly_coach")
 MIN_NUDGES_PER_DAY = 1
 MAX_REASONABLE_NUDGES_PER_DAY = 6
 MIN_DATA_HEALTH_HOURS = 1
@@ -81,6 +86,13 @@ _DEFAULT_EFFECTIVE: dict[str, dict[str, Any]] = {
         "enabled": True,
         "weekday": "monday",
         "time": "10:00",
+    },
+    # Sunday evening, so the coach's proposals land before the week they are
+    # for; the Monday report then reviews the finished week against them.
+    "weekly_coach": {
+        "enabled": True,
+        "weekday": "sunday",
+        "time": "19:00",
     },
     "data_health": {
         "enabled": True,
@@ -344,7 +356,7 @@ def evaluate_report_delivery(
     now: datetime | None = None,
 ) -> dict[str, str]:
     """Decide whether a scheduled report may send now."""
-    if report_type != "weekly_insights":
+    if report_type not in SCHEDULED_REPORTS:
         raise ValueError(f"Unsupported report type: {report_type}")
     now = now or datetime.now().astimezone()
     effective = effective_notification_prefs(prefs)
@@ -409,7 +421,7 @@ def scheduled_report_due(
     now: datetime | None = None,
 ) -> bool:
     """Return True when the configured weekday/time has passed today."""
-    if report_type != "weekly_insights":
+    if report_type not in SCHEDULED_REPORTS:
         raise ValueError(f"Unsupported report type: {report_type}")
     now = now or datetime.now().astimezone()
     effective = effective_notification_prefs(prefs)
@@ -578,9 +590,17 @@ def _mute_label(target: str) -> str:
         "all": "All notifications",
         "nudges": "Nudges",
         "weekly_insights": "Weekly insights",
+        "weekly_coach": "Weekly coach review",
         "data_health": "Sync alerts",
     }
     return labels.get(target, target)
+
+
+def schedule_text(effective: dict[str, dict[str, Any]], section: str) -> str:
+    """Return ``Sunday 19:00 (on)`` for a scheduled report section."""
+    report = effective[section]
+    state = "on" if report["enabled"] else "off"
+    return f"{report['weekday'].title()} {report['time']} ({state})"
 
 
 def format_notification_summary(
@@ -600,12 +620,8 @@ def format_notification_summary(
         f"- Nudges: {'on' if effective['nudges']['enabled'] else 'off'}",
         f"- Nudges not before: {effective['nudges']['earliest_time']}",
         f"- Max nudges per day: {effective['nudges']['max_per_day']}",
-        (
-            "- Weekly insights: "
-            f"{'on' if effective['weekly_insights']['enabled'] else 'off'}"
-            f" ({effective['weekly_insights']['weekday'].title()} "
-            f"{effective['weekly_insights']['time']})"
-        ),
+        f"- Weekly insights: {schedule_text(effective, 'weekly_insights')}",
+        f"- Weekly coach review: {schedule_text(effective, 'weekly_coach')}",
         (
             "- Sync alerts: "
             f"{'on' if effective['data_health']['enabled'] else 'off'}"
@@ -680,21 +696,15 @@ def format_proposed_changes(
             str(after["nudges"]["max_per_day"]),
         )
     )
-    lines.append(
-        _section_line(
-            "Weekly insights",
-            (
-                f"{before['weekly_insights']['weekday'].title()} "
-                f"{before['weekly_insights']['time']} "
-                f"({'on' if before['weekly_insights']['enabled'] else 'off'})"
-            ),
-            (
-                f"{after['weekly_insights']['weekday'].title()} "
-                f"{after['weekly_insights']['time']} "
-                f"({'on' if after['weekly_insights']['enabled'] else 'off'})"
-            ),
+    for section, name in (
+        ("weekly_insights", "Weekly insights"),
+        ("weekly_coach", "Weekly coach review"),
+    ):
+        lines.append(
+            _section_line(
+                name, schedule_text(before, section), schedule_text(after, section)
+            )
         )
-    )
 
     if after_mutes != before_mutes:
         if after_mutes:

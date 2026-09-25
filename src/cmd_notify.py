@@ -13,7 +13,7 @@ from notification_prefs import (
     save_notification_prefs,
 )
 
-RESET_TARGETS = ("all", "nudges", "weekly_insights")
+RESET_TARGETS = ("all", "nudges", "weekly_insights", "weekly_coach")
 
 
 def cmd_notify(args: argparse.Namespace) -> None:

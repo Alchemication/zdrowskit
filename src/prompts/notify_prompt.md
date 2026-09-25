@@ -61,11 +61,14 @@ again.
 - `all`
 - `nudges`
 - `weekly_insights`
+- `weekly_coach` (the Sunday-evening coach review that proposes plan changes and challenges)
 - `data_health`
 - `nudges.earliest_time`
 - `nudges.max_per_day`
 - `weekly_insights.weekday`
 - `weekly_insights.time`
+- `weekly_coach.weekday`
+- `weekly_coach.time`
 - `data_health.stale_after_days`
 - `data_health.split_after_h`
 
@@ -77,11 +80,14 @@ Each item in `changes` must be one of:
 - `{{"action":"set","path":"weekly_insights.enabled","value":true}}`
 - `{{"action":"set","path":"weekly_insights.weekday","value":"tuesday"}}`
 - `{{"action":"set","path":"weekly_insights.time","value":"08:00"}}`
+- `{{"action":"set","path":"weekly_coach.enabled","value":false}}`
+- `{{"action":"set","path":"weekly_coach.time","value":"20:00"}}`
 - `{{"action":"set","path":"data_health.enabled","value":false}}`
 - `{{"action":"set","path":"data_health.stale_after_days","value":2}}`
 - `{{"action":"set","path":"data_health.split_after_h","value":12}}`
 - `{{"action":"reset","path":"nudges"}}`
 - `{{"action":"reset","path":"weekly_insights"}}`
+- `{{"action":"reset","path":"weekly_coach"}}`
 - `{{"action":"reset","path":"data_health"}}`
 - `{{"action":"reset","path":"all"}}`
 - `{{"action":"reset_all"}}`
