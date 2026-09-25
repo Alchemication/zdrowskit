@@ -4,16 +4,16 @@ Regression scorecard for zdrowskit evals. A case is one frozen input plus checks
 
 ## What ships today
 
-The most recent scored run for each feature, on the model it actually runs on, against the 53 cases in `evals/cases` today.
+The most recent scored run for each feature, on the model it actually runs on, against the 55 cases in `evals/cases` today.
 
 | Feature | Route | Cases | Strict | Attempt | Flaky | Repeat | Tool calls | Avg Latency | Cost/run | Commit | Recorded |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
 | chat | gpt-5.6-luna (high) | 12/12 | 83.3% | 88.9% | 2 | 3 | 0.9 avg (8 cases, 1-3), 3 varied | 9.31s | $0.0181 | a722d28 | 2026-09-25 |
-| checkin | gpt-5.6-luna | 1/1 | 0.0% | 66.7% | 1 | 3 | - | 1.68s | $0.0002 | a722d28 | 2026-09-25 |
+| checkin | gpt-5.6-luna | 1/1 | 100.0% | 100.0% | 0 | 3 | - | 1.09s | $0.0002 | 51fb250 | 2026-09-25 |
 | coach | gpt-5.6-luna (high) | 6/6 | 83.3% | 94.4% | 1 | 3 | 0.8 avg (5 cases, up to 1), 1 varied | 15.15s | $0.0175 | a722d28 | 2026-09-25 |
 | insights | gpt-5.6-luna (high) | 7/7 | 71.4% | 85.7% | 2 | 3 | 3.2 avg (7 cases, 1-6), 5 varied | 32.26s | $0.0378 | a722d28 | 2026-09-25 |
 | memory | gpt-5.6-luna | 3/3 | 100.0% | 100.0% | 0 | 3 | - | 1.39s | $0.0007 | a722d28 | 2026-09-25 |
-| nudge | gpt-5.6-luna (high) | 9/9 | 88.9% | 92.6% | 1 | 3 | none used | 6.95s | $0.0127 | a722d28 | 2026-09-25 |
+| nudge | gpt-5.6-luna (high) | 11/11 | 100.0% | 100.0% | 0 | 3 | none used | 4.91s | $0.0070 | 51fb250* | 2026-09-25 |
 | plan_frame | gpt-5.6-luna | 4/4 | 100.0% | 100.0% | 0 | 3 | - | 1.23s | $0.0007 | a722d28 | 2026-09-25 |
 | standout | gpt-5.6-luna | 2/2 | 100.0% | 100.0% | 0 | 3 | - | 1.38s | $0.0003 | a722d28 | 2026-09-25 |
 | targets | gpt-5.6-luna | 2/2 | 100.0% | 100.0% | 0 | 3 | - | 1.59s | $0.0005 | a722d28 | 2026-09-25 |
@@ -45,6 +45,7 @@ How the coach asks what happened, on a week when you trained far less than usual
 | Model | Reasoning | Repeat | Cases | Strict | Attempt | Flaky | Tool calls | Avg Latency | Cost/run | Commit | Not passing |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
 | **gpt-5.6-luna** (ships today) | none | 5 | 1/1 | 100.0% | 100.0% | 0 | - | 1.20s | $0.0002 | a2fba5f* | - |
+| **gpt-5.6-luna** (ships today) | none | 3 | 1/1 | 100.0% | 100.0% | 0 | - | 1.09s | $0.0002 | 51fb250 | - |
 | **gpt-5.6-luna** (ships today) | none | 3 | 1/1 | 0.0% | 66.7% | 1 | - | 1.68s | $0.0002 | a722d28 | `checkin_asks_without_delivering_a_verdict` 2/3 |
 
 Leading row (`gpt-5.6-luna`) passed every case on every attempt.
@@ -95,21 +96,22 @@ What carries over from one week to the next.
 
 Leading row (`gpt-5.6-luna`) passed every case on every attempt.
 
-## nudge · 9 cases
+## nudge · 11 cases
 
 Short, timely messages during the day.
 
 | Model | Reasoning | Repeat | Cases | Strict | Attempt | Flaky | Tool calls | Avg Latency | Cost/run | Commit | Not passing |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
-| **gpt-5.6-luna** (ships today) | high | 3 | 6/9 | 100.0% | 100.0% | 0 | - | 4.51s | $0.0054 | 760d8b6 | - |
-| **gpt-5.6-luna** (ships today) | high | 3 | 6/9 | 100.0% | 100.0% | 0 | 0.1 avg (1 case, up to 1), 1 varied | 5.88s | $0.0084 | 2bfda76* | - |
-| **gpt-5.6-luna** (ships today) | high | 3 | 6/9 | 100.0% | 100.0% | 0 | - | 5.19s | $0.0095 | adc9c5e* | - |
-| **gpt-5.6-luna** (ships today) | high | 3 | 9/9 | 88.9% | 92.6% | 1 | none used | 6.95s | $0.0127 | a722d28 | `nudge_respects_constraints_the_user_logged` 1/3 |
-| gpt-6-luna | high | 5 | 6/9 | 83.3% | 90.0% | 1 | 0.6 avg (5 cases, up to 1), 3 varied | 22.49s | $0.0066 | cdaa5d2* | `nudge_respects_constraints_the_user_logged` 2/5 |
-| gpt-5.6-luna | high | 10 | 6/9 | 66.7% | 90.0% | 2 | 0.0 avg (1 case, up to 1), 1 varied | 6.97s | $0.0057 | cdaa5d2 | `nudge_respects_constraints_the_user_logged` 6/10<br>`nudge_writes_when_a_session_lands` 8/10 |
-| gpt-5.6-luna | high | 5 | 6/9 | 66.7% | 90.0% | 2 | none used | 6.22s | $0.0069 | cdaa5d2* | `nudge_respects_constraints_the_user_logged` 3/5<br>`nudge_writes_when_a_session_lands` 4/5 |
-| gpt-5.6-luna | high | 3 | 6/9 | 66.7% | 83.3% | 2 | none used | 5.49s | $0.0083 | 01eca8f* | `nudge_respects_constraints_the_user_logged` 1/3<br>`nudge_writes_when_a_session_lands` 2/3 |
-| glm-5.3-flash | high | 3 | 6/9 | 50.0% | 72.2% | 3 | 0.5 avg (4 cases, up to 2), 3 varied | 81.05s | $0.0207 | 01eca8f* | `nudge_says_a_missing_reading_is_missing` 2/3<br>`nudge_week_totals_match_logged_workouts_w21` 1/3<br>`nudge_writes_when_a_session_lands` 1/3 |
+| **gpt-5.6-luna** (ships today) | high | 3 | 6/11 | 100.0% | 100.0% | 0 | - | 4.51s | $0.0054 | 760d8b6 | - |
+| **gpt-5.6-luna** (ships today) | high | 3 | 11/11 | 100.0% | 100.0% | 0 | none used | 4.91s | $0.0070 | 51fb250* | - |
+| **gpt-5.6-luna** (ships today) | high | 3 | 6/11 | 100.0% | 100.0% | 0 | 0.1 avg (1 case, up to 1), 1 varied | 5.88s | $0.0084 | 2bfda76* | - |
+| **gpt-5.6-luna** (ships today) | high | 3 | 6/11 | 100.0% | 100.0% | 0 | - | 5.19s | $0.0095 | adc9c5e* | - |
+| **gpt-5.6-luna** (ships today) | high | 3 | 9/11 | 88.9% | 92.6% | 1 | none used | 6.95s | $0.0127 | a722d28 | `nudge_respects_constraints_the_user_logged` 1/3 |
+| gpt-6-luna | high | 5 | 6/11 | 83.3% | 90.0% | 1 | 0.6 avg (5 cases, up to 1), 3 varied | 22.49s | $0.0066 | cdaa5d2* | `nudge_respects_constraints_the_user_logged` 2/5 |
+| gpt-5.6-luna | high | 10 | 6/11 | 66.7% | 90.0% | 2 | 0.0 avg (1 case, up to 1), 1 varied | 6.97s | $0.0057 | cdaa5d2 | `nudge_respects_constraints_the_user_logged` 6/10<br>`nudge_writes_when_a_session_lands` 8/10 |
+| gpt-5.6-luna | high | 5 | 6/11 | 66.7% | 90.0% | 2 | none used | 6.22s | $0.0069 | cdaa5d2* | `nudge_respects_constraints_the_user_logged` 3/5<br>`nudge_writes_when_a_session_lands` 4/5 |
+| gpt-5.6-luna | high | 3 | 6/11 | 66.7% | 83.3% | 2 | none used | 5.49s | $0.0083 | 01eca8f* | `nudge_respects_constraints_the_user_logged` 1/3<br>`nudge_writes_when_a_session_lands` 2/3 |
+| glm-5.3-flash | high | 3 | 6/11 | 50.0% | 72.2% | 3 | 0.5 avg (4 cases, up to 2), 3 varied | 81.05s | $0.0207 | 01eca8f* | `nudge_says_a_missing_reading_is_missing` 2/3<br>`nudge_week_totals_match_logged_workouts_w21` 1/3<br>`nudge_writes_when_a_session_lands` 1/3 |
 
 Leading row (`gpt-5.6-luna`) passed every case on every attempt.
 
