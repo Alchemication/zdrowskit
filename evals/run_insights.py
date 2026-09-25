@@ -19,6 +19,7 @@ if str(_SRC) not in sys.path:
 import llm_context  # noqa: E402
 import llm_health  # noqa: E402
 from config import MAX_TOKENS_INSIGHTS, PROMPTS_DIR  # noqa: E402
+from run_comparison import NO_RUN_COMPARISON  # noqa: E402
 from tools import run_sql_tool  # noqa: E402
 
 
@@ -101,6 +102,7 @@ def _build_context(fixture: dict[str, Any]) -> dict[str, str]:
     if "review_facts" in fixture:
         context["review_facts"] = str(fixture["review_facts"])
     context.setdefault("progress_strip", "(no progress strip this week)")
+    context.setdefault("run_comparison", NO_RUN_COMPARISON)
     context.setdefault(
         "coach_plan",
         "No challenge is active.\n\nLatest coach review: (no recent coach review)",

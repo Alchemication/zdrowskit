@@ -43,6 +43,19 @@ flagged before, and whether it held up.
 The user reads these bars first, in the same message, immediately before your
 first sentence. The counts in them are already said.
 
+## How This Week's Runs Compared
+
+{run_comparison}
+
+Each line compares one run of the reported week with this person's own runs of
+similar distance and pace from the six months before it, computed from the
+database. With pace held in a band, heart rate is what moves: near the top of
+its peers, the run cost more than usual; near the bottom, less; in the middle,
+it was ordinary. When the report says a run cost more or less, it uses these
+figures — never a comparison between two runs of the same week, which is two
+samples, not a pattern. Where a line says there are too few similar runs, make
+no such claim about that run.
+
 ## This Week's Plan From the Coach
 
 {coach_plan}

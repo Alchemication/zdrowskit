@@ -6,6 +6,7 @@ import argparse
 import json
 import logging
 import re
+import sqlite3
 import sys
 from datetime import date, timedelta
 from pathlib import Path
@@ -33,6 +34,7 @@ from config import (
 from llm import LLMResult, _reasoning_engaged, call_llm
 from llm_context import append_history, build_messages, load_context, load_prompt_text
 from challenges import challenge_status_text
+from run_comparison import NO_RUN_COMPARISON, describe_run_comparisons
 from llm_health import (
     build_llm_data,
     build_review_facts,
@@ -183,6 +185,32 @@ def _print_explain(
         stderr.print(f"\n[dim]Report saved to:[/dim] [cyan]{report_path}[/cyan]")
 
 
+def _week_run_comparisons(conn: sqlite3.Connection, health_data: dict) -> str:
+    """Compare each run of the reported week with the person's similar runs.
+
+    The same computed comparison the nudge gets. Reports used to compare two
+    runs of the same week — "164 vs 152 bpm at nearly the same pace" — which
+    is two samples dressed as a finding.
+    """
+    week_start = health_data.get("week_start")
+    week_end = health_data.get("week_end")
+    if not week_start or not week_end:
+        return NO_RUN_COMPARISON
+    try:
+        ids = {
+            row[0]
+            for row in conn.execute(
+                "SELECT start_utc FROM workout_all WHERE category = 'run' "
+                "AND date BETWEEN ? AND ?",
+                (week_start, week_end),
+            )
+        }
+        return describe_run_comparisons(conn, ids)
+    except sqlite3.Error as exc:
+        logger.warning("Run comparison failed; reporting without it: %s", exc)
+        return NO_RUN_COMPARISON
+
+
 def missing_day_note(day: str | None) -> str:
     """Return the report's note for a reported week missing its last day.
 
@@ -323,6 +351,7 @@ def cmd_insights(
         frame=frame,
     )
     context["progress_strip"] = progress_block or "(no progress strip this week)"
+    context["run_comparison"] = _week_run_comparisons(conn, health_data)
     data_note = (getattr(args, "data_note", "") or "").strip()
     if data_note:
         health_data_text = f"{health_data_text}\n\n{data_note}"
