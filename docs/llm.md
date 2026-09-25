@@ -35,6 +35,10 @@ What happens after that depends on what failed:
   fallback is reached over the same socket layer that just failed, so crossing
   to it would only spend a second ladder of backoff to learn the same thing.
   The call stops after one ladder and reports the fault to its caller.
+- **The provider went quiet** — connected, but no answer within
+  `LLM_REQUEST_TIMEOUT_S` (`src/config.py`). Every request carries that
+  timeout. Waiting the same interval again on the same provider buys nothing,
+  so the call skips the backoff ladder and goes straight to the fallback.
 
 Transport faults used to get no retries at all, only an instant hop to the
 other provider — which meant a blip lasting seconds consumed both routes and

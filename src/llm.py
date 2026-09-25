@@ -29,6 +29,7 @@ from config import (
     DEFAULT_MODEL,
     FALLBACK_FLASH_MODEL,
     FALLBACK_PRO_MODEL,
+    LLM_REQUEST_TIMEOUT_S,
     MAX_TOKENS_DEFAULT,
     PRIMARY_FLASH_MODEL,
     PRIMARY_PRO_MODEL,
@@ -211,6 +212,37 @@ def _is_network_error(exc: Exception) -> bool:
 
     text = str(exc).lower()
     return any(signal in text for signal in _NETWORK_ERROR_SIGNALS)
+
+
+_CONNECT_FAILURE_NAMES = frozenset({"ConnectError", "ConnectTimeout"})
+_TIMEOUT_NAMES = frozenset({"Timeout", "APITimeoutError", "ReadTimeout"})
+
+
+def _is_provider_timeout(exc: Exception) -> bool:
+    """Return True when a request connected but got no answer in time.
+
+    That is a provider that went quiet, not a network that is down, and the two
+    need opposite responses. Retrying a silent provider spends the whole
+    timeout again, four times over with backoff; the fallback model, on another
+    provider, is the useful next step. A failure to connect at all is left to
+    :func:`_is_network_error`, where retrying the same model is right.
+
+    Args:
+        exc: The exception raised by the completion attempt.
+
+    Returns:
+        True for a read timeout with no connection failure in its cause chain.
+    """
+    names: set[str] = set()
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        names.add(type(current).__name__)
+        current = current.__cause__ or current.__context__
+    if names & _CONNECT_FAILURE_NAMES:
+        return False
+    return bool(names & _TIMEOUT_NAMES)
 
 
 def is_transient_error_text(text: str | None) -> bool:
@@ -688,6 +720,21 @@ def _call_with_retry(
                 return response, candidate
             except Exception as exc:
                 last_exc = exc
+                if _is_provider_timeout(exc):
+                    # Checked before the network test, which also matches
+                    # timeouts: a silent provider is not worth another wait.
+                    next_model = (
+                        chain[model_index + 1] if model_index + 1 < len(chain) else None
+                    )
+                    logger.warning(
+                        "%s gave no answer within %ds; %s",
+                        candidate,
+                        LLM_REQUEST_TIMEOUT_S,
+                        f"switching to fallback {next_model}"
+                        if next_model
+                        else "no fallback left",
+                    )
+                    break
                 network_fault = _is_network_error(exc)
                 if (_is_overloaded(exc) or network_fault) and delay is not None:
                     logger.warning(
@@ -833,6 +880,7 @@ def call_llm(
         "model": model,
         "messages": messages,
         "max_tokens": max_tokens,
+        "timeout": LLM_REQUEST_TIMEOUT_S,
     }
     if temperature is not None:
         kwargs["temperature"] = temperature

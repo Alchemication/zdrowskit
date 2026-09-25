@@ -41,6 +41,7 @@ from llm import (
     _effective_params_for_model,
     _fallback_chain,
     _is_network_error,
+    _is_provider_timeout,
     _is_overloaded,
     call_llm,
     extract_memory,
@@ -1725,6 +1726,34 @@ class TestIsNetworkError:
         assert not _is_network_error(Exception("overloaded_error"))
 
 
+def _chained(outer: str, *causes: str) -> Exception:
+    """Build an exception whose type and cause chain carry the given names."""
+    exc: Exception | None = None
+    for name in reversed(causes):
+        inner = type(name, (Exception,), {})("inner")
+        inner.__cause__ = exc
+        exc = inner
+    top = type(outer, (Exception,), {})("Request timed out.")
+    top.__cause__ = exc
+    return top
+
+
+class TestIsProviderTimeout:
+    def test_read_timeout_is_a_silent_provider(self) -> None:
+        """The chain litellm raises for a request that got no answer."""
+        exc = _chained("Timeout", "OpenAIError", "Timeout", "ReadTimeout")
+        assert _is_provider_timeout(exc)
+
+    def test_connect_timeout_is_a_network_fault_not_a_silent_provider(self) -> None:
+        exc = _chained("Timeout", "ConnectTimeout")
+        assert not _is_provider_timeout(exc)
+        assert _is_network_error(exc)
+
+    def test_other_errors_are_not_timeouts(self) -> None:
+        assert not _is_provider_timeout(Exception("overloaded_error"))
+        assert not _is_provider_timeout(_chained("APIConnectionError", "ConnectError"))
+
+
 class TestIsTransientErrorText:
     """The daemon only has the logged text, never the exception."""
 
@@ -1843,6 +1872,49 @@ class TestCallWithRetry:
         return Exception(
             "litellm.InternalServerError: InternalServerError: "
             "DeepseekException - [Errno 49] Can't assign requested address"
+        )
+
+    @patch("llm.time.sleep")
+    @patch("llm.litellm")
+    def test_silent_provider_hands_to_the_fallback_without_waiting(
+        self, mock_litellm, mock_sleep
+    ) -> None:
+        """A 2026-09-25 Z.ai request hung for thirty minutes; never retry that."""
+        mock_litellm.completion.side_effect = [
+            _chained("Timeout", "ReadTimeout"),
+            self._mock_response("from the fallback"),
+        ]
+
+        resp, model = _call_with_retry({"model": "primary"}, "primary", ["backup"])
+
+        assert model == "backup"
+        assert resp.choices[0].message.content == "from the fallback"
+        assert mock_litellm.completion.call_count == 2
+        mock_sleep.assert_not_called()
+
+    @patch("llm.time.sleep")
+    @patch("llm.litellm")
+    def test_silent_provider_with_no_fallback_fails_after_one_wait(
+        self, mock_litellm, mock_sleep
+    ) -> None:
+        mock_litellm.completion.side_effect = [_chained("Timeout", "ReadTimeout")]
+
+        with pytest.raises(Exception, match="Request timed out"):
+            _call_with_retry({"model": "only"}, "only", [])
+
+        assert mock_litellm.completion.call_count == 1
+        mock_sleep.assert_not_called()
+
+    @patch("llm.litellm")
+    def test_every_request_carries_the_timeout(self, mock_litellm) -> None:
+        from config import LLM_REQUEST_TIMEOUT_S
+
+        mock_litellm.completion.return_value = self._mock_response()
+
+        call_llm([{"role": "user", "content": "hi"}], model="m", fallback_models=[])
+
+        assert mock_litellm.completion.call_args.kwargs["timeout"] == (
+            LLM_REQUEST_TIMEOUT_S
         )
 
     @patch("llm.time.sleep")

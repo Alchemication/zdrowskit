@@ -638,6 +638,16 @@ waits for an import that brings the day in, re-checking every scheduled tick;
 the phone normally syncs by mid-morning. After it, a report a day late is worth
 less than one that names the missing day, so it runs and says so.
 """
+LLM_REQUEST_TIMEOUT_S: int = 300
+"""Longest a single LLM request may take before it counts as a provider failure.
+
+On 2026-09-25 two Z.ai requests sat on open connections for over thirty minutes
+and never returned: with no timeout of our own, the caller simply waited. Five
+minutes is well above the slowest normal call — a verifier auditing a full
+report with reasoning on runs one to two minutes — and a request that has not
+answered by then hands over to the fallback model instead of retrying the same
+one.
+"""
 COACH_SUMMARY_MAX_AGE_DAYS: int = 14
 """Age after which the last coach review is no longer shown as current context.
 
