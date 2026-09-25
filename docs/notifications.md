@@ -496,8 +496,9 @@ them rather than competing.
 
 On Sunday the week under review is not quite over. The goal check counts it
 through today, marked "so far", and the coach is told that anything not yet
-synced is missing; it does not recap the week. If nothing has synced that day
-the coach does not guess: it asks, with three buttons — run now (told that
+synced is missing; it does not recap the week. If today's data has not arrived
+— an import landing today is not enough if it stops at yesterday — the coach
+does not guess: it asks, with three buttons — run now (told that
 today is missing), check again in `COACH_POSTPONE_MINUTES`, or run on Monday at
 `COACH_MONDAY_FALLBACK_HHMM` on the complete week. A postponement survives a
 daemon restart.
@@ -551,6 +552,11 @@ The coaching and content LLMs share enough recent output to avoid redundancy:
 - **LLM SKIP:** the nudge LLM can respond `SKIP` if there is nothing genuinely new to say.
 - **Coach:** the scheduled review runs once per week at its Sunday slot, and
   at most once per calendar day. Manual `/coach` calls can rerun it on demand.
+- **Waiting for the week's last day:** if the reported week's Sunday has no
+  data yet at the scheduled time — an export can land and still stop at
+  Saturday — the weekly report waits and re-checks every scheduled tick, so it
+  follows the import that brings Sunday in. After `REPORT_MISSING_DAY_CUTOFF_HHMM`
+  it runs anyway and says the day is missing. A manual `/review` never waits.
 - **No replay after mute:** skipped nudges/reports are not replayed after a temporary mute expires.
 - **Failed reports:** a scheduled report that fails on a passing fault — the
   network dropped, the provider was down — is retried on later ticks that same

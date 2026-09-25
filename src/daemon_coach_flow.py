@@ -20,7 +20,7 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from config import COACH_MONDAY_FALLBACK_HHMM, COACH_POSTPONE_MINUTES
-from store import open_db
+from store import latest_metric_date, open_db
 from weekly_targets import week_start_for
 
 if TYPE_CHECKING:
@@ -30,36 +30,29 @@ logger = logging.getLogger(__name__)
 
 CALLBACK_PREFIX = "coachrun:"
 STALE_DATA_NOTE = (
-    "No health data had synced today when this review ran, so today's activity "
-    "is missing from the week under review."
+    "Today's health data had not arrived when this review ran, so today's "
+    "activity is missing from the week under review."
 )
 _RECHECK = "recheck"
 _MONDAY = "monday"
 
 
-def synced_today(db_path: object, now: datetime) -> bool:
-    """Return whether any import has landed today, local time.
+def todays_data_present(db_path: object, now: datetime) -> bool:
+    """Return whether today's metrics have arrived, local date.
 
-    Every import rewrites ``daily.imported_at`` for the days it covers, so its
-    maximum is the time of the latest sync.
+    An import landing today is not enough: on 2026-09-20 the 23:55 export held
+    days only up to Saturday, and the Monday report reviewed a week missing its
+    Sunday. What counts is a metric-bearing row dated today.
     """
+    today = now.date().isoformat()
     conn = open_db(db_path)
     try:
-        row = conn.execute("SELECT MAX(imported_at) FROM daily").fetchone()
+        return latest_metric_date(conn, through=today) == today
     except sqlite3.Error as exc:
-        logger.warning("Could not read the latest import time: %s", exc)
+        logger.warning("Could not read the latest metric date: %s", exc)
         return False
     finally:
         conn.close()
-    if not row or not row[0]:
-        return False
-    try:
-        latest = datetime.fromisoformat(str(row[0]))
-    except ValueError:
-        return False
-    if latest.tzinfo is None:
-        return latest.date() == now.date()
-    return latest.astimezone(now.tzinfo).date() == now.date()
 
 
 def next_monday_fallback(now: datetime) -> datetime:
@@ -118,17 +111,17 @@ class CoachScheduleFlow:
     def attempt(self, now: datetime) -> None:
         """Run the review if today's data has synced, otherwise ask what to do."""
         self._daemon._run_import()
-        if synced_today(self._daemon.db, now):
+        if todays_data_present(self._daemon.db, now):
             self._daemon._run_coach(week="current", skip_import=True)
             return
         poller = self._daemon._poller
         if poller is None:
             return
-        logger.info("Sunday coach review: no data synced today; asking the user")
+        logger.info("Sunday coach review: today's data missing; asking the user")
         poller.send_message_with_keyboard(
-            "No health data has synced today, so the weekly coach review would "
-            "plan next week without today in it. Open the export app to sync, "
-            "then choose:",
+            "Today's health data hasn't arrived yet, so the weekly coach review "
+            "would plan next week without today in it. Open the export app to "
+            "sync, then choose:",
             [
                 [
                     {"text": "Run now", "callback_data": f"{CALLBACK_PREFIX}now"},

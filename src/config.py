@@ -629,6 +629,15 @@ Early enough that a challenge accepted from it still starts the same week
 (accepting by Tuesday starts this week), and by then the finished week has
 synced overnight, so the review sees all of it.
 """
+REPORT_MISSING_DAY_CUTOFF_HHMM: str = "18:00"
+"""Local time after which a weekly report missing its last day runs anyway.
+
+On 2026-09-21 the report reviewed a week without its Sunday: the only export
+since Saturday had stopped at Saturday. Until this time the scheduled report
+waits for an import that brings the day in, re-checking every scheduled tick;
+the phone normally syncs by mid-morning. After it, a report a day late is worth
+less than one that names the missing day, so it runs and says so.
+"""
 COACH_SUMMARY_MAX_AGE_DAYS: int = 14
 """Age after which the last coach review is no longer shown as current context.
 

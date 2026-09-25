@@ -183,6 +183,25 @@ def _print_explain(
         stderr.print(f"\n[dim]Report saved to:[/dim] [cyan]{report_path}[/cyan]")
 
 
+def missing_day_note(day: str | None) -> str:
+    """Return the report's note for a reported week missing its last day.
+
+    Args:
+        day: ISO date of the missing day, or None when the week is complete.
+
+    Returns:
+        A sentence for the writer, or the empty string.
+    """
+    if day is None:
+        return ""
+    name = date.fromisoformat(day).strftime("%A %-d %b")
+    return (
+        f"Data note: {name}, the last day of the reported week, had not synced "
+        "when this report was written, so it is missing from the week above. "
+        "Say so in one clause; do not guess what happened that day."
+    )
+
+
 def _report_day(health_data: dict) -> date:
     """Return the day the progress strip should be measured up to.
 
@@ -304,6 +323,9 @@ def cmd_insights(
         frame=frame,
     )
     context["progress_strip"] = progress_block or "(no progress strip this week)"
+    data_note = (getattr(args, "data_note", "") or "").strip()
+    if data_note:
+        health_data_text = f"{health_data_text}\n\n{data_note}"
 
     try:
         messages = build_messages(

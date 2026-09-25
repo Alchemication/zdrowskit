@@ -15,8 +15,9 @@ file-watching, and scheduling glue.
 from __future__ import annotations
 
 import logging
+import sqlite3
 import types
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -25,6 +26,7 @@ from config import (
     COACH_SUPPRESSION_S,
     MAX_REPORT_ATTEMPTS_PER_DAY,
     MIN_NUDGE_INTERVAL_S,
+    REPORT_MISSING_DAY_CUTOFF_HHMM,
 )
 from daemon_data import changed_workout_ids, data_snapshot
 from llm import is_transient_error_text
@@ -400,7 +402,7 @@ class DaemonRunnerHandler:
         if not skip_import:
             self._d._run_import()
 
-        from cmd_insights import cmd_insights
+        from cmd_insights import cmd_insights, missing_day_note
 
         args = types.SimpleNamespace(
             db=str(self._d.db),
@@ -419,6 +421,7 @@ class DaemonRunnerHandler:
             reasoning_effort="medium",
             last_coach_summary=self._d._state.get("last_coach_summary", ""),
             last_coach_summary_date=self._d._state.get("last_coach_summary_date", ""),
+            data_note=missing_day_note(self._missing_week_end()),
         )
         with _capture_last_error() as cap:
             try:
@@ -446,6 +449,29 @@ class DaemonRunnerHandler:
                     captured,
                     detail=suppression,
                 )
+
+    def _missing_week_end(self) -> str | None:
+        """Return the reported week's last day if it has no metrics yet.
+
+        The weekly report covers the week that ended last Sunday. An import
+        can land and still stop short of it — the export on 2026-09-20 did —
+        so what counts is a metric-bearing row for that day.
+        """
+        from store import latest_metric_date, open_db
+        from weekly_targets import week_start_for
+
+        week_end = (
+            date.fromisoformat(week_start_for(date.today())) - timedelta(days=1)
+        ).isoformat()
+        conn = open_db(self._d.db)
+        try:
+            latest = latest_metric_date(conn, through=week_end)
+        except sqlite3.Error as exc:
+            logger.warning("Could not check the reported week's data: %s", exc)
+            return None
+        finally:
+            conn.close()
+        return None if latest == week_end else week_end
 
     def _run_weekly_report(self) -> None:
         """Run the full weekly insights report and send via Telegram."""
@@ -478,7 +504,23 @@ class DaemonRunnerHandler:
 
         self._d._run_import()
 
-        from cmd_insights import cmd_insights
+        missing = self._missing_week_end()
+        cutoff = datetime.strptime(REPORT_MISSING_DAY_CUTOFF_HHMM, "%H:%M").time()
+        if missing is not None and now.time() < cutoff:
+            # Wait for the reported week's last day; the next tick re-checks.
+            logger.info("Weekly report waiting: %s has no data yet", missing)
+            if self._d._state.get("report_waiting_date") != date.today().isoformat():
+                self._d._state["report_waiting_date"] = date.today().isoformat()
+                self._d._save_state()
+                self._d._record_event(
+                    "insights",
+                    "waiting_for_data",
+                    f"Weekly report waiting for {missing} to sync",
+                    {"missing_day": missing, "kind": "weekly"},
+                )
+            return
+
+        from cmd_insights import cmd_insights, missing_day_note
 
         args = types.SimpleNamespace(
             db=str(self._d.db),
@@ -497,6 +539,7 @@ class DaemonRunnerHandler:
             reasoning_effort="medium",
             last_coach_summary=self._d._state.get("last_coach_summary", ""),
             last_coach_summary_date=self._d._state.get("last_coach_summary_date", ""),
+            data_note=missing_day_note(missing),
         )
         with _capture_last_error() as cap:
             try:

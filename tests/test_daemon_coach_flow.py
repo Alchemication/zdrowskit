@@ -11,7 +11,7 @@ from daemon_coach_flow import (
     STALE_DATA_NOTE,
     CoachScheduleFlow,
     next_monday_fallback,
-    synced_today,
+    todays_data_present,
 )
 from notification_prefs import DEFAULT_NOTIFICATION_PREFS
 from store import open_db
@@ -26,8 +26,8 @@ def _daemon(tmp_path: Path, *, imported_at: datetime | None) -> SimpleNamespace:
     if imported_at is not None:
         with conn:
             conn.execute(
-                "INSERT INTO daily (date, imported_at) VALUES (?, ?)",
-                (imported_at.date().isoformat(), imported_at.isoformat()),
+                "INSERT INTO daily (date, steps, imported_at) VALUES (?, ?, ?)",
+                (imported_at.date().isoformat(), 4000, imported_at.isoformat()),
             )
     conn.close()
     return SimpleNamespace(
@@ -46,7 +46,26 @@ def _prefs(**overrides: object) -> dict:
     return prefs
 
 
-class TestSyncedToday:
+class TestTodaysDataPresent:
+    def test_import_today_without_todays_metrics_is_not_enough(
+        self, tmp_path: Path
+    ) -> None:
+        """The 2026-09-20 case: a late import that stopped at Saturday."""
+        daemon = _daemon(tmp_path, imported_at=None)
+        conn = open_db(daemon.db)
+        with conn:
+            conn.execute(
+                "INSERT INTO daily (date, steps, imported_at) VALUES (?, ?, ?)",
+                ("2026-09-26", 5000, SUNDAY_EVENING.isoformat()),
+            )
+            conn.execute(
+                "INSERT INTO daily (date, imported_at) VALUES (?, ?)",
+                ("2026-09-27", SUNDAY_EVENING.isoformat()),
+            )
+        conn.close()
+
+        assert not todays_data_present(daemon.db, SUNDAY_EVENING)
+
     def test_today_yesterday_and_never(self, tmp_path: Path) -> None:
         today = _daemon(tmp_path / "a", imported_at=SUNDAY_EVENING - timedelta(hours=2))
         yesterday = _daemon(
@@ -54,9 +73,9 @@ class TestSyncedToday:
         )
         never = _daemon(tmp_path / "c", imported_at=None)
 
-        assert synced_today(today.db, SUNDAY_EVENING)
-        assert not synced_today(yesterday.db, SUNDAY_EVENING)
-        assert not synced_today(never.db, SUNDAY_EVENING)
+        assert todays_data_present(today.db, SUNDAY_EVENING)
+        assert not todays_data_present(yesterday.db, SUNDAY_EVENING)
+        assert not todays_data_present(never.db, SUNDAY_EVENING)
 
 
 class TestNextMondayFallback:
@@ -99,7 +118,7 @@ class TestScheduledCheck:
 
         daemon._run_coach.assert_not_called()
         text, rows = daemon._poller.send_message_with_keyboard.call_args.args
-        assert "No health data has synced today" in text
+        assert "Today's health data hasn't arrived yet" in text
         assert [b["callback_data"] for b in rows[0]] == [
             "coachrun:now",
             "coachrun:later",
@@ -137,8 +156,8 @@ class TestPostponement:
         conn = open_db(daemon.db)
         with conn:
             conn.execute(
-                "INSERT INTO daily (date, imported_at) VALUES (?, ?)",
-                (until.date().isoformat(), until.isoformat()),
+                "INSERT INTO daily (date, steps, imported_at) VALUES (?, ?, ?)",
+                (until.date().isoformat(), 4000, until.isoformat()),
             )
         conn.close()
 

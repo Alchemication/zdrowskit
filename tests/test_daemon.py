@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -46,6 +46,63 @@ def _make_daemon(tmp_path: Path) -> ProfileRuntime:
 
 
 class TestWeeklyReportScheduling:
+    @pytest.fixture(autouse=True)
+    def _week_is_complete(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """These tests are about retries and skips, not a missing Sunday."""
+        from daemon_runners import DaemonRunnerHandler
+
+        monkeypatch.setattr(DaemonRunnerHandler, "_missing_week_end", lambda self: None)
+
+    def _missing_sunday(self, monkeypatch: pytest.MonkeyPatch, cutoff: str) -> None:
+        from daemon_runners import DaemonRunnerHandler
+
+        monkeypatch.setattr(
+            DaemonRunnerHandler, "_missing_week_end", lambda self: "2026-09-20"
+        )
+        monkeypatch.setattr("daemon_runners.REPORT_MISSING_DAY_CUTOFF_HHMM", cutoff)
+
+    def test_report_waits_for_a_missing_sunday_before_the_cutoff(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The 2026-09-21 report reviewed a week without its Sunday."""
+        self._missing_sunday(monkeypatch, "23:59")
+        daemon = _make_daemon(tmp_path)
+        events: list[str] = []
+
+        with (
+            patch.object(daemon, "_run_import"),
+            patch("cmd_insights.cmd_insights") as insights,
+            patch.object(
+                daemon, "_record_event", side_effect=lambda *a, **k: events.append(a[1])
+            ),
+        ):
+            daemon._run_weekly_report()
+            daemon._run_weekly_report()
+
+        insights.assert_not_called()
+        assert events == ["waiting_for_data"]
+
+    def test_report_runs_after_the_cutoff_and_names_the_missing_day(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._missing_sunday(monkeypatch, "00:00")
+        daemon = _make_daemon(tmp_path)
+        seen: dict[str, str] = {}
+
+        def _mock_insights(args):
+            seen["note"] = args.data_note
+            return CommandResult(text="report text")
+
+        with (
+            patch.object(daemon, "_run_import"),
+            patch("cmd_insights.cmd_insights", side_effect=_mock_insights),
+            patch.object(daemon, "_record_report"),
+            patch.object(daemon, "_attach_feedback_button"),
+        ):
+            daemon._run_weekly_report()
+
+        assert seen["note"].startswith("Data note: Sunday 20 Sep")
+
     def test_weekly_report_no_longer_runs_the_coach(self, tmp_path: Path) -> None:
         """The coach moved to its own Sunday-evening slot, before the week."""
         daemon = _make_daemon(tmp_path)
@@ -4380,3 +4437,51 @@ class TestQuietWeekCheckin:
         assert not resolve.called
         assert not compose.called
         assert not runtime._chat._poller.send_reply.called
+
+
+class TestMissingWeekEnd:
+    def _last_sunday(self) -> str:
+        from weekly_targets import week_start_for
+
+        return (
+            date.fromisoformat(week_start_for(date.today())) - timedelta(days=1)
+        ).isoformat()
+
+    def test_sunday_without_metrics_is_missing(self, tmp_path: Path) -> None:
+        from store import open_db
+
+        daemon = _make_daemon(tmp_path)
+        sunday = self._last_sunday()
+        conn = open_db(daemon.db)
+        with conn:
+            # An import created the row but brought no metrics for the day.
+            conn.execute(
+                "INSERT INTO daily (date, imported_at) VALUES (?, 'x')", (sunday,)
+            )
+        conn.close()
+
+        assert daemon._runners._missing_week_end() == sunday
+
+    def test_sunday_with_metrics_is_complete(self, tmp_path: Path) -> None:
+        from store import open_db
+
+        daemon = _make_daemon(tmp_path)
+        conn = open_db(daemon.db)
+        with conn:
+            conn.execute(
+                "INSERT INTO daily (date, steps, imported_at) VALUES (?, 5000, 'x')",
+                (self._last_sunday(),),
+            )
+        conn.close()
+
+        assert daemon._runners._missing_week_end() is None
+
+
+class TestMissingDayNote:
+    def test_note_and_empty(self) -> None:
+        from cmd_insights import missing_day_note
+
+        assert missing_day_note(None) == ""
+        assert missing_day_note("2026-09-20").startswith(
+            "Data note: Sunday 20 Sep, the last day of the reported week"
+        )
