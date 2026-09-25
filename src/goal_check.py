@@ -27,10 +27,13 @@ import sqlite3
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 
+from challenges import active_challenge, last_ended_on, open_proposal
 from config import (
     ADHERENCE_MIN_WEEKS,
     ADHERENCE_MISS_SHARE,
     ADHERENCE_WINDOW_WEEKS,
+    CHALLENGE_COOLDOWN_WEEKS,
+    CHALLENGE_DUE_MET_SHARE,
     COACH_TRIGGER_COOLDOWN_WEEKS,
 )
 from weekly_progress import measure_week, ring_label
@@ -61,10 +64,12 @@ class GoalCheck:
     Attributes:
         text: Markdown for the prompt section.
         triggers: Conditions that fired this run, after cooldowns.
+        challenge_due: Whether the coach must propose a challenge this run.
     """
 
     text: str
     triggers: list[Trigger] = field(default_factory=list)
+    challenge_due: bool = False
 
 
 @dataclass
@@ -176,6 +181,7 @@ def build_goal_check(
     """
     lines: list[str] = []
     triggers: list[Trigger] = []
+    all_met_most_weeks = False
 
     weeks = _completed_target_weeks(conn, today)
     if not weeks:
@@ -189,6 +195,7 @@ def build_goal_check(
             f"with targets ({span}), oldest first:"
         )
         most_recent = weeks[0]
+        current_shares: list[float] = []
         for slot, history in results.items():
             item = latest[slot]
             history = sorted(history, key=lambda r: r.week_start)
@@ -207,6 +214,8 @@ def build_goal_check(
             )
             missed = len(history) - met
             still_current = any(r.week_start == most_recent for r in history)
+            if still_current:
+                current_shares.append(met / len(history))
             if (
                 still_current
                 and len(history) >= ADHERENCE_MIN_WEEKS
@@ -224,6 +233,11 @@ def build_goal_check(
                             ),
                         )
                     )
+        all_met_most_weeks = (
+            len(weeks) >= ADHERENCE_MIN_WEEKS
+            and bool(current_shares)
+            and min(current_shares) >= CHALLENGE_DUE_MET_SHARE
+        )
         if len(weeks) < ADHERENCE_MIN_WEEKS:
             lines.append(
                 f"Fewer than {ADHERENCE_MIN_WEEKS} completed weeks: too few to "
@@ -254,13 +268,55 @@ def build_goal_check(
                     )
                 )
 
+    challenge_due, challenge_line = _challenge_due(
+        conn, all_met_most_weeks=all_met_most_weeks, today=today
+    )
+    lines.append(challenge_line)
+
     lines.append("")
-    if triggers:
+    if triggers or challenge_due:
         lines.append("**Review required this week** — SKIP is not an option:")
         lines.extend(f"- {trigger.sentence}" for trigger in triggers)
+        if challenge_due:
+            lines.append("- A challenge is due: propose one with `propose_challenge`.")
     else:
         lines.append("Review required this week: no.")
-    return GoalCheck(text="\n".join(lines), triggers=triggers)
+    return GoalCheck(
+        text="\n".join(lines), triggers=triggers, challenge_due=challenge_due
+    )
+
+
+def _challenge_due(
+    conn: sqlite3.Connection, *, all_met_most_weeks: bool, today: date
+) -> tuple[bool, str]:
+    """Decide in code whether a challenge is due, and say why in one line.
+
+    Left to the model, "occasional" meant anything from one proposal in eight
+    identical weeks to four in four. A challenge is due only when every current
+    target was met in most recent weeks, nothing is active or awaiting a
+    decision, and ``CHALLENGE_COOLDOWN_WEEKS`` have passed since the last one
+    stopped.
+    """
+    try:
+        if active_challenge(conn) is not None:
+            return False, "Challenge due: no — one is active."
+        if open_proposal(conn) is not None:
+            return False, "Challenge due: no — a proposal awaits the user's decision."
+        ended = last_ended_on(conn)
+    except sqlite3.Error as exc:
+        logger.warning("Could not read challenges: %s", exc)
+        return False, "Challenge due: no — challenge history unavailable."
+    if ended is not None and (today - ended).days < CHALLENGE_COOLDOWN_WEEKS * 7:
+        return False, (
+            f"Challenge due: no — the last one stopped on {ended.isoformat()}, "
+            f"within {CHALLENGE_COOLDOWN_WEEKS} weeks."
+        )
+    if not all_met_most_weeks:
+        return False, "Challenge due: no — the targets are not yet met most weeks."
+    return True, (
+        "Challenge due: yes — every current target was met in most recent weeks "
+        "and no challenge ran lately."
+    )
 
 
 def record_triggers(

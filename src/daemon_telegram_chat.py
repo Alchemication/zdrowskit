@@ -371,6 +371,11 @@ class TelegramChatHandler:
         if reply_to and handle_checkin_reply(self, message):
             return
 
+        from telegram_challenge import handle_challenge_reason_reply
+
+        if reply_to and handle_challenge_reason_reply(self, message):
+            return
+
         if reply_to and self._daemon._consume_rejection_reason(reply_to, text):
             self._poller.send_reply(
                 "Saved the rejection reason.",
@@ -656,6 +661,10 @@ class TelegramChatHandler:
             args = text.split(maxsplit=1)
             request_text = args[1].strip() if len(args) > 1 else ""
             self._daemon._notify_flow.handle_command(request_text, message_id)
+        elif cmd == "/challenge":
+            from telegram_challenge import handle_challenge_command
+
+            handle_challenge_command(self, message_id)
         elif cmd == "/targets":
             from telegram_progress import handle_targets
 
@@ -1725,6 +1734,12 @@ class TelegramChatHandler:
             handle_targets(self, data.split(":", 1)[1], msg_id)
             return
 
+        if data.startswith("chal:"):
+            from telegram_challenge import handle_challenge_callback
+
+            handle_challenge_callback(self, cb_id, data, msg_id)
+            return
+
         if data.startswith("ctx_accept:"):
             edit_id = data.split(":", 1)[1]
             pending = self._pending_edits.pop(edit_id)
@@ -2073,6 +2088,11 @@ class TelegramChatHandler:
         ctx["last_coach_summary"] = format_last_coach_summary(
             self._daemon._state.get("last_coach_summary", ""),
             self._daemon._state.get("last_coach_summary_date", ""),
+        )
+        from challenges import challenge_status_text
+
+        ctx["challenge_status"] = challenge_status_text(
+            conn, today=datetime.now().date()
         )
 
         health_data = build_llm_data(conn, months=3)

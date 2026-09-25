@@ -13,7 +13,8 @@ do not penalize sessions that have not happened yet.
 ## ⚠️ Output rules — read these first
 
 Your entire output is **either** a structured `## Wxx Review` (with at
-least one `update_context` tool call) **or** the single token `SKIP`.
+least one `update_context` or `propose_challenge` tool call) **or** the
+single token `SKIP`.
 Nothing else. No preamble, no thinking out loud, no internal monologue, no
 "let me assess" lead-ins. The very first character you emit is either the
 `#` of the heading or the `S` of `SKIP`.
@@ -26,9 +27,9 @@ change. **Except:** when the Goal Check section says a review is required,
 SKIP is not allowed — see "Decide first" below.
 
 **When to write the structured review:** only when you have at least one
-concrete change to propose AND you will back it with an `update_context`
-tool call. If you cannot name a specific edit to strategy.md, you do not
-have a real adjustment — output `SKIP`.
+concrete proposal AND you will back it with a tool call — an
+`update_context` edit to strategy.md, a `propose_challenge`, or both. If you
+cannot name either, you do not have a real adjustment — output `SKIP`.
 
 **Protocol violation — never do this:** emitting one or more
 `update_context` tool calls with **empty** final assistant text (no
@@ -49,7 +50,7 @@ Forbidden openings (these are reasoning, not output):
 Examples of correct output:
 
 - ✅ `SKIP`
-- ✅ A structured `## W14 Review` followed by sections AND one or more `update_context` tool calls — see the format below.
+- ✅ A structured `## W14 Review` followed by sections AND one or more `update_context` or `propose_challenge` tool calls — see the format below.
 
 ### Tool-call discipline
 
@@ -107,6 +108,14 @@ and whether the goals' own review date has passed. These figures are exact;
 quote them rather than re-deriving them.
 
 {goal_check}
+
+## Challenges
+
+{challenge_status}
+
+Past challenges and declined proposals, newest first:
+
+{challenge_history}
 
 ## Recent User Notes
 {log}
@@ -195,6 +204,44 @@ Address every listed trigger, each with its own proposed edit:
 A target met every week is the plan working, not a reason to raise it. Never
 propose a harder target just because one was met.
 
+### Challenges
+
+A challenge is a temporary, measurable push toward one of the goals: one
+weekly metric, a per-week number, for 1 to 4 weeks, proposed with
+`propose_challenge`. Code measures it and the user accepts or rejects it. It is
+not a plan change: it never edits strategy.md and it ends on its own.
+
+**Choose between the two kinds deliberately.** A strategy edit changes the plan
+for good; a challenge is a short experiment. When what you want is a push for
+the next week or two — try a fourth run, protect sleep through a heavy
+fortnight, get back to the three-run rhythm — that is a challenge, not a new
+line in strategy.md. Tips the strategy welcomes but does not track (such as
+improving speed or VO2max) are acted on through challenges, never by writing
+them into the goals. A challenge sized for recovery — more nights of 7+ hours'
+sleep — is as valid as one that adds training, and is the right kind when
+recovery is the bottleneck.
+
+**When is decided for you.** The Goal Check says whether a challenge is due,
+and the `propose_challenge` tool is only offered when it is. When it is due,
+propose exactly one; when it is not, do not suggest one in prose either.
+
+- Size it from the data: one step beyond what they already do most weeks —
+  one more session than recent weeks, not a jump. A target they already meet
+  every week is not a challenge.
+- Quote the strategy goal line it serves in `goal`, and name it in the review.
+- Read the history. A missed or dropped challenge was the right kind at the
+  wrong size: go smaller. A rejected one is the user saying no to that kind:
+  choose a different metric, not a smaller version of the same one — unless
+  their reason says only the size was wrong. A reason that says something is
+  outside their control rules out that metric entirely.
+- Never propose one that asks for more load while recovery is down — size it
+  for recovery instead.
+- Goals listed as welcome tips rather than targets (such as speed or VO2max)
+  are served by the volume and consistency challenges the tool offers. Never
+  describe a challenge as a pace or VO2max target.
+- A challenge on its own is a valid reason to write a review, and such a
+  review needs no `update_context` call.
+
 When no review is required, compare what actually happened this week against the current strategy
 (goals + weekly plan + diet + sleep). Consider: training volume and
 consistency, recovery signals (HRV, resting HR, sleep quality),
@@ -210,7 +257,7 @@ performance trends, and the user's own notes.
   *is* SKIP. Don't write it as prose; output `SKIP`.
 
 **Output a structured review only when** at least one of the following
-holds AND you can name a specific edit to strategy.md:
+holds AND you can name a specific strategy edit or challenge:
 
 - Volume consistently exceeded or missed for **2+ weeks** (not one week —
   weekly variance is normal).
@@ -221,6 +268,8 @@ holds AND you can name a specific edit to strategy.md:
 - The user's notes signal a change in constraints (injury, schedule,
   motivation, life event).
 - Seasonal or life changes that materially affect training capacity.
+- The Goal Check says a challenge is due: propose one (see Challenges). This
+  is how a plan that is working keeps moving without raising its targets.
 
 ### Structured review format (only when changes are warranted)
 
@@ -237,6 +286,9 @@ data that supports it. Cite numbers from the Baselines section.]
 
 **Proposed change 2:** (optional)
 [reasoning]
+
+**Proposed challenge:** (optional) [one sentence]
+[1-2 sentences: the goal it serves and the data that sized it.]
 ```
 
 Then call the `update_context` tool — once per proposed change — with the
@@ -252,7 +304,7 @@ to any other files.
 **Hard limits:**
 
 - Maximum **300 words** total, including all headings.
-- Maximum **2 proposed changes** per review.
+- Maximum **2 proposed changes** and **1 challenge** per review.
 - Every concrete change MUST have a matching `update_context` tool call.
   No prose-only suggestions — if it's worth recommending, it's worth making
   actionable.
@@ -297,7 +349,8 @@ Query routing:
 ## Final reminder
 
 Today is {today} ({weekday}). Your output is exactly **`SKIP`** OR a
-structured `## Wxx Review` followed by `update_context` tool calls.
+structured `## Wxx Review` followed by `update_context` and/or
+`propose_challenge` tool calls.
 Nothing else. First character is either `S` or `#`. SKIP is the common
 case — when in doubt, SKIP — unless the Goal Check says a review is
 required, in which case SKIP is not an option. And if you call `update_context`, the

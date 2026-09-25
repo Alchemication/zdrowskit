@@ -1593,6 +1593,7 @@ def _build_context(fixture: dict[str, Any]) -> dict[str, str]:
     # cannot silently move eval results.
     context["soul"] = llm_context.load_default_soul()
     context["conduct"] = llm_context.load_prompt_text(llm_context.CONDUCT_PROMPT)
+    context.setdefault("challenge_status", "No challenge is active.")
     return context
 
 
@@ -1720,6 +1721,15 @@ def _tool_call_namespace(raw_tool_call: Any) -> Any:
 
 
 def _eval_tool_result(tool_call: CapturedToolCall, fixture: dict[str, Any]) -> str:
+    if tool_call.name == "propose_challenge":
+        from challenges import PROPOSAL_NOTED, ChallengeError, coerce_proposal
+
+        known = frozenset(fixture.get("known_activity_types", []))
+        try:
+            coerce_proposal(tool_call.arguments, known)
+        except ChallengeError as exc:
+            return f"Not proposed: {exc}."
+        return PROPOSAL_NOTED
     if tool_call.name == "update_context":
         if tool_call.arguments.get("action") not in {"append", "replace_section"}:
             return (

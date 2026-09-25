@@ -36,9 +36,21 @@ from llm_health import (
     render_health_data,
 )
 from llm_verify import extract_tool_evidence, slim_source_messages
+from challenges import (
+    PROPOSAL_NOTED,
+    ChallengeError,
+    Proposal,
+    coerce_proposal,
+    challenge_status_text,
+    describe_challenge,
+    describe_history,
+    propose,
+    propose_challenge_tool,
+)
 from goal_check import build_goal_check, record_triggers
 from milestones import compute_milestones
 from store import create_llm_trace, open_db
+from weekly_targets import known_activity_types
 
 logger = logging.getLogger(__name__)
 
@@ -159,6 +171,10 @@ def cmd_coach(
     today = date.today()
     goal_check = build_goal_check(conn, context.get("strategy"), today=today)
     context["goal_check"] = goal_check.text
+    # Code decides when a challenge is due; the model only decides which.
+    challenge_open = goal_check.challenge_due
+    context["challenge_status"] = challenge_status_text(conn, today=today)
+    context["challenge_history"] = describe_history(conn)
 
     # Inject the live list of strategy.md section headings so the model only
     # proposes replace_section edits against headings that actually exist.
@@ -213,7 +229,11 @@ def cmd_coach(
     model = route["model"]
     fallback_models = route.get("fallback_models")
     tools = run_sql_tool() + context_update_tool(allowed_files=["strategy"])
+    if challenge_open:
+        tools = tools + propose_challenge_tool()
     raw_edits: list[ContextEdit] = []
+    challenge_proposal: Proposal | None = None
+    known_types = known_activity_types(conn)
     narrative_parts: list[str] = []
     max_iterations = MAX_TOOL_ITERATIONS_COACH
     reasoning_effort = normalize_reasoning_effort(
@@ -264,7 +284,8 @@ def cmd_coach(
             narrative_parts.append(iter_text)
 
         if not result.tool_calls:
-            if not followed_up and needs_edit_followup(iter_text, len(raw_edits)):
+            proposed = len(raw_edits) + (1 if challenge_proposal else 0)
+            if not followed_up and needs_edit_followup(iter_text, proposed):
                 # A review with no edit gives the user nothing to accept. One
                 # follow-up recovers it; a second slip is left to verification.
                 logger.info("Coach wrote a review without an edit; asking once")
@@ -300,6 +321,15 @@ def cmd_coach(
                         "update_context schema, target section, and compact "
                         "log-entry rules before retrying."
                     )
+            elif fn_name == "propose_challenge" and challenge_open:
+                if challenge_proposal is not None:
+                    tool_result = "Not proposed: one challenge per review."
+                else:
+                    try:
+                        challenge_proposal = coerce_proposal(args_dict, known_types)
+                        tool_result = PROPOSAL_NOTED
+                    except ChallengeError as exc:
+                        tool_result = f"Not proposed: {exc}."
             elif fn_name == "run_sql":
                 logger.info("Coach SQL: %s", args_dict.get("query", "")[:200])
                 tool_result = execute_run_sql(Path(args.db), args_dict)
@@ -373,7 +403,7 @@ def cmd_coach(
             continue
         proposals.append(CoachProposal(edit=edit, preview=preview))
 
-    if not proposals and not narrative:
+    if not proposals and not narrative and challenge_proposal is None:
         logger.info("Coach returned SKIP — no strategy changes warranted")
         return (
             CommandResult(text=None, llm_call_id=result.llm_call_id),
@@ -381,19 +411,18 @@ def cmd_coach(
         )
 
     # Protocol violation fallback: edits but no narrative.
-    if not narrative and proposals:
+    if not narrative and (proposals or challenge_proposal):
         logger.warning(
             "Coach returned %d edit(s) with empty narrative — "
             "prompt compliance failure; sending fallback wrapper",
             len(proposals),
         )
         narrative = (
-            f"Proposing {len(proposals)} strategy update"
-            f"{'s' if len(proposals) != 1 else ''} from this week's data "
-            "(rationale missing — review the diffs carefully)."
+            "Proposals from this week's data "
+            "(rationale missing — review them carefully)."
         )
 
-    bundled_text = _format_coach_bundle(narrative, proposals)
+    bundled_text = _format_coach_bundle(narrative, proposals, challenge_proposal)
     verified_text = apply_verification(
         kind="coach",
         draft=bundled_text,
@@ -408,6 +437,7 @@ def cmd_coach(
             "recent_nudges_text": context.get("recent_nudges"),
             "coach_feedback": context.get("coach_feedback"),
             "proposals": _coach_proposal_evidence(proposals),
+            "challenge": _challenge_evidence(challenge_proposal),
             "tool_calls": extract_tool_evidence(messages),
         },
         source_messages=slim_source_messages(messages, bundled_text),
@@ -430,6 +460,11 @@ def cmd_coach(
         )
     bundled_text = verified_text
     print(bundled_text)
+    if challenge_proposal is not None:
+        try:
+            propose(conn, challenge_proposal, llm_call_id=result.llm_call_id)
+        except ChallengeError as exc:
+            logger.warning("Coach challenge not stored: %s", exc)
     # Only a delivered review raises a trigger; a skip leaves it to fire again.
     record_triggers(
         conn, goal_check.triggers, today=today, llm_call_id=result.llm_call_id
@@ -442,9 +477,25 @@ def cmd_coach(
     return cmd_result, proposals
 
 
-def _format_coach_bundle(narrative: str, proposals: list[CoachProposal]) -> str:
+def _challenge_evidence(proposal: Proposal | None) -> dict | None:
+    """Serialize a challenge proposal for verifier evidence."""
+    if proposal is None:
+        return None
+    return {
+        "spec": describe_challenge(proposal),
+        "title": proposal.title,
+        "goal": proposal.goal,
+        "rationale": proposal.rationale,
+    }
+
+
+def _format_coach_bundle(
+    narrative: str,
+    proposals: list[CoachProposal],
+    challenge: Proposal | None = None,
+) -> str:
     """Render the consolidated coach review for stdout / Telegram."""
-    if not proposals:
+    if not proposals and challenge is None:
         return narrative
     parts: list[str] = []
     if narrative:
@@ -458,4 +509,10 @@ def _format_coach_bundle(narrative: str, proposals: list[CoachProposal]) -> str:
             f"```diff\n{proposal.preview}\n```"
         )
         parts.append(block)
+    if challenge is not None:
+        parts.append(
+            f"🎯 **Proposed challenge** — {challenge.title}\n"
+            f"{describe_challenge(challenge)}\n"
+            f"Serves: {challenge.goal}"
+        )
     return "\n\n".join(parts)

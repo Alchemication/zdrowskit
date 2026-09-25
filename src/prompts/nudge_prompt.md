@@ -43,6 +43,18 @@ run in the middle of its peers is an ordinary run — not a finding. Quote the
 figures as given; where a line says there are too few similar runs, make no
 heart-rate comparison for that run at all.
 
+## Challenge
+
+{challenge}
+
+A challenge is a temporary target the user accepted from the coach, measured by
+code. When this section shows one, this sync moved it or its week is closing:
+you may mention its progress in one clause — a week just met, or what is left —
+if it fits the rest of the message. It ranks below the weekly rhythm and below
+recovery: never push for it when recovery or sleep says ease off, never scold a
+miss, and never repeat progress a nudge above already reported. When the
+section says there is no challenge news, do not mention any challenge.
+
 ## Standout
 
 {standout}

@@ -1088,9 +1088,20 @@ class ProfileRuntime:
         while not self._stop_event.wait(SCHEDULED_CHECK_INTERVAL_S):
             self._scheduled_check_once()
 
+    def _close_challenges(self) -> None:
+        """Close finished challenges and announce them; never raises."""
+        from telegram_challenge import close_and_announce
+
+        try:
+            close_and_announce(self.db, self._poller)
+        except Exception:
+            logger.warning("Challenge housekeeping failed", exc_info=True)
+
     def _scheduled_check_once(self) -> None:
         """Run one profile-scoped scheduled report and queue check."""
         from notification_prefs import evaluate_nudge_delivery, scheduled_report_due
+
+        self._close_challenges()
 
         now = datetime.now().astimezone()
         prefs = self._load_notification_prefs(now=now)

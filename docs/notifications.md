@@ -439,6 +439,38 @@ message from being sent.
 | Health data synced via iCloud | 3 min debounce | Imports the settled files, then reacts |
 | `log.md` / `strategy.md` / `me.md` edited | 60 sec | Acknowledges the change, flags tension, or confirms it |
 
+## Challenges
+
+Alongside plan changes, the weekly coach may propose one challenge: a temporary
+push on one weekly measure from the same vocabulary as the progress strip —
+sessions, distance, sleep nights, step days or exercise minutes — with a
+per-week number, for up to `CHALLENGE_MAX_WEEKS` weeks. It names the goal in
+`strategy.md` it serves, and it never edits that file: challenges live in the
+database and end on their own.
+
+- **You decide.** The review carries Accept and Reject buttons. An accepted
+  challenge starts this week if accepted by `CHALLENGE_LAST_START_WEEKDAY`,
+  otherwise next Monday, so every week is scored whole. A proposal left
+  untapped expires after `CHALLENGE_PROPOSAL_TTL_DAYS`. Rejecting or dropping
+  asks, optionally, why.
+- **Code scores it.** Each week is measured with the same query as the progress
+  strip. When the last week ends the result is frozen — achieved (every week
+  met), partial (at least `CHALLENGE_PARTIAL_SHARE` of weeks) or missed — and
+  announced in Telegram without a model involved.
+- **Code decides when.** A challenge is due only when every current weekly
+  target was met in at least `CHALLENGE_DUE_MET_SHARE` of recent weeks, nothing
+  is active or awaiting a decision, and `CHALLENGE_COOLDOWN_WEEKS` have passed
+  since the last one stopped. Then the coach must propose one; otherwise it is
+  not offered the tool at all. It chooses what to propose, and sees the last
+  `CHALLENGE_HISTORY_COUNT` challenges and declined proposals with any reasons,
+  so it does not re-propose what you turned down.
+- **Nudges mention it only when it is news**: a workout from this sync counts
+  toward it, or, for sleep and steps challenges, the week closes within
+  `CHALLENGE_NUDGE_WEEK_END_DAYS`. It ranks below recovery and is never used to
+  push a session the data says to skip. Chat always sees it.
+
+All tunables live in `src/config.py`.
+
 ## How a New Run Compares
 
 When a sync brings in a run, the nudge is handed a computed comparison with the

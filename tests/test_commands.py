@@ -269,6 +269,7 @@ class TestTelegramBotCommands:
     def test_registered_bot_commands_match_telegram_surface(self) -> None:
         assert TELEGRAM_BOT_COMMANDS == [
             {"command": "targets", "description": "View goals or pause progress"},
+            {"command": "challenge", "description": "View or drop your challenge"},
             {"command": "add", "description": "Add workout or sleep"},
             {"command": "codex", "description": "Ask Codex about this repo"},
             {"command": "claude", "description": "Ask Claude about this repo"},

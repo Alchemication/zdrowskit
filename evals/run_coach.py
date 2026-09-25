@@ -18,6 +18,7 @@ if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
 import llm_context  # noqa: E402
+from challenges import propose_challenge_tool  # noqa: E402
 from cmd_coach import needs_edit_followup  # noqa: E402
 from config import MAX_TOKENS_COACH, PROMPTS_DIR  # noqa: E402
 from tools import run_sql_tool  # noqa: E402
@@ -30,6 +31,8 @@ _COACH_CONTEXT_DEFAULTS = {
     "review_facts": "(not provided)",
     "goal_check": "No completed weeks with weekly targets yet.\n\n"
     "Review required this week: no.",
+    "challenge_status": "No challenge is active.",
+    "challenge_history": "No challenges yet.",
 }
 
 
@@ -76,8 +79,7 @@ def run_coach_case(
         case=case,
         fixture=fixture,
         messages=messages,
-        tools=run_sql_tool()
-        + llm_context.context_update_tool(allowed_files=["strategy"]),
+        tools=_coach_tools(fixture),
         model=model,
         max_tokens=int(fixture.get("max_tokens", MAX_TOKENS_COACH)),
         max_tool_iterations=max_tool_iterations,
@@ -99,9 +101,19 @@ def run_coach_case(
     return execution, model, route
 
 
+def _coach_tools(fixture: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return the tools cmd_coach offers: challenges only when one is due."""
+    tools = run_sql_tool() + llm_context.context_update_tool(allowed_files=["strategy"])
+    if fixture.get("challenge_due", False):
+        tools = tools + propose_challenge_tool()
+    return tools
+
+
 def _edit_followup(text: str, captured: list[Any]) -> str | None:
     """Mirror cmd_coach's one follow-up when a review forgets its edit call."""
-    edits = sum(1 for call in captured if call.name == "update_context")
+    edits = sum(
+        1 for call in captured if call.name in {"update_context", "propose_challenge"}
+    )
     if needs_edit_followup(text, edits):
         return llm_context.load_prompt_text("coach_tool_followup")
     return None

@@ -20,6 +20,7 @@ column, and no one to have predicted the sport.
 Public API:
     RingProgress            — one measured target and its pace verdict.
     measure_week            — measure stored targets against the week so far.
+    measure_target          — measure one target over an inclusive date range.
     render_progress_block   — the multi-line strip for reports.
     render_progress_line    — the single-line form for nudges.
     render_dots             — the dotted form of one countable ring, or None.
@@ -204,7 +205,7 @@ def render_bar(fraction: float, *, complete: bool, started: bool) -> str:
     return _BAR_FILLED * filled + _BAR_EMPTY * (cells - filled)
 
 
-def _measure_one(
+def measure_target(
     conn: sqlite3.Connection,
     item: StoredTarget,
     start: str,
@@ -308,7 +309,7 @@ def measure_week(
     rings: list[RingProgress] = []
     try:
         for item in targets:
-            actual, last_date = _measure_one(conn, item, monday_iso, end)
+            actual, last_date = measure_target(conn, item, monday_iso, end)
             rings.append(
                 RingProgress(
                     target=item,

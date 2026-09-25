@@ -807,6 +807,9 @@ class DaemonRunnerHandler:
         if not skip_import:
             self._d._run_import()
 
+        # Close finished challenges first, so the review sees their outcomes.
+        self._d._close_challenges()
+
         from cmd_coach import cmd_coach
 
         args = types.SimpleNamespace(
@@ -921,17 +924,20 @@ class DaemonRunnerHandler:
                 )
             return
 
-        # No proposals, but coach still has narrative to deliver — rare
-        # (the prompt forces SKIP otherwise) but possible from the
-        # iteration-cap synthesis path. Send as a regular reply with the
-        # feedback keyboard attached.
+        from telegram_challenge import buttons_for_coach_call
+
+        challenge_rows = buttons_for_coach_call(self._d.db, cmd_result.llm_call_id)
+
+        # No strategy edits: either a challenge-only review, or narrative from
+        # the iteration-cap synthesis path.
         if not proposals:
-            msg_id = self._d._poller.send_reply(cmd_result.text)
-            if msg_id is not None and cmd_result.llm_call_id is not None:
-                self._d._poller.edit_message_reply_markup(
-                    msg_id,
-                    feedback_keyboard(cmd_result.llm_call_id, "coach"),
-                )
+            rows = list(challenge_rows)
+            if cmd_result.llm_call_id is not None:
+                rows.extend(feedback_keyboard(cmd_result.llm_call_id, "coach"))
+            if rows:
+                self._d._poller.send_message_with_keyboard(cmd_result.text, rows)
+            else:
+                self._d._poller.send_reply(cmd_result.text)
             return
 
         # Bundled path. Mint one PendingEdit per proposal so the inline
@@ -961,7 +967,7 @@ class DaemonRunnerHandler:
         # Append a feedback row reusing the existing thumbs-down keyboard
         # so the user can flag the whole review without losing the per-edit
         # buttons. feedback_keyboard returns rows (list[list[button]]).
-        keyboard_rows = list(accept_rows)
+        keyboard_rows = list(accept_rows) + challenge_rows
         if cmd_result.llm_call_id is not None:
             keyboard_rows.extend(feedback_keyboard(cmd_result.llm_call_id, "coach"))
 

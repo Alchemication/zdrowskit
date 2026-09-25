@@ -560,6 +560,62 @@ A persistently missed target stays missed for weeks; without a cooldown the
 coach would raise it every Monday until the person gave in. Four weeks lets a
 rejected proposal stand for a month before the evidence is put again.
 """
+CHALLENGE_MAX_WEEKS: int = 4
+"""Longest challenge the coach may propose.
+
+A challenge is a temporary push, not a new standing rule — that is what a plan
+change is for. Past a month it stops being an experiment and becomes the plan by
+stealth, which is how a single suggested tempo run became a permanent priority.
+"""
+CHALLENGE_PARTIAL_SHARE: float = 0.5
+"""Share of a challenge's weeks that must be met for it to close as partial.
+
+Below half, the challenge mostly did not happen and is scored missed; at half or
+more it half-worked, which tells the coach the size was close. Achieved means
+every week met.
+"""
+CHALLENGE_PROPOSAL_TTL_DAYS: int = 7
+"""Days an untapped challenge proposal stays open before it expires.
+
+One weekly coach cycle. A proposal still unanswered when the next review runs
+belongs to last week's data, and a new review should not stack on top of it.
+"""
+CHALLENGE_LAST_START_WEEKDAY: int = 1
+"""Latest weekday (Monday is 0) on which an accepted challenge starts this week.
+
+Challenges are scored in whole Monday-to-Sunday weeks, like the progress strip.
+Accepted by Tuesday, the week is still mostly ahead; accepted later, week one
+would be scored on a few days, so the challenge starts the following Monday.
+"""
+CHALLENGE_HISTORY_COUNT: int = 6
+"""Past challenges and rejected proposals shown to the coach.
+
+About three months at one challenge every two weeks: enough to see what this
+person takes on and finishes, not so much that old outcomes drown recent ones.
+"""
+CHALLENGE_DUE_MET_SHARE: float = 0.75
+"""Share of recent weeks every current target must be met in for a challenge to be due.
+
+A challenge is how a plan that is working keeps moving without raising its
+targets, so it is due only when the plan is working: three of four weeks, six
+of eight. Below that the coach's job is the plan itself, not an extra push.
+"""
+CHALLENGE_COOLDOWN_WEEKS: int = 2
+"""Weeks after a challenge ends or is declined before another can be due.
+
+Asking for the model to judge "occasional" gave anything from one proposal in
+eight identical weeks to four in four. A fixed gap after every challenge —
+finished, dropped, rejected or left to expire — makes the cadence a rule: a
+two-week challenge and its cooldown come round about once a month at most.
+"""
+CHALLENGE_NUDGE_WEEK_END_DAYS: int = 2
+"""Final days of a challenge week on which a sleep or steps challenge is news.
+
+Nearly every sync brings a new sleep night or step count, so for those metrics
+"this sync touched it" would put the challenge in every nudge — the repetition a
+challenge must not become. The weekend is when the week's count is decided and
+one mention can still change it.
+"""
 COACH_SUMMARY_MAX_AGE_DAYS: int = 14
 """Age after which the last coach review is no longer shown as current context.
 

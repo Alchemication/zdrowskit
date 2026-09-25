@@ -108,8 +108,9 @@ class TestBuildGoalCheck:
         check = build_goal_check(in_memory_db, None, today=TODAY)
 
         assert "met 4 of 4" in check.text
+        # Never a plan-change trigger; at most it makes a challenge due.
         assert check.triggers == []
-        assert "Review required this week: no." in check.text
+        assert "was missed" not in check.text
 
     def test_missed_half_the_time_is_a_stretch_not_a_trigger(
         self, in_memory_db: sqlite3.Connection
@@ -219,3 +220,81 @@ class TestReviewDate:
         check = build_goal_check(in_memory_db, strategy, today=TODAY)
 
         assert [t.key for t in check.triggers] == ["review:2026-09-01"]
+
+
+class TestChallengeDue:
+    def _proposal_id(self, conn: sqlite3.Connection) -> int:
+        from challenges import coerce_proposal, propose
+
+        raw = {
+            "title": "Sleep",
+            "goal": "g",
+            "metric": "sleep_nights_week",
+            "target": 5,
+            "threshold": 7,
+            "weeks": 2,
+        }
+        return propose(conn, coerce_proposal(raw, frozenset()), llm_call_id=None)
+
+    def test_due_when_every_target_is_met_most_weeks(
+        self, in_memory_db: sqlite3.Connection
+    ) -> None:
+        _seed(in_memory_db, [3, 3, 2, 3])
+
+        check = build_goal_check(in_memory_db, None, today=TODAY)
+
+        assert check.challenge_due
+        assert check.triggers == []
+        assert "A challenge is due" in check.text
+        assert "SKIP is not an option" in check.text
+
+    def test_not_due_when_a_target_is_missed_too_often(
+        self, in_memory_db: sqlite3.Connection
+    ) -> None:
+        _seed(in_memory_db, [3, 2, 2, 3])
+
+        check = build_goal_check(in_memory_db, None, today=TODAY)
+
+        assert not check.challenge_due
+        assert "not yet met most weeks" in check.text
+
+    def test_not_due_on_short_history(self, in_memory_db: sqlite3.Connection) -> None:
+        _seed(in_memory_db, [3, 3, 3], weeks=WEEKS[1:])
+
+        assert not build_goal_check(in_memory_db, None, today=TODAY).challenge_due
+
+    def test_not_due_while_one_is_active_or_awaiting(
+        self, in_memory_db: sqlite3.Connection
+    ) -> None:
+        from challenges import accept
+
+        _seed(in_memory_db, [3, 3, 3, 3])
+        challenge_id = self._proposal_id(in_memory_db)
+
+        awaiting = build_goal_check(in_memory_db, None, today=TODAY)
+        accept(in_memory_db, challenge_id, today=TODAY)
+        active = build_goal_check(in_memory_db, None, today=TODAY)
+
+        assert not awaiting.challenge_due
+        assert "awaits the user's decision" in awaiting.text
+        assert not active.challenge_due
+        assert "one is active" in active.text
+
+    def test_cooldown_after_a_challenge_stops(
+        self, in_memory_db: sqlite3.Connection
+    ) -> None:
+        from challenges import reject
+
+        _seed(in_memory_db, [3, 3, 3, 3])
+        reject(in_memory_db, self._proposal_id(in_memory_db))
+        with in_memory_db:
+            in_memory_db.execute(
+                "UPDATE challenge SET decided_at = ?", (TODAY.isoformat(),)
+            )
+
+        soon = build_goal_check(in_memory_db, None, today=TODAY + timedelta(days=13))
+        later = build_goal_check(in_memory_db, None, today=TODAY + timedelta(days=14))
+
+        assert not soon.challenge_due
+        assert "within 2 weeks" in soon.text
+        assert later.challenge_due

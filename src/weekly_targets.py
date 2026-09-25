@@ -27,6 +27,7 @@ Public API:
     load_targets        — read a week's stored targets.
     save_targets        — replace a week's stored targets.
     clear_targets       — drop a week's stored targets.
+    coerce_target       — validate one model-proposed target against the vocabulary.
     derive_targets      — one LLM call turning goal prose into targets.
     ensure_weekly_targets — cached derive-or-reuse for the current week.
 """
@@ -539,7 +540,7 @@ def _match_activity_type(name: str, known: frozenset[str]) -> str | None:
     return None
 
 
-def _coerce_target(
+def coerce_target(
     raw: dict, strategy_hash: str, known_types: frozenset[str]
 ) -> StoredTarget | None:
     """Validate one model-proposed target, or return None to drop it.
@@ -675,7 +676,7 @@ def parse_targets_response(
 
     accepted: dict[tuple[str, str], StoredTarget] = {}
     for raw in raw_items:
-        item = _coerce_target(raw, strategy_hash, known_types)
+        item = coerce_target(raw, strategy_hash, known_types)
         if item is None:
             continue
         # First mention wins: the model is asked to list goals in the user's

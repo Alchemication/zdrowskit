@@ -141,6 +141,12 @@ long, paste only the part that answers the question.
 ## Latest Coach Session
 {last_coach_summary}
 
+## Current Challenge
+{challenge_status}
+
+A challenge is temporary and measured by code; its progress above is exact.
+If the user asks to drop it, point them to /challenge.
+
 ## Recent Health Data
 
 This is a compact markdown view of the current week plus recent days.

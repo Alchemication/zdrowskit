@@ -37,6 +37,7 @@ from llm_health import (
 )
 from llm_verify import extract_tool_evidence, slim_source_messages
 from notify import send_telegram
+from challenges import NO_CHALLENGE_NEWS, nudge_challenge_text
 from run_comparison import NO_RUN_COMPARISON, describe_run_comparisons
 from standouts import (
     NO_STANDOUT_NOTICE,
@@ -199,6 +200,13 @@ def cmd_nudge(
     except sqlite3.Error as exc:
         logger.warning("Run comparison failed; nudging without it: %s", exc)
         context["run_comparison"] = NO_RUN_COMPARISON
+    try:
+        context["challenge"] = nudge_challenge_text(
+            conn, workout_ids=eligible_workout_ids, today=datetime.now().date()
+        )
+    except sqlite3.Error as exc:
+        logger.warning("Challenge lookup failed; nudging without it: %s", exc)
+        context["challenge"] = NO_CHALLENGE_NEWS
 
     messages = build_messages(
         context,

@@ -141,3 +141,7 @@ and uses one shared Telegram update stream.
 buttons. `/targets pause` hides the strip until `/targets resume`; it does not
 mute other notifications. `/targets refresh` re-reads goals. To correct a goal,
 ask the chat to change it and approve the proposed strategy edit.
+
+`/challenge` shows the active challenge and its week-by-week progress with a
+Drop button, or a proposal still awaiting your decision with Accept and Reject
+buttons, or the recent challenge history when neither exists.
