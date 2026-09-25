@@ -89,6 +89,10 @@ def md_to_telegram_html(md_text: str) -> str:
     <pre>, <a>, <blockquote>.  This function converts standard markdown
     into that subset so messages render with rich formatting.
 
+    Consecutive lines starting with ``>>`` become one expandable quote, which
+    Telegram shows collapsed behind a tap — for detail that should not
+    lengthen the message, such as the reasoning behind a proposal.
+
     Args:
         md_text: Markdown text (from LLM output or report).
 
@@ -101,7 +105,24 @@ def md_to_telegram_html(md_text: str) -> str:
     code_block_lines: list[str] = []
     code_lang = ""
 
+    expandable: list[str] = []
+
+    def flush_expandable() -> None:
+        if expandable:
+            result.append(
+                "<blockquote expandable>" + "\n".join(expandable) + "</blockquote>"
+            )
+            expandable.clear()
+
     for line in lines:
+        # --- expandable quote: consecutive ">>" lines, outside code blocks ---
+        if not in_code_block:
+            ex = re.match(r"^>>\s?(.*)", line)
+            if ex:
+                expandable.append(_inline_format(ex.group(1)))
+                continue
+            flush_expandable()
+
         # --- fenced code blocks ---
         if re.match(r"^```", line):
             if not in_code_block:
@@ -160,6 +181,8 @@ def md_to_telegram_html(md_text: str) -> str:
 
         # --- regular line ---
         result.append(_inline_format(line))
+
+    flush_expandable()
 
     # Handle unclosed code block gracefully.
     if in_code_block and code_block_lines:

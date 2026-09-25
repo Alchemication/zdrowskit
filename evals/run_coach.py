@@ -19,7 +19,7 @@ if str(_SRC) not in sys.path:
 
 import llm_context  # noqa: E402
 from challenges import propose_challenge_tool  # noqa: E402
-from cmd_coach import needs_edit_followup  # noqa: E402
+from cmd_coach import coach_followup  # noqa: E402
 from config import MAX_TOKENS_COACH, PROMPTS_DIR  # noqa: E402
 from tools import run_sql_tool  # noqa: E402
 
@@ -88,7 +88,7 @@ def run_coach_case(
         cache=cache,
         refresh_cache=refresh_cache,
         extra_metadata={"stage": "coach"},
-        followup=_edit_followup,
+        followup=_followup_for(fixture),
     )
     route = _eval_route(
         feature="coach",
@@ -109,14 +109,27 @@ def _coach_tools(fixture: dict[str, Any]) -> list[dict[str, Any]]:
     return tools
 
 
-def _edit_followup(text: str, captured: list[Any]) -> str | None:
-    """Mirror cmd_coach's one follow-up when a review forgets its edit call."""
-    edits = sum(
-        1 for call in captured if call.name in {"update_context", "propose_challenge"}
-    )
-    if needs_edit_followup(text, edits):
-        return llm_context.load_prompt_text("coach_tool_followup")
-    return None
+def _followup_for(fixture: dict[str, Any]) -> Any:
+    """Mirror cmd_coach's follow-ups, each sent at most once per run."""
+    sent: set[str] = set()
+    due = bool(fixture.get("challenge_due", False))
+
+    def followup(text: str, captured: list[Any]) -> str | None:
+        name = coach_followup(
+            text,
+            edits=sum(1 for call in captured if call.name == "update_context"),
+            challenge_proposed=any(
+                call.name == "propose_challenge" for call in captured
+            ),
+            challenge_due=due,
+            already_sent=sent,
+        )
+        if name is None:
+            return None
+        sent.add(name)
+        return llm_context.load_prompt_text(name)
+
+    return followup
 
 
 def _build_context(fixture: dict[str, Any]) -> dict[str, str]:

@@ -730,7 +730,11 @@ def propose_challenge_tool() -> list[dict]:
                         },
                         "rationale": {
                             "type": "string",
-                            "description": "One or two sentences citing the data.",
+                            "description": (
+                                "One or two sentences: why this, and the data "
+                                "that sized it. Shown to the user under the "
+                                "review, so do not repeat it in the review text."
+                            ),
                         },
                         "metric": {"type": "string", "enum": metrics},
                         "category": {
@@ -754,7 +758,14 @@ def propose_challenge_tool() -> list[dict]:
                             "maximum": CHALLENGE_MAX_WEEKS,
                         },
                     },
-                    "required": ["title", "goal", "metric", "target", "weeks"],
+                    "required": [
+                        "title",
+                        "goal",
+                        "rationale",
+                        "metric",
+                        "target",
+                        "weeks",
+                    ],
                 },
             },
         }

@@ -14,7 +14,7 @@ from unittest.mock import call, patch
 import pytest
 
 from cmd_db import cmd_db
-from cmd_coach import cmd_coach, needs_edit_followup
+from cmd_coach import cmd_coach, coach_followup, needs_edit_followup
 from cmd_insights import cmd_insights
 from cmd_llm_common import (
     InsufficientWeekData,
@@ -461,6 +461,76 @@ class TestNeedsEditFollowup:
         assert not needs_edit_followup("SKIP", 0)
         assert not needs_edit_followup(" skip ", 0)
         assert not needs_edit_followup("", 0)
+
+
+class TestCoachBundleChallenge:
+    def test_challenge_is_one_line_with_details_folded(self) -> None:
+        from challenges import coerce_proposal
+        from cmd_coach import _format_coach_bundle
+
+        proposal = coerce_proposal(
+            {
+                "title": "Protect five 7-hour nights",
+                "goal": "Sleep 7+ hours",
+                "rationale": "Four nights reached 7 h last week.",
+                "metric": "sleep_nights_week",
+                "target": 5,
+                "threshold": 7,
+                "weeks": 2,
+            },
+            frozenset(),
+        )
+
+        text = _format_coach_bundle("## W29 Review\n\nWeek text.", [], proposal)
+
+        block = text.split("──────────────")[1].strip().splitlines()
+        assert block == [
+            "🎯 **Challenge:** Sleep ≥7h: 5 nights a week for 2 weeks",
+            ">> Four nights reached 7 h last week.",
+            ">> Serves: Sleep 7+ hours",
+        ]
+
+
+class TestCoachFollowup:
+    @staticmethod
+    def _ask(text: str, **kwargs: object) -> str | None:
+        args = {
+            "edits": 0,
+            "challenge_proposed": False,
+            "challenge_due": False,
+            "already_sent": set(),
+        }
+        args.update(kwargs)
+        return coach_followup(text, **args)
+
+    def test_due_challenge_written_as_an_edit_is_asked_for(self) -> None:
+        """A time-bound push written as a strategy edit still needs the challenge."""
+        assert (
+            self._ask("## W30 Review", edits=1, challenge_due=True)
+            == "coach_challenge_followup"
+        )
+
+    def test_due_challenge_after_skip_is_asked_for(self) -> None:
+        assert self._ask("SKIP", challenge_due=True) == "coach_challenge_followup"
+
+    def test_each_followup_is_sent_once(self) -> None:
+        sent = {"coach_challenge_followup"}
+
+        assert (
+            self._ask("## W30 Review", challenge_due=True, already_sent=sent)
+            == "coach_tool_followup"
+        )
+        sent.add("coach_tool_followup")
+        assert self._ask("## W30 Review", challenge_due=True, already_sent=sent) is None
+
+    def test_nothing_once_the_challenge_is_proposed(self) -> None:
+        assert (
+            self._ask("## W30 Review", challenge_proposed=True, challenge_due=True)
+            is None
+        )
+
+    def test_skip_is_fine_when_nothing_is_due(self) -> None:
+        assert self._ask("SKIP") is None
 
 
 class TestCmdCoachEditFollowup:

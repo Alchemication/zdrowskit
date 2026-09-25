@@ -1332,9 +1332,10 @@ def run_tool_loop(
         cache: Optional eval cache.
         refresh_cache: When true, bypass cached hits.
         extra_metadata: Extra trace metadata merged into each call.
-        followup: Production's one-shot recovery, when the feature has one.
-            Called with the reply text and the tool calls so far when the model
-            stops; a returned message is sent as a user turn, once.
+        followup: Production's recovery prompts, when the feature has them.
+            Called with the reply text and the tool calls so far each time the
+            model stops; a returned message is sent as a user turn. The hook
+            owns its own once-only bookkeeping.
 
     Returns:
         Aggregated ``EvalExecution`` with tokens, latency, cost, and the final
@@ -1351,7 +1352,6 @@ def run_tool_loop(
     cache_misses = 0
     last_result: Any = None
     effective_models: list[str] = []
-    followed_up = False
     # Production joins every non-SKIP reply into one narrative, so a follow-up
     # that answers with the tool call alone must not erase the review before it.
     carried_text = ""
@@ -1393,13 +1393,16 @@ def run_tool_loop(
         _accumulate(last_result, cache_hit)
 
         tool_calls = _result_tool_calls(last_result)
-        if not tool_calls and followup is not None and not followed_up:
+        if not tool_calls and followup is not None:
             message = followup(str(getattr(last_result, "text", "") or ""), captured)
             if message:
-                carried_text = str(getattr(last_result, "text", "") or "").strip()
+                text_now = str(getattr(last_result, "text", "") or "").strip()
+                if text_now and text_now.upper() != "SKIP":
+                    carried_text = "\n\n".join(
+                        part for part in (carried_text, text_now) if part
+                    )
                 messages.append(_assistant_message(last_result))
                 messages.append({"role": "user", "content": message})
-                followed_up = True
                 continue
         if not tool_calls:
             final_text = str(getattr(last_result, "text", "") or "")

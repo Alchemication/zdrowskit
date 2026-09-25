@@ -34,6 +34,35 @@ class TestMdToTelegramHtmlHeaders:
         assert md_to_telegram_html("## **Week** Review") == "<b><b>Week</b> Review</b>"
 
 
+class TestMdToTelegramHtmlExpandable:
+    def test_consecutive_lines_form_one_expandable_quote(self) -> None:
+        html = md_to_telegram_html(
+            "Headline\n>> Why **this**.\n>> Serves: sleep\nAfter"
+        )
+
+        assert html == (
+            "Headline\n<blockquote expandable>Why <b>this</b>.\nServes: sleep"
+            "</blockquote>\nAfter"
+        )
+
+    def test_quote_at_end_of_message_is_closed(self) -> None:
+        assert (
+            md_to_telegram_html(">> tail") == "<blockquote expandable>tail</blockquote>"
+        )
+
+    def test_content_is_escaped(self) -> None:
+        assert "&lt;b&gt;" in md_to_telegram_html(">> a <b> tag")
+
+    def test_single_quote_marker_is_unchanged(self) -> None:
+        assert md_to_telegram_html("> plain") == "<blockquote>plain</blockquote>"
+
+    def test_inside_a_code_block_it_is_literal(self) -> None:
+        html = md_to_telegram_html("```\n>> not a quote\n```")
+
+        assert "expandable" not in html
+        assert "&gt;&gt; not a quote" in html
+
+
 class TestMdToTelegramHtmlInline:
     def test_bold_asterisks(self) -> None:
         assert md_to_telegram_html("**bold**") == "<b>bold</b>"

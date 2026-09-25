@@ -1,0 +1,1 @@
+A challenge is due this week, and you did not call `propose_challenge`. Call it now with one challenge — sized from the data, compatible with the recovery picture, serving a goal in the strategy — and put the reason in `rationale`. If you wrote a time-bound push as a strategy edit, this challenge is where it belongs; do not repeat it as an edit. Do not rewrite the review.

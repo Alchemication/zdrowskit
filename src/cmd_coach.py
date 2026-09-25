@@ -116,6 +116,45 @@ def needs_edit_followup(text: str, proposed_edits: int) -> bool:
     return bool(stripped) and stripped.upper() != "SKIP" and proposed_edits == 0
 
 
+def coach_followup(
+    text: str,
+    *,
+    edits: int,
+    challenge_proposed: bool,
+    challenge_due: bool,
+    already_sent: set[str],
+) -> str | None:
+    """Return the follow-up prompt to send when the coach stops, or None.
+
+    Each follow-up is sent at most once per run. A due challenge that was not
+    proposed comes first — including after a SKIP, which is not allowed then —
+    because Luna sometimes writes the push as a time-bound strategy edit. A
+    review with no proposal at all is asked for its tool call.
+
+    Args:
+        text: The reply that ended the tool loop.
+        edits: ``update_context`` calls made so far.
+        challenge_proposed: Whether ``propose_challenge`` was called.
+        challenge_due: Whether the goal check made a challenge due.
+        already_sent: Follow-up prompt names already sent this run.
+
+    Returns:
+        A prompt name under ``src/prompts``, or None.
+    """
+    if (
+        challenge_due
+        and not challenge_proposed
+        and "coach_challenge_followup" not in already_sent
+    ):
+        return "coach_challenge_followup"
+    proposed = edits + (1 if challenge_proposed else 0)
+    if "coach_tool_followup" not in already_sent and needs_edit_followup(
+        text, proposed
+    ):
+        return "coach_tool_followup"
+    return None
+
+
 def cmd_coach(
     args: argparse.Namespace,
 ) -> tuple[CommandResult, list[CoachProposal]]:
@@ -248,7 +287,7 @@ def cmd_coach(
         model,
         reasoning_effort or "off",
     )
-    followed_up = False
+    followups_sent: set[str] = set()
     for iteration in range(max_iterations):
         try:
             result = call_llm(
@@ -284,18 +323,20 @@ def cmd_coach(
             narrative_parts.append(iter_text)
 
         if not result.tool_calls:
-            proposed = len(raw_edits) + (1 if challenge_proposal else 0)
-            if not followed_up and needs_edit_followup(iter_text, proposed):
-                # A review with no edit gives the user nothing to accept. One
-                # follow-up recovers it; a second slip is left to verification.
-                logger.info("Coach wrote a review without an edit; asking once")
+            followup = coach_followup(
+                iter_text,
+                edits=len(raw_edits),
+                challenge_proposed=challenge_proposal is not None,
+                challenge_due=challenge_open,
+                already_sent=followups_sent,
+            )
+            if followup is not None:
+                logger.info("Coach follow-up: %s", followup)
                 messages.append(
                     result.raw_message or {"role": "assistant", "content": iter_text}
                 )
-                messages.append(
-                    {"role": "user", "content": load_prompt_text("coach_tool_followup")}
-                )
-                followed_up = True
+                messages.append({"role": "user", "content": load_prompt_text(followup)})
+                followups_sent.add(followup)
                 continue
             break
 
@@ -510,9 +551,11 @@ def _format_coach_bundle(
         )
         parts.append(block)
     if challenge is not None:
-        parts.append(
-            f"🎯 **Proposed challenge** — {challenge.title}\n"
-            f"{describe_challenge(challenge)}\n"
-            f"Serves: {challenge.goal}"
-        )
+        # The single place a challenge is described: one line, with the reason
+        # and the goal it serves folded into an expandable quote.
+        lines = [f"🎯 **Challenge:** {describe_challenge(challenge)}"]
+        if challenge.rationale:
+            lines.append(f">> {challenge.rationale}")
+        lines.append(f">> Serves: {challenge.goal}")
+        parts.append("\n".join(lines))
     return "\n\n".join(parts)
