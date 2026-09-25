@@ -8,7 +8,7 @@ do not call an LLM.
 |---------|---------|---------|-----------|--------|-------|----------------|
 | **Insights** | Full weekly report | Scheduled, default Monday 10:00, or manual `/review` | Weekly when scheduled; manual on demand | A single Telegram message | `run_sql` | Exactly 1 `<chart>`, skipped when it would mislead |
 | **Memory** | Decides what carries forward from an insights report | After every scheduled or manual insights report | Same as insights | A couple of bullets | none | Extracted bullets stored under the week in `history.md`; never sent to the user |
-| **Coach** | Strategy review, only when proposals exist | After scheduled insights, or manual `/coach` | Weekly when scheduled; manual on demand | A few paragraphs | `run_sql`, `update_context` for `strategy` only | `SKIP` if no changes warranted; bundled message with inline Accept/Reject buttons per edit |
+| **Coach** | Strategy review, only when proposals exist | After scheduled insights, or manual `/coach` | Weekly when scheduled; manual on demand | A few paragraphs | `run_sql`, `update_context` for `strategy` only | `SKIP` if no changes warranted, unless the goal check requires a review; bundled message with inline Accept/Reject buttons per edit |
 | **Nudge** | Short reactive next-action nudge | Data sync, file edit | Up to 2/day by default | One or two sentences | `run_sql` | `SKIP` if nothing changes; text only, no chart |
 | **Standout picker** | Checks a qualified rare fact against explicit recording contradictions in your journal | A data-sync nudge, only when the triggering import changed a qualifying workout | At most one announcement per `STANDOUT_COOLDOWN_DAYS` | None — picks a key, writes nothing | none | Normally picks; the sentence was computed, not written |
 | **Targets** | Turns the prose goals in `strategy.md` into countable weekly targets | First notification of a new week, or an edit to the goal sections | Cached per week and goal text, including empty results | None — stored, not sent | none | Strict JSON against a closed metric vocabulary; drives the progress strip |
@@ -452,6 +452,27 @@ compared are `RUN_COMPARISON_*` in `src/config.py`.
 
 The nudge keeps `run_sql` for questions the prompt cannot answer, but is no
 longer told to run a query before deciding to skip.
+
+## The Coach's Goal Check
+
+Each coach review is handed a goal check computed from the stored weekly
+targets: how every target fared in each of the recent completed weeks, and the
+review date written into the goals, if any. Two conditions make a review
+mandatory, so the coach cannot answer `SKIP`:
+
+- a target missed in at least `ADHERENCE_MISS_SHARE` of the recent weeks, once
+  there are `ADHERENCE_MIN_WEEKS` completed weeks to judge;
+- a `review by YYYY-MM-DD` date in a goals heading that has passed.
+
+A target met every week is reported but never forces a review — under a
+consistency goal that is the plan working, not a reason to raise it. Each
+condition is recorded when a review addressing it is delivered and cannot force
+another for `COACH_TRIGGER_COOLDOWN_WEEKS`, so a rejected proposal is not put
+again every Monday. The look-back window is `ADHERENCE_WINDOW_WEEKS`; all four
+live in `src/config.py`.
+
+When a review proposes a change but forgets the `update_context` call that makes
+it acceptable, the coach is asked once to make the call.
 
 ## Cross-Message Awareness
 

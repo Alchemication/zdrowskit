@@ -533,6 +533,33 @@ Below this a "run" is often a jog with a child or a cool-down fragment after a
 walk — a 1.5 km run at 10:13/km sits in the operator history — and its average
 heart rate says nothing about fitness.
 """
+ADHERENCE_WINDOW_WEEKS: int = 8
+"""Completed weeks of stored targets the coach's goal check looks back over.
+
+Two months is long enough that one bad fortnight cannot decide a trend, and
+short enough that a target changed in spring no longer speaks for autumn.
+"""
+ADHERENCE_MIN_WEEKS: int = 4
+"""Completed weeks with targets needed before any adherence trigger can fire.
+
+Three weeks is still one disrupted week away from a coin flip. Four is the
+fewest where "missed three of four" says something about the target rather
+than about a single week.
+"""
+ADHERENCE_MISS_SHARE: float = 0.75
+"""Share of recent weeks a target must be missed in to force a coach review.
+
+Three of four, or six of eight: missed most weeks, not merely often. A target
+missed half the time is a stretch target doing its job, and a coach that
+proposed lowering it would be training the person to aim low.
+"""
+COACH_TRIGGER_COOLDOWN_WEEKS: int = 4
+"""Weeks before the same goal-check trigger may force another coach review.
+
+A persistently missed target stays missed for weeks; without a cooldown the
+coach would raise it every Monday until the person gave in. Four weeks lets a
+rejected proposal stand for a month before the evidence is put again.
+"""
 COACH_SUMMARY_MAX_AGE_DAYS: int = 14
 """Age after which the last coach review is no longer shown as current context.
 

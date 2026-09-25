@@ -14,7 +14,7 @@ from unittest.mock import call, patch
 import pytest
 
 from cmd_db import cmd_db
-from cmd_coach import cmd_coach
+from cmd_coach import cmd_coach, needs_edit_followup
 from cmd_insights import cmd_insights
 from cmd_llm_common import (
     InsufficientWeekData,
@@ -447,6 +447,112 @@ class TestVerificationGate:
         assert captured["reasoning_effort"] == "high"
         assert captured["rewrite_temperature"] is None
         assert captured["rewrite_reasoning_effort"] == "high"
+
+
+class TestNeedsEditFollowup:
+    def test_review_without_edit_needs_followup(self) -> None:
+        assert needs_edit_followup("## W38 Review\n\nLower the distance.", 0)
+
+    def test_review_with_edit_does_not(self) -> None:
+        assert not needs_edit_followup("## W38 Review", 1)
+
+    def test_skip_and_empty_do_not(self) -> None:
+        assert not needs_edit_followup("SKIP", 0)
+        assert not needs_edit_followup(" skip ", 0)
+        assert not needs_edit_followup("", 0)
+
+
+class TestCmdCoachEditFollowup:
+    def test_review_without_edit_gets_one_followup(self, in_memory_db) -> None:
+        """A review that forgot its update_context call is asked once for it."""
+        args = SimpleNamespace(
+            db="ignored.db", model="test-model", week="last", months=3
+        )
+        review = LLMResult(
+            text="## W12 Review\n\n**Proposed change 1:** Lower distance to 12 km.",
+            model="test-model",
+            input_tokens=1,
+            output_tokens=1,
+            total_tokens=2,
+            latency_s=0.1,
+        )
+        tool_call = SimpleNamespace(
+            id="call_1",
+            function=SimpleNamespace(
+                name="update_context",
+                arguments=(
+                    '{"file": "strategy", "action": "replace_section", '
+                    '"section": "## Goals", '
+                    '"content": "## Goals\\n\\n- 3 runs (12 km)\\n", '
+                    '"summary": "Lower distance"}'
+                ),
+            ),
+        )
+        edit = LLMResult(
+            text="",
+            model="test-model",
+            input_tokens=1,
+            output_tokens=1,
+            total_tokens=2,
+            latency_s=0.1,
+            tool_calls=[tool_call],
+            raw_message={
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"id": "call_1", "function": {"name": "update_context"}}
+                ],
+            },
+        )
+        done = LLMResult(
+            text="",
+            model="test-model",
+            input_tokens=1,
+            output_tokens=1,
+            total_tokens=2,
+            latency_s=0.1,
+        )
+
+        with (
+            patch("cmd_coach.load_context", return_value={"prompt": "x", "soul": "y"}),
+            patch("cmd_coach.open_db", return_value=in_memory_db),
+            patch("cmd_coach.compute_baselines", return_value="baseline md"),
+            patch("cmd_coach.save_baselines"),
+            patch(
+                "cmd_coach.build_llm_data",
+                return_value={
+                    "current_week": {"summary": {"week_label": "2026-W12"}, "days": []},
+                    "history": [],
+                    "week_complete": True,
+                    "week_label": "2026-W12",
+                },
+            ),
+            patch(
+                "cmd_coach.build_messages",
+                return_value=[
+                    {"role": "system", "content": "s"},
+                    {"role": "user", "content": "u"},
+                ],
+            ),
+            patch("cmd_coach.call_llm", side_effect=[review, edit, done]) as llm,
+            patch(
+                "cmd_coach.build_edit_preview",
+                return_value="--- strategy.md\n+++ strategy.md (proposed)\n",
+            ),
+        ):
+            cmd_result, proposals = cmd_coach(args)
+
+        assert llm.call_count == 3
+        # The loop mutates one messages list, so find the follow-up turn in it.
+        messages = llm.call_args_list[1].args[0]
+        followups = [
+            m
+            for m in messages
+            if m.get("role") == "user" and "nothing to accept" in m.get("content", "")
+        ]
+        assert len(followups) == 1
+        assert len(proposals) == 1
+        assert "Lower distance to 12 km" in (cmd_result.text or "")
 
 
 class TestCmdCoach:

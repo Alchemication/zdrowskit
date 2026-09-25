@@ -23,6 +23,7 @@ FEATURE_BLURBS = {
     "chat": "Answering your questions in Telegram, including the SQL it writes.",
     "insights": "The weekly report.",
     "nudge": "Short, timely messages during the day.",
+    "coach": "The weekly review that proposes changes to your plan, and must speak up when a goal keeps being missed or is due for review.",
     "memory": "What carries over from one week to the next.",
     "verification_judge": "The second model that fact-checks a draft before it is sent.",
     "targets": "Turning the goals you wrote in prose into the numbers a progress bar is drawn against.",

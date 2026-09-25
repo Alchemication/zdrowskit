@@ -31,6 +31,7 @@ stage rather than a pipeline.
 | `chat` | The full chat tool loop, end to end. | — |
 | `insights` | The weekly-insights writer prompt and its `run_sql` loop. | Verification, rewrite, charts, saved reports, Telegram. |
 | `nudge` | The nudge writer prompt and its `run_sql` loop. | Verification, rewrite, saved nudges, Telegram. |
+| `coach` | The weekly coach prompt with its `run_sql` and `update_context` tools, including the one follow-up production sends when a review forgets its edit. The goal check is a fixture field, not computed. | Verification, Accept/Reject buttons, applying edits, recording triggers. |
 | `memory` | The `<memory>` block written from a finished report. No tool loop — the report is already written. | Everything downstream of the block. |
 | `verification_judge` | The verifier prompt and its structured response schema. `fixture.kind` picks the surface: `nudge`, `insights` or `coach`. | `verify_and_rewrite`, `model_prefs`, DB writes, rewrites. |
 

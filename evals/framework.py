@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
+from collections.abc import Callable
 from typing import Any
 
 from pydantic import BaseModel, Field, ValidationError
@@ -74,6 +75,7 @@ errored cases, which cost more time than the parallelism saved.
 EVAL_FEATURE_TO_PRODUCTION_FEATURE = {
     "chat": "chat",
     "nudge": "nudge",
+    "coach": "coach",
     "insights": "insights",
     "memory": "memory",
     "verification_judge": "verification",
@@ -523,6 +525,18 @@ def _execute_case(
         from evals.run_nudge import run_nudge_case
 
         execution, result.model, result.route = run_nudge_case(
+            case,
+            model=model,
+            max_tool_iterations=max_tool_iterations,
+            reasoning_effort=reasoning_effort,
+            temperature=temperature,
+            cache=cache,
+            refresh_cache=refresh_cache,
+        )
+    elif case.feature == "coach":
+        from evals.run_coach import run_coach_case
+
+        execution, result.model, result.route = run_coach_case(
             case,
             model=model,
             max_tool_iterations=max_tool_iterations,
@@ -1156,6 +1170,12 @@ def _case_from_dict(raw: dict[str, Any], path: Path) -> EvalCase:
                 f"{path} {feature} fixture must include today, context, and "
                 "health_data or health_data_text"
             )
+    elif feature == "coach":
+        if not all(key in fixture for key in ("today", "context", "health_data_text")):
+            raise ValueError(
+                f"{path} coach fixture must include today, context, and "
+                "health_data_text"
+            )
     elif feature == "targets":
         if "goals" not in fixture:
             raise ValueError(f"{path} targets fixture must include goals")
@@ -1295,6 +1315,7 @@ def run_tool_loop(
     cache: EvalCache | None,
     refresh_cache: bool,
     extra_metadata: dict[str, Any] | None = None,
+    followup: Callable[[str, list[CapturedToolCall]], str | None] | None = None,
 ) -> EvalExecution:
     """Drive a tool-calling LLM loop against fixture-seeded tool results.
 
@@ -1311,6 +1332,9 @@ def run_tool_loop(
         cache: Optional eval cache.
         refresh_cache: When true, bypass cached hits.
         extra_metadata: Extra trace metadata merged into each call.
+        followup: Production's one-shot recovery, when the feature has one.
+            Called with the reply text and the tool calls so far when the model
+            stops; a returned message is sent as a user turn, once.
 
     Returns:
         Aggregated ``EvalExecution`` with tokens, latency, cost, and the final
@@ -1327,6 +1351,10 @@ def run_tool_loop(
     cache_misses = 0
     last_result: Any = None
     effective_models: list[str] = []
+    followed_up = False
+    # Production joins every non-SKIP reply into one narrative, so a follow-up
+    # that answers with the tool call alone must not erase the review before it.
+    carried_text = ""
 
     def _accumulate(result: Any, cache_hit: bool) -> None:
         nonlocal input_tokens, output_tokens, total_tokens
@@ -1365,9 +1393,22 @@ def run_tool_loop(
         _accumulate(last_result, cache_hit)
 
         tool_calls = _result_tool_calls(last_result)
+        if not tool_calls and followup is not None and not followed_up:
+            message = followup(str(getattr(last_result, "text", "") or ""), captured)
+            if message:
+                carried_text = str(getattr(last_result, "text", "") or "").strip()
+                messages.append(_assistant_message(last_result))
+                messages.append({"role": "user", "content": message})
+                followed_up = True
+                continue
         if not tool_calls:
+            final_text = str(getattr(last_result, "text", "") or "")
+            if carried_text:
+                tail = final_text.strip()
+                parts = [carried_text] + ([tail] if tail and tail != "SKIP" else [])
+                final_text = "\n\n".join(parts)
             return EvalExecution(
-                text=str(getattr(last_result, "text", "") or ""),
+                text=final_text,
                 tool_calls=captured,
                 messages=messages,
                 input_tokens=input_tokens,

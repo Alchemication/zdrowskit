@@ -7,6 +7,7 @@ import json
 import logging
 import sys
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 
 from baselines import compute_baselines, unestablished_metrics
@@ -35,6 +36,7 @@ from llm_health import (
     render_health_data,
 )
 from llm_verify import extract_tool_evidence, slim_source_messages
+from goal_check import build_goal_check, record_triggers
 from milestones import compute_milestones
 from store import create_llm_trace, open_db
 
@@ -81,6 +83,25 @@ def _coach_proposal_evidence(
         }
         for proposal in proposals
     ]
+
+
+def needs_edit_followup(text: str, proposed_edits: int) -> bool:
+    """Return whether a coach reply is a review that forgot its edit call.
+
+    The prompt requires every proposed change to carry an ``update_context``
+    call. Luna writes the review and drops the call on roughly a quarter of the
+    reviews a goal-check trigger forces, which reaches the user as a proposal
+    with nothing to accept.
+
+    Args:
+        text: The reply that ended the tool loop.
+        proposed_edits: ``update_context`` calls made so far this run.
+
+    Returns:
+        True when the reply is a review and no edit has been proposed.
+    """
+    stripped = (text or "").strip()
+    return bool(stripped) and stripped.upper() != "SKIP" and proposed_edits == 0
 
 
 def cmd_coach(
@@ -133,6 +154,12 @@ def cmd_coach(
         unestablished=unestablished_metrics(conn, METRIC_TRUST_WINDOW_DAYS),
     )
 
+    # Computed adherence and the triggers that forbid a SKIP. The coach used
+    # to skip every week because it was handed no evidence anything was off.
+    today = date.today()
+    goal_check = build_goal_check(conn, context.get("strategy"), today=today)
+    context["goal_check"] = goal_check.text
+
     # Inject the live list of strategy.md section headings so the model only
     # proposes replace_section edits against headings that actually exist.
     strategy_sections = _extract_strategy_sections(context.get("strategy", ""))
@@ -171,7 +198,11 @@ def cmd_coach(
     trace_id = create_llm_trace(
         conn,
         "coach",
-        metadata={"week": week, "months": getattr(args, "months", 3)},
+        metadata={
+            "week": week,
+            "months": getattr(args, "months", 3),
+            "goal_check_triggers": [t.key for t in goal_check.triggers],
+        },
     )
 
     route = route_kwargs(
@@ -197,6 +228,7 @@ def cmd_coach(
         model,
         reasoning_effort or "off",
     )
+    followed_up = False
     for iteration in range(max_iterations):
         try:
             result = call_llm(
@@ -232,6 +264,18 @@ def cmd_coach(
             narrative_parts.append(iter_text)
 
         if not result.tool_calls:
+            if not followed_up and needs_edit_followup(iter_text, len(raw_edits)):
+                # A review with no edit gives the user nothing to accept. One
+                # follow-up recovers it; a second slip is left to verification.
+                logger.info("Coach wrote a review without an edit; asking once")
+                messages.append(
+                    result.raw_message or {"role": "assistant", "content": iter_text}
+                )
+                messages.append(
+                    {"role": "user", "content": load_prompt_text("coach_tool_followup")}
+                )
+                followed_up = True
+                continue
             break
 
         messages.append(result.raw_message)
@@ -386,6 +430,10 @@ def cmd_coach(
         )
     bundled_text = verified_text
     print(bundled_text)
+    # Only a delivered review raises a trigger; a skip leaves it to fire again.
+    record_triggers(
+        conn, goal_check.triggers, today=today, llm_call_id=result.llm_call_id
+    )
 
     cmd_result = CommandResult(
         text=bundled_text,

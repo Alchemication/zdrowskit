@@ -25,7 +25,14 @@ from evals.framework import (
 )
 from evals.run import _normalize_reasoning_effort, _run_selected_cases, select_cases
 
-DIRECT_MODEL_FEATURES = {"chat", "nudge", "insights", "memory", "verification_judge"}
+DIRECT_MODEL_FEATURES = {
+    "chat",
+    "nudge",
+    "coach",
+    "insights",
+    "memory",
+    "verification_judge",
+}
 
 
 @dataclass(frozen=True)

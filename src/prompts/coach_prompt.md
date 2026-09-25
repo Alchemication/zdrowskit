@@ -22,7 +22,8 @@ Nothing else. No preamble, no thinking out loud, no internal monologue, no
 exactly `SKIP` on its own line and nothing else. The weekly insights report
 already covered the week; a "no changes — strategy is working" message is
 redundant noise. SKIP is the common case — most weeks do not warrant a
-change.
+change. **Except:** when the Goal Check section says a review is required,
+SKIP is not allowed — see "Decide first" below.
 
 **When to write the structured review:** only when you have at least one
 concrete change to propose AND you will back it with an `update_context`
@@ -99,6 +100,14 @@ existing section, output `SKIP` instead.
 ## Shared Review Facts
 {review_facts}
 
+## Goal Check (computed)
+
+How each weekly target fared, measured by code against the stored targets,
+and whether the goals' own review date has passed. These figures are exact;
+quote them rather than re-deriving them.
+
+{goal_check}
+
 ## Recent User Notes
 {log}
 
@@ -169,7 +178,24 @@ a better review (or SKIP).
 
 ### Decide first: SKIP or structured review
 
-Compare what actually happened this week against the current strategy
+**If the Goal Check says a review is required, write the structured review.**
+Address every listed trigger, each with its own proposed edit:
+
+- **A target missed most weeks:** propose the change the numbers point to —
+  a lower target, or a reshaped one (for example, a distance target that keeps
+  failing while the session count holds says the runs are shorter than the
+  plan assumes). Cite the week-by-week figures from the Goal Check. If the
+  user's notes explain the misses as a passing disruption, propose keeping the
+  target and say why; that still counts as addressing it.
+- **The goals' review date has passed:** propose the goals section as it
+  should read now — changed where the data says so, unchanged where it still
+  fits — with a fresh `(set YYYY-MM-DD, review by YYYY-MM-DD)` in its heading,
+  the review date 4 to 12 weeks from today.
+
+A target met every week is the plan working, not a reason to raise it. Never
+propose a harder target just because one was met.
+
+When no review is required, compare what actually happened this week against the current strategy
 (goals + weekly plan + diet + sleep). Consider: training volume and
 consistency, recovery signals (HRV, resting HR, sleep quality),
 performance trends, and the user's own notes.
@@ -232,7 +258,8 @@ to any other files.
   actionable.
 - If you cannot fit the review in 300 words, your reasoning is wrong: you
   do not have a clean enough adjustment to propose. Output `SKIP` and let
-  next week's data clarify.
+  next week's data clarify — or, when a review is required, cut it to the
+  triggers alone.
 
 ## Data Query Tool
 
@@ -272,6 +299,7 @@ Query routing:
 Today is {today} ({weekday}). Your output is exactly **`SKIP`** OR a
 structured `## Wxx Review` followed by `update_context` tool calls.
 Nothing else. First character is either `S` or `#`. SKIP is the common
-case — when in doubt, SKIP. And if you call `update_context`, the
+case — when in doubt, SKIP — unless the Goal Check says a review is
+required, in which case SKIP is not an option. And if you call `update_context`, the
 `## Wxx Review` narrative explaining *why* is mandatory — never send
 tool calls with empty text.
