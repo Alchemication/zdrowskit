@@ -113,8 +113,10 @@ genuinely needs two lines:
 
 1. **What the week was** — one sentence on how the week went against the
    plan, in words, not counts. The progress strip above already shows the
-   week's sessions and distance: do not restate them. Name a number only if
-   the strip does not show it and the sentence needs it.
+   week's sessions and distance: do not restate them, and do not re-derive
+   them either — "a four-session week" or "both lifts landed" is the strip in
+   other words. Name a number only if the strip does not show it and the
+   sentence needs it.
 2. **What is interesting in it** — the comparison or relationship. This is the
    report's reason to exist. If nothing is interesting, say the week was
    unremarkable and stop; a padded observation is worse than none.
@@ -129,6 +131,9 @@ genuinely needs two lines:
    Recent Coaching History records the priorities given in earlier weeks. Do
    not re-issue last week's: if it still applies, say in a clause whether this
    week followed it, and give a new priority only when the data calls for one.
+   A new headline with last week's advice attached as its condition or
+   caveat — "only when recovery is back to normal", "no extra volume" — is a
+   re-issue. Leave the caveat out; the user has read it.
    The same instruction four weeks running is no longer read. Changing the
    plan itself is the coach's job, not the report's.
 
