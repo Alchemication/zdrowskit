@@ -760,20 +760,26 @@ def verify_and_rewrite(
         metadata=metadata,
     )
     verifier_call_id: int | None = None
-    try:
-        verifier_result = invoke(
+
+    def _invoke_verifier(
+        verifier_model: str, verifier_fallbacks: list[str] | None
+    ) -> LLMResult:
+        return invoke(
             verifier_messages,
-            model=model,
+            model=verifier_model,
             max_tokens=MAX_TOKENS_VERIFICATION,
             temperature=temperature,
             reasoning_effort=reasoning_effort,
             response_format=VerifierPayload,
-            fallback_models=fallback_models,
+            fallback_models=verifier_fallbacks,
             conn=conn,
             request_type=f"{kind}_verify",
             metadata={**metadata, "stage": "verify"},
             trace_id=trace_id,
         )
+
+    try:
+        verifier_result = _invoke_verifier(model, fallback_models)
         verifier_call_id = verifier_result.llm_call_id
         if not verifier_result.text.strip():
             remaining_fallbacks = [
@@ -790,18 +796,8 @@ def verify_and_rewrite(
                     verifier_result.model,
                     retry_model,
                 )
-                verifier_result = invoke(
-                    verifier_messages,
-                    model=retry_model,
-                    max_tokens=MAX_TOKENS_VERIFICATION,
-                    temperature=temperature,
-                    reasoning_effort=reasoning_effort,
-                    response_format=VerifierPayload,
-                    fallback_models=remaining_fallbacks[1:] or None,
-                    conn=conn,
-                    request_type=f"{kind}_verify",
-                    metadata={**metadata, "stage": "verify"},
-                    trace_id=trace_id,
+                verifier_result = _invoke_verifier(
+                    retry_model, remaining_fallbacks[1:] or None
                 )
                 verifier_call_id = verifier_result.llm_call_id
             if not verifier_result.text.strip():
@@ -824,7 +820,21 @@ def verify_and_rewrite(
                     strict=strict,
                     trace_id=trace_id,
                 )
-        parsed = parse_verification_result(verifier_result.text)
+        try:
+            parsed = parse_verification_result(verifier_result.text)
+        except ValueError as exc:
+            # DeepSeek only gets json_object mode, so the schema is a request,
+            # not a constraint; a dropped field is a compliance slip, not a
+            # verdict. Ask once more before failing the draft closed.
+            logger.warning(
+                "%s verifier returned a malformed payload from %s; retrying once: %s",
+                kind,
+                verifier_result.model,
+                exc,
+            )
+            verifier_result = _invoke_verifier(model, fallback_models)
+            verifier_call_id = verifier_result.llm_call_id
+            parsed = parse_verification_result(verifier_result.text)
         parsed.verifier_call_id = verifier_call_id
     except Exception as exc:
         logger.warning("%s verifier failed closed: %s", kind, exc)

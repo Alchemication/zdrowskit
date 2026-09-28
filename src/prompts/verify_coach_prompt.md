@@ -12,6 +12,7 @@ Use verdict "revise" for fixable narrative/proposal wording issues — but in th
 Set `confidence` to "high"/"medium"/"low" based on how completely evidence and tool_calls support each proposal.
 
 For each issue:
+- `severity` is "critical", "major", or "minor" — required on every issue.
 - `quote` is the exact draft text at issue, or "" if none.
 - `problem` is what is wrong.
 - `correction` is the bounded correction to apply.

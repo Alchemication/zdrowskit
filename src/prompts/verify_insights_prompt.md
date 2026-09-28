@@ -14,6 +14,7 @@ Use verdict "revise" for localized factual errors, fixable unsupported claims, o
 Set `confidence` to "high" when evidence and tool_calls fully cover the claims, "medium" when partial, "low" when you cannot tell — a low-confidence pass is logged.
 
 For each issue:
+- `severity` is "critical", "major", or "minor" — required on every issue.
 - `quote` is the exact draft text at issue, or "" if none.
 - `problem` is what is wrong.
 - `correction` is the bounded correction to apply.

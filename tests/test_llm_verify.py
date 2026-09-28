@@ -84,6 +84,16 @@ class TestVerifierPromptContract:
         assert "Recommendations belong at week level" in normalized
         assert "Since That Week Ended" in normalized
 
+    def test_every_verifier_prompt_asks_for_severity(self) -> None:
+        """DeepSeek gets the schema only as a prompt hint, and a field list
+        without ``severity`` beat it on 2026-09-28."""
+        for name in (
+            "verify_insights_prompt.md",
+            "verify_coach_prompt.md",
+            "verify_nudge_prompt.md",
+        ):
+            assert "`severity`" in _prompt_text(name), name
+
 
 class TestDeterministicVerificationIssues:
     def test_catches_markdown_table(self) -> None:
@@ -407,6 +417,48 @@ class TestVerifyAndRewrite:
 
         assert result.verdict == "fail"
         assert result.issues[0].severity == "critical"
+
+    def test_malformed_verifier_payload_retries_once(
+        self,
+        in_memory_db: sqlite3.Connection,
+        monkeypatch,
+    ) -> None:
+        """2026-09-28: DeepSeek dropped ``severity`` from every issue and the
+        weekly report was refused outright. A shape slip is not a verdict."""
+        responses = [
+            '{"verdict":"revise","confidence":"high","issues":'
+            '[{"quote":"q","problem":"p","correction":"c"}]}',
+            '{"verdict":"pass","issues":[],"confidence":"high"}',
+        ]
+        seen_models: list[str] = []
+
+        def fake_call_llm(messages, **kwargs):
+            seen_models.append(kwargs["model"])
+            return LLMResult(
+                text=responses[len(seen_models) - 1],
+                model=kwargs["model"],
+                input_tokens=1,
+                output_tokens=1,
+                total_tokens=2,
+                latency_s=0.1,
+            )
+
+        monkeypatch.setattr("llm_verify.call_llm", fake_call_llm)
+
+        result = verify_and_rewrite(
+            kind="insights",
+            draft="Draft report.",
+            evidence={},
+            source_messages=[],
+            conn=in_memory_db,
+            metadata={},
+            model="verify-model",
+            rewrite_model="rewrite-model",
+            max_revisions=1,
+        )
+
+        assert result.verdict == "pass"
+        assert seen_models == ["verify-model", "verify-model"]
 
     def test_empty_verifier_response_reports_token_budget(
         self,

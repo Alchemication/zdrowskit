@@ -12,6 +12,7 @@ Use verdict "revise" only when a worthwhile nudge needs a small bounded fix. Use
 Set `confidence` to "high"/"medium"/"low" based on how strongly the evidence supports the claims.
 
 For each issue:
+- `severity` is "critical", "major", or "minor" — required on every issue.
 - `quote` is the exact draft text at issue, or "" if none.
 - `problem` is what is wrong.
 - `correction` is the bounded correction to apply.
