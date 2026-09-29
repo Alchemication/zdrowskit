@@ -26,6 +26,7 @@ from http_ingest import (
     IngestError,
     TokenRegistry,
     newest_expected_day,
+    tailscale_is_switched_off,
     tailscale_node_health,
     validate_upload,
 )
@@ -1733,6 +1734,44 @@ class TestFunnelDnsHealth:
         # that sentence into a support thread, and we cannot improve on it.
         assert "network map" in detail
         assert "lost its connection to Tailscale" in detail
+
+    def _status_json(self, tmp_path: Path, payload: dict):
+        binary = tmp_path / "tailscale"
+        binary.write_text("#!/bin/sh\n", encoding="utf-8")
+        completed = SimpleNamespace(returncode=0, stdout=json.dumps(payload), stderr="")
+        return (
+            patch("http_ingest.TAILSCALE_BINARY", binary),
+            patch("http_ingest.subprocess.run", return_value=completed),
+        )
+
+    def test_a_stopped_backend_reads_as_switched_off(self, tmp_path: Path) -> None:
+        # The 2026-09-28 state: the extension running, the connection off.
+        binary, run = self._status_json(
+            tmp_path,
+            {
+                "BackendState": "Stopped",
+                "Self": {"Online": False},
+                "Health": ["Tailscale is stopped."],
+            },
+        )
+        with binary, run:
+            assert tailscale_is_switched_off() is True
+
+    def test_a_running_or_wedged_backend_is_not_switched_off(
+        self, tmp_path: Path
+    ) -> None:
+        # A wedged node is offline while still wanting to run; `tailscale up`
+        # is not its fix, so it must not read as switched off.
+        for state in ("Running", "Starting", "NeedsLogin"):
+            binary, run = self._status_json(
+                tmp_path, {"BackendState": state, "Self": {"Online": False}}
+            )
+            with binary, run:
+                assert tailscale_is_switched_off() is False, state
+
+    def test_a_missing_cli_is_not_switched_off(self, tmp_path: Path) -> None:
+        with patch("http_ingest.TAILSCALE_BINARY", tmp_path / "no-such-tailscale"):
+            assert tailscale_is_switched_off() is False
 
     def test_silence_plus_a_missing_record_is_reported_as_funnel(
         self, tmp_path: Path

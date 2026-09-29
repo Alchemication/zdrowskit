@@ -3715,6 +3715,150 @@ class TestUnreachableEndpointRepair:
         restart.assert_not_called()
 
 
+class TestKeepTailscaleSwitchedOn:
+    """Tailscale found switched off is switched back on, without waiting."""
+
+    @pytest.fixture(autouse=True)
+    def _isolated(self):
+        with patch.object(daemon_ingest_health, "INSTANCE_NAME", ""):
+            yield
+
+    def _runtime(self, tmp_path: Path, *, operator: bool = True) -> ProfileRuntime:
+        from profiles import Profile
+
+        runtime = _make_daemon(tmp_path)
+        runtime.profile = Profile(
+            name="adam" if operator else "anna",
+            telegram_id=11 if operator else 22,
+            root=tmp_path / "profiles" / ("adam" if operator else "anna"),
+            operator=operator,
+            import_source="http",
+        )
+        runtime._chat._poller = MagicMock()
+        return runtime
+
+    def test_a_switched_off_tailscale_is_switched_on_and_verified(
+        self, tmp_path: Path
+    ) -> None:
+        runtime = self._runtime(tmp_path)
+
+        with (
+            patch("http_ingest.tailscale_is_switched_off", return_value=True),
+            patch.object(
+                runtime._ingest_health, "_switch_tailscale_on", return_value=(True, "")
+            ) as switch_on,
+            patch("http_ingest.tailscale_node_health", return_value=(True, "online")),
+            patch.object(runtime, "_record_event") as record,
+        ):
+            runtime._ingest_health._keep_tailscale_switched_on()
+
+        switch_on.assert_called_once()
+        assert record.call_args.args[1] == "tailscale_switched_on"
+        assert "tailscale_switched_off" not in runtime._state
+
+    def test_a_running_tailscale_is_left_alone(self, tmp_path: Path) -> None:
+        runtime = self._runtime(tmp_path)
+        runtime._state["tailscale_switched_off"] = {"seen_at": "2026-09-28T17:52Z"}
+
+        with (
+            patch("http_ingest.tailscale_is_switched_off", return_value=False),
+            patch.object(runtime._ingest_health, "_switch_tailscale_on") as switch_on,
+        ):
+            runtime._ingest_health._keep_tailscale_switched_on()
+
+        switch_on.assert_not_called()
+        # Switched on by hand in between: the episode is over.
+        assert "tailscale_switched_off" not in runtime._state
+
+    def test_a_failure_is_recorded_once_however_many_cycles_repeat_it(
+        self, tmp_path: Path
+    ) -> None:
+        # A node that needs a browser login fails `tailscale up` every cycle;
+        # that must not write an event every half hour.
+        runtime = self._runtime(tmp_path)
+
+        with (
+            patch("http_ingest.tailscale_is_switched_off", return_value=True),
+            patch.object(
+                runtime._ingest_health,
+                "_switch_tailscale_on",
+                return_value=(False, "tailscale up exited 1. needs login"),
+            ) as switch_on,
+            patch.object(runtime, "_record_event") as record,
+        ):
+            runtime._ingest_health._keep_tailscale_switched_on()
+            runtime._ingest_health._keep_tailscale_switched_on()
+
+        assert switch_on.call_count == 2
+        assert [c.args[1] for c in record.call_args_list] == [
+            "tailscale_switch_on_failed"
+        ]
+        assert "needs login" in record.call_args.args[2]
+
+    def test_a_hosted_profile_never_touches_the_host_s_tailscale(
+        self, tmp_path: Path
+    ) -> None:
+        runtime = self._runtime(tmp_path, operator=False)
+
+        with (
+            patch("http_ingest.tailscale_is_switched_off", return_value=True),
+            patch.object(runtime._ingest_health, "_switch_tailscale_on") as switch_on,
+        ):
+            runtime._ingest_health._keep_tailscale_switched_on()
+
+        switch_on.assert_not_called()
+
+    def test_a_named_instance_never_touches_the_shared_tailscale(
+        self, tmp_path: Path
+    ) -> None:
+        runtime = self._runtime(tmp_path)
+
+        with (
+            patch.object(daemon_ingest_health, "INSTANCE_NAME", "lab"),
+            patch("http_ingest.tailscale_is_switched_off", return_value=True),
+            patch.object(runtime._ingest_health, "_switch_tailscale_on") as switch_on,
+        ):
+            runtime._ingest_health._keep_tailscale_switched_on()
+
+        switch_on.assert_not_called()
+
+    def test_a_restart_that_switches_tailscale_off_is_switched_back_on(
+        self, tmp_path: Path
+    ) -> None:
+        # 2026-09-28: quitting and relaunching the app left WantRunning=false,
+        # so both restart repairs waited on a node that could never come back.
+        runtime = self._runtime(tmp_path)
+        online = iter([(False, "stopped"), (True, "online")])
+
+        with (
+            patch(
+                "http_ingest.tailscale_node_health", side_effect=lambda: next(online)
+            ),
+            patch("http_ingest.tailscale_is_switched_off", return_value=True),
+            patch.object(
+                runtime._ingest_health, "_switch_tailscale_on", return_value=(True, "")
+            ) as switch_on,
+            patch.object(runtime._stop_event, "wait", return_value=False),
+        ):
+            connected, _took = runtime._ingest_health._wait_for_node_online()
+
+        assert connected is True
+        switch_on.assert_called_once()
+
+    def test_switch_on_runs_tailscale_up_with_no_flags(self, tmp_path: Path) -> None:
+        # Flags would rewrite the node's saved settings; bare `up` only sets
+        # WantRunning=true.
+        runtime = self._runtime(tmp_path)
+        completed = SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with patch.object(
+            daemon_ingest_health.subprocess, "run", return_value=completed
+        ) as run:
+            assert runtime._ingest_health._switch_tailscale_on() == (True, "")
+
+        assert run.call_args.args[0][1:] == ["up"]
+
+
 class TestFunnelReachabilityProbe:
     """The probe that asks what a phone would get, while it is still on trial."""
 

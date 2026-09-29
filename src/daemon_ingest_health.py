@@ -30,8 +30,10 @@ from config import (
     INSTANCE_NAME,
     NODE_OFFLINE_REPAIR_AFTER_MIN,
     TAILSCALE_APP_NAME,
+    TAILSCALE_BINARY,
     TAILSCALE_RECONNECT_TIMEOUT_S,
     TAILSCALE_RESTART_TIMEOUT_S,
+    TAILSCALE_UP_TIMEOUT_S,
 )
 
 if TYPE_CHECKING:
@@ -312,6 +314,130 @@ class IngestHealthHandler:
             )
         return True, ""
 
+    def _switch_tailscale_on(self) -> tuple[bool, str]:
+        """Run ``tailscale up``, without judging whether it helped.
+
+        With no flags on an existing node this only sets ``WantRunning=true`` —
+        it re-uses the saved settings and changes nothing else.
+
+        Returns:
+            Whether the command succeeded, and a reason when it did not.
+        """
+        try:
+            completed = subprocess.run(
+                [str(TAILSCALE_BINARY), "up"],
+                capture_output=True,
+                text=True,
+                timeout=TAILSCALE_UP_TIMEOUT_S,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            logger.exception("Could not run tailscale up")
+            return False, str(exc)[:200]
+        if completed.returncode != 0:
+            detail = (completed.stderr or completed.stdout or "").strip()[:200]
+            logger.error("tailscale up exited %d: %s", completed.returncode, detail)
+            return (
+                False,
+                f"tailscale up exited {completed.returncode}. {detail}".strip(),
+            )
+        return True, ""
+
+    def _wait_for_node_online(self) -> tuple[bool, float]:
+        """Poll until the node reports online, switching Tailscale on if it is off.
+
+        Quitting and relaunching the app switches Tailscale off: on 2026-09-28
+        the relaunched node reached Starting and 0.4 seconds later received
+        ``WantRunning=false``, so every restart the daemon ran left the node
+        stopped, and waiting on it could only ever time out. Checked on every
+        poll rather than once, because the switch-off can land after the first
+        look.
+
+        Returns:
+            Whether the node came online within ``TAILSCALE_RECONNECT_TIMEOUT_S``,
+            and how many seconds that took or were spent waiting.
+        """
+        from http_ingest import tailscale_is_switched_off, tailscale_node_health
+
+        started = time.monotonic()
+        deadline = started + TAILSCALE_RECONNECT_TIMEOUT_S
+        while time.monotonic() < deadline:
+            connected, _detail = tailscale_node_health()
+            if connected is True:
+                return True, time.monotonic() - started
+            if tailscale_is_switched_off():
+                self._switch_tailscale_on()
+            if self._runtime._stop_event.wait(3):
+                break
+        return False, time.monotonic() - started
+
+    def _keep_tailscale_switched_on(self) -> None:
+        """Switch Tailscale back on whenever it is found switched off.
+
+        Unlike the other repairs this does not wait for upload silence. A
+        stopped Tailscale is read directly from the CLI rather than inferred,
+        it never recovers on its own, and nothing else on this host needs it
+        off — so every hour spent waiting for silence to accumulate is an hour
+        of uploads lost for no evidential gain. On 2026-09-28 it sat stopped
+        for fourteen hours, until someone typed ``tailscale up`` by hand.
+
+        One success event per episode, and one failure event however many
+        cycles keep failing, so a node that needs a login cannot flood the
+        events table.
+        """
+        from http_ingest import tailscale_is_switched_off
+
+        if INSTANCE_NAME:
+            # Machine-wide, like the restarts: a lab instance must not switch
+            # the default installation's Tailscale on or off.
+            return
+        if self._runtime.profile is None or not self._runtime.profile.operator:
+            return
+
+        if not tailscale_is_switched_off():
+            if self._runtime._state.pop("tailscale_switched_off", None) is not None:
+                self._runtime._save_state()
+            return
+
+        episode = self._runtime._state.get("tailscale_switched_off")
+        if not isinstance(episode, dict):
+            episode = {"seen_at": datetime.now(timezone.utc).isoformat()}
+            self._runtime._state["tailscale_switched_off"] = episode
+            self._runtime._save_state()
+
+        logger.warning("Tailscale is switched off; running tailscale up.")
+        switched, failure = self._switch_tailscale_on()
+        online, took = self._wait_for_node_online() if switched else (False, 0.0)
+        if online:
+            self._runtime._state.pop("tailscale_switched_off", None)
+            self._runtime._save_state()
+            logger.info("Tailscale is back online %.0fs after tailscale up", took)
+            self._runtime._record_event(
+                "ingest",
+                "tailscale_switched_on",
+                "Tailscale was switched off; ran tailscale up and the node "
+                f"reported online {took:.0f}s later. The public DNS record "
+                "follows within about ten minutes.",
+                {"switched_off_seen_at": episode.get("seen_at")},
+            )
+            return
+
+        if episode.get("failed_at"):
+            return
+        episode["failed_at"] = datetime.now(timezone.utc).isoformat()
+        self._runtime._save_state()
+        self._runtime._record_event(
+            "ingest",
+            "tailscale_switch_on_failed",
+            (
+                f"Tailscale was switched off and tailscale up failed: {failure}"
+                if not switched
+                else "Tailscale was switched off; tailscale up ran but the node "
+                f"was still offline {took:.0f}s later."
+            ),
+            {"switched_off_seen_at": episode.get("seen_at")},
+        )
+
     def _maybe_repair_unreachable_endpoint(self, *, now: datetime) -> None:
         """Restart Tailscale when the public path is dead and the node says it is fine.
 
@@ -382,6 +508,9 @@ class IngestHealthHandler:
         if not restarted:
             self._runtime._record_event("ingest", "endpoint_repair_failed", failure)
             return
+        # The restart switches Tailscale off, so the public path cannot answer
+        # until the node is back; this also switches it on again.
+        self._wait_for_node_online()
 
         dns_name = _tailscale_dns_name()
         deadline = time.monotonic() + FUNNEL_REPAIR_VERIFY_TIMEOUT_S
@@ -452,8 +581,6 @@ class IngestHealthHandler:
             ``"reconnected"`` or ``"failed"`` when a restart ran, or None when
             none was attempted.
         """
-        from http_ingest import tailscale_node_health
-
         if INSTANCE_NAME:
             # Tailscale is machine-wide. A lab instance restarting it would drop
             # the live installation's tailnet to repair a fault it does not own,
@@ -491,17 +618,8 @@ class IngestHealthHandler:
             self._runtime._record_event("ingest", "node_repair_failed", failure)
             return "failed"
 
-        deadline = time.monotonic() + TAILSCALE_RECONNECT_TIMEOUT_S
-        connected: bool | None = None
-        while time.monotonic() < deadline:
-            connected, _detail = tailscale_node_health()
-            if connected is True:
-                break
-            if self._runtime._stop_event.wait(3):
-                break
-
-        took = TAILSCALE_RECONNECT_TIMEOUT_S - max(deadline - time.monotonic(), 0)
-        if connected is True:
+        connected, took = self._wait_for_node_online()
+        if connected:
             self._runtime._state["node_repair"]["reconnected_at"] = datetime.now(
                 timezone.utc
             ).isoformat()
@@ -763,6 +881,10 @@ class IngestHealthHandler:
             or self._runtime.profile.import_source != "http"
         ):
             return
+
+        # Before the assessment, so a node switched back on here is assessed
+        # as the connected node it now is.
+        self._keep_tailscale_switched_on()
 
         settings = effective_notification_prefs(prefs)["data_health"]
         assessment_now = datetime.now(timezone.utc)

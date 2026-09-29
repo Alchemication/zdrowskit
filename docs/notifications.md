@@ -606,7 +606,7 @@ in order of how specific they are about the cause:
 
 | Condition | Default | Meaning |
 |-----------|---------|---------|
-| `node` | 3h of silence | This Mac lost its Tailscale connection, so Tailscale stopped publishing the address phones upload to. **Operator only.** Repairable here: the daemon restarts Tailscale once per outage and reports whether the node actually came back. See [HTTP ingest](http-ingest.md#the-address-stops-resolving). |
+| `node` | 3h of silence | This Mac lost its Tailscale connection, so Tailscale stopped publishing the address phones upload to. **Operator only.** Repairable here: a stopped Tailscale is switched on at the next check without waiting for this condition; any other disconnection draws one restart per outage. Either way the daemon reports whether the node actually came back. See [HTTP ingest](http-ingest.md#the-address-stops-resolving). |
 | `funnel` | 3h of silence, then a second failed lookup | Tailscale stopped publishing that address for a Mac that is still connected — checked first, so this condition means the local side is verified healthy. **Operator only** — one Funnel serves every profile and nobody else can act on it. Past outages cleared themselves in 26-35 hours. See [HTTP ingest](http-ingest.md#the-address-stops-resolving). |
 | `error` | 6h stalled; immediate for unreadable state | The last import failed and none has succeeded while the pipe is stalled, or the ingest state file cannot be read. |
 | `split` | 6h | Uploads arrived and nothing imports. A strong signal while the phone is demonstrably reachable. Because a half now imports on its own once the pairing window lapses, a stall this long is a fault on this end whatever the arrival gap was; the message names the gap but never sends you after the automation schedules. Counted from when the un-imported upload landed, and never reported before the pair's import deadline — an overnight gap is hours with nothing to import, not hours of failing to import. |
@@ -635,6 +635,26 @@ that never existed.
 A disconnected node is not gated this way. It is read from the local Tailscale
 CLI rather than inferred from a network lookup, and the repair it triggers has
 its own delay in `NODE_OFFLINE_REPAIR_AFTER_MIN`.
+
+### Tailscale switched off is switched back on
+
+A Tailscale that reports itself stopped (`WantRunning=false`) is not waited on
+at all. On every check, before anything is assessed, the operator profile reads
+Tailscale's state and runs `tailscale up` if it is stopped, then checks that the
+node came back online. It does not wait for uploads to go quiet: the state is
+read directly rather than inferred, it never clears on its own, and relaunching
+the app starts straight back into it. So a Tailscale switched off by hand is
+switched back on within one check; stop the daemon first if you need it off.
+
+Every restart the daemon runs is followed by the same step, because quitting
+and relaunching the app is itself what switched Tailscale off on 2026-09-28.
+Both restart repairs then waited on a node that could never reconnect, and it
+stayed off for fourteen hours.
+
+A successful switch-on writes `tailscale_switched_on`. A failure (for example a
+node that needs a browser sign-in) writes `tailscale_switch_on_failed` once per
+episode, however many checks keep failing, and the usual `node` alert follows
+once uploads have been quiet long enough.
 
 ### The DNS lookup is the wrong question, and is being replaced
 
@@ -852,6 +872,8 @@ written to the `events` table under the `ingest` category:
 | `funnel_probe` | The public-path probe changed its verdict. Carries what the DNS check said at the same moment, so a disagreement is findable. Nobody is messaged about these. |
 | `upload_received` | One half arrived, with the seconds since the previous upload of that kind. Nobody is messaged about these either; they exist so a liveness threshold can be set against the cadence the phone actually achieves. |
 | `endpoint_repair_recovered` / `endpoint_repair_failed` | A restart was attempted against an unreachable Funnel, and whether the public path answered afterwards. |
+| `node_repair_reconnected` / `node_repair_failed` | A restart was attempted against a disconnected node, and whether it came back online. |
+| `tailscale_switched_on` / `tailscale_switch_on_failed` | Tailscale was found switched off and `tailscale up` was run, and whether the node came back online. |
 
 `uv run python main.py events --category ingest` reads them back. The daemon log
 holds the same story in more detail but rotates within about a week, which is

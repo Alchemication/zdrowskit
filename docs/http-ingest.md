@@ -366,7 +366,7 @@ responses.
 | `Tailscale:` | Meaning |
 |---|---|
 | `connected` | This Mac is in the tailnet. Anything wrong with the public record is Tailscale's side. |
-| `DISCONNECTED` | This Mac has dropped out of the tailnet, and the quoted line is Tailscale's own explanation. The public record will be gone as a consequence. Restart the Tailscale app. |
+| `DISCONNECTED` | This Mac has dropped out of the tailnet, and the quoted line is Tailscale's own explanation. The public record will be gone as a consequence. The line under `Public DNS:` names the fix: `tailscale up` when Tailscale is stopped, otherwise restart the Tailscale app. |
 | `unknown` | The CLI is missing, timed out, or returned something unreadable. Says nothing about the connection — never treated as a fault. |
 
 The `Public DNS:` line resolves the Funnel hostname through a public
@@ -441,7 +441,8 @@ dig @1.1.1.1 <name> A +short           # blank means gone; check AAAA too
 
 | `Tailscale:` | Cause | What to do |
 |---|---|---|
-| `DISCONNECTED` | This Mac lost its control connection. Tailscale does not publish a public address for a node it cannot see, so the missing record is a *symptom*. | **Restart the Tailscale app.** Reconnects in seconds; the record follows within about ten minutes. |
+| `DISCONNECTED`, Tailscale says `Tailscale is stopped.` | Tailscale's connection is switched off (`WantRunning=false`), the state `tailscale down` or the app's toggle leaves. Relaunching the app starts straight back into it. | **Run `tailscale up`** or switch it on in the app. The record follows within about ten minutes. The daemon does this itself on its next check. |
+| `DISCONNECTED`, any other reason | This Mac lost its control connection. Tailscale does not publish a public address for a node it cannot see, so the missing record is a *symptom*. | **Restart the Tailscale app.** Reconnects in seconds; the record follows within about ten minutes. |
 | `connected` | Tailscale stopped publishing the record for a node it can see. Nobody's to fix. | **Wait.** Four occurrences between 2026-08-02 and 2026-08-16 each ran 26-35 hours and cleared unaided. |
 
 Nothing is permanently lost either way — both exports carry rolling windows, so
@@ -452,9 +453,11 @@ the backlog re-sends once the address returns.
 - **`tailscale funnel --bg` (re-asserting the mapping).** Measured against three
   live occurrences; changed neither the node state nor the record. The daemon no
   longer runs it.
-- **`tailscale down && tailscale up`.** Measured 2026-08-29 against a
-  disconnected node: six samples over 100 seconds, still offline throughout. It
-  re-runs the login flow, not the wedged process.
+- **`tailscale down && tailscale up` on a wedged node.** Measured 2026-08-29
+  against a disconnected node that still wanted to run: six samples over 100
+  seconds, still offline throughout. It re-runs the login flow, not the wedged
+  process. `tailscale up` is only the fix when Tailscale reports itself
+  stopped.
 - **`tailscale funnel reset` is unproven and aimed at the wrong layer.** One
   outage ended fifteen minutes after a reset, but at 28 hours old it was already
   inside the band the others cleared in unaided. It also rewrites proxy config
@@ -535,6 +538,15 @@ the node reports online draws one Tailscale restart per outage, verified
 against the public path afterwards. See [sync
 alerts](notifications.md#the-repair-the-daemon-could-not-reach).
 
+It recurred on 2026-09-28, and the daemon's restart made it worse: quitting and
+relaunching the app switched Tailscale off (`WantRunning=false` arrived 0.4
+seconds after the relaunch), so the endpoint stayed dead and the node dropped
+off entirely. It stayed off for fourteen hours until `tailscale up` was run by
+hand, after which the record, the handshake and uploads all returned within
+five minutes. Every restart the daemon runs is now followed by switching
+Tailscale back on if it is off. Whether a restart alone clears this failure is
+still unmeasured: the 2026-09-28 attempt never got a fair test.
+
 **If it has not cleared in ~48h** it is no longer the usual pattern. Check
 **DNS -> HTTPS Certificates** in the Tailscale admin console, which gates public
 `.ts.net` names. If that is enabled and the record is still absent, it is a
@@ -556,9 +568,9 @@ unless forced with `--min-validity`.
 | Public URL does not resolve immediately | Initial public DNS propagation can take up to ten minutes. Avoid repeatedly recreating the Funnel/certificate. |
 | Local `/healthz` works, public URL does not | Run `tailscale funnel status`; port 443 must be a Funnel proxy to `http://127.0.0.1:8787`, not a private Tailscale Serve mapping. |
 | Public URL worked before and now does not | Check **both** record types: `dig @1.1.1.1 <name> A +short` and `... AAAA +short`. Either one answering means the name resolves; a resolver can hold a stale negative answer for one while serving the other, which was observed minutes after a record was republished. Do **not** test with plain `curl` or `dig` on a tailnet machine: MagicDNS answers locally with a `100.x` address, so both succeed while the phone cannot connect. Check the node's own connection first — see [The address stops resolving](#the-address-stops-resolving). |
-| Auto Export reports "A server with the specified hostname could not be found" | The public address is gone. Read the `Tailscale:` line of `main.py ingest status` before doing anything: `DISCONNECTED` means restart the Tailscale app, `connected` means wait. See [The address stops resolving](#the-address-stops-resolving). Do **not** recreate the Funnel — that has never been shown to republish a record. |
+| Auto Export reports "A server with the specified hostname could not be found" | The public address is gone. Read the `Tailscale:` line of `main.py ingest status` before doing anything: `DISCONNECTED` means follow the advice printed under it, `connected` means wait. See [The address stops resolving](#the-address-stops-resolving). Do **not** recreate the Funnel — that has never been shown to republish a record. |
 | Auto Export reports "A TLS error caused the secure connection to fail" | A different fault: the record resolves and the handshake dies at the ingress. Every local signal stays green, including `Tailscale: connected`. See [The address resolves and nothing connects](#the-address-resolves-and-nothing-connects). |
-| `Tailscale: DISCONNECTED` | This Mac has lost its control connection, so Tailscale withdrew the public address. Restart the Tailscale app; it reconnects in seconds and the address follows within about ten minutes. The daemon does this on its own once per outage and reports whether it worked. |
+| `Tailscale: DISCONNECTED` | This Mac has lost its control connection, so Tailscale withdrew the public address. If Tailscale says it is stopped, run `tailscale up`; otherwise restart the Tailscale app. It reconnects in seconds and the address follows within about ten minutes. The daemon switches a stopped Tailscale on at its next check, restarts a wedged one once per outage, and reports whether either worked. |
 | `/` returns `404` | Expected. Production exposes `GET /healthz` and authenticated `POST /v1/auto-export`, not a directory listing. |
 | Auto Export gets `401` | Re-enter the exact `Bearer <token>` authorization value or rotate the profile token. |
 | Auto Export gets `422` | Read the returned error; normally aggregation, headers, JSON format, or an oversized export. |

@@ -23,6 +23,7 @@ from http_ingest import (
     TokenRegistry,
     UPLOAD_PATH,
     public_dns_health,
+    tailscale_is_switched_off,
     tailscale_node_health,
 )
 from profiles import Profile, ProfileConfigError, load_profiles
@@ -239,12 +240,22 @@ def cmd_ingest_status(args: argparse.Namespace) -> None:  # noqa: ARG001
         print(f"Funnel URL: https://{dns_name}{UPLOAD_PATH}")
         public_ok, public_detail = public_dns_health(dns_name)
         label = {True: "reachable", False: "NOT REACHABLE", None: "unknown"}[public_ok]
-        print(f"Public DNS: {label} ({public_detail})")
         if public_ok is False and node_ok is False:
+            # The detail blames Tailscale's side for a Mac it assumes is
+            # connected; printed under DISCONNECTED it told the operator to
+            # wait out a fault they could fix in seconds.
+            print(f"Public DNS: {label} (no public record for {dns_name})")
+            fix = (
+                "Run `tailscale up` or switch it on in the Tailscale app."
+                if tailscale_is_switched_off()
+                else "Restart the Tailscale app."
+            )
             print(
                 "  -> The record is missing because this Mac is disconnected, "
-                "not because of a Tailscale outage. Restart the Tailscale app."
+                f"not because of a Tailscale outage. {fix}"
             )
+        else:
+            print(f"Public DNS: {label} ({public_detail})")
     else:
         print("Funnel URL: unavailable (Tailscale is offline or not connected)")
     states = manager.status()

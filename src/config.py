@@ -399,6 +399,14 @@ Generous for a local app launch. A restart that overruns this is reported as
 failed rather than waited on, because the alternative is a daemon thread
 blocked behind a hung GUI process.
 """
+TAILSCALE_UP_TIMEOUT_S: float = 20
+"""Seconds to allow ``tailscale up`` to switch a stopped Tailscale back on.
+
+The measured case took 0.2 seconds to reach Running. The bound exists for the
+other case: a node that needs to sign in again makes ``tailscale up`` wait for
+a browser login that will never come from a daemon, and that must fail rather
+than hold a daemon thread.
+"""
 TAILSCALE_RECONNECT_TIMEOUT_S: float = 90
 """Seconds to wait for a restarted Tailscale to report the node online again.
 

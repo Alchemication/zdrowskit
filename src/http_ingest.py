@@ -640,6 +640,56 @@ def _assess_data_freshness(
     )
 
 
+def _tailscale_status() -> tuple[dict | None, str]:
+    """Run ``tailscale status --json`` and return its parsed payload.
+
+    Returns:
+        The payload and an empty string, or None and a reason when the CLI is
+        missing, times out, fails, or prints something unreadable.
+    """
+    if not TAILSCALE_BINARY.exists():
+        return None, f"the Tailscale CLI is not at {TAILSCALE_BINARY}"
+    try:
+        completed = subprocess.run(
+            [str(TAILSCALE_BINARY), "status", "--json"],
+            capture_output=True,
+            text=True,
+            timeout=TAILSCALE_STATUS_TIMEOUT_S,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return None, f"the Tailscale CLI could not be run ({exc})"
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout or "").strip()[:200]
+        return None, f"tailscale status exited {completed.returncode}: {detail}"
+    try:
+        payload = json.loads(completed.stdout)
+    except json.JSONDecodeError:
+        return None, "tailscale status returned unreadable JSON"
+    if not isinstance(payload, dict):
+        return None, "tailscale status returned unreadable JSON"
+    return payload, ""
+
+
+def tailscale_is_switched_off() -> bool:
+    """Return whether Tailscale is running with its connection switched off.
+
+    ``BackendState: Stopped`` is Tailscale's own record of ``WantRunning=false``
+    — the state ``tailscale down`` or the app's toggle leaves behind. It is not
+    a wedge and nothing reconnects it on its own, however long it is left:
+    relaunching the app starts straight back into it. On 2026-09-28 the
+    daemon's own quit-and-relaunch left the node in exactly this state and a
+    second relaunch half an hour later could not undo it; ``tailscale up``
+    brought it back in a fifth of a second the next morning.
+
+    Returns:
+        True only when Tailscale positively reports Stopped. Anything it cannot
+        read counts as False, because an unreadable CLI is not a switch to flip.
+    """
+    payload, _failure = _tailscale_status()
+    return payload is not None and payload.get("BackendState") == "Stopped"
+
+
 def tailscale_node_health() -> tuple[bool | None, str]:
     """Check whether this node still holds its Tailscale control connection.
 
@@ -661,25 +711,9 @@ def tailscale_node_health() -> tuple[bool | None, str]:
         and must never be reported as a disconnection, because an absent CLI is
         not a broken tailnet.
     """
-    if not TAILSCALE_BINARY.exists():
-        return None, f"the Tailscale CLI is not at {TAILSCALE_BINARY}"
-    try:
-        completed = subprocess.run(
-            [str(TAILSCALE_BINARY), "status", "--json"],
-            capture_output=True,
-            text=True,
-            timeout=TAILSCALE_STATUS_TIMEOUT_S,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        return None, f"the Tailscale CLI could not be run ({exc})"
-    if completed.returncode != 0:
-        detail = (completed.stderr or completed.stdout or "").strip()[:200]
-        return None, f"tailscale status exited {completed.returncode}: {detail}"
-    try:
-        payload = json.loads(completed.stdout)
-    except json.JSONDecodeError:
-        return None, "tailscale status returned unreadable JSON"
+    payload, failure = _tailscale_status()
+    if payload is None:
+        return None, failure
     self_info = payload.get("Self")
     if not isinstance(self_info, dict) or not isinstance(self_info.get("Online"), bool):
         return None, "tailscale status did not report this node's state"

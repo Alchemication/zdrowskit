@@ -16,6 +16,18 @@ from models import DailySnapshot, WorkoutSnapshot
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
+@pytest.fixture(autouse=True)
+def _no_real_tailscale(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep every test away from the host's real Tailscale CLI.
+
+    The daemon reads Tailscale's state on every health cycle and runs
+    ``tailscale up`` when it finds it switched off, so a test that reaches
+    ``check()`` without patching would otherwise act on the developer's tailnet.
+    Tests that exercise the CLI path patch the binary themselves.
+    """
+    monkeypatch.setattr("http_ingest.TAILSCALE_BINARY", tmp_path / "no-tailscale")
+
+
 @pytest.fixture
 def fixtures_dir() -> Path:
     """Path to the tests/fixtures/ directory."""

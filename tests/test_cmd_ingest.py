@@ -266,3 +266,84 @@ class TestPublicDnsRecordTypes:
 
         # Still None, not False: an offline host has proved nothing.
         assert public_dns_health("host.ts.net")[0] is None
+
+
+class TestIngestStatusTailscaleAdvice:
+    """What `ingest status` tells the operator when this Mac is off Tailscale."""
+
+    def _status(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+        tmp_path: Path,
+        *,
+        switched_off: bool,
+    ) -> str:
+        from unittest.mock import MagicMock
+
+        profile = Profile(
+            name="adam",
+            telegram_id=1,
+            root=tmp_path / "adam",
+            operator=True,
+            import_source="http",
+        )
+        manager = MagicMock()
+        manager.status.return_value = {
+            "adam": {
+                "metrics_received_at": None,
+                "workouts_received_at": None,
+                "last_imported_at": None,
+                "pair_state": "imported",
+                "pair_detail": "",
+                "last_error": None,
+            }
+        }
+        monkeypatch.setattr(cmd_ingest, "load_profiles", lambda: {"adam": profile})
+        monkeypatch.setattr(cmd_ingest, "TokenRegistry", MagicMock())
+        monkeypatch.setattr(cmd_ingest, "HttpIngestManager", lambda *a, **k: manager)
+        monkeypatch.setattr(cmd_ingest, "receiver_health", lambda: (True, "200"))
+        monkeypatch.setattr(cmd_ingest, "_tailscale_dns_name", lambda: "host.ts.net")
+        monkeypatch.setattr(
+            cmd_ingest,
+            "tailscale_node_health",
+            lambda: (False, "This Mac has lost its connection to Tailscale."),
+        )
+        monkeypatch.setattr(
+            cmd_ingest,
+            "public_dns_health",
+            lambda _name: (False, "This Mac is still connected, so wait."),
+        )
+        monkeypatch.setattr(
+            cmd_ingest, "tailscale_is_switched_off", lambda: switched_off
+        )
+
+        cmd_ingest.cmd_ingest_status(argparse.Namespace())
+        return capsys.readouterr().out
+
+    def test_a_disconnected_mac_is_never_told_it_is_still_connected(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+        tmp_path: Path,
+    ) -> None:
+        # 2026-09-29: the DNS line said "still connected ... wait 36 hours"
+        # directly beneath "Tailscale: DISCONNECTED".
+        out = self._status(monkeypatch, capsys, tmp_path, switched_off=False)
+
+        assert "still connected" not in out
+        assert "Public DNS: NOT REACHABLE" in out
+        assert "Restart the Tailscale app" in out
+
+    def test_a_switched_off_tailscale_is_told_to_switch_it_on(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+        tmp_path: Path,
+    ) -> None:
+        # Relaunching the app starts straight back into the stopped state, so
+        # restart advice cannot fix this one.
+        out = self._status(monkeypatch, capsys, tmp_path, switched_off=True)
+
+        assert "tailscale up" in out
+        assert "Restart the Tailscale app" not in out
