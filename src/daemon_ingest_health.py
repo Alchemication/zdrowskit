@@ -271,6 +271,24 @@ class IngestHealthHandler:
         finally:
             conn.close()
 
+    def _tailscale_app_running(self) -> bool:
+        """Return whether the Tailscale app process is running.
+
+        Matches the app's own process name exactly, so the system network
+        extension — which keeps running across an app restart — never counts.
+        """
+        try:
+            completed = subprocess.run(
+                ["pgrep", "-x", TAILSCALE_APP_NAME],
+                capture_output=True,
+                text=True,
+                timeout=TAILSCALE_RESTART_TIMEOUT_S,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return False
+        return completed.returncode == 0
+
     def _restart_tailscale_app(self) -> tuple[bool, str]:
         """Quit and relaunch Tailscale, without judging whether it helped.
 
@@ -290,6 +308,16 @@ class IngestHealthHandler:
                 timeout=TAILSCALE_RESTART_TIMEOUT_S,
                 check=False,
             )
+            # `quit` returns before the app has exited, and opening it while it
+            # is still terminating fails: on 2026-10-06 the relaunch exited with
+            # LaunchServices error -600 and left the app not running at all.
+            deadline = time.monotonic() + TAILSCALE_RESTART_TIMEOUT_S
+            while self._tailscale_app_running():
+                if time.monotonic() >= deadline or self._runtime._stop_event.wait(0.5):
+                    return False, (
+                        f"{TAILSCALE_APP_NAME} was still running "
+                        f"{TAILSCALE_RESTART_TIMEOUT_S:.0f}s after being asked to quit."
+                    )
             completed = subprocess.run(
                 ["open", "-a", TAILSCALE_APP_NAME],
                 capture_output=True,
@@ -438,6 +466,29 @@ class IngestHealthHandler:
             {"switched_off_seen_at": episode.get("seen_at")},
         )
 
+    def _track_node_online(self, *, now: datetime) -> None:
+        """Record when this node was first seen online after being off or unseen.
+
+        The endpoint repair counts unreachable time from here, because a dead
+        public path says nothing about the ingress while the node itself is
+        offline. With no observation yet — a daemon that has just started — the
+        node counts as having just come online, which only ever delays a repair.
+
+        Args:
+            now: The moment of this assessment, in UTC.
+        """
+        from http_ingest import tailscale_node_health
+
+        if self._runtime.profile is None or not self._runtime.profile.operator:
+            return
+        connected, _detail = tailscale_node_health()
+        if connected is False:
+            if self._runtime._state.pop("node_online_since", None) is not None:
+                self._runtime._save_state()
+        elif connected is True and not self._runtime._state.get("node_online_since"):
+            self._runtime._state["node_online_since"] = now.isoformat()
+            self._runtime._save_state()
+
     def _maybe_repair_unreachable_endpoint(self, *, now: datetime) -> None:
         """Restart Tailscale when the public path is dead and the node says it is fine.
 
@@ -451,7 +502,8 @@ class IngestHealthHandler:
 
         Gated harder than the alert it shadows, because the evidence is younger
         and the action is machine-wide. The probe must have read unreachable
-        continuously for ``FUNNEL_UNREACHABLE_REPAIR_AFTER_MIN`` — several
+        continuously, with the node online, for
+        ``FUNNEL_UNREACHABLE_REPAIR_AFTER_MIN`` — several
         consecutive failures at the scheduler's tick rate, so one flap cannot
         restart a working tailnet — and one outage still draws one attempt.
 
@@ -478,7 +530,15 @@ class IngestHealthHandler:
             return
         unreachable_since = seen.get("changed_at")
         held_h = _hours_since(unreachable_since, now=now)
-        if held_h is None or held_h * 60 < FUNNEL_UNREACHABLE_REPAIR_AFTER_MIN:
+        # Only time spent unreachable while the node was online counts. On
+        # 2026-10-03 the path had been dead for 38.7h because Tailscale was
+        # switched off, and the repair restarted it three seconds after it was
+        # switched back on — before the address could be republished.
+        online_h = _hours_since(self._runtime._state.get("node_online_since"), now=now)
+        if held_h is None or online_h is None:
+            return
+        held_h = min(held_h, online_h)
+        if held_h * 60 < FUNNEL_UNREACHABLE_REPAIR_AFTER_MIN:
             return
 
         previous = self._runtime._state.get("endpoint_repair")
@@ -956,6 +1016,7 @@ class IngestHealthHandler:
             return
 
         self._observe_funnel_reachability(health, now=assessment_now)
+        self._track_node_online(now=assessment_now)
         self._maybe_repair_unreachable_endpoint(now=assessment_now)
 
         # One local now for every delivery decision below: quiet-hours gating is

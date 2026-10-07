@@ -26,6 +26,12 @@ def _no_real_tailscale(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     Tests that exercise the CLI path patch the binary themselves.
     """
     monkeypatch.setattr("http_ingest.TAILSCALE_BINARY", tmp_path / "no-tailscale")
+    # Restarts wait for the app to exit; with subprocess patched to succeed,
+    # pgrep would report it running forever.
+    monkeypatch.setattr(
+        "daemon_ingest_health.IngestHealthHandler._tailscale_app_running",
+        lambda self: False,
+    )
 
 
 @pytest.fixture

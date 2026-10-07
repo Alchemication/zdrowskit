@@ -695,9 +695,17 @@ registration.
 
 So a second repair watches the public path instead. It restarts Tailscale once
 per outage when the probe has read unreachable for
-`FUNNEL_UNREACHABLE_REPAIR_AFTER_MIN` **and** the node reports itself online —
+`FUNNEL_UNREACHABLE_REPAIR_AFTER_MIN` **while** the node reports itself online —
 a disconnected node is the first repair's to own, and one fault must not draw
-two restarts.
+two restarts. Only time with the node online counts: each check records when
+the node was first seen online, and a daemon that has just started counts it as
+online from that moment. On 2026-10-03 the path had read dead for 38.7 hours
+because Tailscale was switched off, and the repair restarted it three seconds
+after it came back, before the address could be republished.
+
+A restart waits for the app to finish quitting before opening it again. On
+2026-10-06 the reopen came too early, failed with LaunchServices error -600, and
+left the app not running.
 
 It is gated harder than any alert, because the action is machine-wide and the
 evidence is a probe whose false-positive rate is not yet measured. The delay

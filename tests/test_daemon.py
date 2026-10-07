@@ -3583,16 +3583,20 @@ class TestUnreachableEndpointRepair:
         runtime._chat._poller = MagicMock()
         return runtime
 
-    def _unreachable_for(self, runtime, minutes: float) -> None:
+    def _unreachable_for(
+        self, runtime, minutes: float, *, online_for: float | None = None
+    ) -> None:
         from datetime import datetime, timedelta, timezone
 
+        now = datetime.now(timezone.utc)
         runtime._state["funnel_probe"] = {
             "reachable": False,
-            "changed_at": (
-                datetime.now(timezone.utc) - timedelta(minutes=minutes)
-            ).isoformat(),
+            "changed_at": (now - timedelta(minutes=minutes)).isoformat(),
             "detail": "TLS died at the ingress",
         }
+        runtime._state["node_online_since"] = (
+            now - timedelta(minutes=minutes if online_for is None else online_for)
+        ).isoformat()
 
     def _now(self):
         from datetime import datetime, timezone
@@ -3636,6 +3640,98 @@ class TestUnreachableEndpointRepair:
         assert restart.call_count == 1
         assert record.call_args.args[1] == "endpoint_repair_recovered"
         assert runtime._state["endpoint_repair"]["recovered_at"]
+
+    def test_a_node_that_just_came_online_is_not_restarted(
+        self, tmp_path: Path
+    ) -> None:
+        # 2026-10-03: dead for 38.7h because Tailscale was switched off, then
+        # restarted three seconds after being switched back on — before the
+        # address could be republished.
+        runtime = self._runtime(tmp_path)
+        self._unreachable_for(runtime, 38.7 * 60, online_for=0.05)
+
+        with (
+            patch.object(runtime._ingest_health, "_restart_tailscale_app") as restart,
+            patch("http_ingest.tailscale_node_health", return_value=(True, "online")),
+        ):
+            runtime._ingest_health._maybe_repair_unreachable_endpoint(now=self._now())
+
+        restart.assert_not_called()
+
+    def test_an_unobserved_node_is_not_restarted(self, tmp_path: Path) -> None:
+        # A daemon that has just started has not yet seen the node online.
+        runtime = self._runtime(tmp_path)
+        self._unreachable_for(runtime, 60)
+        runtime._state.pop("node_online_since")
+
+        with patch.object(runtime._ingest_health, "_restart_tailscale_app") as restart:
+            runtime._ingest_health._maybe_repair_unreachable_endpoint(now=self._now())
+
+        restart.assert_not_called()
+
+    def test_online_tracking_starts_and_resets_with_the_node(
+        self, tmp_path: Path
+    ) -> None:
+        runtime = self._runtime(tmp_path)
+        handler = runtime._ingest_health
+
+        with patch("http_ingest.tailscale_node_health", return_value=(True, "on")):
+            handler._track_node_online(now=self._now())
+            first = runtime._state["node_online_since"]
+            handler._track_node_online(now=self._now())
+        assert runtime._state["node_online_since"] == first
+
+        with patch("http_ingest.tailscale_node_health", return_value=(False, "off")):
+            handler._track_node_online(now=self._now())
+        assert "node_online_since" not in runtime._state
+
+        # An unreadable CLI is no evidence either way.
+        runtime._state["node_online_since"] = first
+        with patch("http_ingest.tailscale_node_health", return_value=(None, "?")):
+            handler._track_node_online(now=self._now())
+        assert runtime._state["node_online_since"] == first
+
+    def test_the_relaunch_waits_for_the_app_to_finish_quitting(
+        self, tmp_path: Path
+    ) -> None:
+        # 2026-10-06: opening the app while it was still terminating failed
+        # with LaunchServices error -600 and left it not running.
+        runtime = self._runtime(tmp_path)
+        handler = runtime._ingest_health
+        running = iter([True, True, False])
+        completed = SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with (
+            patch.object(
+                handler, "_tailscale_app_running", side_effect=lambda: next(running)
+            ),
+            patch.object(runtime._stop_event, "wait", return_value=False),
+            patch.object(
+                daemon_ingest_health.subprocess, "run", return_value=completed
+            ) as run,
+        ):
+            assert handler._restart_tailscale_app() == (True, "")
+
+        commands = [c.args[0][0] for c in run.call_args_list]
+        assert commands == ["osascript", "open"]
+
+    def test_an_app_that_never_quits_is_not_reopened(self, tmp_path: Path) -> None:
+        runtime = self._runtime(tmp_path)
+        handler = runtime._ingest_health
+        completed = SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with (
+            patch.object(daemon_ingest_health, "TAILSCALE_RESTART_TIMEOUT_S", 0),
+            patch.object(handler, "_tailscale_app_running", return_value=True),
+            patch.object(
+                daemon_ingest_health.subprocess, "run", return_value=completed
+            ) as run,
+        ):
+            restarted, reason = handler._restart_tailscale_app()
+
+        assert restarted is False
+        assert "still running" in reason
+        assert [c.args[0][0] for c in run.call_args_list] == ["osascript"]
 
     def test_a_disconnected_node_is_left_to_the_other_repair(
         self, tmp_path: Path
