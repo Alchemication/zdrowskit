@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
+
+import pytest
 
 from parsers.metrics import (
     _parse_date,
@@ -287,11 +290,11 @@ class TestTimeGroupingIndependence:
 
     def test_distance_and_energy_also_sum(self) -> None:
         """Every running total shares the bug, not just steps."""
-        for name, field in (
-            ("walking_running_distance", "distance_km"),
-            ("active_energy", "active_energy_kj"),
-            ("apple_exercise_time", "exercise_min"),
-            ("flights_climbed", "flights_climbed"),
+        for name, field, unit in (
+            ("walking_running_distance", "distance_km", "km"),
+            ("active_energy", "active_energy_kj", "kJ"),
+            ("apple_exercise_time", "exercise_min", "min"),
+            ("flights_climbed", "flights_climbed", "count"),
         ):
             result = parse_metrics_payload(
                 _payload(
@@ -300,6 +303,7 @@ class TestTimeGroupingIndependence:
                         {"date": "2026-03-02 07:00:00 +0000", "qty": 2.0},
                         {"date": "2026-03-02 08:00:00 +0000", "qty": 3.0},
                     ],
+                    unit,
                 )
             )
             assert result["2026-03-02"][field] == 5.0, name
@@ -314,6 +318,7 @@ class TestTimeGroupingIndependence:
                     {"date": "2026-03-02 01:00:00 +0000", "qty": 52.0},
                     {"date": "2026-03-02 02:00:00 +0000", "qty": 54.0},
                 ],
+                "count/min",
             )
         )
         assert result["2026-03-02"]["resting_hr"] == 52.0
@@ -327,6 +332,7 @@ class TestTimeGroupingIndependence:
                     {"date": "2026-03-02 09:00:00 +0000", "Min": 48, "Max": 165},
                     {"date": "2026-03-02 23:00:00 +0000", "Min": 55, "Max": 70},
                 ],
+                "count/min",
             )
         )
         day = result["2026-03-02"]
@@ -342,7 +348,161 @@ class TestTimeGroupingIndependence:
                     {"date": "2026-03-02 23:00:00 +0000", "qty": 15.0},
                     {"date": "2026-03-03 02:00:00 +0000", "qty": 17.0},
                 ],
+                "count/min",
             )
         )
         assert result["2026-03-02"]["respiratory_rate"] == 16.0
         assert "2026-03-03" not in result
+
+
+class TestImperialMetrics:
+    """A phone exporting miles, feet and degF stores the same metric figures."""
+
+    @pytest.fixture
+    def day(self, fixtures_dir: Path) -> dict[str, float]:
+        return parse_metrics_file(fixtures_dir / "imperial_metrics.json")["2026-03-09"]
+
+    def test_distance_miles(self, day: dict[str, float]) -> None:
+        assert day["distance_km"] == pytest.approx(3.1 * 1.609344)
+
+    def test_energy_kcal(self, day: dict[str, float]) -> None:
+        assert day["active_energy_kj"] == pytest.approx(500 * 4.184)
+
+    def test_walking_speed_mi_per_hr(self, day: dict[str, float]) -> None:
+        assert day["walking_speed_kmh"] == pytest.approx(3.0 * 1.609344)
+
+    def test_running_speed_mph(self, day: dict[str, float]) -> None:
+        assert day["running_speed_kmh"] == pytest.approx(6.0 * 1.609344)
+
+    def test_step_length_inches(self, day: dict[str, float]) -> None:
+        assert day["walking_step_length_cm"] == pytest.approx(28 * 2.54)
+
+    def test_stride_length_feet(self, day: dict[str, float]) -> None:
+        assert day["running_stride_length_m"] == pytest.approx(3.5 * 0.3048)
+
+    def test_stair_speed_feet_per_second(self, day: dict[str, float]) -> None:
+        assert day["stair_speed_up_ms"] == pytest.approx(0.3048)
+
+    def test_wrist_temperature_degf(self, fixtures_dir: Path) -> None:
+        result = parse_metrics_file(fixtures_dir / "imperial_metrics.json")
+        assert result["2026-03-09"]["sleeping_wrist_temp_c"] == pytest.approx(
+            36.5, abs=0.01
+        )
+
+    def test_invariant_metric_untouched(self, day: dict[str, float]) -> None:
+        assert day["resting_hr"] == 52.0
+
+    def test_unknown_metric_not_stored(self, day: dict[str, float]) -> None:
+        assert "totally_unknown_metric" not in day
+
+
+class TestUnknownUnits:
+    def test_unknown_distance_unit_is_dropped_and_warned(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        payload = _payload(
+            "walking_running_distance",
+            [{"date": "2026-03-02 00:00:00 +0000", "qty": 4.0}],
+            "furlong",
+        )
+        with caplog.at_level(logging.WARNING, logger="parsers.normalise"):
+            result = parse_metrics_payload(payload)
+        assert "distance_km" not in result.get("2026-03-02", {})
+        assert len(caplog.records) == 1
+        message = caplog.records[0].getMessage()
+        assert "walking_running_distance" in message
+        assert "furlong" in message
+
+    def test_unknown_metric_name_is_silent(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        payload = _payload(
+            "totally_unknown_metric",
+            [{"date": "2026-03-02 00:00:00 +0000", "qty": 1.0}],
+            "??",
+        )
+        with caplog.at_level(logging.WARNING, logger="parsers.normalise"):
+            assert parse_metrics_payload(payload) == {}
+        assert caplog.records == []
+
+    def test_missing_units_key_drops_distance(self) -> None:
+        payload = {
+            "data": {
+                "metrics": [
+                    {
+                        "name": "walking_running_distance",
+                        "data": [{"date": "2026-03-02 00:00:00 +0000", "qty": 4.0}],
+                    }
+                ]
+            }
+        }
+        assert parse_metrics_payload(payload) == {}
+
+    def test_missing_units_key_keeps_invariant_metric(self) -> None:
+        payload = {
+            "data": {
+                "metrics": [
+                    {
+                        "name": "step_count",
+                        "data": [{"date": "2026-03-02 00:00:00 +0000", "qty": 4.0}],
+                    }
+                ]
+            }
+        }
+        assert parse_metrics_payload(payload)["2026-03-02"]["steps"] == 4.0
+
+    def _sleep_payload(self, units: str, total: float) -> dict:
+        return _payload(
+            "sleep_analysis",
+            [
+                {
+                    "date": "2026-03-10 07:00:00 +0000",
+                    "sleepStart": "2026-03-09 23:30:00 +0000",
+                    "totalSleep": total,
+                    "deep": total / 7,
+                    "core": total / 2,
+                    "rem": total / 4,
+                    "awake": 0.0,
+                }
+            ],
+            units,
+        )
+
+    def test_sleep_in_minutes_is_converted_to_hours(self) -> None:
+        result = parse_metrics_payload(self._sleep_payload("min", 420.0))
+        assert result["2026-03-09"]["sleep_total_h"] == 7.0
+
+    def test_sleep_in_minutes_with_null_total_is_skipped(self) -> None:
+        payload = self._sleep_payload("min", 420.0)
+        payload["data"]["metrics"][0]["data"][0]["totalSleep"] = None
+        assert parse_metrics_payload(payload) == {}
+
+    def test_sleep_in_bogus_unit_is_dropped(self) -> None:
+        assert parse_metrics_payload(self._sleep_payload("fortnights", 7.0)) == {}
+
+    def test_heart_rate_in_bpm_is_accepted(self) -> None:
+        payload = _payload(
+            "heart_rate",
+            [{"date": "2026-03-02 09:00:00 +0000", "Min": 48, "Max": 165}],
+            "bpm",
+        )
+        assert parse_metrics_payload(payload)["2026-03-02"]["hr_day_max"] == 165.0
+
+    def test_heart_rate_in_bogus_unit_is_kept(self) -> None:
+        payload = _payload(
+            "heart_rate",
+            [{"date": "2026-03-02 09:00:00 +0000", "Min": 48, "Max": 165}],
+            "beats",
+        )
+        assert parse_metrics_payload(payload)["2026-03-02"]["hr_day_max"] == 165.0
+
+    def test_invariant_metric_with_unknown_unit_is_kept_and_warned(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        payload = _payload(
+            "vo2_max", [{"date": "2026-03-02 00:00:00 +0000", "qty": 45.2}], "ml/kg·min"
+        )
+        with caplog.at_level(logging.WARNING, logger="parsers.normalise"):
+            result = parse_metrics_payload(payload)
+        assert result["2026-03-02"]["vo2max"] == 45.2
+        assert "assumed to be" in caplog.records[0].getMessage()

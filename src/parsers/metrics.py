@@ -11,10 +11,16 @@ Both share the schema:
 heart_rate entries use Min/Avg/Max instead of qty.
 sleep_analysis entries use pre-aggregated nightly totals (Auto Export format).
 
+Auto Export labels each metric with the unit the phone exports in (``mi`` on an
+imperial phone). Values are converted to the stored unit named in ``METRIC_MAP``
+by ``parsers.normalise``; a metric whose unit is unrecognised or missing is
+logged and dropped rather than stored in the wrong unit, except for single-unit
+metrics (counts, heart rate, HRV, ...), which keep their value.
+
 Public API:
     parse_metrics_file(path)      -- parse a single metrics JSON file
     parse_all_metrics(metrics_dir) -- parse and merge all files in Metrics/
-    METRIC_MAP                    -- Apple Health metric name → internal field name
+    METRIC_MAP                    -- Apple Health metric name → MetricSpec(field, stored unit)
 
 Example:
     from pathlib import Path
@@ -28,37 +34,54 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import NamedTuple
+
+from parsers.normalise import UnitNormaliser
 
 
-# Maps Apple Health metric names to our internal field names
-METRIC_MAP: dict[str, str] = {
+class MetricSpec(NamedTuple):
+    """Where a metric is stored and the unit its stored value is in."""
+
+    field: str
+    unit: str
+
+
+# Stored unit of the heart_rate and sleep_analysis special cases, which sit
+# outside METRIC_MAP.
+_HEART_RATE_UNIT = "count/min"
+_SLEEP_UNIT = "hr"
+
+# Maps Apple Health metric names to our internal field names and stored units
+METRIC_MAP: dict[str, MetricSpec] = {
     # activity.json
-    "apple_exercise_time": "exercise_min",
-    "apple_stand_time": "stand_time_min",  # not used in DailySnapshot, kept for completeness
-    "active_energy": "active_energy_kj",
-    "flights_climbed": "flights_climbed",
-    "apple_stand_hour": "stand_hours",
-    "walking_running_distance": "distance_km",
-    "step_count": "steps",
+    "apple_exercise_time": MetricSpec("exercise_min", "min"),
+    "apple_stand_time": MetricSpec(
+        "stand_time_min", "min"
+    ),  # not used in DailySnapshot, kept for completeness
+    "active_energy": MetricSpec("active_energy_kj", "kJ"),
+    "flights_climbed": MetricSpec("flights_climbed", "count"),
+    "apple_stand_hour": MetricSpec("stand_hours", "count"),
+    "walking_running_distance": MetricSpec("distance_km", "km"),
+    "step_count": MetricSpec("steps", "count"),
     # heart.json
-    "vo2_max": "vo2max",
-    "walking_heart_rate_average": "walking_hr_avg",
-    "resting_heart_rate": "resting_hr",
-    "heart_rate_variability": "hrv_ms",
+    "vo2_max": MetricSpec("vo2max", "mL/min·kg"),
+    "walking_heart_rate_average": MetricSpec("walking_hr_avg", "count/min"),
+    "resting_heart_rate": MetricSpec("resting_hr", "count/min"),
+    "heart_rate_variability": MetricSpec("hrv_ms", "ms"),
     # heart_rate handled separately (Min/Avg/Max)
     # mobility.json
-    "stair_speed_down": "stair_speed_down_ms",
-    "stair_speed_up": "stair_speed_up_ms",
-    "walking_asymmetry_percentage": "walking_asymmetry_pct",
-    "running_stride_length": "running_stride_length_m",
-    "running_power": "running_power_w",
-    "running_speed": "running_speed_kmh",
-    "walking_double_support_percentage": "walking_double_support_pct",
-    "walking_speed": "walking_speed_kmh",
-    "walking_step_length": "walking_step_length_cm",
+    "stair_speed_down": MetricSpec("stair_speed_down_ms", "m/s"),
+    "stair_speed_up": MetricSpec("stair_speed_up_ms", "m/s"),
+    "walking_asymmetry_percentage": MetricSpec("walking_asymmetry_pct", "%"),
+    "running_stride_length": MetricSpec("running_stride_length_m", "m"),
+    "running_power": MetricSpec("running_power_w", "W"),
+    "running_speed": MetricSpec("running_speed_kmh", "km/h"),
+    "walking_double_support_percentage": MetricSpec("walking_double_support_pct", "%"),
+    "walking_speed": MetricSpec("walking_speed_kmh", "km/h"),
+    "walking_step_length": MetricSpec("walking_step_length_cm", "cm"),
     # overnight recovery metrics — see _NIGHT_ATTRIBUTED_METRICS
-    "respiratory_rate": "respiratory_rate",
-    "apple_sleeping_wrist_temperature": "sleeping_wrist_temp_c",
+    "respiratory_rate": MetricSpec("respiratory_rate", "count/min"),
+    "apple_sleeping_wrist_temperature": MetricSpec("sleeping_wrist_temp_c", "degC"),
 }
 
 # Metrics sampled while asleep, which Apple stamps in local clock time. A single
@@ -170,11 +193,14 @@ def parse_metrics_payload(data: dict) -> dict[str, dict[str, float]]:
     # (date, apple name, field) -> readings, reduced once the file is fully
     # read. Held per Apple name so the reduction can consult _SUMMED_METRICS.
     day_readings: dict[tuple[str, str, str], list[float]] = {}
+    norm = UnitNormaliser()
 
     for metric in data["data"]["metrics"]:
         name = metric["name"]
 
         if name == "heart_rate":
+            if not norm.accepts(metric.get("units"), _HEART_RATE_UNIT, field=name):
+                continue
             # Special case: entries have Min, Avg, Max instead of qty. The
             # day's extremes are the extremes across its entries — taking the
             # last entry's would report the final hour's range as the day's.
@@ -194,20 +220,32 @@ def parse_metrics_payload(data: dict) -> dict[str, dict[str, float]]:
             continue
 
         if name == "sleep_analysis":
+            sleep_unit = metric.get("units")
+            if not norm.accepts(sleep_unit, _SLEEP_UNIT, field=name):
+                continue
+
+            def hours(value: float | None) -> float | None:
+                # Nulls pass through so the guards below behave as they always
+                # did. The unit was accepted above, so convert cannot return None
+                # for a real number.
+                if value is None:
+                    return None
+                return norm.convert(value, sleep_unit, _SLEEP_UNIT, field=name)
+
             # Auto Export format: pre-aggregated nightly totals.
             # Fields: totalSleep, deep, core, rem, awake (hours),
             #         sleepStart/sleepEnd, date.
             for entry in metric.get("data", []):
-                total = entry.get("totalSleep", 0.0)
+                total = hours(entry.get("totalSleep", 0.0))
                 # Auto Export emits zero-hour entries for nights the watch was
                 # not worn. Storing them makes an untracked night look like a
                 # night without sleep to every average and every SQL query.
                 if not total or total <= 0:
                     continue
-                deep = entry.get("deep", 0.0)
-                core = entry.get("core", 0.0)
-                rem = entry.get("rem", 0.0)
-                awake = entry.get("awake", 0.0)
+                deep = hours(entry.get("deep", 0.0))
+                core = hours(entry.get("core", 0.0))
+                rem = hours(entry.get("rem", 0.0))
+                awake = hours(entry.get("awake", 0.0))
                 in_bed = total + awake
                 efficiency = (total / in_bed * 100) if in_bed > 0 else 0.0
 
@@ -227,9 +265,16 @@ def parse_metrics_payload(data: dict) -> dict[str, dict[str, float]]:
                 day["sleep_awake_h"] = round(awake, 2)
             continue
 
-        field = METRIC_MAP.get(name)
-        if field is None:
-            continue  # unknown metric — ignore
+        spec = METRIC_MAP.get(name)
+        if spec is None:
+            continue  # unknown metric — ignore, before its unit is looked at
+        field = spec.field
+
+        # One label covers the whole metric. Check it once up front so an
+        # unusable unit drops the metric with a single warning.
+        unit = metric.get("units")
+        if not norm.accepts(unit, spec.unit, field=name):
+            continue
 
         if name in _NIGHT_ATTRIBUTED_METRICS:
             for entry in metric.get("data", []):
@@ -238,8 +283,9 @@ def parse_metrics_payload(data: dict) -> dict[str, dict[str, float]]:
                 night_date = _night_start_date(entry["date"])
                 if night_date is None:
                     continue
+                # Convert each reading before averaging: degF -> degC is affine.
                 night_readings.setdefault((night_date, field), []).append(
-                    float(entry["qty"])
+                    norm.convert(float(entry["qty"]), unit, spec.unit, field=name)
                 )
             continue
 
@@ -247,7 +293,9 @@ def parse_metrics_payload(data: dict) -> dict[str, dict[str, float]]:
             if "qty" not in entry:
                 continue
             date = _parse_date(entry["date"])
-            day_readings.setdefault((date, name, field), []).append(float(entry["qty"]))
+            day_readings.setdefault((date, name, field), []).append(
+                norm.convert(float(entry["qty"]), unit, spec.unit, field=name)
+            )
 
     for (date, name, field), readings in day_readings.items():
         if name in _SUMMED_METRICS:

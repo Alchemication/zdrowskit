@@ -447,6 +447,9 @@ def _parser_dry_run(payload: dict[str, Any], kind: str) -> None:
 
     Parsing the decoded payload in memory keeps health data out of the shared
     system temp directory and avoids decoding the request body a second time.
+
+    The parsers log a warning for any unrecognised unit label, so an upload with
+    one warns here and again when the payload is imported.
     """
     try:
         if kind == "metrics":

@@ -152,6 +152,28 @@ Notes:
 - Overnight respiratory rate and sleeping wrist temperature are stored per night as the mean of that night's readings, under the night-start date so they line up with the sleep columns. Apple samples both across midnight, so filing them by calendar date would split one night over two rows.
 - Route workouts are also reverse-geocoded during import into locality-level locations (for example Crosshaven, Warsaw, Malaga). Full route coordinates are not stored in SQLite. Set `ZDROWSKIT_LOCATION_GEOCODER=off` to disable the external lookup; the default provider is Nominatim and results are looked up/cached by coarse start coordinate.
 
+## Units
+
+Auto Export labels each value with the unit the phone is set to export in, so a
+phone using miles, feet, or Fahrenheit sends `mi`, `ft`, or `degF`. zdrowskit
+converts every recognised label to the unit it stores; the accepted spellings
+live in `src/parsers/normalise.py`.
+
+- A field with an unrecognised unit, or none, where the unit matters
+  (distance, length, speed, energy, temperature, time) is not stored, and a
+  warning naming the field and unit is logged. Workout energy, which has a
+  default, is stored as 0. Counts, heart and respiratory rate, HRV, percentages,
+  power, VO2 max, and workout intensity have a single possible unit, so an unrecognised or
+  missing label keeps the value as sent; an unrecognised one still logs a
+  warning.
+- Keep Auto Export's **Use Localized Units** off. Localized unit names are not
+  recognised, so values that depend on the unit are not stored.
+- Workout route points are always SI (metres, metres per second) whatever the
+  phone's unit preferences, and are used as sent.
+
+Data imported before unit conversion existed is not corrected retroactively.
+Re-export the affected date range from Auto Export to re-import it correctly.
+
 ## Historical Backfill
 
 Each automation has a **Manual Export** button at the bottom of the automation
