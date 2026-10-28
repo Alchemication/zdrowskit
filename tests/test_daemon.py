@@ -936,7 +936,7 @@ class TestChatReplyLoop:
                 ],
             ),
             patch(
-                "llm_health.build_llm_data",
+                "llm_health_data.build_llm_data",
                 return_value={
                     "current_week": {"summary": {"week_label": "2026-W19"}},
                     "history": [],
@@ -1053,7 +1053,7 @@ class TestChatReplyLoop:
                 ],
             ),
             patch(
-                "llm_health.build_llm_data",
+                "llm_health_data.build_llm_data",
                 return_value={
                     "current_week": {"summary": {"week_label": "2026-W19"}},
                     "history": [],
@@ -1178,7 +1178,7 @@ class TestChatReplyLoop:
                 ],
             ),
             patch(
-                "llm_health.build_llm_data",
+                "llm_health_data.build_llm_data",
                 return_value={
                     "current_week": {"summary": {"week_label": "2026-W20"}},
                     "history": [],
@@ -1292,7 +1292,7 @@ class TestChatReplyLoop:
                 ],
             ),
             patch(
-                "llm_health.build_llm_data",
+                "llm_health_data.build_llm_data",
                 return_value={
                     "current_week": {"summary": {"week_label": "2026-W19"}},
                     "history": [],
@@ -1392,7 +1392,7 @@ class TestChatReplyLoop:
                 ],
             ),
             patch(
-                "llm_health.build_llm_data",
+                "llm_health_data.build_llm_data",
                 return_value={
                     "current_week": {"summary": {"week_label": "2026-W19"}},
                     "history": [],

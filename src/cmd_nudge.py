@@ -29,8 +29,8 @@ from config import (
 from data_maturity import build_data_maturity
 from llm import call_llm
 from llm_context import build_messages, load_context, load_prompt_text
+from llm_health_data import build_llm_data
 from llm_health import (
-    build_llm_data,
     format_last_coach_summary,
     format_recent_nudges,
     render_health_data,

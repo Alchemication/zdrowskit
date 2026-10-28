@@ -45,7 +45,7 @@ from config import (
 )
 from google_drive import DriveFetchError, fetch_health_export
 from llm_context import load_context
-from llm_health import build_llm_data
+from llm_health_data import build_llm_data
 from report import (
     current_week_bounds,
     group_by_week,

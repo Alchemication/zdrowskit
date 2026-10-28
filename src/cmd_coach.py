@@ -29,8 +29,8 @@ from config import (
 from context_edit import ContextEdit, EditPreviewError, build_edit_preview
 from llm import call_llm
 from llm_context import build_messages, load_context, load_prompt_text
+from llm_health_data import build_llm_data
 from llm_health import (
-    build_llm_data,
     build_review_facts,
     format_recent_nudges,
     render_health_data,

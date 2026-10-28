@@ -35,8 +35,8 @@ from llm import LLMResult, _reasoning_engaged, call_llm
 from llm_context import append_history, build_messages, load_context, load_prompt_text
 from challenges import challenge_status_text
 from run_comparison import NO_RUN_COMPARISON, describe_run_comparisons
+from llm_health_data import build_llm_data
 from llm_health import (
-    build_llm_data,
     build_review_facts,
     format_last_coach_summary,
     render_health_data,
