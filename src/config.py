@@ -872,6 +872,15 @@ annually per activity, which suits a surface budgeted at one announcement a
 month across every kind.
 """
 
+STANDOUT_VOLUME_STEP_MI: int = 150
+"""Mile counterpart of ``STANDOUT_VOLUME_STEP_KM`` for imperial profiles.
+
+250 km is about 155 mi, so 150 mi keeps the same roughly-annual cadence while
+landing on a round number a miles reader recognises. Thresholds are counted in
+miles for these profiles, which is why the announcement key carries a unit
+suffix: ``volume_run|150mi`` and ``volume_run|250`` never collide.
+"""
+
 TELEGRAM_MESSAGE_EFFECTS: dict[str, str] = {
     "fire": "5104841245755180586",
     "confetti": "5046509860389126442",

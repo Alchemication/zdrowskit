@@ -9,6 +9,7 @@ from pathlib import Path
 
 from config import STANDOUT_RECENCY_DAYS
 from store import open_db
+from units import Quantity, UnitSystem, format_quantity
 
 logger = logging.getLogger(__name__)
 
@@ -89,13 +90,16 @@ def changed_workout_ids(before: dict, after: dict) -> set[str]:
     }
 
 
-def format_data_delta(db: Path, before: dict, after: dict) -> str:
+def format_data_delta(
+    db: Path, before: dict, after: dict, *, units: UnitSystem = UnitSystem.METRIC
+) -> str:
     """Describe records that arrived between two data snapshots.
 
     Args:
         db: Known profile database path.
         before: Snapshot taken before the import ran.
         after: Snapshot taken after the import ran.
+        units: Display unit system for distances.
 
     Returns:
         Human-readable text the LLM can use to know what is actually new.
@@ -125,7 +129,11 @@ def format_data_delta(db: Path, before: dict, after: dict) -> str:
             duration = row["duration_min"]
             duration_text = f"{duration:.0f} min" if duration is not None else "?"
             distance = row["gpx_distance_km"]
-            distance_text = f", {distance:.2f} km" if distance is not None else ""
+            distance_text = (
+                f", {format_quantity(distance, Quantity.DISTANCE, units, decimals=2)}"
+                if distance is not None
+                else ""
+            )
             lines.append(
                 f"- New workout: {row['type']} ({row['category']}), "
                 f"{duration_text}{distance_text} on {row['date']}"

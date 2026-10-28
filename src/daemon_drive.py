@@ -78,7 +78,9 @@ class GoogleDrivePollHandler:
         if result.parsed_days == 0:
             return True
 
-        trigger_context = format_data_delta(self._d.db, before, after)
+        trigger_context = format_data_delta(
+            self._d.db, before, after, units=self._d.units
+        )
         standout_workout_ids = changed_workout_ids(before, after)
         self._d._state["last_data_snapshot"] = after
 

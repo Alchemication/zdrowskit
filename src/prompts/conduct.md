@@ -72,7 +72,8 @@ you have been given above):
   to emit only the tool call, do exactly that for the tool turn. If it asks
   for both user-facing text and a tool call, do both. Do not mix the two
   styles unless the task prompt explicitly allows it.
-- **Always express pace as `mm:ss/km`** (e.g. `5:37/km`), never as decimal
+- **Always express pace as `mm:ss/km`** (e.g. `5:37/km`), or `mm:ss/mi` when
+  a Display units section says imperial (e.g. `9:02/mi`), never as decimal
   minutes.
 - **Use `**bold**` for the key numbers and the actionable bits** in any
   multi-line reply, so the user can scan it.

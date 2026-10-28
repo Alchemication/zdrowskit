@@ -12,7 +12,13 @@ from config import CONTEXT_DIR
 from llm_context import load_context
 from plan_frame import load_plan_frame, progress_paused
 from store import open_db
-from weekly_progress import measure_week, render_progress_block, week_label_for
+from units import UnitSystem, units_from_args
+from weekly_progress import (
+    display_rings,
+    measure_week,
+    render_progress_block,
+    week_label_for,
+)
 from weekly_targets import (
     StoredTarget,
     clear_targets,
@@ -33,8 +39,9 @@ schedules sessions, then run:
     uv run python main.py targets refresh"""
 
 
-def _provenance_line(item: StoredTarget) -> str:
+def _provenance_line(item: StoredTarget, units: UnitSystem) -> str:
     """Render one target's number and the sentence it came from."""
+    item = item.for_display(units)
     threshold = ""
     if item.spec.needs_threshold and item.threshold is not None:
         threshold = f" (per-day bar {item.threshold:g} {item.spec.threshold_unit})"
@@ -94,7 +101,10 @@ def cmd_targets(args: argparse.Namespace) -> None:
     if progress_paused(conn):
         print("Progress is paused. Use /targets resume in Telegram to resume it.")
 
-    rings = measure_week(conn, targets, week_start=week_start, today=today)
+    units = units_from_args(args)
+    rings = display_rings(
+        measure_week(conn, targets, week_start=week_start, today=today), units
+    )
     block = render_progress_block(rings, week_start=week_start)
     if block:
         # Printed without the markdown fence: the fence exists so Telegram
@@ -103,7 +113,7 @@ def cmd_targets(args: argparse.Namespace) -> None:
 
     print("\nDerived from strategy.md:")
     for item in targets:
-        print(_provenance_line(item))
+        print(_provenance_line(item, units))
 
     if frame is not None and frame.mode != "full":
         print(

@@ -59,6 +59,7 @@ from store import (
     open_db,
     store_snapshots,
 )
+from units import units_from_args
 
 logger = logging.getLogger(__name__)
 
@@ -255,7 +256,11 @@ def cmd_report(args: argparse.Namespace) -> None:
             print(json.dumps(output, indent=2))
         else:
             for week_snapshots in weeks:
-                print_summary(week_snapshots, summarise(week_snapshots))
+                print_summary(
+                    week_snapshots,
+                    summarise(week_snapshots),
+                    units=units_from_args(args),
+                )
         return
 
     # --- Default mode: current week (or explicit range) ---
@@ -275,8 +280,9 @@ def cmd_report(args: argparse.Namespace) -> None:
         }
         print(json.dumps(output, indent=2))
     else:
-        print_summary(snapshots, summary)
-        print_daily(snapshots)
+        units = units_from_args(args)
+        print_summary(snapshots, summary, units=units)
+        print_daily(snapshots, units=units)
 
 
 def cmd_status(args: argparse.Namespace) -> None:

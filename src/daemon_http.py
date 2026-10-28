@@ -128,7 +128,9 @@ class DaemonHttpIngestHandler:
             )
             raise
         after = data_snapshot(runtime.db)
-        trigger_context = format_data_delta(runtime.db, before, after)
+        trigger_context = format_data_delta(
+            runtime.db, before, after, units=runtime.units
+        )
         standout_workout_ids = changed_workout_ids(before, after)
         runtime._state["last_data_snapshot"] = after
         runtime._save_state()

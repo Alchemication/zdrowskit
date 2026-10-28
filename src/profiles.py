@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from config import APP_HOME
+from units import UnitSystem, parse_unit_system, units_from_args
 
 PROFILE_NAME_RE = re.compile(r"^[a-z0-9_-]+$")
 DRIVE_FOLDER_ID_RE = re.compile(r"^[A-Za-z0-9_-]{10,}$")
@@ -44,6 +45,7 @@ class Profile:
     import_source: str = "http"
     drive_metrics_folder_id: str | None = None
     drive_workouts_folder_id: str | None = None
+    units: UnitSystem = UnitSystem.METRIC
 
     @property
     def db(self) -> Path:
@@ -197,6 +199,12 @@ def load_profiles(path: Path = PROFILES_FILE) -> dict[str, Profile]:
             "drive_workouts_folder_id",
             name,
         )
+        try:
+            units = parse_unit_system(values.get("units", "metric"))
+        except ValueError:
+            raise ProfileConfigError(
+                f"profiles.{name}.units must be 'metric' or 'imperial'."
+            ) from None
         profiles[name] = Profile(
             name=name,
             telegram_id=telegram_id,
@@ -206,6 +214,7 @@ def load_profiles(path: Path = PROFILES_FILE) -> dict[str, Profile]:
             import_source=source,
             drive_metrics_folder_id=metrics_id,
             drive_workouts_folder_id=workouts_id,
+            units=units,
         )
 
     operators = [profile for profile in profiles.values() if profile.operator]
@@ -270,6 +279,7 @@ def _toml_profile_section(
     import_source: str,
     metrics_id: str | None = None,
     workouts_id: str | None = None,
+    units: UnitSystem = UnitSystem.METRIC,
 ) -> str:
     """Render one minimal profile table."""
     lines = [f"[profiles.{name}]", f"telegram_id = {telegram_id}"]
@@ -277,6 +287,8 @@ def _toml_profile_section(
         lines.append("operator = true")
     if import_source != "http":
         lines.append(f'import_source = "{import_source}"')
+    if units is not UnitSystem.METRIC:
+        lines.append(f'units = "{units}"')
     if metrics_id:
         lines.append(f'drive_metrics_folder_id = "{metrics_id}"')
     if workouts_id:
@@ -328,6 +340,7 @@ def add_profile(
     import_source: str = "http",
     metrics_id: str | None = None,
     workouts_id: str | None = None,
+    units: UnitSystem | str = UnitSystem.METRIC,
 ) -> Profile:
     """Append a roster entry and create its isolated filesystem tree."""
     name = validate_profile_name(name)
@@ -343,6 +356,10 @@ def add_profile(
         )
     if import_source == "local" and not operator:
         raise ProfileConfigError("Local import is operator-only.")
+    try:
+        units = parse_unit_system(units)
+    except ValueError as exc:
+        raise ProfileConfigError(str(exc)) from None
     metrics_id = _optional_folder_id(metrics_id, "drive_metrics_folder_id", name)
     workouts_id = _optional_folder_id(workouts_id, "drive_workouts_folder_id", name)
     if path.exists():
@@ -364,6 +381,7 @@ def add_profile(
         import_source=import_source,
         drive_metrics_folder_id=metrics_id,
         drive_workouts_folder_id=workouts_id,
+        units=units,
     )
     _create_profile_tree(profile)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -378,6 +396,7 @@ def add_profile(
                 import_source=import_source,
                 metrics_id=metrics_id,
                 workouts_id=workouts_id,
+                units=units,
             )
         )
     return profile
@@ -573,6 +592,7 @@ def cmd_profile(args: Any) -> None:
             import_source=args.source,
             metrics_id=args.google_drive_metrics_folder_id,
             workouts_id=args.google_drive_workouts_folder_id,
+            units=units_from_args(args),
         )
         print(f"Created profile {profile.name}: {profile.root}")
         return

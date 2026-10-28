@@ -33,6 +33,7 @@ from challenges import (
     set_reason_prompt,
 )
 from store import open_db
+from units import UnitSystem
 
 if TYPE_CHECKING:
     from daemon_telegram_chat import TelegramChatHandler
@@ -84,10 +85,10 @@ def buttons_for_coach_call(
     return proposal_buttons(proposal.id) if proposal else []
 
 
-def _started_text(challenge: Challenge) -> str:
+def _started_text(challenge: Challenge, units: UnitSystem) -> str:
     return (
         f"🎯 Challenge on: {challenge.title}\n"
-        f"{describe_challenge(challenge)}, {challenge.start_week} to "
+        f"{describe_challenge(challenge, units=units)}, {challenge.start_week} to "
         f"{challenge.end_date}. /challenge shows progress."
     )
 
@@ -100,7 +101,10 @@ def handle_challenge_command(chat: TelegramChatHandler, message_id: int | None) 
         expire_stale_proposals(conn, today=today)
         active = active_challenge(conn)
         if active is not None:
-            text = describe_active(conn, today=today) or describe_challenge(active)
+            units = chat._daemon.units
+            text = describe_active(conn, today=today, units=units) or (
+                describe_challenge(active, units=units)
+            )
             chat._poller.send_message_with_keyboard(
                 f"🎯 {text}", _drop_buttons(active.id)
             )
@@ -109,13 +113,13 @@ def handle_challenge_command(chat: TelegramChatHandler, message_id: int | None) 
         if pending is not None:
             chat._poller.send_message_with_keyboard(
                 f"🎯 Proposed by the coach: {pending.title}\n"
-                f"{describe_challenge(pending)}\nServes: {pending.goal}",
+                f"{describe_challenge(pending, units=chat._daemon.units)}\nServes: {pending.goal}",
                 proposal_buttons(pending.id),
             )
             return
         chat._poller.send_reply(
             "No challenge is active. The weekly coach proposes one when the "
-            f"data suggests it.\n\nRecent:\n{describe_history(conn)}",
+            f"data suggests it.\n\nRecent:\n{describe_history(conn, units=chat._daemon.units)}",
             reply_to_message_id=message_id,
         )
     finally:
@@ -162,7 +166,7 @@ def handle_challenge_callback(
             # The buttons stay: in a coach review they share the keyboard with
             # the strategy-edit and feedback rows. A second tap is refused.
             chat._poller.answer_callback_query(cb_id, "Challenge on.")
-            chat._poller.send_reply(_started_text(started))
+            chat._poller.send_reply(_started_text(started, chat._daemon.units))
         elif action == "reject":
             rejected = reject(conn, challenge_id)
             if rejected is None:
@@ -219,10 +223,19 @@ def handle_challenge_reason_reply(chat: TelegramChatHandler, message: dict) -> b
     return True
 
 
-def close_and_announce(db_path: object, poller: TelegramPoller | None) -> int:
+def close_and_announce(
+    db_path: object,
+    poller: TelegramPoller | None,
+    units: UnitSystem = UnitSystem.METRIC,
+) -> int:
     """Close finished challenges, expire stale proposals, announce outcomes.
 
     Idempotent and cheap, so the scheduled loop can call it every tick.
+
+    Args:
+        db_path: Known profile database path.
+        poller: Telegram poller, or None to skip announcements.
+        units: Display unit system for the announcement.
 
     Returns:
         Number of challenges closed.
@@ -237,5 +250,5 @@ def close_and_announce(db_path: object, poller: TelegramPoller | None) -> int:
     for challenge in closed:
         logger.info("Challenge %s closed as %s", challenge.id, challenge.status)
         if poller is not None:
-            poller.send_reply(outcome_message(challenge))
+            poller.send_reply(outcome_message(challenge, units=units))
     return len(closed)

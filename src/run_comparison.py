@@ -24,18 +24,19 @@ from config import (
     RUN_COMPARISON_PACE_BAND_MIN,
     RUN_COMPARISON_WINDOW_DAYS,
 )
+from units import (
+    Quantity,
+    UnitSystem,
+    format_pace,
+    format_quantity,
+    to_display,
+    unit_label,
+)
 
 NO_RUN_COMPARISON = "(no run comparison for this sync)"
 
 
-def _format_pace(pace_min_km: float) -> str:
-    """Format minutes per km as mm:ss/km."""
-    total_seconds = int(round(pace_min_km * 60))
-    minutes, seconds = divmod(total_seconds, 60)
-    return f"{minutes}:{seconds:02d}/km"
-
-
-def _describe_one(conn: sqlite3.Connection, run: sqlite3.Row) -> str:
+def _describe_one(conn: sqlite3.Connection, run: sqlite3.Row, units: UnitSystem) -> str:
     """Return one comparison line for a single run."""
     distance = float(run["gpx_distance_km"])
     pace = float(run["duration_min"]) / distance
@@ -64,14 +65,17 @@ def _describe_one(conn: sqlite3.Connection, run: sqlite3.Row) -> str:
     peer_hrs = [float(row["hr_avg"]) for row in rows]
 
     head = (
-        f"- {run['type']} on {run['date']}, {distance:.1f} km at "
-        f"{_format_pace(pace)}, avg HR {hr:.0f} bpm"
+        f"- {run['type']} on {run['date']}, {format_quantity(distance, Quantity.DISTANCE, units)} at "
+        f"{format_pace(pace, units)}, avg HR {hr:.0f} bpm"
     )
     noun = "similar run" if len(peer_hrs) == 1 else "similar runs"
-    band = f"{_format_pace(fast).removesuffix('/km')}–{_format_pace(slow)}"
+    band = f"{format_pace(fast, units, suffix=False)}–{format_pace(slow, units)}"
+    low_shown = to_display(low_km, Quantity.DISTANCE, units)
+    high_shown = to_display(high_km, Quantity.DISTANCE, units)
+    distance_unit = unit_label(Quantity.DISTANCE, units)
     scope = (
         f"{noun} in the previous {RUN_COMPARISON_WINDOW_DAYS} days "
-        f"({low_km:.1f}–{high_km:.1f} km, {band})"
+        f"({low_shown:.1f}–{high_shown:.1f} {distance_unit}, {band})"
     )
     if len(peer_hrs) < BASELINE_MIN_SAMPLES:
         return (
@@ -88,7 +92,10 @@ def _describe_one(conn: sqlite3.Connection, run: sqlite3.Row) -> str:
 
 
 def describe_run_comparisons(
-    conn: sqlite3.Connection, workout_ids: set[str] | list[str]
+    conn: sqlite3.Connection,
+    workout_ids: set[str] | list[str],
+    *,
+    units: UnitSystem = UnitSystem.METRIC,
 ) -> str:
     """Describe how each run a sync brought in compares with similar runs.
 
@@ -102,6 +109,7 @@ def describe_run_comparisons(
     Args:
         conn: Open database connection.
         workout_ids: ``start_utc`` of workouts inserted or changed by the sync.
+        units: Display unit system for distances and paces.
 
     Returns:
         One line per qualifying run, or ``NO_RUN_COMPARISON``.
@@ -125,4 +133,4 @@ def describe_run_comparisons(
     ).fetchall()
     if not runs:
         return NO_RUN_COMPARISON
-    return "\n".join(_describe_one(conn, run) for run in runs)
+    return "\n".join(_describe_one(conn, run, units) for run in runs)

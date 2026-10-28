@@ -262,7 +262,8 @@ message.
 
 Produce a single short message — maximum 80 words. Use **bold** for key
 numbers or actions. No headers. Keep it conversational. Always express pace
-in mm:ss/km format (e.g. `5:37/km`), never as decimal minutes.
+in mm:ss/km format (e.g. `5:37/km`), or mm:ss/mi when a Display units section
+says imperial (e.g. `9:02/mi`), never as decimal minutes.
 
 Tone comes from your persona, not from this prompt — do not override it here.
 Whatever that persona, two things hold: do not repeat back data the user

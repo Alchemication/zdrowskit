@@ -38,7 +38,7 @@ import hashlib
 import json
 import logging
 import sqlite3
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -48,6 +48,7 @@ from config import (
     WEEKLY_TARGET_TYPE_CHOICES,
 )
 from llm_context import UNFILLED_CONTEXT
+from units import KM_PER_MILE, Quantity, UnitSystem, to_display, unit_label
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +57,7 @@ TARGETS_PROMPT = "targets_prompt.md"
 # Bumped whenever the vocabulary or its measurement changes meaning. It is
 # folded into the cache key so stored targets from an older definition are
 # re-derived instead of being measured by rules they were never written for.
-_VOCABULARY_VERSION = 2
+_VOCABULARY_VERSION = 3
 
 # The two ways load_context reports "there is nothing here": a missing file and
 # a file still holding its shipped template. Either one means no stated goals.
@@ -71,7 +72,7 @@ class TargetSpec:
     ``distance_km_week`` and ``sessions_week`` each cover running, walking and
     cycling, so a walker and a cyclist are first-class without a new key, a new
     column, or a new branch in the measurement. Adding a sport is a line in
-    :data:`CATEGORY_LABELS`, not a migration.
+    :data:`CATEGORY_NOUNS`, not a migration.
 
     Attributes:
         key: Stable identifier, also the value the LLM must emit.
@@ -81,6 +82,9 @@ class TargetSpec:
         shape: ``total`` sums a quantity over the week; ``count`` counts
             qualifying days or sessions.
         decimals: Decimal places used when printing the measured value.
+        quantity: Physical quantity of the stored number when it has an
+            imperial display form, else None. Targets are always stored in
+            ``unit``; only their display and the model's input are converted.
         min_target: Smallest target accepted from the model.
         max_target: Largest target accepted from the model.
         categories: Activity categories this metric accepts. Empty when the
@@ -108,6 +112,7 @@ class TargetSpec:
     threshold_unit: str | None = None
     min_threshold: float | None = None
     max_threshold: float | None = None
+    quantity: Quantity | None = None
 
     @property
     def needs_threshold(self) -> bool:
@@ -133,10 +138,10 @@ class TargetSpec:
 # ``any`` is the answer for a sport with no category of its own — rowing, yoga,
 # climbing all land in the schema's "other" bucket, and a ring reading "Other"
 # tells the reader nothing that "Sessions" does not.
-CATEGORY_LABELS: dict[str, str] = {
-    "run": "Run km",
-    "walk": "Walk km",
-    "cycle": "Ride km",
+CATEGORY_NOUNS: dict[str, str] = {
+    "run": "Run",
+    "walk": "Walk",
+    "cycle": "Ride",
     "lift": "Lift",
     "hiit": "HIIT",
     "any": "Session",
@@ -170,6 +175,7 @@ TARGET_SPECS: tuple[TargetSpec, ...] = (
     TargetSpec(
         key="distance_km_week",
         unit="km",
+        quantity=Quantity.DISTANCE,
         shape="total",
         decimals=1,
         min_target=1,
@@ -276,8 +282,52 @@ class StoredTarget:
         activity_type = activity_type_of(self.category)
         if activity_type:
             return activity_type
-        source = CATEGORY_PLURALS if self.spec.shape == "count" else CATEGORY_LABELS
-        return source.get(self.category, self.category.title())
+        if self.spec.shape == "count":
+            return CATEGORY_PLURALS.get(self.category, self.category.title())
+        noun = CATEGORY_NOUNS.get(self.category, self.category.title())
+        if self.spec.shape == "total" and self.spec.quantity is not None:
+            return f"{noun} {self.spec.unit}"
+        return noun
+
+    def for_display(self, units: UnitSystem) -> StoredTarget:
+        """Return a copy whose target and unit are in the display units.
+
+        The copy exists to be rendered. It must never reach ``save_targets``:
+        storage is metric whatever the profile displays.
+
+        Args:
+            units: Display unit system.
+
+        Returns:
+            This target unchanged for metric or a unitless metric, else a copy
+            with the spec's unit relabelled and the target converted.
+        """
+        if units is UnitSystem.METRIC or self.spec.quantity is None:
+            return self
+        return replace(
+            self,
+            spec=replace(self.spec, unit=unit_label(self.spec.quantity, units)),
+            target=target_to_display(self.spec, self.target, units),
+        )
+
+
+def target_to_display(spec: TargetSpec, value: float, units: UnitSystem) -> float:
+    """Convert a stored target or measured value to the display units.
+
+    Args:
+        spec: The metric the value belongs to.
+        value: Number in the spec's stored unit.
+        units: Display unit system.
+
+    Returns:
+        The converted number, or ``value`` for a metric with no imperial form.
+    """
+    if spec.quantity is None or units is UnitSystem.METRIC:
+        return value
+    converted = to_display(value, spec.quantity, units)
+    # Rounded so a measured value equal to its target in stored units is still
+    # equal after both are divided: 24.14016 / 1.609344 is not exactly 15.
+    return value if converted is None else round(converted, 6)
 
 
 def week_start_for(day: date) -> str:
@@ -597,6 +647,18 @@ def coerce_target(
     except (KeyError, TypeError, ValueError):
         logger.warning("Dropping %s: target is not a number", spec.key)
         return None
+    if spec.quantity is not None:
+        # The model copies the goal's own unit and never converts, so the
+        # arithmetic is done here. The range check below then runs on the
+        # stored unit, whichever unit the goal was written in.
+        raw_unit = str(raw.get("unit") or spec.unit).strip().lower()
+        if raw_unit == "mi":
+            target *= KM_PER_MILE
+        elif raw_unit != spec.unit:
+            logger.warning(
+                "Dropping %s: unit %r is not %s or mi", spec.key, raw_unit, spec.unit
+            )
+            return None
     upper = spec.max_for(category)
     if not spec.min_target <= target <= upper:
         logger.warning(
@@ -747,6 +809,8 @@ def _describe_spec(spec: TargetSpec) -> str:
     """Render one vocabulary entry for the prompt."""
     if spec.shape == "total":
         measured = f"sum of {spec.unit} across the week"
+        if spec.quantity is not None:
+            measured = "sum of distance across the week"
     elif spec.needs_threshold:
         measured = (
             f"number of {spec.unit} in the week that reach `threshold` "
@@ -778,6 +842,12 @@ def _describe_spec(spec: TargetSpec) -> str:
         line += (
             f" `category` is null. `target` is a number between "
             f"{spec.min_target:g} and {spec.max_target:g}."
+        )
+    if spec.quantity is not None:
+        line += (
+            f" `unit` is `{spec.unit}` or `mi`, whichever the goal is written "
+            "in, and `target` is the goal's own number in that unit, not "
+            f"converted. The bounds above are in {spec.unit}."
         )
     if spec.needs_threshold:
         line += (

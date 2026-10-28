@@ -644,6 +644,7 @@ class TestCmdCoach:
             milestones=None,
             week_complete=True,
             data_maturity=None,
+            units=None,
         ):
             seen["week_complete"] = week_complete
             seen["review_facts"] = context["review_facts"]

@@ -47,6 +47,7 @@ from milestones import compute_milestones
 from plan_frame import resolve_plan_frame
 from notify import send_telegram_report
 from store import create_llm_trace, open_db
+from units import UnitSystem, units_from_args
 from weekly_progress import weekly_progress_block
 
 logger = logging.getLogger(__name__)
@@ -185,7 +186,11 @@ def _print_explain(
         stderr.print(f"\n[dim]Report saved to:[/dim] [cyan]{report_path}[/cyan]")
 
 
-def _week_run_comparisons(conn: sqlite3.Connection, health_data: dict) -> str:
+def _week_run_comparisons(
+    conn: sqlite3.Connection,
+    health_data: dict,
+    units: UnitSystem = UnitSystem.METRIC,
+) -> str:
     """Compare each run of the reported week with the person's similar runs.
 
     The same computed comparison the nudge gets. Reports used to compare two
@@ -205,7 +210,7 @@ def _week_run_comparisons(conn: sqlite3.Connection, health_data: dict) -> str:
                 (week_start, week_end),
             )
         }
-        return describe_run_comparisons(conn, ids)
+        return describe_run_comparisons(conn, ids, units=units)
     except sqlite3.Error as exc:
         logger.warning("Run comparison failed; reporting without it: %s", exc)
         return NO_RUN_COMPARISON
@@ -287,6 +292,7 @@ def cmd_insights(
         sys.exit(1)
 
     conn = open_db(Path(args.db))
+    units = units_from_args(args)
     health_data = build_llm_data(conn, args.months, week=REPORT_WEEK)
     if health_data["current_week"]["summary"] is None:
         fail_without_week_data(conn, health_data)
@@ -294,9 +300,9 @@ def cmd_insights(
     baselines = None
     milestones = None
     if not args.no_update_baselines:
-        baselines = compute_baselines(conn)
+        baselines = compute_baselines(conn, units=units)
         save_baselines(context_dir, baselines)
-    milestones = compute_milestones(conn)
+    milestones = compute_milestones(conn, units=units)
 
     week_complete = health_data.get("week_complete", False)
     week_label = health_data.get("week_label")
@@ -305,6 +311,7 @@ def cmd_insights(
         context,
         week_complete=week_complete,
         unestablished=unestablished_metrics(conn, METRIC_TRUST_WINDOW_DAYS),
+        units=units,
     )
     # What the Sunday coach set up for the week this report looks back on, so
     # the report's one priority builds on it instead of competing with it.
@@ -313,7 +320,7 @@ def cmd_insights(
         getattr(args, "last_coach_summary_date", "") or "",
     )
     context["coach_plan"] = (
-        f"{challenge_status_text(conn, today=date.today())}\n\n"
+        f"{challenge_status_text(conn, today=date.today(), units=units)}\n\n"
         f"Latest coach review: {coach_summary}"
     )
     health_data_text = render_health_data(
@@ -321,6 +328,7 @@ def cmd_insights(
         prompt_kind="report",
         week=REPORT_WEEK,
         unestablished=unestablished_metrics(conn, METRIC_TRUST_WINDOW_DAYS),
+        units=units,
     )
 
     trace_id = create_llm_trace(
@@ -349,9 +357,10 @@ def cmd_insights(
         trace_id=trace_id,
         model_prefs_path=getattr(args, "model_prefs_path", None),
         frame=frame,
+        units=units,
     )
     context["progress_strip"] = progress_block or "(no progress strip this week)"
-    context["run_comparison"] = _week_run_comparisons(conn, health_data)
+    context["run_comparison"] = _week_run_comparisons(conn, health_data, units)
     data_note = (getattr(args, "data_note", "") or "").strip()
     if data_note:
         health_data_text = f"{health_data_text}\n\n{data_note}"
@@ -364,6 +373,7 @@ def cmd_insights(
             milestones=milestones,
             week_complete=week_complete,
             data_maturity=build_data_maturity(conn, context),
+            units=units,
         )
     except (KeyError, ValueError) as e:
         logger.error("Failed to render insights_prompt.md template: %s", e)
@@ -561,6 +571,7 @@ def cmd_insights(
             "milestones": milestones,
             "week_complete": week_complete,
             "week_label": week_label,
+            "display_units": str(units),
             "tool_calls": extract_tool_evidence(messages),
         },
         source_messages=slim_source_messages(messages, result.text),

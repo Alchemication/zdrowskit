@@ -23,6 +23,7 @@ from config import (
     MAX_LOG_ENTRIES,
     PROMPTS_DIR,
 )
+from units import UnitSystem
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,7 @@ DEFAULT_SOUL_PATH = (
     Path(__file__).resolve().parent / "templates" / "context" / "soul.md"
 )
 SCHEMA_REFERENCE_PROMPT = "schema_reference.md"
+DISPLAY_UNITS_IMPERIAL_PROMPT = "display_units_imperial.md"
 WEEK_STATUS_FULL_PROMPT = "week_status_full.md"
 WEEK_STATUS_PARTIAL_PROMPT = "week_status_partial.md"
 
@@ -310,6 +312,7 @@ def build_messages(
     week_complete: bool = True,
     today: date | None = None,
     data_maturity: str | None = None,
+    units: UnitSystem = UnitSystem.METRIC,
 ) -> list[dict[str, str]]:
     """Assemble system and user messages for the LLM call.
 
@@ -329,6 +332,8 @@ def build_messages(
             Useful for evals with pinned dates.
         data_maturity: Rendered coverage and metric-trust block, or None when
             the caller has no database to describe.
+        units: Display unit system. Imperial appends a display-units section
+            to the system message; metric adds nothing.
 
     Returns:
         A list of message dicts ready for litellm.completion().
@@ -338,6 +343,10 @@ def build_messages(
         soul = load_default_soul()
     conduct = context.get("conduct") or load_prompt_text(CONDUCT_PROMPT)
     system_content = f"{soul.strip()}\n\n{conduct.strip()}\n"
+    if units is UnitSystem.IMPERIAL:
+        system_content += (
+            f"\n{load_prompt_text(DISPLAY_UNITS_IMPERIAL_PROMPT).strip()}\n"
+        )
 
     if today is None:
         today = date.today()

@@ -17,6 +17,14 @@ from aggregator import summarise
 from config import COACH_SUMMARY_MAX_AGE_DAYS, SLEEP_SYNC_CUTOFF_HOUR
 from report import group_by_week, to_dict
 from store import load_date_range, load_snapshots
+from units import (
+    Quantity,
+    UnitSystem,
+    format_pace,
+    pace_to_display,
+    to_display,
+    unit_label,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -80,13 +88,34 @@ def _format_percent(value: float | int | None, decimals: int = 1) -> str | None:
     return f"{rendered}%"
 
 
-def _format_pace(value: float | None) -> str | None:
-    """Format minutes/km as mm:ss/km."""
-    if value is None:
+def _format_quantity_metric(
+    value: float | int | None,
+    quantity: Quantity,
+    units: UnitSystem,
+    *,
+    decimals: int = 1,
+    suffix: str = "",
+) -> str | None:
+    """Format a stored metric value in the display units, like ``_format_metric``.
+
+    Args:
+        value: Value in the stored (metric) unit, or None.
+        quantity: Which physical quantity the value is.
+        units: Display unit system.
+        decimals: Digits after the decimal point.
+        suffix: Appended to the unit label, e.g. ``"/day"``.
+
+    Returns:
+        The rendered value with unit, or None when missing or non-positive.
+    """
+    label = unit_label(quantity, units) + suffix
+    if value is None or units is UnitSystem.METRIC:
+        return _format_metric(value, label, decimals=decimals)
+    try:
+        shown = to_display(float(value), quantity, units)
+    except (TypeError, ValueError):
         return None
-    total_seconds = int(round(value * 60))
-    minutes, seconds = divmod(total_seconds, 60)
-    return f"{minutes}:{seconds:02d}/km"
+    return _format_metric(shown, label, decimals=decimals)
 
 
 def _format_day_label(date_str: str) -> str:
@@ -102,7 +131,9 @@ def _pluralize(count: int, singular: str, plural: str | None = None) -> str:
     return plural or f"{singular}s"
 
 
-def _format_workout_line(workout: dict) -> str:
+def _format_workout_line(
+    workout: dict, *, units: UnitSystem = UnitSystem.METRIC
+) -> str:
     """Render one workout compactly for prompt consumption."""
     name = str(workout.get("type") or workout.get("category") or "Workout")
     parts: list[str] = []
@@ -117,14 +148,16 @@ def _format_workout_line(workout: dict) -> str:
         except (TypeError, ValueError):
             pace = None
 
-    distance_text = _format_metric(distance, "km", decimals=1)
+    distance_text = _format_quantity_metric(
+        distance, Quantity.DISTANCE, units, decimals=1
+    )
     duration_text = _format_metric(duration, "min", decimals=0)
     if distance_text:
         parts.append(distance_text)
     if duration_text:
         parts.append(duration_text)
     pace_value = float(pace) if isinstance(pace, (int, float)) else None
-    pace_text = _format_pace(pace_value)
+    pace_text = format_pace(pace_value, units)
     if pace_text:
         parts.append(pace_text)
 
@@ -136,9 +169,10 @@ def _format_workout_line(workout: dict) -> str:
     if avg_hr:
         parts.append(f"avg HR {avg_hr}")
 
-    elevation = _format_metric(
+    elevation = _format_quantity_metric(
         workout.get("elevation_gain_m") or workout.get("gpx_elevation_gain_m"),
-        "m",
+        Quantity.ELEVATION,
+        units,
         decimals=0,
     )
     if elevation:
@@ -152,9 +186,12 @@ def _format_workout_line(workout: dict) -> str:
             location_text = f"{location_text}, {country}"
         parts.append(location_text)
 
-    splits_text = _format_splits(workout.get("splits"))
+    splits_text = _format_splits(workout.get("splits"), units=units)
     if splits_text:
-        parts.append(f"splits {splits_text}")
+        splits_label = (
+            "km splits (pace per mi)" if units is UnitSystem.IMPERIAL else "splits"
+        )
+        parts.append(f"{splits_label} {splits_text}")
 
     # A short functional session is logged as a lift but is not counted as one
     # in the week totals. Unlabelled, the card and the totals disagree and the
@@ -167,8 +204,12 @@ def _format_workout_line(workout: dict) -> str:
     return name
 
 
-def _format_splits(splits: object) -> str | None:
+def _format_splits(
+    splits: object, *, units: UnitSystem = UnitSystem.METRIC
+) -> str | None:
     """Format per-km splits as a compact slash-separated pace string.
+
+    Splits are always per km; imperial converts each pace to min/mi.
 
     Returns None when splits are missing, empty, or unparseable, so the
     workout line stays clean for non-GPS sessions.
@@ -182,8 +223,9 @@ def _format_splits(splits: object) -> str | None:
         pace = split.get("pace_min_km")
         if not isinstance(pace, (int, float)):
             continue
-        minutes = int(pace)
-        seconds = int(round((float(pace) - minutes) * 60))
+        shown = pace_to_display(float(pace), units)
+        minutes = int(shown)
+        seconds = int(round((shown - minutes) * 60))
         if seconds == 60:
             minutes += 1
             seconds = 0
@@ -198,13 +240,19 @@ def _format_splits(splits: object) -> str | None:
 # ---------------------------------------------------------------------------
 
 
-def _render_day_block(day: dict, withheld: frozenset[str] = frozenset()) -> str:
+def _render_day_block(
+    day: dict,
+    withheld: frozenset[str] = frozenset(),
+    *,
+    units: UnitSystem = UnitSystem.METRIC,
+) -> str:
     """Render one day card for the prompt.
 
     Args:
         day: Canonical day dict.
         withheld: Metric columns with too few readings to show as a per-day
             series. Their latest values are reported once elsewhere instead.
+        units: Display unit system.
 
     Returns:
         Markdown for one day card.
@@ -223,7 +271,9 @@ def _render_day_block(day: dict, withheld: frozenset[str] = frozenset()) -> str:
     exercise = _format_metric(value_of("exercise_min"), "exercise min", decimals=0)
     if exercise:
         activity_parts.append(exercise)
-    distance = _format_metric(value_of("distance_km"), "km", decimals=1)
+    distance = _format_quantity_metric(
+        value_of("distance_km"), Quantity.DISTANCE, units, decimals=1
+    )
     if distance:
         activity_parts.append(distance)
     if activity_parts:
@@ -282,7 +332,9 @@ def _render_day_block(day: dict, withheld: frozenset[str] = frozenset()) -> str:
 
     workouts = day.get("workouts") or []
     if workouts:
-        rendered_workouts = " | ".join(_format_workout_line(w) for w in workouts)
+        rendered_workouts = " | ".join(
+            _format_workout_line(w, units=units) for w in workouts
+        )
         lines.append(f"- Workouts: {rendered_workouts}.")
     else:
         lines.append("- Workouts: none logged.")
@@ -290,7 +342,9 @@ def _render_day_block(day: dict, withheld: frozenset[str] = frozenset()) -> str:
     return "\n".join(lines)
 
 
-def _render_week_summary_block(summary: dict, *, prompt_kind: str) -> str:
+def _render_week_summary_block(
+    summary: dict, *, prompt_kind: str, units: UnitSystem = UnitSystem.METRIC
+) -> str:
     """Render the current target week's summary with semantic missing-data rules.
 
     The totals here already include today, and the heading says so because a
@@ -326,16 +380,20 @@ def _render_week_summary_block(summary: dict, *, prompt_kind: str) -> str:
     )
 
     running_parts: list[str] = []
-    total_run_km = _format_metric(summary.get("total_run_km"), "km", decimals=1)
+    total_run_km = _format_quantity_metric(
+        summary.get("total_run_km"), Quantity.DISTANCE, units, decimals=1
+    )
     if total_run_km:
         running_parts.append(f"{total_run_km} total")
-    best_pace = _format_pace(summary.get("best_pace_min_per_km"))
+    best_pace = format_pace(summary.get("best_pace_min_per_km"), units)
     if best_pace:
         running_parts.append(f"best pace {best_pace}")
     avg_run_hr = _format_metric(summary.get("avg_run_hr"), "bpm", decimals=0)
     if avg_run_hr:
         running_parts.append(f"avg run HR {avg_run_hr}")
-    avg_elev = _format_metric(summary.get("avg_elevation_gain_m"), "m", decimals=0)
+    avg_elev = _format_quantity_metric(
+        summary.get("avg_elevation_gain_m"), Quantity.ELEVATION, units, decimals=0
+    )
     if avg_elev:
         running_parts.append(f"avg elev {avg_elev}")
     if running_parts:
@@ -360,8 +418,12 @@ def _render_week_summary_block(summary: dict, *, prompt_kind: str) -> str:
     )
     if avg_exercise:
         activity_parts.append(avg_exercise)
-    avg_energy = _format_metric(
-        summary.get("avg_active_energy_kj"), "kJ/day", decimals=0
+    avg_energy = _format_quantity_metric(
+        summary.get("avg_active_energy_kj"),
+        Quantity.ENERGY,
+        units,
+        decimals=0,
+        suffix="/day",
     )
     if avg_energy:
         activity_parts.append(avg_energy)
@@ -421,7 +483,9 @@ def _render_week_summary_block(summary: dict, *, prompt_kind: str) -> str:
     return "\n".join(lines)
 
 
-def _render_history_week(summary: dict) -> str:
+def _render_history_week(
+    summary: dict, *, units: UnitSystem = UnitSystem.METRIC
+) -> str:
     """Render one compact prior-week bullet."""
     label = str(summary.get("week_label", "Unknown week"))
     parts = [
@@ -432,7 +496,9 @@ def _render_history_week(summary: dict) -> str:
     if walk_count:
         parts.append(f"{walk_count} walk")
 
-    total_run = _format_metric(summary.get("total_run_km"), "km", decimals=1)
+    total_run = _format_quantity_metric(
+        summary.get("total_run_km"), Quantity.DISTANCE, units, decimals=1
+    )
     if total_run:
         parts.append(total_run)
 
@@ -568,7 +634,7 @@ def format_last_coach_summary(
 _WITHHELD_LABELS = {
     "steps": ("Steps", "", 0),
     "exercise_min": ("Exercise minutes", "min", 0),
-    "distance_km": ("Distance", "km", 1),
+    "distance_km": ("Distance", Quantity.DISTANCE, 1),
     "hrv_ms": ("HRV", "ms", 1),
     "resting_hr": ("Resting HR", "bpm", 0),
     "recovery_index": ("Recovery index", "", 2),
@@ -581,7 +647,12 @@ _WITHHELD_LABELS = {
 }
 
 
-def _render_withheld_readings(days: list[dict], withheld: frozenset[str]) -> str | None:
+def _render_withheld_readings(
+    days: list[dict],
+    withheld: frozenset[str],
+    *,
+    units: UnitSystem = UnitSystem.METRIC,
+) -> str | None:
     """Report the latest value of each metric kept out of the day cards.
 
     The reading itself is useful and stays. What is removed is its position in
@@ -592,6 +663,7 @@ def _render_withheld_readings(days: list[dict], withheld: frozenset[str]) -> str
     Args:
         days: Canonical day dicts, oldest first.
         withheld: Metric columns being kept out of the day cards.
+        units: Display unit system.
 
     Returns:
         A markdown section, or None when nothing was withheld.
@@ -611,7 +683,12 @@ def _render_withheld_readings(days: list[dict], withheld: frozenset[str]) -> str
         if latest is None:
             continue
         label, unit, decimals = _WITHHELD_LABELS[column]
-        rendered = _format_metric(latest[1], unit, decimals=decimals)
+        if isinstance(unit, Quantity):
+            rendered = _format_quantity_metric(
+                latest[1], unit, units, decimals=decimals
+            )
+        else:
+            rendered = _format_metric(latest[1], unit, decimals=decimals)
         entries.append(f"- {label}: {rendered} on {latest[0]} ({count} recorded).")
 
     if not entries:
@@ -635,6 +712,7 @@ def render_health_data(
     week: str = "current",
     today: date | None = None,
     unestablished: set[str] | None = None,
+    units: UnitSystem = UnitSystem.METRIC,
 ) -> str:
     """Render canonical health data into compact markdown for LLM prompts.
 
@@ -645,6 +723,7 @@ def render_health_data(
         today: Override for the current date.
         unestablished: Metric columns with too few readings to show as a
             per-day series. Omit on a mature profile.
+        units: Display unit system for distances, paces, elevation, energy.
 
     Returns:
         Compact markdown for prompt injection.
@@ -666,13 +745,17 @@ def render_health_data(
     if not summary:
         return "No health data available."
 
-    sections = [_render_week_summary_block(summary, prompt_kind=prompt_kind)]
+    sections = [
+        _render_week_summary_block(summary, prompt_kind=prompt_kind, units=units)
+    ]
 
     def render_day_section(title: str, day_blocks: list[dict]) -> None:
         if day_blocks:
             sections.append(
                 f"{title}\n\n"
-                + "\n\n".join(_render_day_block(day, withheld) for day in day_blocks)
+                + "\n\n".join(
+                    _render_day_block(day, withheld, units=units) for day in day_blocks
+                )
             )
 
     if prompt_kind == "nudge":
@@ -696,7 +779,7 @@ def render_health_data(
             )
 
     if withheld:
-        readings = _render_withheld_readings(days, withheld)
+        readings = _render_withheld_readings(days, withheld, units=units)
         if readings:
             sections.append(readings)
 
@@ -707,7 +790,7 @@ def render_health_data(
                 continue
             summary_dict = entry.get("summary")
             if isinstance(summary_dict, dict):
-                history_lines.append(_render_history_week(summary_dict))
+                history_lines.append(_render_history_week(summary_dict, units=units))
         if history_lines:
             sections.append("### Previous Weeks\n\n" + "\n".join(history_lines))
 
@@ -811,6 +894,7 @@ def build_review_facts(
     *,
     week_complete: bool,
     unestablished: set[str] | None = None,
+    units: UnitSystem = UnitSystem.METRIC,
 ) -> str:
     """Build a compact shared summary for insights and coach prompts.
 
@@ -820,6 +904,7 @@ def build_review_facts(
         week_complete: Whether the target week has fully elapsed.
         unestablished: Metric columns with too few readings to generalise
             from. Omit on a mature profile.
+        units: Display unit system for run volume.
 
     Returns:
         Compact markdown of shared review facts.
@@ -834,12 +919,18 @@ def build_review_facts(
     run_count = summary.get("run_count")
     lift_count = summary.get("lift_count")
     total_run_km = summary.get("total_run_km")
+    run_volume = _fmt_review_value(to_display(total_run_km, Quantity.DISTANCE, units))
+    distance_unit = unit_label(Quantity.DISTANCE, units)
     avg_hrv = summary.get("avg_hrv_ms")
     avg_resting_hr = summary.get("avg_resting_hr")
     avg_sleep = summary.get("avg_sleep_total_h")
     avg_sleep_eff = summary.get("avg_sleep_efficiency_pct")
     hrv_trend = summary.get("hrv_trend") or "n/a"
     prev_run_km = previous_summary.get("total_run_km") if previous_summary else None
+    run_delta = _fmt_review_delta(
+        to_display(total_run_km, Quantity.DISTANCE, units),
+        to_display(prev_run_km, Quantity.DISTANCE, units),
+    )
     prev_hrv = previous_summary.get("avg_hrv_ms") if previous_summary else None
     prev_resting = previous_summary.get("avg_resting_hr") if previous_summary else None
     notes_present = (
@@ -861,7 +952,7 @@ def build_review_facts(
             "- Training snapshot: "
             f"**{run_count or 0}** runs, "
             f"**{lift_count or 0}** lifts, "
-            f"**{_fmt_review_value(total_run_km)} km** run volume."
+            f"**{run_volume} {distance_unit}** run volume."
         ),
         (
             "- Recovery verdict: "
@@ -875,7 +966,7 @@ def build_review_facts(
     if previous_summary:
         lines.append(
             "- vs previous week: "
-            f"run volume {_fmt_review_delta(total_run_km, prev_run_km)} km, "
+            f"run volume {run_delta} {distance_unit}, "
             f"HRV {_fmt_review_delta(avg_hrv, prev_hrv)} ms, "
             f"resting HR {_fmt_review_delta(avg_resting_hr, prev_resting)} bpm."
         )

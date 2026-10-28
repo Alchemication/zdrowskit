@@ -50,6 +50,7 @@ from challenges import (
 from goal_check import build_goal_check, record_triggers
 from milestones import compute_milestones
 from store import create_llm_trace, open_db
+from units import UnitSystem, units_from_args
 from weekly_targets import known_activity_types
 
 logger = logging.getLogger(__name__)
@@ -187,13 +188,14 @@ def cmd_coach(
         sys.exit(1)
 
     conn = open_db(Path(args.db))
+    units = units_from_args(args)
     week = getattr(args, "week", "current")
     health_data = build_llm_data(conn, getattr(args, "months", 3), week=week)
     if health_data["current_week"]["summary"] is None:
         fail_without_week_data(conn, health_data)
 
-    baselines = compute_baselines(conn)
-    milestones = compute_milestones(conn)
+    baselines = compute_baselines(conn, units=units)
+    milestones = compute_milestones(conn, units=units)
     save_baselines(context_dir, baselines)
 
     week_complete = health_data.get("week_complete", False)
@@ -203,6 +205,7 @@ def cmd_coach(
         context,
         week_complete=week_complete,
         unestablished=unestablished_metrics(conn, METRIC_TRUST_WINDOW_DAYS),
+        units=units,
     )
 
     # Computed adherence and the triggers that forbid a SKIP. The coach used
@@ -215,6 +218,7 @@ def cmd_coach(
         context.get("strategy"),
         today=today,
         include_current_week=week == "current",
+        units=units,
     )
     context["goal_check"] = goal_check.text
     data_note = (getattr(args, "data_note", "") or "").strip()
@@ -222,8 +226,8 @@ def cmd_coach(
         context["goal_check"] += f"\n\n{data_note}"
     # Code decides when a challenge is due; the model only decides which.
     challenge_open = goal_check.challenge_due
-    context["challenge_status"] = challenge_status_text(conn, today=today)
-    context["challenge_history"] = describe_history(conn)
+    context["challenge_status"] = challenge_status_text(conn, today=today, units=units)
+    context["challenge_history"] = describe_history(conn, units=units)
 
     # Inject the live list of strategy.md section headings so the model only
     # proposes replace_section edits against headings that actually exist.
@@ -245,6 +249,7 @@ def cmd_coach(
         prompt_kind="coach",
         week=week,
         unestablished=unestablished_metrics(conn, METRIC_TRUST_WINDOW_DAYS),
+        units=units,
     )
 
     try:
@@ -255,6 +260,7 @@ def cmd_coach(
             milestones=milestones,
             week_complete=week_complete,
             data_maturity=build_data_maturity(conn, context),
+            units=units,
         )
     except (KeyError, ValueError) as e:
         logger.error("Failed to render coach_prompt.md template: %s", e)
@@ -473,7 +479,7 @@ def cmd_coach(
             "(rationale missing — review them carefully)."
         )
 
-    bundled_text = _format_coach_bundle(narrative, proposals, challenge_proposal)
+    bundled_text = _format_coach_bundle(narrative, proposals, challenge_proposal, units)
     verified_text = apply_verification(
         kind="coach",
         draft=bundled_text,
@@ -484,11 +490,12 @@ def cmd_coach(
             "milestones": milestones,
             "week_complete": week_complete,
             "week_label": week_label,
+            "display_units": str(units),
             "strategy_sections": strategy_sections,
             "recent_nudges_text": context.get("recent_nudges"),
             "coach_feedback": context.get("coach_feedback"),
             "proposals": _coach_proposal_evidence(proposals),
-            "challenge": _challenge_evidence(challenge_proposal),
+            "challenge": _challenge_evidence(challenge_proposal, units),
             "tool_calls": extract_tool_evidence(messages),
         },
         source_messages=slim_source_messages(messages, bundled_text),
@@ -528,12 +535,14 @@ def cmd_coach(
     return cmd_result, proposals
 
 
-def _challenge_evidence(proposal: Proposal | None) -> dict | None:
+def _challenge_evidence(
+    proposal: Proposal | None, units: UnitSystem = UnitSystem.METRIC
+) -> dict | None:
     """Serialize a challenge proposal for verifier evidence."""
     if proposal is None:
         return None
     return {
-        "spec": describe_challenge(proposal),
+        "spec": describe_challenge(proposal, units=units),
         "title": proposal.title,
         "goal": proposal.goal,
         "rationale": proposal.rationale,
@@ -544,6 +553,7 @@ def _format_coach_bundle(
     narrative: str,
     proposals: list[CoachProposal],
     challenge: Proposal | None = None,
+    units: UnitSystem = UnitSystem.METRIC,
 ) -> str:
     """Render the consolidated coach review for stdout / Telegram."""
     if not proposals and challenge is None:
@@ -563,7 +573,7 @@ def _format_coach_bundle(
     if challenge is not None:
         # The single place a challenge is described: one line, with the reason
         # and the goal it serves folded into an expandable quote.
-        lines = [f"🎯 **Challenge:** {describe_challenge(challenge)}"]
+        lines = [f"🎯 **Challenge:** {describe_challenge(challenge, units=units)}"]
         if challenge.rationale:
             lines.append(f">> {challenge.rationale}")
         lines.append(f">> Serves: {challenge.goal}")

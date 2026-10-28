@@ -48,6 +48,7 @@ from standouts import (
     reserve_standout_delivery,
 )
 from store import create_llm_trace, open_db
+from units import units_from_args
 from plan_frame import resolve_plan_frame
 from weekly_progress import (
     record_progress_line_shown,
@@ -128,11 +129,13 @@ def cmd_nudge(
         sys.exit(1)
 
     conn = open_db(Path(args.db))
+    units = units_from_args(args)
     health_data = build_llm_data(conn, getattr(args, "months", 1))
     health_data_text = render_health_data(
         health_data,
         prompt_kind="nudge",
         unestablished=unestablished_metrics(conn, METRIC_TRUST_WINDOW_DAYS),
+        units=units,
     )
 
     recent_nudge_entries: list[dict] = getattr(args, "recent_nudges", [])
@@ -178,6 +181,7 @@ def cmd_nudge(
             today=datetime.now().date(),
             trace_id=trace_id,
             model_prefs_path=getattr(args, "model_prefs_path", None),
+            units=units,
         )
         if standout_triggered
         else None
@@ -197,7 +201,9 @@ def cmd_nudge(
             standout = None
     context["standout"] = standout.headline if standout else NO_STANDOUT_NOTICE
     try:
-        context["run_comparison"] = describe_run_comparisons(conn, eligible_workout_ids)
+        context["run_comparison"] = describe_run_comparisons(
+            conn, eligible_workout_ids, units=units
+        )
     except sqlite3.Error as exc:
         logger.warning("Run comparison failed; nudging without it: %s", exc)
         context["run_comparison"] = NO_RUN_COMPARISON
@@ -208,10 +214,14 @@ def cmd_nudge(
         today=datetime.now().date(),
         trace_id=trace_id,
         model_prefs_path=getattr(args, "model_prefs_path", None),
+        units=units,
     )
     try:
         context["challenge"] = nudge_challenge_text(
-            conn, workout_ids=eligible_workout_ids, today=datetime.now().date()
+            conn,
+            workout_ids=eligible_workout_ids,
+            today=datetime.now().date(),
+            units=units,
         )
     except sqlite3.Error as exc:
         logger.warning("Challenge lookup failed; nudging without it: %s", exc)
@@ -221,6 +231,7 @@ def cmd_nudge(
         context,
         health_data_text,
         data_maturity=build_data_maturity(conn, context),
+        units=units,
     )
 
     from tools import execute_run_sql, run_sql_tool
@@ -421,6 +432,7 @@ def cmd_nudge(
                 "last_coach_summary": context.get("last_coach_summary"),
                 "trigger_type": _trigger,
                 "trigger_context": trigger_context_text,
+                "display_units": str(units),
                 "tool_calls": extract_tool_evidence(messages),
                 # The verifier scores the body, but the body was written to sit
                 # underneath this. Without it, a sentence that only means
@@ -489,6 +501,7 @@ def cmd_nudge(
         trace_id=trace_id,
         model_prefs_path=getattr(args, "model_prefs_path", None),
         frame=frame,
+        units=units,
     )
     progress, progress_fingerprint = shown if shown else (None, None)
     # The ring replaces the trigger label rather than sitting beside it.

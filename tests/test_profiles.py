@@ -544,3 +544,41 @@ class TestMultiProfileDaemon:
         sender.send_reply.assert_called_once_with(
             "Operator access required.", reply_to_message_id=7
         )
+
+
+class TestProfileUnits:
+    def _write(self, tmp_path, extra: str = ""):
+        path = tmp_path / "profiles.toml"
+        path.write_text(
+            f"[profiles.me]\ntelegram_id = 1\noperator = true\n{extra}",
+            encoding="utf-8",
+        )
+        return path
+
+    def test_defaults_to_metric(self, tmp_path):
+        from units import UnitSystem
+
+        assert load_profiles(self._write(tmp_path))["me"].units is UnitSystem.METRIC
+
+    def test_imperial_parses(self, tmp_path):
+        from units import UnitSystem
+
+        path = self._write(tmp_path, 'units = "imperial"\n')
+        assert load_profiles(path)["me"].units is UnitSystem.IMPERIAL
+
+    def test_invalid_raises(self, tmp_path):
+        path = self._write(tmp_path, 'units = "US"\n')
+        with pytest.raises(ProfileConfigError, match="units must be"):
+            load_profiles(path)
+
+    def test_add_profile_writes_imperial_only(self, tmp_path):
+        from units import UnitSystem
+
+        path = tmp_path / "profiles.toml"
+        add_profile("me", 1, operator=True, path=path, units=UnitSystem.IMPERIAL)
+        add_profile("you", 2, path=path)
+        text = path.read_text(encoding="utf-8")
+        assert text.count('units = "imperial"') == 1
+        profiles = load_profiles(path)
+        assert profiles["me"].units is UnitSystem.IMPERIAL
+        assert profiles["you"].units is UnitSystem.METRIC

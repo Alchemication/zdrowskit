@@ -59,5 +59,6 @@ Checklist:
 - Tone should be natural, not report-like.
 - If the right answer is silence, verdict is fail and correction is SKIP.
 - No markdown tables.
+- When the evidence says the display units are imperial, paces in mm:ss/mi and distances in miles are correct; do not flag them as the wrong unit.
 
 Do not rewrite. Do not reward cleverness. Prefer SKIP when value is marginal.
