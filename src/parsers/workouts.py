@@ -89,7 +89,7 @@ _MAX_SEGMENT_DISTANCE_M: dict[str, float] = {
 # apart in observed data. A bin is treated as covering at most this long so a
 # sampling dropout reads as an uncovered gap rather than one reading smeared
 # across the minutes it was absent for.
-_BIN_SECONDS = 60.0
+BIN_SECONDS = 60.0
 
 
 def _category(name: str) -> str:
@@ -274,7 +274,7 @@ def _extract_bins(
     Auto Export ships several per-minute series in the same shape — heart rate
     as ``heartRateData`` with {Min, Avg, Max}, step count as ``stepCount`` with
     ``qty``. Each entry carries a start ``date`` but no end time, so a bin is
-    closed at the earlier of the next bin's start and ``_BIN_SECONDS`` after its
+    closed at the earlier of the next bin's start and ``BIN_SECONDS`` after its
     own: consecutive bins tile the workout, while a sampling dropout leaves a
     real hole instead of stretching one reading over it.
 
@@ -308,7 +308,7 @@ def _extract_bins(
 
     bins: list[tuple[datetime, datetime, float, float | None]] = []
     for index, (start, value, max_value) in enumerate(parsed):
-        end = start + timedelta(seconds=_BIN_SECONDS)
+        end = start + timedelta(seconds=BIN_SECONDS)
         if index + 1 < len(parsed):
             end = min(end, parsed[index + 1][0])
         if end > start:

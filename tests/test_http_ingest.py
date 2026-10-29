@@ -152,14 +152,16 @@ class TestValidateUpload:
 
         assert validate_upload(headers, _body("metrics")).kind == "metrics"
 
-    @pytest.mark.parametrize("aggregation", ["Hours", "Days", "Default"])
-    def test_workouts_still_require_minutes(self, aggregation: str) -> None:
+    @pytest.mark.parametrize("aggregation", ["Hours", "Days"])
+    def test_workouts_reject_a_coarser_aggregation_header(
+        self, aggregation: str
+    ) -> None:
         """Coarser workout bins silently empty every split's HR and cadence."""
         headers = _headers("workouts")
         headers["automation-aggregation"] = aggregation
 
         with pytest.raises(IngestError, match="must be Minutes"):
-            validate_upload(headers, _body("workouts"))
+            validate_upload(headers, _series_body(gap_s=60))
 
     @pytest.mark.parametrize(
         "period", ["Default", "Last 7 Days", "Last 30 Days", "Previous 7 Days"]
@@ -189,6 +191,92 @@ class TestValidateUpload:
 
         with pytest.raises(IngestError, match="invalid coordinates"):
             validate_upload(_headers("workouts"), json.dumps(payload).encode())
+
+
+def _series_body(*, gap_s: int, count: int = 5) -> bytes:
+    """Return a Workouts payload whose HR and step series are ``gap_s`` apart."""
+    start = datetime(2026, 10, 27, 7, 0, tzinfo=timezone(timedelta(hours=-7)))
+    stamps = [
+        (start + timedelta(seconds=gap_s * i)).strftime("%Y-%m-%d %H:%M:%S %z")
+        for i in range(count)
+    ]
+    workout = {
+        "name": "Indoor Run",
+        "start": stamps[0],
+        "duration": max(gap_s * count, 60),
+        "heartRateData": [
+            {"date": s, "Min": 120, "Avg": 130, "Max": 140, "units": "count/min"}
+            for s in stamps
+        ],
+        "stepCount": [{"date": s, "qty": 160, "units": "count"} for s in stamps],
+    }
+    return json.dumps({"data": {"workouts": [workout]}}).encode("utf-8")
+
+
+class TestWorkoutsAggregationFromSeries:
+    """Workouts aggregation is judged from the body when the header can't say.
+
+    Regression cover for 2026-10-29: Auto Export 20261023.1 sends
+    ``automation-aggregation: Default`` for a Workouts automation whether it is
+    set to Minutes or Seconds, so the receiver rejected every Workouts upload
+    with 422 although the series inside were per-minute.
+    """
+
+    @pytest.mark.parametrize("aggregation", ["Default", "", "Seconds"])
+    @pytest.mark.parametrize("gap_s", [1, 60])
+    def test_accepts_per_minute_or_finer_series(
+        self, aggregation: str, gap_s: int
+    ) -> None:
+        headers = _headers("workouts")
+        headers["automation-aggregation"] = aggregation
+
+        result = validate_upload(headers, _series_body(gap_s=gap_s))
+
+        assert result.kind == "workouts"
+
+    def test_rejects_coarser_series_and_names_the_spacing(self) -> None:
+        headers = _headers("workouts")
+        headers["automation-aggregation"] = "Default"
+
+        with pytest.raises(IngestError, match="must be Minutes.*3600 s apart"):
+            validate_upload(headers, _series_body(gap_s=3600))
+
+    def test_accepts_workouts_without_series(self) -> None:
+        # Nothing is binned, so nothing can be binned too coarsely.
+        headers = _headers("workouts")
+        headers["automation-aggregation"] = "Default"
+
+        assert validate_upload(headers, _body("workouts")).kind == "workouts"
+
+    def test_minutes_header_is_trusted(self) -> None:
+        headers = _headers("workouts")
+
+        assert validate_upload(headers, _series_body(gap_s=3600)).kind == "workouts"
+
+
+class TestMedianSeriesGap:
+    def test_ignores_unparseable_and_duplicate_dates(self) -> None:
+        series = [
+            {"date": "2026-10-27 07:00:00 -0700"},
+            {"date": "2026-10-27 07:00:00 -0700"},
+            {"date": "not a date"},
+            {"date": None},
+            "not an entry",
+            {"date": "2026-10-27 07:01:00 -0700"},
+        ]
+
+        assert http_ingest._median_series_gap_s([{"heartRateData": series}]) == 60
+
+    def test_none_without_two_dated_entries(self) -> None:
+        items = [{"heartRateData": [{"date": "2026-10-27 07:00:00 -0700"}]}, {}]
+
+        assert http_ingest._median_series_gap_s(items) is None
+
+    def test_median_ignores_a_paused_stretch(self) -> None:
+        stamps = ["07:00", "07:01", "07:02", "07:30", "07:31"]
+        series = [{"date": f"2026-10-27 {s}:00 -0700"} for s in stamps]
+
+        assert http_ingest._median_series_gap_s([{"stepCount": series}]) == 60
 
 
 class TestUploadArrivalCallback:
