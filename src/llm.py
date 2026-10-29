@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import litellm
+from litellm.llms.anthropic.chat.transformation import AnthropicConfig
 from litellm.llms.anthropic.common_utils import AnthropicModelInfo
 from pydantic import BaseModel
 
@@ -398,6 +399,31 @@ def _uses_output_config_effort(model: str) -> bool:
     return _is_anthropic_model(model) and "opus-5" in model.lower()
 
 
+def _anthropic_thinking_budget(model: str, reasoning_effort: str) -> int:
+    """Return the thinking budget litellm will send *model* for an effort.
+
+    litellm turns ``reasoning_effort`` into a fixed ``thinking.budget_tokens``
+    for Anthropic models without adaptive thinking (Haiku 4.5, at ``high``,
+    gets 4096). Anthropic counts thinking inside ``max_tokens`` and rejects a
+    budget that is not below it, so a surface asking for 4096 tokens fails
+    with a 400 on every attempt. Which models get a fixed budget, and its size,
+    is litellm's decision, so this asks litellm, passing the bare model name
+    as its request path does.
+
+    Args:
+        model: The LiteLLM model id being attempted.
+        reasoning_effort: The effort requested for the call.
+
+    Returns:
+        The fixed budget in tokens, or 0 when the model thinks adaptively or
+        not at all.
+    """
+    thinking = AnthropicConfig._map_reasoning_effort(
+        reasoning_effort, model.rsplit("/", 1)[-1], "anthropic"
+    )
+    return int((thinking or {}).get("budget_tokens") or 0)
+
+
 def _reasoning_engaged(model: str, reasoning_effort: str | None) -> bool:
     """Return True when *reasoning_effort* actually engages reasoning on *model*.
 
@@ -548,7 +574,8 @@ def _completion_kwargs_for_model(kwargs: dict, model: str) -> dict:
 
     Per-attempt translation: Anthropic receives ``reasoning_effort`` natively,
     except Opus 5 which takes ``thinking={"type": "adaptive"}`` plus
-    ``output_config={"effort": ...}``; DeepSeek translates ``reasoning_effort``
+    ``output_config={"effort": ...}``, and ``max_tokens`` grows by any fixed
+    thinking budget litellm derives from that effort; DeepSeek translates ``reasoning_effort``
     of ``high`` or ``max`` into ``extra_body={"thinking": {"type": "enabled"}}``
     unless the caller passed an explicit ``extra_body`` (which always wins).
     """
@@ -574,6 +601,11 @@ def _completion_kwargs_for_model(kwargs: dict, model: str) -> dict:
             adjusted["output_config"] = {"effort": anthropic_reasoning}
         else:
             adjusted["reasoning_effort"] = anthropic_reasoning
+            # Thinking is counted inside max_tokens, so lift the ceiling by the
+            # budget to leave the caller's full allowance for the answer.
+            budget = _anthropic_thinking_budget(model, anthropic_reasoning)
+            if budget and "max_tokens" in adjusted:
+                adjusted["max_tokens"] += budget
     if requested_response_format is not None:
         accepts_response_format = _model_accepts_response_format(model)
         is_pydantic = isinstance(requested_response_format, type) and issubclass(
@@ -625,6 +657,11 @@ def _effective_params_for_model(
     """Return call params as they were effectively sent to the final model."""
     params: dict[str, Any] = {"max_tokens": max_tokens}
     anthropic_reasoning = reasoning_effort if _is_anthropic_model(model) else None
+    if anthropic_reasoning is not None and not _uses_output_config_effort(model):
+        budget = _anthropic_thinking_budget(model, anthropic_reasoning)
+        if budget:
+            params["max_tokens"] = max_tokens + budget
+            params["thinking_budget_tokens"] = budget
     if temperature is not None:
         effective_temperature = 1.0 if anthropic_reasoning is not None else temperature
         if _rejects_temperature(model, reasoning_effort, effective_temperature):

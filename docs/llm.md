@@ -45,7 +45,9 @@ other provider — which meant a blip lasting seconds consumed both routes and
 failed the call. That is what lost the weekly report on 31 Aug 2026.
 
 `reasoning_effort` is the one reasoning control: Anthropic receives it
-directly; DeepSeek translates `high`/`max` into thinking mode and treats the
+directly, and where litellm turns it into a fixed thinking budget (Haiku
+4.5) the request's token limit grows by that budget, since Anthropic counts
+thinking inside it; DeepSeek translates `high`/`max` into thinking mode and treats the
 other values as thinking off; Z.ai's GLM models think on every request whatever
 you ask for, so the effort is passed through and `none` changes nothing. It is on for every judgment surface — reports,
 coach, nudges, chat, verification, rewrites, `/add` — and off for the

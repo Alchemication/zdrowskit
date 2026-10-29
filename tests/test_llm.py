@@ -36,6 +36,7 @@ from config import (
 from charts import chart_figure_caption
 from llm import (
     LLMResult,
+    _anthropic_thinking_budget,
     _call_with_retry,
     _completion_kwargs_for_model,
     _effective_params_for_model,
@@ -2094,6 +2095,75 @@ class TestCallWithRetry:
         assert kwargs["reasoning_effort"] == "high"
         assert "thinking" not in kwargs
         assert "output_config" not in kwargs
+
+    def test_fixed_thinking_budget_lifts_max_tokens(self) -> None:
+        """Haiku 4.5 thinks on a fixed budget that counts inside max_tokens.
+
+        At ``high`` litellm sends a 4096-token budget, and Anthropic rejects
+        any budget not below max_tokens. Chat and nudges ask for 4096, so
+        without headroom every Haiku attempt failed with a 400 — including
+        the fallback that should have answered when the primary was down.
+        """
+        kwargs = _completion_kwargs_for_model(
+            {
+                "model": "anthropic/claude-haiku-4-5",
+                "messages": [],
+                "max_tokens": 4096,
+                "reasoning_effort": "high",
+            },
+            "anthropic/claude-haiku-4-5",
+        )
+
+        budget = _anthropic_thinking_budget("anthropic/claude-haiku-4-5", "high")
+        assert budget > 0
+        assert kwargs["reasoning_effort"] == "high"
+        assert kwargs["max_tokens"] == 4096 + budget
+
+    def test_thinking_off_keeps_max_tokens(self) -> None:
+        kwargs = _completion_kwargs_for_model(
+            {
+                "model": "anthropic/claude-haiku-4-5",
+                "messages": [],
+                "max_tokens": 1024,
+                "reasoning_effort": "none",
+            },
+            "anthropic/claude-haiku-4-5",
+        )
+
+        assert kwargs["max_tokens"] == 1024
+
+    @pytest.mark.parametrize(
+        "model", ["anthropic/claude-sonnet-4-6", "anthropic/claude-opus-5"]
+    )
+    def test_adaptive_thinking_keeps_max_tokens(self, model: str) -> None:
+        """Adaptive models have no fixed budget to make room for."""
+        kwargs = _completion_kwargs_for_model(
+            {
+                "model": model,
+                "messages": [],
+                "max_tokens": 4096,
+                "reasoning_effort": "high",
+            },
+            model,
+        )
+
+        assert kwargs["max_tokens"] == 4096
+
+    def test_logged_params_record_lifted_max_tokens(self) -> None:
+        budget = _anthropic_thinking_budget("anthropic/claude-haiku-4-5", "high")
+
+        params = _effective_params_for_model(
+            model="anthropic/claude-haiku-4-5",
+            max_tokens=4096,
+            temperature=None,
+            reasoning_effort="high",
+            response_format=None,
+            extra_body=None,
+            requested_model="openai/gpt-5.6-luna",
+        )
+
+        assert params["max_tokens"] == 4096 + budget
+        assert params["thinking_budget_tokens"] == budget
 
     def test_opus5_attempt_forces_temperature_to_one(self) -> None:
         """Opus 5 accepts temperature only at 1.0 when thinking is engaged."""
