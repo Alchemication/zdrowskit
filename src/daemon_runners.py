@@ -353,6 +353,7 @@ class DaemonRunnerHandler:
             nudges_dir=self._d.nudges_dir,
             model_prefs_path=self._d.model_prefs_path,
             telegram_id=(self._d.profile.telegram_id if self._d.profile else None),
+            units=self._d.units,
             google_drive_service_account=(
                 str(self._d.google_drive_service_account)
                 if self._d.google_drive_service_account
@@ -442,6 +443,7 @@ class DaemonRunnerHandler:
             nudges_dir=self._d.nudges_dir,
             model_prefs_path=self._d.model_prefs_path,
             telegram_id=(self._d.profile.telegram_id if self._d.profile else None),
+            units=self._d.units,
             model=self._d.model,
             telegram=True,
             months=3,
@@ -560,6 +562,7 @@ class DaemonRunnerHandler:
             nudges_dir=self._d.nudges_dir,
             model_prefs_path=self._d.model_prefs_path,
             telegram_id=(self._d.profile.telegram_id if self._d.profile else None),
+            units=self._d.units,
             model=self._d.model,
             telegram=True,
             months=3,
@@ -740,6 +743,7 @@ class DaemonRunnerHandler:
             nudges_dir=self._d.nudges_dir,
             model_prefs_path=self._d.model_prefs_path,
             telegram_id=(self._d.profile.telegram_id if self._d.profile else None),
+            units=self._d.units,
             model=self._d.model,
             telegram=True,
             trigger=trigger,
@@ -899,6 +903,7 @@ class DaemonRunnerHandler:
             nudges_dir=self._d.nudges_dir,
             model_prefs_path=self._d.model_prefs_path,
             telegram_id=(self._d.profile.telegram_id if self._d.profile else None),
+            units=self._d.units,
             model=self._d.model,
             week=week,
             months=3,

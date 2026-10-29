@@ -19,27 +19,36 @@ from config import (
     BASELINE_MIN_WINDOW_COVERAGE,
     BEST_RECENT_PACE_MIN_KM,
 )
+from units import (
+    Quantity,
+    UnitSystem,
+    format_pace,
+    format_quantity,
+    to_display,
+    unit_label,
+)
 
 
-_DAILY_METRICS = [
-    ("Resting HR", "resting_hr", "bpm", 0),
-    ("HRV (SDNN)", "hrv_ms", "ms", 1),
-    ("Recovery Index", "recovery_index", "", 2),
-    ("VO2max", "vo2max", "ml/kg/min", 1),
-    ("Walking HR", "walking_hr_avg", "bpm", 0),
-    ("Steps", "steps", "", 0),
-    ("Walking Speed", "walking_speed_kmh", "km/h", 1),
-    ("Sleep Duration", "sleep_total_h", "hr", 2),
-    ("Sleep Efficiency", "sleep_efficiency_pct", "%", 1),
-    ("Deep Sleep", "sleep_deep_h", "hr", 2),
-    ("REM Sleep", "sleep_rem_h", "hr", 2),
+_DAILY_METRICS: list[tuple[str, str, str, int, Quantity | None]] = [
+    ("Resting HR", "resting_hr", "bpm", 0, None),
+    ("HRV (SDNN)", "hrv_ms", "ms", 1, None),
+    ("Recovery Index", "recovery_index", "", 2, None),
+    ("VO2max", "vo2max", "ml/kg/min", 1, None),
+    ("Walking HR", "walking_hr_avg", "bpm", 0, None),
+    ("Steps", "steps", "", 0, None),
+    ("Walking Speed", "walking_speed_kmh", "km/h", 1, Quantity.SPEED),
+    ("Sleep Duration", "sleep_total_h", "hr", 2, None),
+    ("Sleep Efficiency", "sleep_efficiency_pct", "%", 1, None),
+    ("Deep Sleep", "sleep_deep_h", "hr", 2, None),
+    ("REM Sleep", "sleep_rem_h", "hr", 2, None),
 ]
+"""(label, column, stored unit label, decimals, convertible quantity or None)."""
 
 
 _TRAINING_VOLUME_QUERIES = [
     (
         "Run distance",
-        "km/week",
+        "{distance}/week",
         "SELECT SUM(gpx_distance_km) AS value "
         "FROM workout "
         "WHERE category = 'run' AND gpx_distance_km IS NOT NULL "
@@ -128,7 +137,7 @@ def _query_window_value(
 def _metric_counts(conn: sqlite3.Connection, days: int) -> list[tuple[str, str, int]]:
     """Return (label, column, readings) for every daily metric in a window."""
     counts: list[tuple[str, str, int]] = []
-    for label, column, _unit, _decimals in _DAILY_METRICS:
+    for label, column, *_rest in _DAILY_METRICS:
         row = conn.execute(
             f"""
             SELECT COUNT({column}) AS n
@@ -199,7 +208,9 @@ def days_of_data(conn: sqlite3.Connection) -> int:
     return max(int(row["span"]), 0) + 1
 
 
-def _append_daily_metrics(lines: list[str], conn: sqlite3.Connection) -> None:
+def _append_daily_metrics(
+    lines: list[str], conn: sqlite3.Connection, units: UnitSystem
+) -> None:
     """Append the 30d/90d daily-metrics table.
 
     A profile too new for any metric to clear the sample floor gets a sentence
@@ -208,13 +219,17 @@ def _append_daily_metrics(lines: list[str], conn: sqlite3.Connection) -> None:
     """
     rows: list[str] = []
     has_value = False
-    for label, column, unit, decimals in _DAILY_METRICS:
+    for label, column, unit, decimals, quantity in _DAILY_METRICS:
         avg_30 = _query_daily_avg(
             conn, column, ("-30 days",), min_samples=BASELINE_MIN_SAMPLES
         )
         avg_90 = _query_daily_avg(
             conn, column, ("-90 days",), min_samples=BASELINE_MIN_SAMPLES
         )
+        if quantity is not None:
+            avg_30 = to_display(avg_30, quantity, units)
+            avg_90 = to_display(avg_90, quantity, units)
+            unit = unit_label(quantity, units)
         has_value = has_value or avg_30 is not None or avg_90 is not None
         rows.append(
             f"| {label} | {_fmt(avg_30, decimals)} | {_fmt(avg_90, decimals)} | {unit} |"
@@ -272,7 +287,9 @@ def _append_sleep_compliance(lines: list[str], conn: sqlite3.Connection) -> None
     )
 
 
-def _append_training_volume(lines: list[str], conn: sqlite3.Connection) -> None:
+def _append_training_volume(
+    lines: list[str], conn: sqlite3.Connection, units: UnitSystem
+) -> None:
     """Append recent training-volume averages.
 
     A window is only divided by its nominal length once the data actually
@@ -293,6 +310,8 @@ def _append_training_volume(lines: list[str], conn: sqlite3.Connection) -> None:
     lines.append("|-----------------|-------------------|-------------------|")
 
     for label, unit, query in _TRAINING_VOLUME_QUERIES:
+        is_distance = "{distance}" in unit
+        unit = unit.replace("{distance}", unit_label(Quantity.DISTANCE, units))
         cells: list[str] = []
         for days, weeks in [(28, 4), (84, 12)]:
             if covered < days * BASELINE_MIN_WINDOW_COVERAGE:
@@ -300,14 +319,18 @@ def _append_training_volume(lines: list[str], conn: sqlite3.Connection) -> None:
                 continue
             row = conn.execute(query, (f"-{days} days",)).fetchone()
             total = row["value"] if row and row["value"] is not None else 0.0
+            if is_distance:
+                total = to_display(total, Quantity.DISTANCE, units) or 0.0
             cells.append(f"{total / weeks:.1f} {unit}")
         lines.append(f"| {label} | {cells[0]} | {cells[1]} |")
 
 
-def _append_yoy_daily_metrics(lines: list[str], conn: sqlite3.Connection) -> None:
+def _append_yoy_daily_metrics(
+    lines: list[str], conn: sqlite3.Connection, units: UnitSystem
+) -> None:
     """Append a same-season year-over-year table for daily metrics."""
     rows: list[str] = []
-    for label, column, unit, decimals in _DAILY_METRICS:
+    for label, column, unit, decimals, quantity in _DAILY_METRICS:
         current_30d = _query_daily_avg(conn, column, ("-30 days",))
         year_1 = _query_daily_avg(
             conn,
@@ -325,6 +348,11 @@ def _append_yoy_daily_metrics(lines: list[str], conn: sqlite3.Connection) -> Non
         )
         if year_1 is None and year_2 is None:
             continue
+        if quantity is not None:
+            current_30d = to_display(current_30d, quantity, units)
+            year_1 = to_display(year_1, quantity, units)
+            year_2 = to_display(year_2, quantity, units)
+            unit = unit_label(quantity, units)
         rows.append(
             f"| {label} | {_fmt(current_30d, decimals)} | {_fmt(year_1, decimals)} | {_fmt(year_2, decimals)} | {unit} |"
         )
@@ -350,7 +378,7 @@ def _has_workouts(conn: sqlite3.Connection) -> bool:
 
 
 def _append_seasonal_training_volume(
-    lines: list[str], conn: sqlite3.Connection
+    lines: list[str], conn: sqlite3.Connection, units: UnitSystem
 ) -> None:
     """Append current-vs-prior-years seasonal run-volume comparisons.
 
@@ -360,7 +388,7 @@ def _append_seasonal_training_volume(
     queries = [
         (
             "Run distance",
-            "km",
+            unit_label(Quantity.DISTANCE, units),
             "SELECT SUM(gpx_distance_km) AS value "
             "FROM workout "
             "WHERE category = 'run' AND gpx_distance_km IS NOT NULL "
@@ -392,6 +420,8 @@ def _append_seasonal_training_volume(
             _query_window_value(conn, query, ("-2 years", "-28 days"), ("-2 years",)),
             _query_window_value(conn, query, ("-3 years", "-28 days"), ("-3 years",)),
         ]
+        if label == "Run distance":
+            values = [to_display(v, Quantity.DISTANCE, units) for v in values]
         rows.append(
             "| "
             f"{label} | "
@@ -413,7 +443,9 @@ def _append_seasonal_training_volume(
     lines.extend(rows)
 
 
-def _append_pace_curve(lines: list[str], conn: sqlite3.Connection) -> None:
+def _append_pace_curve(
+    lines: list[str], conn: sqlite3.Connection, units: UnitSystem
+) -> None:
     """Append a per-year best 5 km pace curve based on split windows.
 
     A year needs enough qualifying runs to have a best worth naming. Otherwise
@@ -477,18 +509,13 @@ def _append_pace_curve(lines: list[str], conn: sqlite3.Connection) -> None:
     lines.append("| Year | Best 5 km pace | Date |")
     lines.append("|------|----------------|------|")
     for row in rows:
-        pace = row["pace_min_km"]
-        pace_min = int(pace)
-        pace_sec = int(round((pace - pace_min) * 60))
-        if pace_sec == 60:
-            pace_min += 1
-            pace_sec = 0
-        lines.append(
-            f"| {row['calendar_year']} | {pace_min}:{pace_sec:02d}/km | {row['workout_date']} |"
-        )
+        pace = format_pace(row["pace_min_km"], units)
+        lines.append(f"| {row['calendar_year']} | {pace} | {row['workout_date']} |")
 
 
-def _append_best_recent_pace(lines: list[str], conn: sqlite3.Connection) -> None:
+def _append_best_recent_pace(
+    lines: list[str], conn: sqlite3.Connection, units: UnitSystem
+) -> None:
     """Append the fastest recent whole-run pace.
 
     "Best" needs a field to be best of. With one or two runs in the window the
@@ -509,23 +536,24 @@ def _append_best_recent_pace(lines: list[str], conn: sqlite3.Connection) -> None
     if row["runs"] < BASELINE_MIN_SAMPLES:
         return
 
-    pace = row["pace_min_km"]
-    pace_min = int(pace)
-    pace_sec = int(round((pace - pace_min) * 60))
-    if pace_sec == 60:
-        pace_min += 1
-        pace_sec = 0
+    if units is UnitSystem.METRIC:
+        floor = f"{BEST_RECENT_PACE_MIN_KM:g} km"
+    else:
+        floor = format_quantity(BEST_RECENT_PACE_MIN_KM, Quantity.DISTANCE, units)
     lines.append(
-        f"\n**Fastest run pace (30d, runs of {BEST_RECENT_PACE_MIN_KM:g} km or more):** "
-        f"{pace_min}:{pace_sec:02d}/km"
+        f"\n**Fastest run pace (30d, runs of {floor} or more):** "
+        f"{format_pace(row['pace_min_km'], units)}"
     )
 
 
-def compute_baselines(conn: sqlite3.Connection) -> str:
+def compute_baselines(
+    conn: sqlite3.Connection, *, units: UnitSystem = UnitSystem.METRIC
+) -> str:
     """Compute rolling baseline metrics from the database.
 
     Args:
         conn: Open SQLite database connection.
+        units: Display unit system for distances, paces and speeds.
 
     Returns:
         A formatted markdown string with rolling, seasonal, and split-derived
@@ -533,11 +561,11 @@ def compute_baselines(conn: sqlite3.Connection) -> str:
     """
     # The calling prompt owns the section heading.
     lines: list[str] = []
-    _append_daily_metrics(lines, conn)
+    _append_daily_metrics(lines, conn, units)
     _append_sleep_compliance(lines, conn)
-    _append_training_volume(lines, conn)
-    _append_yoy_daily_metrics(lines, conn)
-    _append_seasonal_training_volume(lines, conn)
-    _append_pace_curve(lines, conn)
-    _append_best_recent_pace(lines, conn)
+    _append_training_volume(lines, conn, units)
+    _append_yoy_daily_metrics(lines, conn, units)
+    _append_seasonal_training_volume(lines, conn, units)
+    _append_pace_curve(lines, conn, units)
+    _append_best_recent_pace(lines, conn, units)
     return "\n".join(lines).strip()

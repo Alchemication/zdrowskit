@@ -8,7 +8,7 @@ independent copy; `--profile NAME` selects it in the CLI.
 |------|-----------|---------|
 | `soul.md` | you | The coach's persona: who it is and how it talks to you |
 | `me.md` | you or chat | Your profile: age, body, injuries, what you already do |
-| `strategy.md` | you, chat, or coach | Goals + weekly training schedule + diet + sleep targets, all in one file. Numbers stated in the goal and plan sections also become the weekly progress bars |
+| `strategy.md` | you, chat, or coach | Goals + weekly training schedule + diet + sleep targets, all in one file. Numbers stated in the goal and plan sections also become the weekly progress bars (distance goals may be written in kilometres or miles; targets are stored in kilometres) |
 | `log.md` | you or chat | Freeform weekly journal: why things happened, such as travel, illness, or life |
 | `baselines.md` | auto | Rolling + seasonal baselines computed from the DB by `insights`, `coach`, and chat |
 | `history.md` | auto | Rolling memory: what a separate call after each weekly report chose to carry forward |

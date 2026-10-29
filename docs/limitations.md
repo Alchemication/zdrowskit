@@ -3,6 +3,7 @@
 zdrowskit is a personal Apple Health coach, not a general health-data platform.
 
 - **Apple Health source only** - health data still originates from Apple Health on an iPhone. There is no Garmin, Fitbit, or Android ingestion path. HTTP, Google Drive, and iCloud are transports, not additional health-data sources.
+- **Per-km splits only** - route splits are stored per kilometre and exact mile splits cannot be derived from them. An imperial profile sees the per-km splits at min/mi pace, labelled as such. Treadmill speed (mph) goals are not supported as progress bars.
 - **Single person per database** - family hosting uses one cache, context tree, and SQLite database per person. Cross-profile queries are intentionally unsupported.
 - **Auto Export JSON required** - the parser supports [Auto Export](https://apps.apple.com/app/myhealth-export-to-icloud/id6737380982) JSON, not Apple's built-in all-data XML export. Scheduled delivery depends on the automation features available in the installed app version.
 - **Platform-specific service installation** - the daemon runs on macOS or Linux, but built-in service installation manages macOS `launchd` only. A Raspberry Pi deployment needs an external systemd unit or equivalent. The documented public HTTP path also assumes a Tailscale Funnel-capable host.

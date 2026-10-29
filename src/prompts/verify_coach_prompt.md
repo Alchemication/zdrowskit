@@ -33,5 +33,6 @@ Checklist:
 - If no meaningful change is warranted, the correct output is SKIP/no proposals.
 - No duplicate or conflicting proposals.
 - No markdown tables.
+- When the evidence says the display units are imperial, paces in mm:ss/mi and distances in miles are correct; do not flag them as the wrong unit.
 
 Be strict about unsupported strategy changes. Do not invent better edits.

@@ -54,9 +54,12 @@ from weekly_targets import (
     SPEC_BY_KEY,
     TARGET_SPECS,
     StoredTarget,
+    TargetSpec,
     coerce_target,
+    target_to_display,
     week_start_for,
 )
+from units import UnitSystem
 
 logger = logging.getLogger(__name__)
 
@@ -163,8 +166,18 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _fmt(value: float) -> str:
+def _fmt(value: float, decimals: int | None = None) -> str:
+    """Format a number; ``decimals`` rounds first (converted values only)."""
+    if decimals is not None:
+        value = round(value, decimals)
     return f"{value:.0f}" if float(value).is_integer() else f"{value:g}"
+
+
+def _display_decimals(spec: TargetSpec, units: UnitSystem) -> int | None:
+    """Return the rounding for converted values, or None on the metric path."""
+    if units is UnitSystem.IMPERIAL and spec.quantity is not None:
+        return spec.decimals
+    return None
 
 
 def _row_to_challenge(row: sqlite3.Row) -> Challenge:
@@ -221,11 +234,21 @@ def coerce_proposal(raw: dict, known_types: frozenset[str]) -> Proposal:
         raise ChallengeError("weeks must be a whole number") from exc
     if not 1 <= weeks <= CHALLENGE_MAX_WEEKS:
         raise ChallengeError(f"weeks must be between 1 and {CHALLENGE_MAX_WEEKS}")
+    metric_spec = SPEC_BY_KEY.get(str(raw.get("metric") or ""))
+    if metric_spec is not None and metric_spec.quantity is not None:
+        given = str(raw.get("unit") or "").strip().lower()
+        if given not in {metric_spec.unit, "mi"}:
+            raise ChallengeError(
+                f"unit is required for {metric_spec.key}: set `unit` to "
+                f"`{metric_spec.unit}` or `mi` to say which unit `target` is in"
+                + (f" (got {raw.get('unit')!r})" if given else "")
+            )
     target = coerce_target(
         {
             "metric": raw.get("metric"),
             "category": raw.get("category"),
             "target": raw.get("target"),
+            "unit": raw.get("unit"),
             "threshold": raw.get("threshold"),
             "goal": goal,
         },
@@ -509,20 +532,34 @@ def close_finished(conn: sqlite3.Connection, *, today: date) -> list[Challenge]:
     return closed
 
 
-def describe_challenge(challenge: Challenge | Proposal) -> str:
-    """Return the one-line spec, e.g. ``Runs: 4 sessions a week for 2 weeks``."""
+def describe_challenge(
+    challenge: Challenge | Proposal, *, units: UnitSystem = UnitSystem.METRIC
+) -> str:
+    """Return the one-line spec, e.g. ``Runs: 4 sessions a week for 2 weeks``.
+
+    Args:
+        challenge: A stored challenge or a validated proposal.
+        units: Display unit system for a distance target.
+    """
     target = (
         challenge.target if isinstance(challenge, Proposal) else challenge.stored_target
-    )
+    ).for_display(units)
     weeks = challenge.weeks
     return (
-        f"{ring_label(target)}: {_fmt(target.target)} {target.spec.unit} a week "
+        f"{ring_label(target)}: {_fmt(target.target, _display_decimals(target.spec, units))} {target.spec.unit} a week "
         f"for {weeks} {'week' if weeks == 1 else 'weeks'}"
     )
 
 
-def describe_active(conn: sqlite3.Connection, *, today: date) -> str | None:
+def describe_active(
+    conn: sqlite3.Connection, *, today: date, units: UnitSystem = UnitSystem.METRIC
+) -> str | None:
     """Describe the active challenge and its progress, for a prompt.
+
+    Args:
+        conn: Open database connection.
+        today: The day being reported on.
+        units: Display unit system for distance figures.
 
     Returns:
         A few lines of text, or None when no challenge is active.
@@ -531,21 +568,25 @@ def describe_active(conn: sqlite3.Connection, *, today: date) -> str | None:
     if active is None or not active.start_week or not active.end_date:
         return None
     lines = [
-        f"{active.title} — {describe_challenge(active)}, "
+        f"{active.title} — {describe_challenge(active, units=units)}, "
         f"{active.start_week} to {active.end_date}.",
         f"Proposed by the coach and accepted by the user. Serves: {active.goal}",
     ]
     if date.fromisoformat(active.start_week) > today:
         lines.append(f"Starts {active.start_week}; nothing to measure yet.")
         return "\n".join(lines)
-    unit = active.stored_target.spec.unit
+    spec = active.stored_target.spec
+    unit = active.stored_target.for_display(units).spec.unit
+    places = _display_decimals(spec, units)
     for result in _week_results(conn, active, through=today):
         state = (
             "met" if result["met"] else ("missed" if result["complete"] else "so far")
         )
         lines.append(
-            f"- Week {result['week']}: {_fmt(result['actual'])}/"
-            f"{_fmt(result['target'])} {unit} ({state})"
+            f"- Week {result['week']}: "
+            f"{_fmt(target_to_display(spec, result['actual'], units), places)}/"
+            f"{_fmt(target_to_display(spec, result['target'], units), places)} "
+            f"{unit} ({state})"
         )
     days_left = (date.fromisoformat(active.end_date) - today).days
     lines.append(f"{days_left} days left.")
@@ -556,7 +597,11 @@ NO_CHALLENGE_NEWS = "(no challenge news in this sync — do not mention any chal
 
 
 def nudge_challenge_text(
-    conn: sqlite3.Connection, *, workout_ids: set[str], today: date
+    conn: sqlite3.Connection,
+    *,
+    workout_ids: set[str],
+    today: date,
+    units: UnitSystem = UnitSystem.METRIC,
 ) -> str:
     """Return the active challenge for a nudge, only when this sync is news for it.
 
@@ -579,19 +624,21 @@ def nudge_challenge_text(
     )
     if not (moved or week_ending):
         return NO_CHALLENGE_NEWS
-    return describe_active(conn, today=today) or NO_CHALLENGE_NEWS
+    return describe_active(conn, today=today, units=units) or NO_CHALLENGE_NEWS
 
 
-def challenge_status_text(conn: sqlite3.Connection, *, today: date) -> str:
+def challenge_status_text(
+    conn: sqlite3.Connection, *, today: date, units: UnitSystem = UnitSystem.METRIC
+) -> str:
     """Describe the active challenge or an open proposal, for chat and coach."""
-    active = describe_active(conn, today=today)
+    active = describe_active(conn, today=today, units=units)
     if active:
         return f"Active challenge:\n{active}"
     pending = open_proposal(conn)
     if pending is not None:
         return (
             f"A challenge proposed on {pending.proposed_at[:10]} is still awaiting "
-            f"the user's decision: {describe_challenge(pending)}."
+            f"the user's decision: {describe_challenge(pending, units=units)}."
         )
     return "No challenge is active."
 
@@ -611,7 +658,9 @@ def last_ended_on(conn: sqlite3.Connection) -> date | None:
     return date.fromisoformat(str(row[0])[:10])
 
 
-def describe_history(conn: sqlite3.Connection) -> str:
+def describe_history(
+    conn: sqlite3.Connection, *, units: UnitSystem = UnitSystem.METRIC
+) -> str:
     """Describe recent past challenges and declined proposals, for the coach."""
     rows = conn.execute(
         "SELECT * FROM challenge WHERE status NOT IN (?, ?) ORDER BY id DESC LIMIT ?",
@@ -622,7 +671,7 @@ def describe_history(conn: sqlite3.Connection) -> str:
     lines: list[str] = []
     for row in rows:
         challenge = _row_to_challenge(row)
-        spec = describe_challenge(challenge)
+        spec = describe_challenge(challenge, units=units)
         when = (challenge.closed_at or challenge.decided_at or challenge.proposed_at)[
             :10
         ]
@@ -640,17 +689,23 @@ def describe_history(conn: sqlite3.Connection) -> str:
     return "\n".join(lines)
 
 
-def outcome_message(challenge: Challenge) -> str:
+def outcome_message(
+    challenge: Challenge, *, units: UnitSystem = UnitSystem.METRIC
+) -> str:
     """Return the Telegram announcement for a closed challenge."""
     outcome = challenge.outcome or {"weeks_met": 0, "weeks": challenge.weeks}
-    unit = challenge.stored_target.spec.unit
+    spec = challenge.stored_target.spec
+    unit = challenge.stored_target.for_display(units).spec.unit
+    places = _display_decimals(spec, units)
     headline = {
         ACHIEVED: "✅ Challenge complete",
         PARTIAL: "➖ Challenge partly done",
         MISSED: "Challenge finished",
     }.get(challenge.status, "Challenge finished")
     per_week = ", ".join(
-        f"week {r['week']} {_fmt(r['actual'])}/{_fmt(r['target'])}"
+        f"week {r['week']} "
+        f"{_fmt(target_to_display(spec, r['actual'], units), places)}"
+        f"/{_fmt(target_to_display(spec, r['target'], units), places)}"
         for r in outcome.get("per_week", [])
     )
     return (
@@ -675,7 +730,10 @@ def propose_challenge_tool() -> list[dict]:
         if spec.threshold_unit:
             extra.append(f"threshold in {spec.threshold_unit} required")
         suffix = f" ({'; '.join(extra)})" if extra else ""
-        lines.append(f"{spec.key}: counts {spec.unit} per week{suffix}")
+        if spec.quantity is not None:
+            lines.append(f"{spec.key}: target in `unit` (km or mi) per week{suffix}")
+        else:
+            lines.append(f"{spec.key}: counts {spec.unit} per week{suffix}")
     return [
         {
             "type": "function",
@@ -719,6 +777,14 @@ def propose_challenge_tool() -> list[dict]:
                         "target": {
                             "type": "number",
                             "description": "Per-week number to reach.",
+                        },
+                        "unit": {
+                            "type": "string",
+                            "enum": ["km", "mi"],
+                            "description": (
+                                "Required for distance_km_week: the unit "
+                                "`target` is in (km or mi)."
+                            ),
                         },
                         "threshold": {
                             "type": "number",

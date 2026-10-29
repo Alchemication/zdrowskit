@@ -40,6 +40,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, Field
 
 from config import MAX_TOKENS_ADD_CLONE, PROMPTS_DIR
+from units import Quantity, format_quantity
 
 if TYPE_CHECKING:
     from daemon import ProfileRuntime
@@ -770,9 +771,11 @@ class AddFlowHandler:
 
         parts = [f"**{pending.workout_type}** — {dur:.0f} min"]
         if dist:
-            parts.append(f"{dist:.1f} km")
+            parts.append(format_quantity(dist, Quantity.DISTANCE, self._daemon.units))
         if energy:
-            parts.append(f"~{energy:.0f} kJ")
+            parts.append(
+                f"~{format_quantity(energy, Quantity.ENERGY, self._daemon.units, decimals=0)}"
+            )
         summary = ", ".join(parts)
 
         warning = self._check_existing_workout(

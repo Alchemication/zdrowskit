@@ -29,7 +29,7 @@ Checklist:
 - Superlatives like "first ever" or "highest of 2026" need evidence.
 - Baselines may be cited only when present in evidence.
 - Numeric physiological thresholds and normal ranges must come from this person's own data in evidence. Flag any invented cutoff, invented normal range, or appeal to "research"/"studies"/"population data" that is not in evidence — the claim reads as authoritative and the user cannot check it.
-- Pace values must use mm:ss/km.
+- Pace values must use mm:ss/km, or mm:ss/mi when the evidence says the display units are imperial.
 - Recovery verdict must be consistent with HRV, resting HR, sleep, and shared facts.
 - No markdown tables.
 - The report must not restate what the Health app already shows: day-by-day session listings, metric enumerations, or the plan read back. Flag those as bloat.

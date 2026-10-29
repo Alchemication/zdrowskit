@@ -11,7 +11,8 @@ from plan_frame import load_plan_frame, progress_paused, set_progress_paused
 from quiet_week import CHOICE_BY_KEY, journal_entry, record_answer
 from store import open_db
 from weekly_targets import ensure_weekly_targets, week_start_for
-from weekly_progress import measure_week, render_progress_block
+from weekly_progress import display_rings, measure_week, render_progress_block
+from units import UnitSystem
 
 if TYPE_CHECKING:
     from daemon_telegram_chat import TelegramChatHandler
@@ -43,13 +44,17 @@ def handle_targets(
             force=action == "refresh",
             model_prefs_path=chat._daemon.model_prefs_path,
         )
+        units = chat._daemon.units
         block = render_progress_block(
-            measure_week(conn, targets, week_start=week, today=today), week_start=week
+            display_rings(
+                measure_week(conn, targets, week_start=week, today=today), units
+            ),
+            week_start=week,
         )
         lines = [block or "No measurable weekly targets."]
         for target in targets:
             if target.goal_text:
-                lines.append(f"{target.label}: {target.goal_text}")
+                lines.append(f"{target.for_display(units).label}: {target.goal_text}")
         paused = progress_paused(conn)
         if paused:
             lines.append("Progress is paused until you resume it.")
@@ -59,8 +64,11 @@ def handle_targets(
                 lines.append(
                     f"Last automatic display decision: {frame.mode} — {frame.reason}"
                 )
+        example = "12 mi" if units is UnitSystem.IMPERIAL else "20 km"
         lines.append(
-            'To correct a goal, tell me here, for example: "Change my weekly running goal to 20 km." I’ll show the proposed strategy edit for approval.'
+            "To correct a goal, tell me here, for example: "
+            f'"Change my weekly running goal to {example}." '
+            "I’ll show the proposed strategy edit for approval."
         )
         keyboard = [
             [

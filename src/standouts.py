@@ -57,9 +57,10 @@ from config import (
     STANDOUT_MIN_SPAN_DAYS,
     STANDOUT_RECENCY_DAYS,
     STANDOUT_VOLUME_STEP_KM,
+    STANDOUT_VOLUME_STEP_MI,
     TELEGRAM_MESSAGE_EFFECTS,
 )
-from milestones import format_pace
+from units import KM_PER_MILE, Quantity, UnitSystem, format_pace, to_display, unit_label
 
 logger = logging.getLogger(__name__)
 
@@ -184,7 +185,9 @@ def _is_recent(occurred_on: str, today: date) -> bool:
     return 0 <= (today - when).days <= STANDOUT_RECENCY_DAYS
 
 
-def _pace_candidates(conn: sqlite3.Connection, today: date) -> list[Standout]:
+def _pace_candidates(
+    conn: sqlite3.Connection, today: date, units: UnitSystem = UnitSystem.METRIC
+) -> list[Standout]:
     """Rank the fastest contiguous split windows across every recorded run."""
     found: list[Standout] = []
     for km_count, label in _PACE_WINDOWS:
@@ -227,8 +230,8 @@ def _pace_candidates(conn: sqlite3.Connection, today: date) -> list[Standout]:
         if span < STANDOUT_MIN_SPAN_DAYS:
             continue
         scope = _scope_phrase(len(rows), span, "runs")
-        pace = format_pace(best["pace"])
-        previous = format_pace(runner_up["pace"])
+        pace = format_pace(best["pace"], units)
+        previous = format_pace(runner_up["pace"], units)
         found.append(
             Standout(
                 key=f"pace_window_{km_count}|{best['date']}|{best['pace']:.4f}",
@@ -256,6 +259,8 @@ def _extreme_candidates(
     kind_prefix: str,
     unit: str,
     decimals: int,
+    quantity: Quantity | None = None,
+    units: UnitSystem = UnitSystem.METRIC,
 ) -> list[Standout]:
     """Rank sessions of each category by one column, largest first.
 
@@ -269,8 +274,11 @@ def _extreme_candidates(
         column: Numeric column to rank on.
         categories: Triples of database category, singular name, plural noun.
         kind_prefix: Prefix for the generated candidate kind.
-        unit: Unit printed after the value.
+        unit: Stored unit printed after the value when ``quantity`` is None.
         decimals: Decimal places for the printed value.
+        quantity: Physical quantity of ``column`` when it is convertible for
+            display; ranking always uses the stored values.
+        units: Display unit system.
 
     Returns:
         Every candidate that cleared the population, recency and margin gates.
@@ -300,15 +308,21 @@ def _extreme_candidates(
         if span < STANDOUT_MIN_SPAN_DAYS:
             continue
         scope = _scope_phrase(len(rows), span, plural)
-        value = f"{best['value']:.{decimals}f}"
-        previous = f"{runner_up['value']:.{decimals}f}"
+        shown_best, shown_previous = best["value"], runner_up["value"]
+        shown_unit = unit
+        if quantity is not None:
+            shown_best = to_display(shown_best, quantity, units)
+            shown_previous = to_display(shown_previous, quantity, units)
+            shown_unit = unit_label(quantity, units)
+        value = f"{shown_best:.{decimals}f}"
+        previous = f"{shown_previous:.{decimals}f}"
         found.append(
             Standout(
                 key=f"{kind_prefix}_{category}|{best['date']}|{best['value']:.4f}",
                 kind=f"{kind_prefix}_{category}",
                 headline=(
-                    f"Longest {singular} {scope} — **{value} {unit}**, "
-                    f"past your previous **{previous} {unit}**."
+                    f"Longest {singular} {scope} — **{value} {shown_unit}**, "
+                    f"past your previous **{previous} {shown_unit}**."
                 ),
                 occurred_on=best["date"],
                 population=len(rows),
@@ -320,7 +334,9 @@ def _extreme_candidates(
     return found
 
 
-def _volume_candidates(conn: sqlite3.Connection, today: date) -> list[Standout]:
+def _volume_candidates(
+    conn: sqlite3.Connection, today: date, units: UnitSystem = UnitSystem.METRIC
+) -> list[Standout]:
     """Detect lifetime distance crossing a round threshold.
 
     The only standout that needs no ranking: crossing a round number is true
@@ -350,9 +366,12 @@ def _volume_candidates(conn: sqlite3.Connection, today: date) -> list[Standout]:
         if row["sessions"] < STANDOUT_MIN_POPULATION:
             continue
 
-        step = STANDOUT_VOLUME_STEP_KM
-        crossed = int(row["total"] // step)
-        if crossed <= int((row["before"] or 0) // step) or crossed < 1:
+        imperial = units is UnitSystem.IMPERIAL
+        step = STANDOUT_VOLUME_STEP_MI if imperial else STANDOUT_VOLUME_STEP_KM
+        divisor = KM_PER_MILE if imperial else 1.0
+        total = row["total"] / divisor
+        crossed = int(total // step)
+        if crossed <= int(((row["before"] or 0) / divisor) // step) or crossed < 1:
             continue
 
         threshold = crossed * step
@@ -371,10 +390,10 @@ def _volume_candidates(conn: sqlite3.Connection, today: date) -> list[Standout]:
         )
         found.append(
             Standout(
-                key=f"volume_{category}|{threshold}",
+                key=f"volume_{category}|{threshold}{'mi' if imperial else ''}",
                 kind=f"volume_{category}",
                 headline=(
-                    f"You have now {_VOLUME_VERBS[category]} **{threshold:,} km** "
+                    f"You have now {_VOLUME_VERBS[category]} **{threshold:,} {unit_label(Quantity.DISTANCE, units)}** "
                     f"{scope}."
                 ),
                 occurred_on=row["last_date"],
@@ -391,6 +410,7 @@ def find_candidates(
     *,
     today: date | None = None,
     eligible_workout_ids: set[str] | None = None,
+    units: UnitSystem = UnitSystem.METRIC,
 ) -> list[Standout]:
     """Return every fact that is currently true, rare and sufficiently evidenced.
 
@@ -405,13 +425,14 @@ def find_candidates(
         eligible_workout_ids: When provided, keep only facts caused by one of
             these newly inserted or changed workouts. An empty set therefore
             produces no candidates.
+        units: Display unit system for the finished headlines.
 
     Returns:
         Candidates, best margin first. Never raises.
     """
     today = today or date.today()
     generators = (
-        lambda: _pace_candidates(conn, today),
+        lambda: _pace_candidates(conn, today, units),
         lambda: _extreme_candidates(
             conn,
             today,
@@ -420,6 +441,8 @@ def find_candidates(
             kind_prefix="distance",
             unit="km",
             decimals=1,
+            quantity=Quantity.DISTANCE,
+            units=units,
         ),
         lambda: _extreme_candidates(
             conn,
@@ -430,7 +453,7 @@ def find_candidates(
             unit="min",
             decimals=0,
         ),
-        lambda: _volume_candidates(conn, today),
+        lambda: _volume_candidates(conn, today, units),
     )
 
     found: list[Standout] = []
@@ -758,6 +781,7 @@ def find_standout(
     now: datetime | None = None,
     trace_id: int | None = None,
     model_prefs_path: Path | None = None,
+    units: UnitSystem = UnitSystem.METRIC,
 ) -> Standout | None:
     """Return the one standout worth announcing right now, or None.
 
@@ -779,6 +803,7 @@ def find_standout(
         now: Override for the current moment, for tests.
         trace_id: Trace to attach the selection call to.
         model_prefs_path: Profile model preferences.
+        units: Display unit system for the announcement text.
 
     Returns:
         A standout to announce, or None. Never raises.
@@ -801,6 +826,7 @@ def find_standout(
                 conn,
                 today=today,
                 eligible_workout_ids=eligible_workout_ids,
+                units=units,
             )
             if item.key not in seen
         ]

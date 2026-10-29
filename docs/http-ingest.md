@@ -297,7 +297,7 @@ Imports/archive/metrics/2026-08-04.json.gz
 Imports/archive/workouts/2026-08-04.json.gz
 ```
 
-The archive is what makes a parser fix or a widened metric map replayable
+The archive is what lets a parser change be re-applied to past payloads
 without asking someone to re-export from their phone. Archiving never blocks
 ingestion — if the write fails the payload still imports, and the failure is
 logged as an error.

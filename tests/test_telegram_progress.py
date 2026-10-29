@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 
 from plan_frame import progress_paused, resolve_plan_frame
 from store import open_db
+from units import UnitSystem
 from telegram_progress import (
     handle_checkin_callback,
     handle_checkin_reply,
@@ -28,6 +29,7 @@ class TestTelegramProgress:
             db=tmp_path / "health.db",
             context_dir=context,
             model_prefs_path=None,
+            units=UnitSystem.METRIC,
             _self_originated_writes=set(),
         )
         poller = MagicMock()

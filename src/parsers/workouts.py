@@ -7,6 +7,12 @@ Supports two export formats:
 
 Schema: {"data": {"workouts": [...]}}
 
+Each quantity carries the unit the phone exports in (``mi``, ``degF``, ``ft``
+on an imperial phone). Values are converted to the stored unit by
+``parsers.normalise``; a field whose unit is unrecognised or missing is logged
+and stored as absent rather than in the wrong unit, except for single-unit
+fields (heart rate, humidity, intensity), which keep their value.
+
 Public API:
     parse_workouts(path)          -- parse a single workouts JSON file
     parse_workouts_dir(directory) -- parse all JSON files in a directory, deduplicated
@@ -27,6 +33,7 @@ from pathlib import Path
 
 from config import WORKOUT_SPLIT_MIN_SAMPLE_COVERAGE
 from models import WorkoutSnapshot, WorkoutSplit
+from parsers.normalise import UnitNormaliser
 
 
 # Maps workout name → category. Auto Export writes Apple's own activity names,
@@ -122,21 +129,6 @@ def _counts_as_lift(name: str, duration_min: float) -> bool:
     return False
 
 
-def _qty(obj: dict | None) -> float | None:
-    """Safely extract the numeric value from an Apple Health qty dict.
-
-    Args:
-        obj: A dict like ``{"qty": 81.6, "units": "count/min"}``, or None.
-
-    Returns:
-        The float value of "qty", or None if obj is None or "qty" is absent.
-    """
-    if obj is None:
-        return None
-    v = obj.get("qty")
-    return float(v) if v is not None else None
-
-
 def _parse_apple_dt(raw: str) -> datetime:
     """Parse an Apple Health datetime string to a UTC datetime.
 
@@ -189,7 +181,7 @@ def _percentile(values: list[float], p: float) -> float:
     return sorted_vals[lo] + (sorted_vals[hi] - sorted_vals[lo]) * (idx - lo)
 
 
-def _extract_route_stats(w: dict) -> dict[str, float | None]:
+def _extract_route_stats(w: dict, norm: UnitNormaliser) -> dict[str, float | None]:
     """Extract route/distance stats from Auto Export workout fields.
 
     Uses Apple-computed summary fields (distance, speed, elevationUp) when
@@ -197,19 +189,22 @@ def _extract_route_stats(w: dict) -> dict[str, float | None]:
 
     Args:
         w: Raw workout dict from the JSON.
+        norm: Unit normaliser for this payload.
 
     Returns:
         Dict with gpx_distance_km, gpx_elevation_gain_m, gpx_avg_speed_ms,
         gpx_max_speed_p95_ms — any may be None if data is absent.
     """
-    distance_km = _qty(w.get("distance"))
-    elevation_m = _qty(w.get("elevationUp"))
+    distance_km = norm.qty(w.get("distance"), "km", field="workout distance")
+    elevation_m = norm.qty(w.get("elevationUp"), "m", field="workout elevationUp")
 
     # Convert speed from km/h to m/s
-    speed_kmh = _qty(w.get("speed"))
+    speed_kmh = norm.qty(w.get("speed"), "km/h", field="workout speed")
     avg_speed_ms = round(speed_kmh / 3.6, 4) if speed_kmh is not None else None
 
-    # Compute p95 max speed from route trackpoints
+    # Compute p95 max speed from route trackpoints. Route points carry no
+    # units: Auto Export documents altitude as metres and speed as m/s whatever
+    # the phone's unit preferences, so they are used as sent.
     max_speed_p95_ms: float | None = None
     route = w.get("route", [])
     if route:
@@ -268,6 +263,9 @@ def _extract_bins(
     key: str,
     value_field: str,
     max_field: str | None = None,
+    *,
+    canonical: str,
+    norm: UnitNormaliser,
 ) -> list[tuple[datetime, datetime, float, float | None]]:
     """Build sorted, non-overlapping one-minute bins from a workout series.
 
@@ -283,6 +281,8 @@ def _extract_bins(
         key: Workout field holding the series, e.g. "heartRateData".
         value_field: Entry field holding the primary value, e.g. "Avg".
         max_field: Entry field holding a per-bin maximum, if the series has one.
+        canonical: Stored unit of the series, e.g. "count/min".
+        norm: Unit normaliser for this payload.
 
     Returns:
         A list of (start, end, value, max_value) tuples ordered by start. Entries
@@ -296,6 +296,11 @@ def _extract_bins(
     parsed: list[tuple[datetime, float, float | None]] = []
     for entry in raw:
         if not isinstance(entry, dict):
+            continue
+        # These series are rates and counts with no locale variant, so a unit
+        # is only checked, never converted; an absent or unrecognised one is
+        # taken as canonical (the latter warned about once).
+        if not norm.accepts(entry.get("units"), canonical, field=f"workout {key}"):
             continue
         start = _parse_route_timestamp(entry.get("date"))
         value = _finite_float(entry.get(value_field))
@@ -445,6 +450,7 @@ def _extract_splits(
     w: dict,
     category: str,
     session_elevation_gain_m: float | None,
+    norm: UnitNormaliser,
 ) -> list[WorkoutSplit]:
     """Derive 1 km splits from embedded route trackpoints.
 
@@ -471,7 +477,9 @@ def _extract_splits(
     Args:
         w: Raw workout dict from the JSON.
         category: Normalised workout category string.
-        session_elevation_gain_m: Apple-reported session elevation gain, if any.
+        session_elevation_gain_m: Apple-reported session elevation gain in
+            metres (already converted), if any.
+        norm: Unit normaliser for this payload.
 
     Returns:
         A list of complete 1 km splits. Workouts shorter than 1 km, unsupported
@@ -486,8 +494,10 @@ def _extract_splits(
     if not isinstance(route, list) or len(route) < 2:
         return []
 
-    hr_bins = _extract_bins(w, "heartRateData", "Avg", max_field="Max")
-    step_bins = _extract_bins(w, "stepCount", "qty")
+    hr_bins = _extract_bins(
+        w, "heartRateData", "Avg", max_field="Max", canonical="count/min", norm=norm
+    )
+    step_bins = _extract_bins(w, "stepCount", "qty", canonical="count", norm=norm)
 
     km_index = 1
     split_distance_m = 0.0
@@ -727,6 +737,7 @@ def parse_workouts_payload(data: dict) -> list[WorkoutSnapshot]:
         A list of WorkoutSnapshot objects ordered chronologically by start_utc.
     """
     snapshots: list[WorkoutSnapshot] = []
+    norm = UnitNormaliser()
 
     for w in data["data"]["workouts"]:
         name = w.get("name", "Unknown")
@@ -738,29 +749,43 @@ def parse_workouts_payload(data: dict) -> list[WorkoutSnapshot]:
 
         # Heart rate — nested {"avg": {"qty": x}, "min": {...}, "max": {...}}
         hr_block = w.get("heartRate", {})
-        hr_avg = _qty(hr_block.get("avg"))
-        hr_min_val = _qty(hr_block.get("min"))
-        hr_max_val = _qty(hr_block.get("max"))
+        hr_avg = norm.qty(hr_block.get("avg"), "count/min", field="workout heartRate")
+        hr_min_val = norm.qty(
+            hr_block.get("min"), "count/min", field="workout heartRate"
+        )
+        hr_max_val = norm.qty(
+            hr_block.get("max"), "count/min", field="workout heartRate"
+        )
 
         # Fallback: avgHeartRate / maxHeartRate top-level fields
         if hr_avg is None:
-            hr_avg = _qty(w.get("avgHeartRate"))
+            hr_avg = norm.qty(
+                w.get("avgHeartRate"), "count/min", field="workout avgHeartRate"
+            )
         if hr_max_val is None:
-            hr_max_val = _qty(w.get("maxHeartRate"))
+            hr_max_val = norm.qty(
+                w.get("maxHeartRate"), "count/min", field="workout maxHeartRate"
+            )
 
-        active_energy = _qty(w.get("activeEnergyBurned")) or 0.0
-        intensity = _qty(w.get("intensity"))
-        temperature = _qty(w.get("temperature"))
-        humidity = (
-            w.get("humidity", {}).get("qty")
-            if isinstance(w.get("humidity"), dict)
-            else None
+        active_energy = (
+            norm.qty(
+                w.get("activeEnergyBurned"), "kJ", field="workout activeEnergyBurned"
+            )
+            or 0.0
         )
+        intensity = norm.qty(
+            w.get("intensity"), "kcal/hr·kg", field="workout intensity"
+        )
+        temperature = norm.qty(
+            w.get("temperature"), "degC", field="workout temperature"
+        )
+        humidity = norm.qty(w.get("humidity"), "%", field="workout humidity")
 
         # Extract embedded route/summary stats (Auto Export format)
-        route_stats = _extract_route_stats(w)
+        route_stats = _extract_route_stats(w, norm)
         category = _category(name)
-        splits = _extract_splits(w, category, route_stats["gpx_elevation_gain_m"])
+        # Elevation is already in metres here; split elevation is rescaled to it.
+        splits = _extract_splits(w, category, route_stats["gpx_elevation_gain_m"], norm)
         start_location = _extract_start_location(w)
 
         snapshots.append(

@@ -22,7 +22,7 @@ uv run python main.py telegram-setup      # register bot /commands for Telegram 
 uv run python main.py daemon-install      # generate + load launchd daemon plist
 uv run python main.py daemon-restart      # restart the background daemon
 uv run python main.py daemon-stop         # stop the background daemon
-uv run python main.py profile add NAME --telegram-id ID # create a profile
+uv run python main.py profile add NAME --telegram-id ID # create a profile (--units imperial for miles)
 uv run python main.py profile adopt NAME --dry-run       # preview legacy migration
 uv run python main.py profile source NAME http           # change import transport
 uv run python main.py ingest setup        # tokens + Auto Export configuration

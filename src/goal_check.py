@@ -37,7 +37,13 @@ from config import (
     COACH_TRIGGER_COOLDOWN_WEEKS,
 )
 from weekly_progress import measure_week, ring_label
-from weekly_targets import StoredTarget, load_targets, week_start_for
+from units import UnitSystem
+from weekly_targets import (
+    StoredTarget,
+    load_targets,
+    target_to_display,
+    week_start_for,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -176,6 +182,7 @@ def build_goal_check(
     *,
     today: date,
     include_current_week: bool = False,
+    units: UnitSystem = UnitSystem.METRIC,
 ) -> GoalCheck:
     """Compute goal adherence facts and the triggers that force a review.
 
@@ -186,6 +193,8 @@ def build_goal_check(
         include_current_week: Count this week too, measured through today. The
             Sunday-evening review sets this: the week is effectively over, but
             anything not yet synced is missing, and the text says so.
+        units: Display unit system for distance targets and actuals. Met and
+            missed are decided on the stored values.
 
     Returns:
         The prompt section and any triggers that fired, cooldowns applied.
@@ -229,15 +238,17 @@ def build_goal_check(
             history = sorted(history, key=lambda r: r.week_start)
             decimals = item.spec.decimals
             met = sum(1 for r in history if r.met)
+            shown = item.for_display(units)
+
             per_week = ", ".join(
-                f"{week_tag(r.week_start)} {_fmt(r.actual, decimals)}"
-                f"/{_fmt(r.target, decimals)}"
+                f"{week_tag(r.week_start)} {_fmt(target_to_display(item.spec, r.actual, units), decimals)}"
+                f"/{_fmt(target_to_display(item.spec, r.target, units), decimals)}"
                 for r in history
             )
-            label = ring_label(item)
-            unit = item.spec.unit
+            label = ring_label(shown)
+            unit = shown.spec.unit
             lines.append(
-                f"- {label} ({_fmt(item.target, decimals)} {unit}/week): "
+                f"- {label} ({_fmt(shown.target, decimals)} {unit}/week): "
                 f"met {met} of {len(history)} — {per_week}"
             )
             missed = len(history) - met
@@ -255,7 +266,7 @@ def build_goal_check(
                         Trigger(
                             key=key,
                             sentence=(
-                                f"{label} ({_fmt(item.target, decimals)} "
+                                f"{label} ({_fmt(shown.target, decimals)} "
                                 f"{unit}/week) was missed in {missed} of the "
                                 f"last {len(history)} weeks: {per_week}."
                             ),

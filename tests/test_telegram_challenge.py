@@ -24,12 +24,13 @@ from telegram_challenge import (
     handle_challenge_command,
     handle_challenge_reason_reply,
 )
+from units import UnitSystem
 
 MONDAY = date(2026, 9, 28)
 
 
 def _chat(tmp_path: Path) -> SimpleNamespace:
-    daemon = SimpleNamespace(db=tmp_path / "health.db")
+    daemon = SimpleNamespace(db=tmp_path / "health.db", units=UnitSystem.METRIC)
     poller = MagicMock()
     poller.send_reply.return_value = 501
     return SimpleNamespace(_daemon=daemon, _poller=poller)

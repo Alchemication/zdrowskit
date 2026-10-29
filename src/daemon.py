@@ -55,6 +55,7 @@ from llm_verify import (
     register_suppression_listener,
     unregister_suppression_listener,
 )
+from units import UnitSystem
 
 if TYPE_CHECKING:
     from cmd_llm_common import CommandResult
@@ -329,6 +330,7 @@ class ProfileRuntime:
         self.profile = profile
         self.name = profile.name if profile is not None else "default"
         self.operator = profile.operator if profile is not None else True
+        self.units = profile.units if profile is not None else UnitSystem.METRIC
         self.model = model
         self.db = db
         self.context_dir = context_dir
@@ -739,7 +741,7 @@ class ProfileRuntime:
             after = data_snapshot(self.db)
         if result is None:
             return
-        trigger_context = format_data_delta(self.db, before, after)
+        trigger_context = format_data_delta(self.db, before, after, units=self.units)
         standout_workout_ids = changed_workout_ids(before, after)
         self._state["last_data_snapshot"] = after
         self._save_state()
@@ -1092,7 +1094,7 @@ class ProfileRuntime:
         from telegram_challenge import close_and_announce
 
         try:
-            close_and_announce(self.db, self._poller)
+            close_and_announce(self.db, self._poller, self.units)
         except Exception:
             logger.warning("Challenge housekeeping failed", exc_info=True)
 

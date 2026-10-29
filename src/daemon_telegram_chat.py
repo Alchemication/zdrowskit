@@ -2071,8 +2071,8 @@ class TelegramChatHandler:
         from data_maturity import build_data_maturity
         from llm import call_llm
         from llm_context import build_messages, load_context
+        from llm_health_data import build_llm_data
         from llm_health import (
-            build_llm_data,
             format_last_coach_summary,
             format_recent_nudges,
             render_health_data,
@@ -2096,13 +2096,13 @@ class TelegramChatHandler:
         from challenges import challenge_status_text
 
         ctx["challenge_status"] = challenge_status_text(
-            conn, today=datetime.now().date()
+            conn, today=datetime.now().date(), units=self._daemon.units
         )
 
         health_data = build_llm_data(conn, months=3)
 
         try:
-            baselines = compute_baselines(conn)
+            baselines = compute_baselines(conn, units=self._daemon.units)
         except Exception:
             logger.warning("Baselines computation failed", exc_info=True)
             baselines = None
@@ -2113,9 +2113,11 @@ class TelegramChatHandler:
                 health_data,
                 prompt_kind="chat",
                 unestablished=unestablished_metrics(conn, METRIC_TRUST_WINDOW_DAYS),
+                units=self._daemon.units,
             ),
             baselines=baselines,
             data_maturity=build_data_maturity(conn, ctx),
+            units=self._daemon.units,
         )
 
         # Inject conversation history before the last user message.

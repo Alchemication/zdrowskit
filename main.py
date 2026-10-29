@@ -571,6 +571,12 @@ def main() -> None:
         choices=("http", "local", "google-drive"),
         default="http",
     )
+    p_profile_add.add_argument(
+        "--units",
+        choices=("metric", "imperial"),
+        default="metric",
+        help="Display units for this profile (storage stays metric)",
+    )
     p_profile_add.add_argument("--google-drive-metrics-folder-id", metavar="ID")
     p_profile_add.add_argument("--google-drive-workouts-folder-id", metavar="ID")
     p_profile_adopt = profile_sub.add_parser(
@@ -650,6 +656,7 @@ def main() -> None:
             args.notification_prefs_path = profile.notification_prefs
             args.model_prefs_path = profile.model_prefs
             args.telegram_id = profile.telegram_id
+            args.units = profile.units
             if args.cmd == "import":
                 args.source = args.source or profile.import_source
                 args.google_drive_metrics_folder_id = (

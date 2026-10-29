@@ -109,7 +109,7 @@ uv run python main.py models              # inspect/change model routing
 uv run python main.py telegram-setup      # register Telegram bot commands
 uv run python main.py daemon-install      # install the launchd daemon
 uv run python main.py daemon-restart      # restart the background daemon
-uv run python main.py profile add anna --telegram-id ID # add an isolated profile
+uv run python main.py profile add anna --telegram-id ID # add an isolated profile (--units imperial for miles and °F)
 uv run python main.py db status --all     # check every profile database
 ```
 

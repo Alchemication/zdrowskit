@@ -7,15 +7,7 @@ from datetime import date, timedelta
 
 from baselines import days_of_data
 from config import MILESTONE_LIFETIME_MIN_DAYS
-
-
-def format_pace(value: float | None) -> str | None:
-    """Format minutes/km as mm:ss/km."""
-    if value is None:
-        return None
-    total_seconds = int(round(value * 60))
-    minutes, seconds = divmod(total_seconds, 60)
-    return f"{minutes}:{seconds:02d}/km"
+from units import Quantity, UnitSystem, format_pace, format_quantity
 
 
 def _format_age_days(date_str: str) -> str:
@@ -145,13 +137,19 @@ def _longest_rest_gap(conn: sqlite3.Connection) -> tuple[int, str, str] | None:
     return best_gap_days, best_start.isoformat(), best_end.isoformat()
 
 
-def compute_milestones(conn: sqlite3.Connection) -> str:
+def compute_milestones(
+    conn: sqlite3.Connection, *, units: UnitSystem = UnitSystem.METRIC
+) -> str:
     """Compute lifetime milestones and PR summaries from the database.
 
     "Lifetime" and "PR" are claims about a history, so the heading states which
     history they were drawn from. On a young profile the best recorded run is
     simply the only recorded run, and calling that a lifetime best invites the
     report to celebrate an achievement that has not happened yet.
+
+    Args:
+        conn: Open SQLite database connection.
+        units: Display unit system for paces and lifetime volume.
     """
     covered = days_of_data(conn)
     if covered >= MILESTONE_LIFETIME_MIN_DAYS:
@@ -175,7 +173,7 @@ def compute_milestones(conn: sqlite3.Connection) -> str:
         if row is None or row["pace_min_km"] is None:
             continue
         run_pr_lines.append(
-            f"- {label} PR: **{format_pace(row['pace_min_km'])}** on {row['date']} ({_format_age_days(row['date'])})."
+            f"- {label} PR: **{format_pace(row['pace_min_km'], units)}** on {row['date']} ({_format_age_days(row['date'])})."
         )
 
     if run_pr_lines:
@@ -218,7 +216,9 @@ def compute_milestones(conn: sqlite3.Connection) -> str:
             if covered >= MILESTONE_LIFETIME_MIN_DAYS
             else f"Run volume across all {covered} recorded days"
         )
-        consistency_lines.append(f"- {scope}: **{lifetime_km_row['value']:.1f} km**.")
+        consistency_lines.append(
+            f"- {scope}: **{format_quantity(lifetime_km_row['value'], Quantity.DISTANCE, units)}**."
+        )
 
     training_streak = _longest_weekly_streak(conn, "1 = 1")
     if training_streak is not None:

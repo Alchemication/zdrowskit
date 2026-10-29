@@ -21,6 +21,7 @@ Public API:
     RingProgress            — one measured target and its pace verdict.
     measure_week            — measure stored targets against the week so far.
     measure_target          — measure one target over an inclusive date range.
+    display_ring / display_rings — copies of rings in the display units.
     render_progress_block   — the multi-line strip for reports.
     render_progress_line    — the single-line form for nudges.
     render_dots             — the dotted form of one countable ring, or None.
@@ -37,7 +38,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -52,9 +53,11 @@ from weekly_targets import (
     StoredTarget,
     activity_type_of,
     ensure_weekly_targets,
+    target_to_display,
     week_start_for,
     week_bounds_for,
 )
+from units import UnitSystem
 
 logger = logging.getLogger(__name__)
 
@@ -523,6 +526,35 @@ def _negated_date_key(iso_date: str | None) -> str:
     return "".join(str(9 - int(ch)) if ch.isdigit() else ch for ch in (iso_date or ""))
 
 
+def display_ring(ring: RingProgress, units: UnitSystem) -> RingProgress:
+    """Return a copy of a ring with its target and actual in the display units.
+
+    Status, fraction and fingerprints are ratios, so they are the same on
+    either side of the conversion. The copy is for rendering only and must
+    never reach ``save_targets``.
+
+    Args:
+        ring: A ring measured in the stored (metric) units.
+        units: Display unit system.
+
+    Returns:
+        The ring unchanged for metric or a unitless metric, else a converted copy.
+    """
+    spec = ring.target.spec
+    if units is UnitSystem.METRIC or spec.quantity is None:
+        return ring
+    return replace(
+        ring,
+        target=ring.target.for_display(units),
+        actual=target_to_display(spec, ring.actual, units),
+    )
+
+
+def display_rings(rings: list[RingProgress], units: UnitSystem) -> list[RingProgress]:
+    """Return every ring converted to the display units; see :func:`display_ring`."""
+    return [display_ring(ring, units) for ring in rings]
+
+
 def _rings_for(
     conn: sqlite3.Connection,
     *,
@@ -530,8 +562,12 @@ def _rings_for(
     today: date,
     trace_id: int | None,
     model_prefs_path: Path | None,
+    units: UnitSystem = UnitSystem.METRIC,
 ) -> tuple[list[RingProgress], str]:
-    """Resolve this week's targets and measure them. Never raises."""
+    """Resolve this week's targets and measure them. Never raises.
+
+    The rings are in the display units; the stored targets are untouched.
+    """
     week_start = week_start_for(today)
     targets = ensure_weekly_targets(
         conn,
@@ -540,7 +576,8 @@ def _rings_for(
         trace_id=trace_id,
         model_prefs_path=model_prefs_path,
     )
-    return measure_week(conn, targets, week_start=week_start, today=today), week_start
+    rings = measure_week(conn, targets, week_start=week_start, today=today)
+    return display_rings(rings, units), week_start
 
 
 NO_TARGET_NEWS = "(no weekly target was completed by this sync)"
@@ -603,6 +640,7 @@ def targets_completed_by(
     today: date,
     trace_id: int | None = None,
     model_prefs_path: Path | None = None,
+    units: UnitSystem = UnitSystem.METRIC,
 ) -> str:
     """Describe the weekly targets this sync just completed, for the nudge.
 
@@ -622,6 +660,7 @@ def targets_completed_by(
             today=today,
             trace_id=trace_id,
             model_prefs_path=model_prefs_path,
+            units=units,
         )
         lines = [
             f"- {ring_label(ring.target)}: {_value_text(ring)} "
@@ -644,6 +683,7 @@ def weekly_progress_block(
     trace_id: int | None = None,
     model_prefs_path: Path | None = None,
     frame: PlanFrame | None = None,
+    units: UnitSystem = UnitSystem.METRIC,
 ) -> str | None:
     """Return the full progress strip for a report, or None.
 
@@ -659,6 +699,7 @@ def weekly_progress_block(
         model_prefs_path: Profile model preferences.
         frame: How much of the strip this person's context warrants. Defaults
             to the full strip.
+        units: Display unit system for distance rings.
 
     Returns:
         A fenced markdown block, or None.
@@ -673,6 +714,7 @@ def weekly_progress_block(
             today=today or date.today(),
             trace_id=trace_id,
             model_prefs_path=model_prefs_path,
+            units=units,
         )
         return render_progress_block(
             rings,
@@ -770,6 +812,7 @@ def weekly_progress_nudge_line(
     trace_id: int | None = None,
     model_prefs_path: Path | None = None,
     frame: PlanFrame | None = None,
+    units: UnitSystem = UnitSystem.METRIC,
 ) -> tuple[str, str] | None:
     """Return the nudge's progress line, but only when it would say something new.
 
@@ -792,6 +835,7 @@ def weekly_progress_nudge_line(
         frame: How much of the strip this person's context warrants. A hidden
             frame returns None without recording anything, so the line the
             person last actually saw stays the one it is compared against.
+        units: Display unit system for distance rings.
 
     Returns:
         A (line, fingerprint) pair, or None when nothing visible has changed
@@ -807,6 +851,7 @@ def weekly_progress_nudge_line(
             today=today or date.today(),
             trace_id=trace_id,
             model_prefs_path=model_prefs_path,
+            units=units,
         )
         ring = pick_headline_ring(rings)
         if ring is None:

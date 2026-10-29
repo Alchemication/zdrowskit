@@ -106,6 +106,10 @@ The first profile must use `--operator`; HTTP is the default source. Use
 `--source google-drive`, both folder IDs, and configure the shared service
 account as described in [Google Drive import](google-drive.md).
 
+Display units default to metric. Pass `--units imperial` to read miles, min/mi,
+feet, °F and kcal; see [Multi-profile](multi-profile.md). Storage stays metric
+and the phone's export units do not matter.
+
 The Telegram ID is the stable numeric user ID, not a username. For the first
 operator, send the bot a message before starting the daemon and read
 `message.from.id` from the official Bot API `getUpdates` response. Later, an

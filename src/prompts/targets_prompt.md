@@ -8,7 +8,7 @@ Return **one JSON object** and nothing else. No preamble, no explanation, no
 markdown fence commentary.
 
 ```
-{{"targets": [{{"metric": "<key>", "category": "<name or null>", "target": <number>, "threshold": <number or null>, "goal": "<the sentence this came from>"}}]}}
+{{"targets": [{{"metric": "<key>", "category": "<name or null>", "target": <number>, "unit": "<km or mi for distance keys, else null>", "threshold": <number or null>, "goal": "<the sentence this came from>"}}]}}
 ```
 
 - `metric` must be one of the keys listed below, spelled exactly.
@@ -16,6 +16,9 @@ markdown fence commentary.
   keys that list categories, and `null` for every other key.
 - `target` is what the person is committing to reach across the whole week,
   Monday to Sunday.
+- `unit` is required for the distance keys and `null` for every other key.
+  Copy the unit the goal is written in: miles is `mi`, kilometres is `km`.
+  Never convert the number yourself.
 - `threshold` is required for the keys that say so, and `null` for every other
   key.
 - `goal` quotes the goal line you read it from, so a disputed number can be
@@ -63,10 +66,11 @@ sit at zero all week.
    `sessions_week` with the matching `type:` category from the list above.
    Fall back to `sessions_week`/`any` only when the goal is about training in
    general rather than one sport, and never force a sport into a category it
-   is not.
+   is not. A goal written in miles keeps its number: "run 15 miles a week" is
+   `distance_km_week`/`run` with `target` 15 and `unit` `mi`.
 6. **Drop what does not fit.** A goal about pace, resting heart rate, HRV, body
-   weight, injury avoidance, or diet has no key here. Leave it out entirely; do
-   not force it into the nearest key.
+   weight, treadmill speed, injury avoidance, or diet has no key here. Leave
+   it out entirely; do not force it into the nearest key.
 7. **Ranges take the lower bound.** "Run 25-30 km" is a target of 25. The bar
    should be reachable, not aspirational.
 8. **Aim for the fewest rings that cover the week.** One volume ring, one

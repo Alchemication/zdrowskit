@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
+import json
+import logging
 from pathlib import Path
 
-from parsers.workouts import _category, _counts_as_lift, _qty, parse_workouts
+import pytest
+
+from models import WorkoutSnapshot
+from parsers.normalise import UnitNormaliser
+from parsers.workouts import _category, _counts_as_lift, parse_workouts
 
 
 class TestCategory:
@@ -30,13 +36,15 @@ class TestCategory:
 
 class TestQty:
     def test_extracts_value(self) -> None:
-        assert _qty({"qty": 81.6, "units": "count/min"}) == 81.6
+        obj = {"qty": 81.6, "units": "count/min"}
+        assert UnitNormaliser().qty(obj, "count/min", field="hr") == 81.6
 
     def test_none_input(self) -> None:
-        assert _qty(None) is None
+        assert UnitNormaliser().qty(None, "count/min", field="hr") is None
 
     def test_missing_qty_key(self) -> None:
-        assert _qty({"units": "count/min"}) is None
+        obj = {"units": "count/min"}
+        assert UnitNormaliser().qty(obj, "count/min", field="hr") is None
 
 
 class TestCountsAsLift:
@@ -137,3 +145,117 @@ class TestParseWorkouts:
         assert len(workouts) == 1
         assert workouts[0].category == "lift"
         assert workouts[0].counts_as_lift is False
+
+
+class TestImperialWorkouts:
+    @pytest.fixture
+    def run(self, fixtures_dir: Path) -> WorkoutSnapshot:
+        return parse_workouts(fixtures_dir / "imperial_workouts.json")[0]
+
+    def test_distance_miles(self, run: WorkoutSnapshot) -> None:
+        assert run.gpx_distance_km == pytest.approx(3.1 * 1.609344, abs=1e-3)
+
+    def test_speed_mph_to_ms(self, run: WorkoutSnapshot) -> None:
+        assert run.gpx_avg_speed_ms == pytest.approx(6.0 * 0.44704, abs=1e-4)
+
+    def test_elevation_feet(self, run: WorkoutSnapshot) -> None:
+        assert run.gpx_elevation_gain_m == pytest.approx(20 * 0.3048)
+
+    def test_energy_kcal(self, run: WorkoutSnapshot) -> None:
+        assert run.active_energy_kj == pytest.approx(500 * 4.184)
+
+    def test_temperature_degf(self, run: WorkoutSnapshot) -> None:
+        assert run.temperature_c == pytest.approx(10.0)
+
+    def test_intensity_met(self, run: WorkoutSnapshot) -> None:
+        assert run.intensity_kcal_per_hr_kg == 8.0
+
+    def test_heart_rate_bpm(self, run: WorkoutSnapshot) -> None:
+        assert (run.hr_min, run.hr_avg, run.hr_max) == (120, 150.0, 170)
+
+    def test_split_elevation_rescaled_to_converted_gain(
+        self, run: WorkoutSnapshot
+    ) -> None:
+        assert len(run.splits) == 1
+        assert run.splits[0].elevation_gain_m == pytest.approx(
+            run.gpx_elevation_gain_m, abs=0.01
+        )
+
+    def test_bpm_bins_feed_split_heart_rate(self, run: WorkoutSnapshot) -> None:
+        assert run.splits[0].hr_avg == 150.0
+        assert run.splits[0].cadence_spm == 170.0
+
+
+class TestWorkoutUnknownUnits:
+    def _parse(self, tmp_path: Path, **fields: object) -> WorkoutSnapshot:
+        workout = {
+            "name": "Outdoor Run",
+            "start": "2026-03-10 07:00:00 +0000",
+            "duration": 1800.0,
+            **fields,
+        }
+        path = tmp_path / "workouts.json"
+        path.write_text(json.dumps({"data": {"workouts": [workout]}}))
+        return parse_workouts(path)[0]
+
+    def test_unknown_temperature_unit_is_dropped_and_warned(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.WARNING, logger="parsers.normalise"):
+            run = self._parse(tmp_path, temperature={"qty": 50, "units": "furlong"})
+        assert run.temperature_c is None
+        assert len(caplog.records) == 1
+        assert "furlong" in caplog.records[0].getMessage()
+
+    def test_distance_without_units_is_dropped(self, tmp_path: Path) -> None:
+        assert self._parse(tmp_path, distance={"qty": 5.0}).gpx_distance_km is None
+
+    def test_energy_without_units_falls_back_to_zero(self, tmp_path: Path) -> None:
+        run = self._parse(tmp_path, activeEnergyBurned={"qty": 500})
+        assert run.active_energy_kj == 0.0
+
+    def test_heart_rate_bin_with_unknown_unit_is_kept_and_warned(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        lat = 0.008993216059187304 / 1000 * 150
+        route = [
+            {
+                "latitude": lat * i,
+                "longitude": 0.0,
+                "altitude": 100.0,
+                "speed": 3.3,
+                "timestamp": f"2026-03-10T07:{(45 * i) // 60:02d}:{(45 * i) % 60:02d}Z",
+            }
+            for i in range(9)
+        ]
+        bins = [
+            {
+                "date": f"2026-03-10 07:{m:02d}:00 +0000",
+                "Avg": 150,
+                "Max": 160,
+                "units": "beats",
+            }
+            for m in range(7)
+        ]
+        with caplog.at_level(logging.WARNING, logger="parsers.normalise"):
+            run = self._parse(tmp_path, route=route, heartRateData=bins)
+        assert len(run.splits) == 1
+        assert run.splits[0].hr_avg == 150.0
+        assert len(caplog.records) == 1
+        assert "beats" in caplog.records[0].getMessage()
+
+    @pytest.mark.parametrize("bad", [65, "65", [65]])
+    def test_non_dict_field_values_do_not_abort_the_payload(
+        self, tmp_path: Path, bad: object
+    ) -> None:
+        run = self._parse(
+            tmp_path,
+            humidity=bad,
+            temperature=bad,
+            distance=bad,
+            heartRate={"avg": bad},
+        )
+        assert run.humidity_pct is None
+        assert run.temperature_c is None
+        assert run.gpx_distance_km is None
+        assert run.hr_avg is None

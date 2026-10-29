@@ -66,6 +66,7 @@ enabled = false
 | `operator` | `false` | Grants operator-only coding-agent commands. Exactly one roster entry must be the operator. |
 | `enabled` | `true` | Disabled profiles keep their files but are not loaded, scheduled, or routed. |
 | `import_source` | `http` | `http`, `google-drive`, or operator-only `local`. |
+| `units` | `metric` | Display units: `metric` or `imperial`. Storage stays metric; only what the person reads (reports, nudges, chat, progress bars) changes. |
 | `drive_metrics_folder_id` | — | Required for a Drive profile. |
 | `drive_workouts_folder_id` | — | Required for a Drive profile. |
 
@@ -187,6 +188,10 @@ entry:
 ```bash
 uv run python main.py profile add anna --telegram-id 222222222
 ```
+
+Pass `--units imperial` to show miles, min/mi, feet, °F and kcal. There is no
+command to change it later: edit `units` in `profiles.toml` and restart the
+daemon.
 
 `profile adopt` is different. It is the one-time migration path for an older
 single-profile installation with root-level `health.db` and `ContextFiles/`:

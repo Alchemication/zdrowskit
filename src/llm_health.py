@@ -1,37 +1,26 @@
-"""Health data rendering and assembly for LLM prompts.
+"""Health data rendering for LLM prompts.
 
 Pure formatting functions that turn raw health data dicts into compact
-markdown for prompt injection, plus DB-backed data assembly.
+markdown for prompt injection. DB-backed assembly lives in
+``llm_health_data``.
 
 Extracted from llm.py to separate app-domain logic from LLM infrastructure.
 """
 
 from __future__ import annotations
 
-import logging
 import re
-import sqlite3
-from datetime import date, datetime, timedelta
+from datetime import date
 
-from aggregator import summarise
-from config import COACH_SUMMARY_MAX_AGE_DAYS, SLEEP_SYNC_CUTOFF_HOUR
-from report import group_by_week, to_dict
-from store import load_date_range, load_snapshots
-
-logger = logging.getLogger(__name__)
-
-_SLEEP_KEYS = frozenset(
-    {
-        "sleep_total_h",
-        "sleep_in_bed_h",
-        "sleep_efficiency_pct",
-        "sleep_deep_h",
-        "sleep_core_h",
-        "sleep_rem_h",
-        "sleep_awake_h",
-    }
+from config import COACH_SUMMARY_MAX_AGE_DAYS
+from units import (
+    Quantity,
+    UnitSystem,
+    format_pace,
+    pace_to_display,
+    to_display,
+    unit_label,
 )
-
 
 # ---------------------------------------------------------------------------
 # Formatting helpers
@@ -80,13 +69,34 @@ def _format_percent(value: float | int | None, decimals: int = 1) -> str | None:
     return f"{rendered}%"
 
 
-def _format_pace(value: float | None) -> str | None:
-    """Format minutes/km as mm:ss/km."""
-    if value is None:
+def _format_quantity_metric(
+    value: float | int | None,
+    quantity: Quantity,
+    units: UnitSystem,
+    *,
+    decimals: int = 1,
+    suffix: str = "",
+) -> str | None:
+    """Format a stored metric value in the display units, like ``_format_metric``.
+
+    Args:
+        value: Value in the stored (metric) unit, or None.
+        quantity: Which physical quantity the value is.
+        units: Display unit system.
+        decimals: Digits after the decimal point.
+        suffix: Appended to the unit label, e.g. ``"/day"``.
+
+    Returns:
+        The rendered value with unit, or None when missing or non-positive.
+    """
+    label = unit_label(quantity, units) + suffix
+    if value is None or units is UnitSystem.METRIC:
+        return _format_metric(value, label, decimals=decimals)
+    try:
+        shown = to_display(float(value), quantity, units)
+    except (TypeError, ValueError):
         return None
-    total_seconds = int(round(value * 60))
-    minutes, seconds = divmod(total_seconds, 60)
-    return f"{minutes}:{seconds:02d}/km"
+    return _format_metric(shown, label, decimals=decimals)
 
 
 def _format_day_label(date_str: str) -> str:
@@ -102,7 +112,9 @@ def _pluralize(count: int, singular: str, plural: str | None = None) -> str:
     return plural or f"{singular}s"
 
 
-def _format_workout_line(workout: dict) -> str:
+def _format_workout_line(
+    workout: dict, *, units: UnitSystem = UnitSystem.METRIC
+) -> str:
     """Render one workout compactly for prompt consumption."""
     name = str(workout.get("type") or workout.get("category") or "Workout")
     parts: list[str] = []
@@ -117,14 +129,16 @@ def _format_workout_line(workout: dict) -> str:
         except (TypeError, ValueError):
             pace = None
 
-    distance_text = _format_metric(distance, "km", decimals=1)
+    distance_text = _format_quantity_metric(
+        distance, Quantity.DISTANCE, units, decimals=1
+    )
     duration_text = _format_metric(duration, "min", decimals=0)
     if distance_text:
         parts.append(distance_text)
     if duration_text:
         parts.append(duration_text)
     pace_value = float(pace) if isinstance(pace, (int, float)) else None
-    pace_text = _format_pace(pace_value)
+    pace_text = format_pace(pace_value, units)
     if pace_text:
         parts.append(pace_text)
 
@@ -136,9 +150,10 @@ def _format_workout_line(workout: dict) -> str:
     if avg_hr:
         parts.append(f"avg HR {avg_hr}")
 
-    elevation = _format_metric(
+    elevation = _format_quantity_metric(
         workout.get("elevation_gain_m") or workout.get("gpx_elevation_gain_m"),
-        "m",
+        Quantity.ELEVATION,
+        units,
         decimals=0,
     )
     if elevation:
@@ -152,9 +167,12 @@ def _format_workout_line(workout: dict) -> str:
             location_text = f"{location_text}, {country}"
         parts.append(location_text)
 
-    splits_text = _format_splits(workout.get("splits"))
+    splits_text = _format_splits(workout.get("splits"), units=units)
     if splits_text:
-        parts.append(f"splits {splits_text}")
+        splits_label = (
+            "km splits (pace per mi)" if units is UnitSystem.IMPERIAL else "splits"
+        )
+        parts.append(f"{splits_label} {splits_text}")
 
     # A short functional session is logged as a lift but is not counted as one
     # in the week totals. Unlabelled, the card and the totals disagree and the
@@ -167,8 +185,12 @@ def _format_workout_line(workout: dict) -> str:
     return name
 
 
-def _format_splits(splits: object) -> str | None:
+def _format_splits(
+    splits: object, *, units: UnitSystem = UnitSystem.METRIC
+) -> str | None:
     """Format per-km splits as a compact slash-separated pace string.
+
+    Splits are always per km; imperial converts each pace to min/mi.
 
     Returns None when splits are missing, empty, or unparseable, so the
     workout line stays clean for non-GPS sessions.
@@ -182,8 +204,9 @@ def _format_splits(splits: object) -> str | None:
         pace = split.get("pace_min_km")
         if not isinstance(pace, (int, float)):
             continue
-        minutes = int(pace)
-        seconds = int(round((float(pace) - minutes) * 60))
+        shown = pace_to_display(float(pace), units)
+        minutes = int(shown)
+        seconds = int(round((shown - minutes) * 60))
         if seconds == 60:
             minutes += 1
             seconds = 0
@@ -198,13 +221,19 @@ def _format_splits(splits: object) -> str | None:
 # ---------------------------------------------------------------------------
 
 
-def _render_day_block(day: dict, withheld: frozenset[str] = frozenset()) -> str:
+def _render_day_block(
+    day: dict,
+    withheld: frozenset[str] = frozenset(),
+    *,
+    units: UnitSystem = UnitSystem.METRIC,
+) -> str:
     """Render one day card for the prompt.
 
     Args:
         day: Canonical day dict.
         withheld: Metric columns with too few readings to show as a per-day
             series. Their latest values are reported once elsewhere instead.
+        units: Display unit system.
 
     Returns:
         Markdown for one day card.
@@ -223,7 +252,9 @@ def _render_day_block(day: dict, withheld: frozenset[str] = frozenset()) -> str:
     exercise = _format_metric(value_of("exercise_min"), "exercise min", decimals=0)
     if exercise:
         activity_parts.append(exercise)
-    distance = _format_metric(value_of("distance_km"), "km", decimals=1)
+    distance = _format_quantity_metric(
+        value_of("distance_km"), Quantity.DISTANCE, units, decimals=1
+    )
     if distance:
         activity_parts.append(distance)
     if activity_parts:
@@ -282,7 +313,9 @@ def _render_day_block(day: dict, withheld: frozenset[str] = frozenset()) -> str:
 
     workouts = day.get("workouts") or []
     if workouts:
-        rendered_workouts = " | ".join(_format_workout_line(w) for w in workouts)
+        rendered_workouts = " | ".join(
+            _format_workout_line(w, units=units) for w in workouts
+        )
         lines.append(f"- Workouts: {rendered_workouts}.")
     else:
         lines.append("- Workouts: none logged.")
@@ -290,7 +323,9 @@ def _render_day_block(day: dict, withheld: frozenset[str] = frozenset()) -> str:
     return "\n".join(lines)
 
 
-def _render_week_summary_block(summary: dict, *, prompt_kind: str) -> str:
+def _render_week_summary_block(
+    summary: dict, *, prompt_kind: str, units: UnitSystem = UnitSystem.METRIC
+) -> str:
     """Render the current target week's summary with semantic missing-data rules.
 
     The totals here already include today, and the heading says so because a
@@ -326,16 +361,20 @@ def _render_week_summary_block(summary: dict, *, prompt_kind: str) -> str:
     )
 
     running_parts: list[str] = []
-    total_run_km = _format_metric(summary.get("total_run_km"), "km", decimals=1)
+    total_run_km = _format_quantity_metric(
+        summary.get("total_run_km"), Quantity.DISTANCE, units, decimals=1
+    )
     if total_run_km:
         running_parts.append(f"{total_run_km} total")
-    best_pace = _format_pace(summary.get("best_pace_min_per_km"))
+    best_pace = format_pace(summary.get("best_pace_min_per_km"), units)
     if best_pace:
         running_parts.append(f"best pace {best_pace}")
     avg_run_hr = _format_metric(summary.get("avg_run_hr"), "bpm", decimals=0)
     if avg_run_hr:
         running_parts.append(f"avg run HR {avg_run_hr}")
-    avg_elev = _format_metric(summary.get("avg_elevation_gain_m"), "m", decimals=0)
+    avg_elev = _format_quantity_metric(
+        summary.get("avg_elevation_gain_m"), Quantity.ELEVATION, units, decimals=0
+    )
     if avg_elev:
         running_parts.append(f"avg elev {avg_elev}")
     if running_parts:
@@ -360,8 +399,12 @@ def _render_week_summary_block(summary: dict, *, prompt_kind: str) -> str:
     )
     if avg_exercise:
         activity_parts.append(avg_exercise)
-    avg_energy = _format_metric(
-        summary.get("avg_active_energy_kj"), "kJ/day", decimals=0
+    avg_energy = _format_quantity_metric(
+        summary.get("avg_active_energy_kj"),
+        Quantity.ENERGY,
+        units,
+        decimals=0,
+        suffix="/day",
     )
     if avg_energy:
         activity_parts.append(avg_energy)
@@ -421,7 +464,9 @@ def _render_week_summary_block(summary: dict, *, prompt_kind: str) -> str:
     return "\n".join(lines)
 
 
-def _render_history_week(summary: dict) -> str:
+def _render_history_week(
+    summary: dict, *, units: UnitSystem = UnitSystem.METRIC
+) -> str:
     """Render one compact prior-week bullet."""
     label = str(summary.get("week_label", "Unknown week"))
     parts = [
@@ -432,7 +477,9 @@ def _render_history_week(summary: dict) -> str:
     if walk_count:
         parts.append(f"{walk_count} walk")
 
-    total_run = _format_metric(summary.get("total_run_km"), "km", decimals=1)
+    total_run = _format_quantity_metric(
+        summary.get("total_run_km"), Quantity.DISTANCE, units, decimals=1
+    )
     if total_run:
         parts.append(total_run)
 
@@ -568,7 +615,7 @@ def format_last_coach_summary(
 _WITHHELD_LABELS = {
     "steps": ("Steps", "", 0),
     "exercise_min": ("Exercise minutes", "min", 0),
-    "distance_km": ("Distance", "km", 1),
+    "distance_km": ("Distance", Quantity.DISTANCE, 1),
     "hrv_ms": ("HRV", "ms", 1),
     "resting_hr": ("Resting HR", "bpm", 0),
     "recovery_index": ("Recovery index", "", 2),
@@ -581,7 +628,12 @@ _WITHHELD_LABELS = {
 }
 
 
-def _render_withheld_readings(days: list[dict], withheld: frozenset[str]) -> str | None:
+def _render_withheld_readings(
+    days: list[dict],
+    withheld: frozenset[str],
+    *,
+    units: UnitSystem = UnitSystem.METRIC,
+) -> str | None:
     """Report the latest value of each metric kept out of the day cards.
 
     The reading itself is useful and stays. What is removed is its position in
@@ -592,6 +644,7 @@ def _render_withheld_readings(days: list[dict], withheld: frozenset[str]) -> str
     Args:
         days: Canonical day dicts, oldest first.
         withheld: Metric columns being kept out of the day cards.
+        units: Display unit system.
 
     Returns:
         A markdown section, or None when nothing was withheld.
@@ -611,7 +664,12 @@ def _render_withheld_readings(days: list[dict], withheld: frozenset[str]) -> str
         if latest is None:
             continue
         label, unit, decimals = _WITHHELD_LABELS[column]
-        rendered = _format_metric(latest[1], unit, decimals=decimals)
+        if isinstance(unit, Quantity):
+            rendered = _format_quantity_metric(
+                latest[1], unit, units, decimals=decimals
+            )
+        else:
+            rendered = _format_metric(latest[1], unit, decimals=decimals)
         entries.append(f"- {label}: {rendered} on {latest[0]} ({count} recorded).")
 
     if not entries:
@@ -635,6 +693,7 @@ def render_health_data(
     week: str = "current",
     today: date | None = None,
     unestablished: set[str] | None = None,
+    units: UnitSystem = UnitSystem.METRIC,
 ) -> str:
     """Render canonical health data into compact markdown for LLM prompts.
 
@@ -645,6 +704,7 @@ def render_health_data(
         today: Override for the current date.
         unestablished: Metric columns with too few readings to show as a
             per-day series. Omit on a mature profile.
+        units: Display unit system for distances, paces, elevation, energy.
 
     Returns:
         Compact markdown for prompt injection.
@@ -666,13 +726,17 @@ def render_health_data(
     if not summary:
         return "No health data available."
 
-    sections = [_render_week_summary_block(summary, prompt_kind=prompt_kind)]
+    sections = [
+        _render_week_summary_block(summary, prompt_kind=prompt_kind, units=units)
+    ]
 
     def render_day_section(title: str, day_blocks: list[dict]) -> None:
         if day_blocks:
             sections.append(
                 f"{title}\n\n"
-                + "\n\n".join(_render_day_block(day, withheld) for day in day_blocks)
+                + "\n\n".join(
+                    _render_day_block(day, withheld, units=units) for day in day_blocks
+                )
             )
 
     if prompt_kind == "nudge":
@@ -696,7 +760,7 @@ def render_health_data(
             )
 
     if withheld:
-        readings = _render_withheld_readings(days, withheld)
+        readings = _render_withheld_readings(days, withheld, units=units)
         if readings:
             sections.append(readings)
 
@@ -707,7 +771,7 @@ def render_health_data(
                 continue
             summary_dict = entry.get("summary")
             if isinstance(summary_dict, dict):
-                history_lines.append(_render_history_week(summary_dict))
+                history_lines.append(_render_history_week(summary_dict, units=units))
         if history_lines:
             sections.append("### Previous Weeks\n\n" + "\n".join(history_lines))
 
@@ -811,6 +875,7 @@ def build_review_facts(
     *,
     week_complete: bool,
     unestablished: set[str] | None = None,
+    units: UnitSystem = UnitSystem.METRIC,
 ) -> str:
     """Build a compact shared summary for insights and coach prompts.
 
@@ -820,6 +885,7 @@ def build_review_facts(
         week_complete: Whether the target week has fully elapsed.
         unestablished: Metric columns with too few readings to generalise
             from. Omit on a mature profile.
+        units: Display unit system for run volume.
 
     Returns:
         Compact markdown of shared review facts.
@@ -834,12 +900,18 @@ def build_review_facts(
     run_count = summary.get("run_count")
     lift_count = summary.get("lift_count")
     total_run_km = summary.get("total_run_km")
+    run_volume = _fmt_review_value(to_display(total_run_km, Quantity.DISTANCE, units))
+    distance_unit = unit_label(Quantity.DISTANCE, units)
     avg_hrv = summary.get("avg_hrv_ms")
     avg_resting_hr = summary.get("avg_resting_hr")
     avg_sleep = summary.get("avg_sleep_total_h")
     avg_sleep_eff = summary.get("avg_sleep_efficiency_pct")
     hrv_trend = summary.get("hrv_trend") or "n/a"
     prev_run_km = previous_summary.get("total_run_km") if previous_summary else None
+    run_delta = _fmt_review_delta(
+        to_display(total_run_km, Quantity.DISTANCE, units),
+        to_display(prev_run_km, Quantity.DISTANCE, units),
+    )
     prev_hrv = previous_summary.get("avg_hrv_ms") if previous_summary else None
     prev_resting = previous_summary.get("avg_resting_hr") if previous_summary else None
     notes_present = (
@@ -861,7 +933,7 @@ def build_review_facts(
             "- Training snapshot: "
             f"**{run_count or 0}** runs, "
             f"**{lift_count or 0}** lifts, "
-            f"**{_fmt_review_value(total_run_km)} km** run volume."
+            f"**{run_volume} {distance_unit}** run volume."
         ),
         (
             "- Recovery verdict: "
@@ -875,7 +947,7 @@ def build_review_facts(
     if previous_summary:
         lines.append(
             "- vs previous week: "
-            f"run volume {_fmt_review_delta(total_run_km, prev_run_km)} km, "
+            f"run volume {run_delta} {distance_unit}, "
             f"HRV {_fmt_review_delta(avg_hrv, prev_hrv)} ms, "
             f"resting HR {_fmt_review_delta(avg_resting_hr, prev_resting)} bpm."
         )
@@ -892,259 +964,3 @@ def build_review_facts(
         )
 
     return "\n".join(lines)
-
-
-# ---------------------------------------------------------------------------
-# Data assembly from DB
-# ---------------------------------------------------------------------------
-
-
-def build_llm_data(
-    conn: sqlite3.Connection, months: int, week: str = "current"
-) -> dict:
-    """Build a compact summary + history JSON for LLM consumption.
-
-    Args:
-        conn: Open SQLite database connection.
-        months: Number of months of history to include.
-        week: Which week to report on — "current" or "last".
-
-    Returns:
-        A dict with 'current_week', 'history', 'since_days', 'week_complete',
-        'week_label', 'week_start' and 'week_end' keys, JSON-serialisable. The
-        early return for an empty database carries only 'current_week',
-        'history' and 'week_complete'.
-    """
-    dr = load_date_range(conn)
-    if dr is None:
-        return {
-            "current_week": {"summary": None},
-            "history": [],
-            "week_complete": False,
-        }
-
-    today = date.today()
-    if week == "last":
-        last_sunday = today - timedelta(days=today.weekday() + 1)
-        week_start = (last_sunday - timedelta(days=6)).isoformat()
-        week_end = last_sunday.isoformat()
-    else:
-        monday = today - timedelta(days=today.weekday())
-        week_start = monday.isoformat()
-        week_end = (monday + timedelta(days=6)).isoformat()
-
-    logger.info(
-        "Report dates: mode=%s, week=%s..%s, today=%s, db_range=%s..%s",
-        week,
-        week_start,
-        week_end,
-        today,
-        dr[0],
-        dr[1],
-    )
-
-    # Fetch one extra day before the week so we can shift sleep forward.
-    sleep_start = (date.fromisoformat(week_start) - timedelta(days=1)).isoformat()
-    current_snaps = load_snapshots(conn, start=sleep_start, end=week_end)
-
-    history_end = (date.fromisoformat(week_start) - timedelta(days=1)).isoformat()
-    # Round forward to a Monday: a window cut mid-week renders its first week
-    # as two days reading "0 run, 1 lift", indistinguishable from a real week.
-    history_start_day = date.fromisoformat(week_start) - timedelta(days=30 * months)
-    history_start = (
-        history_start_day + timedelta(days=-history_start_day.weekday() % 7)
-    ).isoformat()
-    history_snaps = load_snapshots(conn, start=history_start, end=history_end)
-    history_weeks = group_by_week(history_snaps)
-
-    ws = date.fromisoformat(week_start)
-    iso = ws.isocalendar()
-    week_label = f"{iso.year}-W{iso.week:02d}"
-
-    days = _shift_sleep_forward([to_dict(s) for s in current_snaps], week_start)
-
-    # --- Classify sleep status per day and compute compliance ---
-    today_iso = today.isoformat()
-    sleep_tracked, sleep_total_eligible, not_tracked_dates = _classify_sleep_status(
-        days, today
-    )
-
-    # --- Build the today snapshot ---
-    today_snapshot = _build_today_snapshot(days, today_iso)
-
-    # --- Assemble the summary ---
-    week_snaps = [s for s in current_snaps if s.date >= week_start]
-    summary = to_dict(summarise(week_snaps)) if week_snaps else None
-
-    if summary:
-        summary["sleep_nights_tracked"] = sleep_tracked
-        summary["sleep_nights_total"] = sleep_total_eligible
-        summary["sleep_not_tracked_dates"] = not_tracked_dates
-        if today_snapshot:
-            summary["today"] = today_snapshot
-
-    return {
-        "current_week": {
-            "summary": summary,
-            "days": days,
-        },
-        "history": [{"summary": to_dict(summarise(w))} for w in history_weeks],
-        "since_days": _build_since_days(conn, week_end, today),
-        "week_complete": today > date.fromisoformat(week_end),
-        "week_label": week_label,
-        "week_start": week_start,
-        "week_end": week_end,
-    }
-
-
-def _shift_sleep_forward(days: list[dict], boundary: str) -> list[dict]:
-    """Move each night's sleep onto the morning it belongs to.
-
-    Apple records a night's sleep against the day it started, but the user
-    experiences it as the morning they woke up. Callers fetch one extra day
-    before the window so the first in-window morning has a night to inherit;
-    that extra day is dropped afterwards.
-
-    Args:
-        days: Day dicts in ascending date order, oldest first.
-        boundary: First date that belongs to the window, ISO format. Days
-            before it are dropped once their sleep has been shifted forward.
-
-    Returns:
-        The in-window days, sleep shifted.
-    """
-    for i in range(len(days) - 1, 0, -1):
-        prev_day, cur_day = days[i - 1], days[i]
-        for k in _SLEEP_KEYS:
-            cur_day[k] = prev_day.get(k)
-            prev_day.pop(k, None)
-    if days and days[0].get("date", "") < boundary:
-        days = days[1:]
-    return days
-
-
-def _classify_sleep_status(days: list[dict], today: date) -> tuple[int, int, list[str]]:
-    """Tag each day with a sleep status and count tracking compliance.
-
-    A night can be missing because the user did not wear the watch or because
-    the export has not caught up yet. Only the first is a compliance miss, so
-    today — and yesterday before the morning sync window closes — is "pending"
-    rather than "not tracked" and does not count against the total.
-
-    Args:
-        days: Day dicts, mutated in place with a ``sleep_status`` key.
-        today: The current date.
-
-    Returns:
-        Tuple of (nights tracked, nights eligible, dates not tracked).
-    """
-    today_iso = today.isoformat()
-    yesterday_iso = (today - timedelta(days=1)).isoformat()
-    before_sync_cutoff = datetime.now().hour < SLEEP_SYNC_CUTOFF_HOUR
-
-    tracked = 0
-    eligible = 0
-    not_tracked_dates: list[str] = []
-
-    for day in days:
-        if not isinstance(day, dict):
-            continue
-        day_date = day.get("date")
-        has_sleep = any(day.get(k) is not None for k in _SLEEP_KEYS)
-
-        if has_sleep:
-            day["sleep_status"] = "tracked"
-            tracked += 1
-            eligible += 1
-        elif day_date == today_iso or (
-            day_date == yesterday_iso and before_sync_cutoff
-        ):
-            day["sleep_status"] = "pending"
-        else:
-            day["sleep_status"] = "not_tracked"
-            eligible += 1
-            not_tracked_dates.append(day_date or "")
-
-    return tracked, eligible, not_tracked_dates
-
-
-def _build_since_days(
-    conn: sqlite3.Connection, week_end: str, today: date
-) -> list[dict]:
-    """Build day cards for everything after the reported week, up to today.
-
-    The weekly report runs on Monday morning but can be triggered by hand at
-    any point in the following week. Without this the model is blind to the
-    days between: it would talk about the finished week as if no time had
-    passed, and recommend a session the user already did.
-
-    Args:
-        conn: Open SQLite database connection.
-        week_end: Last date of the reported week, ISO format.
-        today: The current date.
-
-    Returns:
-        Day dicts from the day after ``week_end`` through today, sleep
-        shifted. Empty when the reported week is the current one.
-    """
-    first = date.fromisoformat(week_end) + timedelta(days=1)
-    if first > today:
-        return []
-    # Fetch week_end too, so the first morning has a night to inherit.
-    snaps = load_snapshots(conn, start=week_end, end=today.isoformat())
-    days = _shift_sleep_forward([to_dict(s) for s in snaps], first.isoformat())
-    _classify_sleep_status(days, today)
-    return days
-
-
-def _build_today_snapshot(days: list[dict], today_iso: str) -> dict | None:
-    """Extract a compact snapshot for today from the shifted day list."""
-    today_day = None
-    for d in days:
-        if isinstance(d, dict) and d.get("date") == today_iso:
-            today_day = d
-            break
-    if today_day is None:
-        return None
-
-    workouts = []
-    for w in today_day.get("workouts", []):
-        distance_km = w.get("gpx_distance_km")
-        duration_min = w.get("duration_min")
-        pace_min_per_km: float | None = None
-        if distance_km and duration_min and distance_km > 0:
-            pace_min_per_km = round(duration_min / distance_km, 2)
-        workouts.append(
-            {
-                "type": w.get("type"),
-                "category": w.get("category"),
-                "counts_as_lift": w.get("counts_as_lift"),
-                "duration_min": duration_min,
-                "distance_km": distance_km,
-                "pace_min_per_km": pace_min_per_km,
-                "avg_hr": w.get("hr_avg"),
-                "elevation_gain_m": w.get("gpx_elevation_gain_m"),
-                "location_label": w.get("location_label"),
-                "location_locality": w.get("location_locality"),
-                "location_country": w.get("location_country"),
-                "location_country_code": w.get("location_country_code"),
-            }
-        )
-
-    snapshot: dict = {
-        "date": today_iso,
-        "hrv_ms": today_day.get("hrv_ms"),
-        "resting_hr": today_day.get("resting_hr"),
-        "recovery_index": today_day.get("recovery_index"),
-        "steps": today_day.get("steps"),
-        "exercise_min": today_day.get("exercise_min"),
-        "sleep_status": today_day.get("sleep_status", "pending"),
-    }
-    if snapshot["sleep_status"] == "tracked":
-        snapshot["sleep_total_h"] = today_day.get("sleep_total_h")
-        snapshot["sleep_efficiency_pct"] = today_day.get("sleep_efficiency_pct")
-
-    if workouts:
-        snapshot["workouts"] = workouts
-
-    return snapshot

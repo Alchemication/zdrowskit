@@ -25,6 +25,7 @@ from standouts import (
     pending_keys,
 )
 from store import open_db
+from units import units_from_args
 
 logger = logging.getLogger(__name__)
 
@@ -114,7 +115,7 @@ def cmd_standouts(args: argparse.Namespace) -> None:
             "suppressed to prevent duplicate sends."
         )
 
-    candidates = find_candidates(conn, today=today)
+    candidates = find_candidates(conn, today=today, units=units_from_args(args))
     if not candidates:
         print()
         print(_NO_CANDIDATES_HELP)
