@@ -259,6 +259,19 @@ class TestUnitsPlumbing:
             patch("cmd_insights.cmd_insights", side_effect=spy("insights")),
             patch("cmd_nudge.cmd_nudge", side_effect=spy("nudge")),
             patch("cmd_coach.cmd_coach", side_effect=spy("coach")),
+            # The nudge runner checks quiet hours, the earliest send time and
+            # the rate limit against the wall clock before it reaches
+            # cmd_nudge; pin them open so the capture doesn't depend on when
+            # the suite runs.
+            patch(
+                "notification_prefs.evaluate_nudge_delivery",
+                return_value={"status": "allowed"},
+            ),
+            patch.object(
+                runtime._runners,
+                "_check_nudge_rate_limit",
+                return_value=(True, None, None),
+            ),
         ]
         for p in patches:
             p.start()
