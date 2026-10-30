@@ -25,12 +25,51 @@ from store import open_db
 logger = logging.getLogger(__name__)
 
 
+class SetChange(BaseModel):
+    """Set one preference path to a value."""
+
+    action: Literal["set"]
+    path: str = Field(description="Dotted preference path, e.g. nudges.max_per_day.")
+    value: bool | int | float | str = Field(
+        description="New value: boolean, number, weekday name, or HH:MM time."
+    )
+
+
+class ResetChange(BaseModel):
+    """Reset one preference path or section to its default."""
+
+    action: Literal["reset"]
+    path: str = Field(description="Dotted path or section name, or 'all'.")
+
+
+class ResetAllChange(BaseModel):
+    """Reset every override and clear temporary mutes."""
+
+    action: Literal["reset_all"]
+
+
+class MuteChange(BaseModel):
+    """Mute one target until an exact future timestamp."""
+
+    action: Literal["mute_until"]
+    target: str = Field(description="Mute target, e.g. nudges or all.")
+    expires_at: str = Field(description="ISO-8601 timestamp with offset.")
+    source_text: str = Field(description="The user's wording for the mute.")
+
+
+NotifyChange = SetChange | ResetChange | ResetAllChange | MuteChange
+
+
 class NotifyResponse(BaseModel):
     """Structured notify-request interpretation produced by the LLM.
 
-    Outer envelope only — ``changes`` items are dict-shaped and validated
-    semantically by :func:`validate_notification_changes`, since the legal
-    paths and value types depend on runtime constants.
+    Each change is typed by its ``action`` so the response format itself
+    requires the fields that action needs. A free-form dict left ``action`` to
+    the prompt's examples: DeepSeek followed them, but Claude Haiku returned
+    changes with no ``action`` at all, and every request failed. Paths and
+    values are still validated semantically by
+    :func:`validate_notification_changes`, since the legal ones depend on
+    runtime constants.
     """
 
     status: Literal["proposal", "needs_clarification", "unsupported"] = Field(
@@ -43,7 +82,7 @@ class NotifyResponse(BaseModel):
     intent: Literal[
         "show", "set", "enable", "disable", "reset", "reset_all", "mute_until"
     ] = Field(description="High-level user intent.")
-    changes: list[dict[str, Any]] = Field(
+    changes: list[NotifyChange] = Field(
         default_factory=list,
         description=(
             "Concrete change items (see Change schema in the system prompt). "
@@ -151,7 +190,9 @@ def interpret_notify_request(
     payload: dict[str, Any] = {
         "status": parsed.status,
         "intent": parsed.intent,
-        "changes": validate_notification_changes(parsed.changes),
+        "changes": validate_notification_changes(
+            [change.model_dump() for change in parsed.changes]
+        ),
         "summary": parsed.summary.strip(),
         "clarification_question": clarification,
         "reason": parsed.reason.strip(),
