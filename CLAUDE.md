@@ -25,8 +25,12 @@ value was chosen. Never inline them at the point of use, and never bury one in a
 defaults dict. Validation bounds may stay beside the code that enforces them
 (see `MIN_NUDGES_PER_DAY`), but the default itself belongs in `config.py`.
 
-Work on `main` and push straight to it — no feature branches, no PRs. Single
-developer for now; revisit when more join. Still commit only when asked, and
+The owner's own work goes on `main` and is pushed straight to it — no
+feature branches, no PRs. Outside contributors send PRs from forks; review
+each against the owner's live setup (operator profile, metric units, model
+routing, running daemon, applied migrations) before merging, and merge only
+with lint and tests green on the merged result. Never push to a contributor's
+branch or merge a PR without being asked. Still commit only when asked, and
 only with lint and tests green.
 
 ## Collaboration Style
