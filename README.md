@@ -141,3 +141,7 @@ Run any command with `--help` for the full flag list. See [Commands](docs/comman
 Tests live in `tests/`; evals live in `evals/`; prompts live in `src/prompts/`. See [Testing](docs/testing.md) and [LLM evals](docs/evals.md) for normal project workflows.
 
 `AGENTS.md` and `CLAUDE.md` contain agent-specific coding instructions and are intentionally separate from the user-facing docs.
+
+## License
+
+[MIT](LICENSE).
