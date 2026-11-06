@@ -4,7 +4,7 @@ zdrowskit is a personal Apple Health coach, not a general health-data platform.
 
 - **Apple Health source only** - health data still originates from Apple Health on an iPhone. There is no Garmin, Fitbit, or Android ingestion path. HTTP, Google Drive, and iCloud are transports, not additional health-data sources.
 - **Single person per database** - family hosting uses one cache, context tree, and SQLite database per person. Cross-profile queries are intentionally unsupported.
-- **Auto Export JSON required** - the parser supports [Auto Export](https://apps.apple.com/app/myhealth-export-to-icloud/id6737380982) JSON, not Apple's built-in all-data XML export. Scheduled delivery depends on the automation features available in the installed app version.
+- **Auto Export JSON required** - the parser supports [Health Auto Export](https://apps.apple.com/app/id1115567069) JSON, not Apple's built-in all-data XML export. Scheduled delivery needs the app's Premium tier; see [Getting the App](apple-health.md#getting-the-app).
 - **Platform-specific service installation** - the daemon runs on macOS or Linux, but built-in service installation manages macOS `launchd` only. A Raspberry Pi deployment needs an external systemd unit or equivalent. The documented public HTTP path also assumes a Tailscale Funnel-capable host.
 - **Public ingest depends on Tailscale Funnel** - upload tokens protect profile routing and Funnel exposes only the receiver, but availability still depends on the host being logged in and Tailscale running.
 - **Not real time** - scheduled automations and HealthKit delivery run opportunistically. Data arrives in overlapping batches with minutes of latency, not seconds.

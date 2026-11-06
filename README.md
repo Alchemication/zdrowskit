@@ -37,7 +37,7 @@ Three loops run continuously:
 ## Requirements
 
 - Apple Watch + iPhone
-- [Auto Export](https://apps.apple.com/app/myhealth-export-to-icloud/id6737380982) for scheduled Apple Health JSON export
+- [Health Auto Export](https://apps.apple.com/app/id1115567069) with a **Premium** subscription, for scheduled Apple Health JSON export
 - A macOS or Linux machine that runs Python
 - [Tailscale](https://tailscale.com/docs/install/mac) on the host when using the default HTTP transport
 - Python 3.12+ and [uv](https://github.com/astral-sh/uv)

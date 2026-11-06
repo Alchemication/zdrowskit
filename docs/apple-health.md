@@ -1,7 +1,7 @@
 # Apple Health Data Export
 
 zdrowskit imports the JSON produced by
-[Auto Export](https://apps.apple.com/app/myhealth-export-to-icloud/id6737380982),
+[Health Auto Export](https://apps.apple.com/app/id1115567069) ("Auto Export" below),
 not Apple's built-in all-data XML export. Auto Export can post JSON directly to
 the HTTP receiver or write the same data to iCloud or Google Drive.
 
@@ -90,6 +90,27 @@ switched off.
 
 A practical combination: run HTTP for day-to-day delivery, and temporarily
 enable local or Drive import when you need a backfill.
+
+## Getting the App
+
+Install **Health Auto Export – JSON+CSV** (developer Lybron Sobers) from the
+[App Store](https://apps.apple.com/app/id1115567069) on the iPhone that pairs
+with your Apple Watch, and grant it read access to Apple Health when it asks.
+
+The app is free to install, with paid tiers sold as in-app purchases:
+
+| Tier | What zdrowskit uses from it |
+|---|---|
+| Free | Nothing: dashboards and widgets only, no export |
+| Basic (one-time purchase) | Manual export only. Enough for a one-off backfill, not for zdrowskit's ongoing imports |
+| **Premium** (monthly, annual, or lifetime) | **Required.** Automations: scheduled exports to a REST API (HTTP), iCloud Drive, or Google Drive, plus everything in Basic |
+
+Every zdrowskit transport is an automation, so **Premium is required**; Basic
+does not include automations. The developer's
+[FAQ](https://help.healthyapps.dev/en/health-auto-export/faq/) lists what each
+tier unlocks, and the App Store page shows current prices for your region.
+Purchases include Family Sharing, so a household hosted on one zdrowskit
+installation can share a single Premium purchase.
 
 ## Auto Export Setup
 

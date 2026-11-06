@@ -180,6 +180,9 @@ tailscale funnel reset
 
 ## iPhone Auto Export Setup
 
+REST API automations need Health Auto Export's Premium tier; see
+[Getting the App](apple-health.md#getting-the-app).
+
 Create two REST API automations with the same schedule.
 
 Shared settings:
