@@ -213,9 +213,11 @@ matter](apple-health.md#why-the-aggregation-settings-matter). Over HTTP the
 receiver checks them and rejects a wrong one with `422`, so Auto Export shows
 the automation as failing. Current Auto Export versions send `Default` as the
 Workouts aggregation header whatever the setting, so for Workouts the receiver
-checks the spacing of the heart-rate and step samples in the upload instead,
-and its `422` says how far apart they were. The file transports have no such check: there a wrong
-value is accepted and quietly produces empty splits or misdated nights.
+checks the spacing of the heart-rate and step samples in each workout instead:
+one workout spaced wider than a minute fails the whole upload, and the `422`
+says how far apart its samples were. The file transports have no such check:
+there a wrong value is accepted and quietly produces empty splits or misdated
+nights.
 
 ## Choosing Date Ranges
 

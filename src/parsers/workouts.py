@@ -246,8 +246,18 @@ def _finite_float(value: object) -> float | None:
     return parsed
 
 
-def _parse_route_timestamp(raw: object) -> datetime | None:
-    """Parse a route-point timestamp into UTC."""
+def parse_timestamp_utc(raw: object) -> datetime | None:
+    """Parse an Auto Export timestamp into an aware UTC datetime.
+
+    Used for route points and workout series entries. A trailing ``Z`` is read
+    as UTC, and a value without an offset is taken as local time.
+
+    Args:
+        raw: The raw timestamp value.
+
+    Returns:
+        The UTC datetime, or None when *raw* is not a parseable string.
+    """
     if not isinstance(raw, str) or not raw.strip():
         return None
 
@@ -302,7 +312,7 @@ def _extract_bins(
         # taken as canonical (the latter warned about once).
         if not norm.accepts(entry.get("units"), canonical, field=f"workout {key}"):
             continue
-        start = _parse_route_timestamp(entry.get("date"))
+        start = parse_timestamp_utc(entry.get("date"))
         value = _finite_float(entry.get(value_field))
         if start is None or value is None or value <= 0:
             continue
@@ -615,8 +625,8 @@ def _extract_splits(
         if None in (prev_lat, prev_lon, lat, lon):
             continue
 
-        prev_ts = _parse_route_timestamp(prev_point.get("timestamp"))
-        ts = _parse_route_timestamp(point.get("timestamp"))
+        prev_ts = parse_timestamp_utc(prev_point.get("timestamp"))
+        ts = parse_timestamp_utc(point.get("timestamp"))
         if prev_ts is None or ts is None:
             continue
 

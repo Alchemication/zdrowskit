@@ -47,7 +47,7 @@ from config import (
     TAILSCALE_STATUS_TIMEOUT_S,
 )
 from parsers.metrics import parse_metrics_payload
-from parsers.workouts import BIN_SECONDS, parse_workouts_payload
+from parsers.workouts import BIN_SECONDS, parse_timestamp_utc, parse_workouts_payload
 from profiles import Profile
 
 logger = logging.getLogger(__name__)
@@ -450,60 +450,64 @@ def _validate_workouts(items: list[Any]) -> None:
             )
 
 
-def _median_series_gap_s(items: list[Any]) -> float | None:
-    """Return the median gap between consecutive workout series entries.
+def _median_series_gap_s(workout: dict[str, Any]) -> float | None:
+    """Return the median gap between one workout's consecutive series entries.
+
+    Timestamps go through the parser's own rule, so the check and the parser
+    agree on what a series entry's time is, and naive and aware values compare.
 
     Args:
-        items: The validated ``data.workouts`` array.
+        workout: One entry of the validated ``data.workouts`` array.
 
     Returns:
-        The median gap in seconds across every workout's heart-rate and step
+        The median gap in seconds across the workout's heart-rate and step
         series, or None when no series has two dated entries to compare.
     """
     gaps: list[float] = []
-    for workout in items:
-        for key in _WORKOUT_SERIES_KEYS:
-            series = workout.get(key)
-            if not isinstance(series, list):
-                continue
-            starts: list[datetime] = []
-            for entry in series:
-                raw = entry.get("date") if isinstance(entry, dict) else None
-                if not isinstance(raw, str):
-                    continue
-                try:
-                    starts.append(datetime.fromisoformat(raw.strip()))
-                except ValueError:
-                    continue
-            starts.sort()
-            gaps.extend(
-                (later - earlier).total_seconds()
-                for earlier, later in zip(starts, starts[1:])
-                if later > earlier
-            )
+    for key in _WORKOUT_SERIES_KEYS:
+        series = workout.get(key)
+        if not isinstance(series, list):
+            continue
+        starts = sorted(
+            ts
+            for entry in series
+            if isinstance(entry, dict)
+            and (ts := parse_timestamp_utc(entry.get("date"))) is not None
+        )
+        gaps.extend(
+            (later - earlier).total_seconds()
+            for earlier, later in zip(starts, starts[1:])
+            if later > earlier
+        )
     return statistics.median(gaps) if gaps else None
 
 
 def _require_minute_series(items: list[Any]) -> None:
-    """Reject workouts whose series are binned coarser than one minute.
+    """Reject an upload holding any workout binned coarser than one minute.
 
     Per-kilometre heart rate and cadence come from these series, and the parser
     credits each entry with at most one bin, so coarser entries leave every
-    split below the coverage floor.
+    split below the coverage floor. Each workout is judged on its own median:
+    one median over the whole upload would let a coarse workout through behind
+    fine ones, and its splits would come out empty with no error.
 
     Args:
         items: The validated ``data.workouts`` array.
 
     Raises:
-        IngestError: When the median series gap exceeds the parser's bin.
+        IngestError: When any workout's median series gap exceeds the
+            parser's bin.
     """
-    gap = _median_series_gap_s(items)
-    if gap is not None and gap > BIN_SECONDS:
-        raise IngestError(
-            HTTPStatus.UNPROCESSABLE_ENTITY,
-            "Workouts automation aggregation must be Minutes: heart-rate and "
-            f"step samples in this upload are {gap:.0f} s apart.",
-        )
+    for workout in items:
+        if not isinstance(workout, dict):
+            continue
+        gap = _median_series_gap_s(workout)
+        if gap is not None and gap > BIN_SECONDS:
+            raise IngestError(
+                HTTPStatus.UNPROCESSABLE_ENTITY,
+                "Workouts automation aggregation must be Minutes: heart-rate "
+                f"and step samples in a workout are {gap:.0f} s apart.",
+            )
 
 
 def _parser_dry_run(payload: dict[str, Any], kind: str) -> None:

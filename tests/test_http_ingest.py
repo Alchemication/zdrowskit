@@ -193,8 +193,8 @@ class TestValidateUpload:
             validate_upload(_headers("workouts"), json.dumps(payload).encode())
 
 
-def _series_body(*, gap_s: int, count: int = 5) -> bytes:
-    """Return a Workouts payload whose HR and step series are ``gap_s`` apart."""
+def _series_workout(*, gap_s: int, count: int = 5) -> dict:
+    """Return one workout whose HR and step series are ``gap_s`` apart."""
     start = datetime(2026, 10, 27, 7, 0, tzinfo=timezone(timedelta(hours=-7)))
     stamps = [
         (start + timedelta(seconds=gap_s * i)).strftime("%Y-%m-%d %H:%M:%S %z")
@@ -210,6 +210,12 @@ def _series_body(*, gap_s: int, count: int = 5) -> bytes:
         ],
         "stepCount": [{"date": s, "qty": 160, "units": "count"} for s in stamps],
     }
+    return workout
+
+
+def _series_body(*, gap_s: int, count: int = 5) -> bytes:
+    """Return a Workouts payload whose HR and step series are ``gap_s`` apart."""
+    workout = _series_workout(gap_s=gap_s, count=count)
     return json.dumps({"data": {"workouts": [workout]}}).encode("utf-8")
 
 
@@ -241,6 +247,30 @@ class TestWorkoutsAggregationFromSeries:
         with pytest.raises(IngestError, match="must be Minutes.*3600 s apart"):
             validate_upload(headers, _series_body(gap_s=3600))
 
+    def test_rejects_one_coarse_workout_among_fine_ones(self) -> None:
+        """A median over the whole upload let the coarse one through empty."""
+        headers = _headers("workouts")
+        headers["automation-aggregation"] = "Default"
+        workouts = [_series_workout(gap_s=60) for _ in range(5)]
+        workouts.append(_series_workout(gap_s=3600))
+        body = json.dumps({"data": {"workouts": workouts}}).encode("utf-8")
+
+        with pytest.raises(IngestError, match="must be Minutes.*3600 s apart"):
+            validate_upload(headers, body)
+
+    def test_mixed_timezone_series_gets_a_verdict_not_a_crash(self) -> None:
+        """A TypeError here escaped the handler, which catches ValueError."""
+        headers = _headers("workouts")
+        headers["automation-aggregation"] = "Default"
+        workout = _series_workout(gap_s=60)
+        workout["heartRateData"][1]["date"] = workout["heartRateData"][1]["date"][:-6]
+        body = json.dumps({"data": {"workouts": [workout]}}).encode("utf-8")
+
+        try:
+            validate_upload(headers, body)
+        except IngestError:
+            pass
+
     def test_accepts_workouts_without_series(self) -> None:
         # Nothing is binned, so nothing can be binned too coarsely.
         headers = _headers("workouts")
@@ -265,18 +295,37 @@ class TestMedianSeriesGap:
             {"date": "2026-10-27 07:01:00 -0700"},
         ]
 
-        assert http_ingest._median_series_gap_s([{"heartRateData": series}]) == 60
+        assert http_ingest._median_series_gap_s({"heartRateData": series}) == 60
 
     def test_none_without_two_dated_entries(self) -> None:
-        items = [{"heartRateData": [{"date": "2026-10-27 07:00:00 -0700"}]}, {}]
+        workout = {"heartRateData": [{"date": "2026-10-27 07:00:00 -0700"}]}
 
-        assert http_ingest._median_series_gap_s(items) is None
+        assert http_ingest._median_series_gap_s(workout) is None
+        assert http_ingest._median_series_gap_s({}) is None
+
+    def test_mixed_naive_and_aware_dates_do_not_crash(self) -> None:
+        """Sorting raw naive and aware datetimes raised TypeError."""
+        series = [
+            {"date": "2026-10-27 07:00:00 -0700"},
+            {"date": "2026-10-27 07:01:00"},
+            {"date": "2026-10-27 07:02:00 -0700"},
+        ]
+
+        assert http_ingest._median_series_gap_s({"heartRateData": series}) is not None
+
+    def test_z_suffixed_dates_are_read_as_utc(self) -> None:
+        series = [
+            {"date": "2026-10-27T14:00:00Z"},
+            {"date": "2026-10-27T14:01:00Z"},
+        ]
+
+        assert http_ingest._median_series_gap_s({"stepCount": series}) == 60
 
     def test_median_ignores_a_paused_stretch(self) -> None:
         stamps = ["07:00", "07:01", "07:02", "07:30", "07:31"]
         series = [{"date": f"2026-10-27 {s}:00 -0700"} for s in stamps]
 
-        assert http_ingest._median_series_gap_s([{"stepCount": series}]) == 60
+        assert http_ingest._median_series_gap_s({"stepCount": series}) == 60
 
 
 class TestUploadArrivalCallback:
