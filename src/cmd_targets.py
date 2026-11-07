@@ -20,12 +20,12 @@ from weekly_progress import (
     week_label_for,
 )
 from weekly_targets import (
-    StoredTarget,
     clear_targets,
     ensure_weekly_targets,
     extract_goal_text,
     week_start_for,
 )
+from target_specs import StoredTarget
 
 logger = logging.getLogger(__name__)
 

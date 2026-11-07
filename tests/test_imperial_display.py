@@ -30,12 +30,8 @@ from standouts import find_candidates
 from store import open_db, store_snapshots
 from units import KM_PER_MILE, UnitSystem
 from weekly_progress import display_ring, render_progress_block
-from weekly_targets import (
-    SPEC_BY_KEY,
-    StoredTarget,
-    goals_digest,
-    parse_targets_response,
-)
+from weekly_targets import goals_digest, parse_targets_response
+from target_specs import SPEC_BY_KEY, StoredTarget
 from aggregator import summarise
 
 M = UnitSystem.METRIC
@@ -615,11 +611,23 @@ class TestChallengeUnitRequired:
         "weeks": 2,
     }
 
-    def test_missing_unit_asks_the_model_to_supply_one(self) -> None:
+    def test_missing_unit_asks_an_imperial_coach_to_supply_one(self) -> None:
         from challenges import ChallengeError
 
         with pytest.raises(ChallengeError, match="set `unit` to `km` or `mi`"):
-            coerce_proposal(dict(self.BASE), frozenset())
+            coerce_proposal(dict(self.BASE), frozenset(), units=IMP)
+
+    def test_missing_unit_means_km_for_a_metric_profile(self) -> None:
+        """Before units existed a distance target was km; metric keeps that."""
+        proposal = coerce_proposal(dict(self.BASE), frozenset())
+
+        assert proposal.target.target == 20
+
+    def test_invalid_unit_is_rejected_for_a_metric_profile_too(self) -> None:
+        from challenges import ChallengeError
+
+        with pytest.raises(ChallengeError, match="yards"):
+            coerce_proposal({**self.BASE, "unit": "yards"}, frozenset())
 
     def test_invalid_unit_is_rejected(self) -> None:
         from challenges import ChallengeError

@@ -8,7 +8,8 @@ from datetime import date, timedelta
 from goal_check import build_goal_check, record_triggers
 from models import DailySnapshot, WorkoutSnapshot
 from store import store_snapshots
-from weekly_targets import SPEC_BY_KEY, StoredTarget, save_targets
+from weekly_targets import save_targets
+from target_specs import SPEC_BY_KEY, StoredTarget
 
 # Four completed Monday-start weeks, then the week the coach runs in.
 WEEKS = ["2026-08-31", "2026-09-07", "2026-09-14", "2026-09-21"]

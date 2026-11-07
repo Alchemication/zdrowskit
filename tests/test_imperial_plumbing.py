@@ -24,13 +24,8 @@ from weekly_progress import (
     targets_completed_by,
     weekly_progress_nudge_line,
 )
-from weekly_targets import (
-    SPEC_BY_KEY,
-    StoredTarget,
-    extract_goal_text,
-    goals_digest,
-    save_targets,
-)
+from weekly_targets import extract_goal_text, goals_digest, save_targets
+from target_specs import SPEC_BY_KEY, StoredTarget
 
 M = UnitSystem.METRIC
 IMP = UnitSystem.IMPERIAL

@@ -50,14 +50,13 @@ from config import (
     CHALLENGE_PROPOSAL_TTL_DAYS,
 )
 from weekly_progress import measure_target, ring_label, workouts_count_toward
-from weekly_targets import (
+from weekly_targets import coerce_target, week_start_for
+from target_specs import (
     SPEC_BY_KEY,
     TARGET_SPECS,
     StoredTarget,
     TargetSpec,
-    coerce_target,
     target_to_display,
-    week_start_for,
 )
 from units import UnitSystem
 
@@ -204,13 +203,24 @@ def _row_to_challenge(row: sqlite3.Row) -> Challenge:
     )
 
 
-def coerce_proposal(raw: dict, known_types: frozenset[str]) -> Proposal:
+def coerce_proposal(
+    raw: dict,
+    known_types: frozenset[str],
+    *,
+    units: UnitSystem = UnitSystem.METRIC,
+) -> Proposal:
     """Validate a coach's ``propose_challenge`` arguments.
+
+    A distance target needs to say which unit it is in. For a metric profile
+    a missing ``unit`` means kilometres, as it did before units existed, so a
+    coach that leaves it out does not pay a tool error and a retry. An
+    imperial profile's coach could mean either, so there it must be stated.
 
     Args:
         raw: Tool-call arguments.
         known_types: Workout types this profile has recorded, for ``type:``
             categories.
+        units: The profile's display unit system.
 
     Returns:
         The validated proposal.
@@ -237,6 +247,9 @@ def coerce_proposal(raw: dict, known_types: frozenset[str]) -> Proposal:
     metric_spec = SPEC_BY_KEY.get(str(raw.get("metric") or ""))
     if metric_spec is not None and metric_spec.quantity is not None:
         given = str(raw.get("unit") or "").strip().lower()
+        if not given and units is UnitSystem.METRIC:
+            raw = {**raw, "unit": metric_spec.unit}
+            given = metric_spec.unit
         if given not in {metric_spec.unit, "mi"}:
             raise ChallengeError(
                 f"unit is required for {metric_spec.key}: set `unit` to "
@@ -545,8 +558,9 @@ def describe_challenge(
         challenge.target if isinstance(challenge, Proposal) else challenge.stored_target
     ).for_display(units)
     weeks = challenge.weeks
+    amount = _fmt(target.target, _display_decimals(target.spec, units))
     return (
-        f"{ring_label(target)}: {_fmt(target.target, _display_decimals(target.spec, units))} {target.spec.unit} a week "
+        f"{ring_label(target)}: {amount} {target.spec.unit} a week "
         f"for {weeks} {'week' if weeks == 1 else 'weeks'}"
     )
 

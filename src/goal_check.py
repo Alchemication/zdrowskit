@@ -38,12 +38,8 @@ from config import (
 )
 from weekly_progress import measure_week, ring_label
 from units import UnitSystem
-from weekly_targets import (
-    StoredTarget,
-    load_targets,
-    target_to_display,
-    week_start_for,
-)
+from weekly_targets import load_targets, week_start_for
+from target_specs import StoredTarget, target_to_display
 
 logger = logging.getLogger(__name__)
 

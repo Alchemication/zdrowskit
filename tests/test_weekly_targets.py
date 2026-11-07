@@ -8,8 +8,6 @@ import pytest
 
 from llm_context import UNFILLED_CONTEXT
 from weekly_targets import (
-    SPEC_BY_KEY,
-    StoredTarget,
     clear_targets,
     ensure_weekly_targets,
     extract_goal_text,
@@ -22,6 +20,7 @@ from weekly_targets import (
     week_bounds_for,
     week_start_for,
 )
+from target_specs import SPEC_BY_KEY, StoredTarget
 
 STRATEGY = """# Strategy
 

@@ -383,7 +383,9 @@ def cmd_coach(
                     tool_result = "Not proposed: one challenge per review."
                 else:
                     try:
-                        challenge_proposal = coerce_proposal(args_dict, known_types)
+                        challenge_proposal = coerce_proposal(
+                            args_dict, known_types, units=units
+                        )
                         tool_result = PROPOSAL_NOTED
                     except ChallengeError as exc:
                         tool_result = f"Not proposed: {exc}."

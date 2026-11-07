@@ -28,13 +28,8 @@ from weekly_progress import (
     weekly_progress_block,
     weekly_progress_nudge_line,
 )
-from weekly_targets import (
-    SPEC_BY_KEY,
-    StoredTarget,
-    extract_goal_text,
-    goals_digest,
-    save_targets,
-)
+from weekly_targets import extract_goal_text, goals_digest, save_targets
+from target_specs import SPEC_BY_KEY, StoredTarget
 
 WEEK_START = "2026-08-31"  # Monday
 WEDNESDAY = date(2026, 9, 2)

@@ -49,14 +49,8 @@ from config import (
     WEEKLY_PROGRESS_PACE_SLACK_DAYS,
 )
 from plan_frame import PlanFrame
-from weekly_targets import (
-    StoredTarget,
-    activity_type_of,
-    ensure_weekly_targets,
-    target_to_display,
-    week_start_for,
-    week_bounds_for,
-)
+from weekly_targets import ensure_weekly_targets, week_start_for, week_bounds_for
+from target_specs import StoredTarget, activity_type_of, target_to_display
 from units import UnitSystem
 
 logger = logging.getLogger(__name__)

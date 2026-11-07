@@ -393,7 +393,8 @@ def _volume_candidates(
                 key=f"volume_{category}|{threshold}{'mi' if imperial else ''}",
                 kind=f"volume_{category}",
                 headline=(
-                    f"You have now {_VOLUME_VERBS[category]} **{threshold:,} {unit_label(Quantity.DISTANCE, units)}** "
+                    f"You have now {_VOLUME_VERBS[category]} "
+                    f"**{threshold:,} {unit_label(Quantity.DISTANCE, units)}** "
                     f"{scope}."
                 ),
                 occurred_on=row["last_date"],
