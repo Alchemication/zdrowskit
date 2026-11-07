@@ -14,6 +14,7 @@ import re
 import secrets
 import shutil
 import socket
+import statistics
 import ssl
 import subprocess
 import threading
@@ -46,7 +47,7 @@ from config import (
     TAILSCALE_STATUS_TIMEOUT_S,
 )
 from parsers.metrics import parse_metrics_payload
-from parsers.workouts import parse_workouts_payload
+from parsers.workouts import BIN_SECONDS, parse_workouts_payload
 from profiles import Profile
 
 logger = logging.getLogger(__name__)
@@ -65,6 +66,13 @@ _UUID_RE = re.compile(
     r"[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$"
 )
 _APPLE_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}(?:[ T].*)?$")
+
+# Workouts aggregation header values that name a bin coarser than the parser's
+# one-minute series bins. Auto Export 20261023.1 sends "Default" for a Workouts
+# automation whatever its Minutes/Seconds setting, so any other value is judged
+# from the series spacing in the body instead of from the header.
+_COARSE_WORKOUT_AGGREGATIONS = frozenset({"hours", "days", "weeks", "months", "years"})
+_WORKOUT_SERIES_KEYS = ("heartRateData", "stepCount")
 
 
 class IngestError(ValueError):
@@ -442,6 +450,62 @@ def _validate_workouts(items: list[Any]) -> None:
             )
 
 
+def _median_series_gap_s(items: list[Any]) -> float | None:
+    """Return the median gap between consecutive workout series entries.
+
+    Args:
+        items: The validated ``data.workouts`` array.
+
+    Returns:
+        The median gap in seconds across every workout's heart-rate and step
+        series, or None when no series has two dated entries to compare.
+    """
+    gaps: list[float] = []
+    for workout in items:
+        for key in _WORKOUT_SERIES_KEYS:
+            series = workout.get(key)
+            if not isinstance(series, list):
+                continue
+            starts: list[datetime] = []
+            for entry in series:
+                raw = entry.get("date") if isinstance(entry, dict) else None
+                if not isinstance(raw, str):
+                    continue
+                try:
+                    starts.append(datetime.fromisoformat(raw.strip()))
+                except ValueError:
+                    continue
+            starts.sort()
+            gaps.extend(
+                (later - earlier).total_seconds()
+                for earlier, later in zip(starts, starts[1:])
+                if later > earlier
+            )
+    return statistics.median(gaps) if gaps else None
+
+
+def _require_minute_series(items: list[Any]) -> None:
+    """Reject workouts whose series are binned coarser than one minute.
+
+    Per-kilometre heart rate and cadence come from these series, and the parser
+    credits each entry with at most one bin, so coarser entries leave every
+    split below the coverage floor.
+
+    Args:
+        items: The validated ``data.workouts`` array.
+
+    Raises:
+        IngestError: When the median series gap exceeds the parser's bin.
+    """
+    gap = _median_series_gap_s(items)
+    if gap is not None and gap > BIN_SECONDS:
+        raise IngestError(
+            HTTPStatus.UNPROCESSABLE_ENTITY,
+            "Workouts automation aggregation must be Minutes: heart-rate and "
+            f"step samples in this upload are {gap:.0f} s apart.",
+        )
+
+
 def _parser_dry_run(payload: dict[str, Any], kind: str) -> None:
     """Run the production parser against a validated payload before accepting it.
 
@@ -485,7 +549,10 @@ def validate_upload(headers: dict[str, str], body: bytes) -> ValidatedUpload:
     # Workouts is not negotiable. Per-kilometre heart rate and cadence come from
     # the per-minute series inside each workout, and a coarser bin is credited
     # with at most a minute of a split, so every split silently falls below the
-    # sample-coverage floor and stores nothing.
+    # sample-coverage floor and stores nothing. The header is trusted when it
+    # says Minutes or names a coarser bin; any other value, including the
+    # "Default" current Auto Export sends for every Workouts automation, is
+    # checked against the series spacing in the body below.
     aggregation = headers.get("automation-aggregation", "").strip().lower()
     if automation_name == "metrics":
         if aggregation not in {"hours", "days"}:
@@ -493,7 +560,7 @@ def validate_upload(headers: dict[str, str], body: bytes) -> ValidatedUpload:
                 HTTPStatus.UNPROCESSABLE_ENTITY,
                 "Metrics automation aggregation must be Hours (preferred) or Days.",
             )
-    elif aggregation != "minutes":
+    elif aggregation in _COARSE_WORKOUT_AGGREGATIONS:
         raise IngestError(
             HTTPStatus.UNPROCESSABLE_ENTITY,
             "Workouts automation aggregation must be Minutes.",
@@ -545,6 +612,8 @@ def validate_upload(headers: dict[str, str], body: bytes) -> ValidatedUpload:
         _validate_metrics(items)
     else:
         _validate_workouts(items)
+        if aggregation != "minutes":
+            _require_minute_series(items)
     _parser_dry_run(payload, automation_name)
     logger.debug("Validated %s upload over Date Range %r", automation_name, period)
     return ValidatedUpload(
