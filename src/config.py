@@ -1225,13 +1225,13 @@ DEEPSEEK_FLASH_MODEL: str = os.environ.get(
 
 ANTHROPIC_OPUS_MODEL: str = os.environ.get(
     "ZDROWSKIT_ANTHROPIC_OPUS_MODEL",
-    "anthropic/claude-opus-5",
+    "anthropic/claude-opus-5-5",
 )
 """High-capability Anthropic model: premium primary and DeepSeek Pro fallback."""
 
 ANTHROPIC_HAIKU_MODEL: str = os.environ.get(
     "ZDROWSKIT_ANTHROPIC_HAIKU_MODEL",
-    "anthropic/claude-haiku-4-5",
+    "anthropic/claude-haiku-5-5",
 )
 """Low-cost Anthropic fallback paired with DeepSeek Flash."""
 

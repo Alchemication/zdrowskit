@@ -1344,7 +1344,7 @@ class TestCallLlm:
             reasoning_effort="high",
         )
         kwargs = mock_litellm.completion.call_args[1]
-        # ANTHROPIC_OPUS_MODEL is Opus 5, which takes effort via output_config.
+        # ANTHROPIC_OPUS_MODEL is Opus 5.5, which takes effort via output_config.
         assert kwargs["output_config"] == {"effort": "high"}
         assert kwargs["thinking"] == {"type": "adaptive"}
 

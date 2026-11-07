@@ -547,7 +547,7 @@ def _completion_kwargs_for_model(kwargs: dict, model: str) -> dict:
     """Return LiteLLM kwargs adjusted for a specific attempted model.
 
     Per-attempt translation: Anthropic receives ``reasoning_effort`` natively,
-    except Opus 5 which takes ``thinking={"type": "adaptive"}`` plus
+    except Opus 5.x which takes ``thinking={"type": "adaptive"}`` plus
     ``output_config={"effort": ...}``; DeepSeek translates ``reasoning_effort``
     of ``high`` or ``max`` into ``extra_body={"thinking": {"type": "enabled"}}``
     unless the caller passed an explicit ``extra_body`` (which always wins).
