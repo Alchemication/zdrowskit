@@ -2764,6 +2764,133 @@ class TestInterpretNotifyRequest:
                 raise AssertionError("Expected ValueError for invalid nudge cap")
 
 
+class TestNotifyResponseSchema:
+    """The response format must make each change's required fields mandatory."""
+
+    def test_every_change_type_requires_its_action(self) -> None:
+        from cmd_notify_interpreter import NotifyResponse
+
+        schema = NotifyResponse.model_json_schema()
+        variants = schema["properties"]["changes"]["items"]["anyOf"]
+        actions = set()
+        for ref in variants:
+            name = ref["$ref"].rsplit("/", 1)[-1]
+            definition = schema["$defs"][name]
+            assert "action" in definition["required"]
+            actions.add(definition["properties"]["action"]["const"])
+        assert actions == {"set", "reset", "reset_all", "mute_until"}
+
+    def test_schema_converts_for_openai_strict_mode(self) -> None:
+        """litellm sends Pydantic formats to OpenAI in strict mode."""
+        from openai.lib._pydantic import to_strict_json_schema
+
+        from cmd_notify_interpreter import NotifyResponse
+
+        strict = to_strict_json_schema(NotifyResponse)
+        assert strict["additionalProperties"] is False
+
+    def test_change_without_action_is_rejected_as_invalid_payload(
+        self, in_memory_db
+    ) -> None:
+        """Claude Haiku returned changes like this; it must fail clearly."""
+        result = LLMResult(
+            text=json.dumps(
+                {
+                    "status": "proposal",
+                    "intent": "enable",
+                    "changes": [{"path": "weekly_coach.enabled", "value": True}],
+                    "summary": "Turn on the coach review.",
+                    "clarification_question": None,
+                    "reason": "",
+                }
+            ),
+            model="test-model",
+            input_tokens=1,
+            output_tokens=1,
+            total_tokens=2,
+            latency_s=0.1,
+        )
+        with (
+            patch(
+                "cmd_notify_interpreter.load_context",
+                return_value={"prompt": "x", "soul": "y"},
+            ),
+            patch(
+                "cmd_notify_interpreter.build_messages",
+                return_value=[
+                    {"role": "system", "content": "s"},
+                    {"role": "user", "content": "u"},
+                ],
+            ),
+            patch("cmd_notify_interpreter.open_db", return_value=in_memory_db),
+            patch("cmd_notify_interpreter.call_llm", return_value=result),
+        ):
+            with pytest.raises(ValueError, match="invalid payload"):
+                interpret_notify_request(
+                    "turn on the coach review",
+                    db="ignored.db",
+                    prefs={"overrides": {}, "temporary_mutes": [], "version": 1},
+                )
+
+    def test_typed_changes_reach_validation_as_dicts(self, in_memory_db) -> None:
+        result = LLMResult(
+            text=json.dumps(
+                {
+                    "status": "proposal",
+                    "intent": "mute_until",
+                    "changes": [
+                        {
+                            "action": "set",
+                            "path": "weekly_coach.enabled",
+                            "value": True,
+                        },
+                        {
+                            "action": "mute_until",
+                            "target": "nudges",
+                            "expires_at": "2099-01-01T10:00:00+00:00",
+                            "source_text": "mute nudges",
+                        },
+                    ],
+                    "summary": "",
+                    "clarification_question": None,
+                    "reason": "",
+                }
+            ),
+            model="test-model",
+            input_tokens=1,
+            output_tokens=1,
+            total_tokens=2,
+            latency_s=0.1,
+        )
+        with (
+            patch(
+                "cmd_notify_interpreter.load_context",
+                return_value={"prompt": "x", "soul": "y"},
+            ),
+            patch(
+                "cmd_notify_interpreter.build_messages",
+                return_value=[
+                    {"role": "system", "content": "s"},
+                    {"role": "user", "content": "u"},
+                ],
+            ),
+            patch("cmd_notify_interpreter.open_db", return_value=in_memory_db),
+            patch("cmd_notify_interpreter.call_llm", return_value=result),
+        ):
+            payload = interpret_notify_request(
+                "turn on the coach review and mute nudges",
+                db="ignored.db",
+                prefs={"overrides": {}, "temporary_mutes": [], "version": 1},
+            )
+        set_change, mute = payload["changes"]
+        assert set_change == {
+            "action": "set",
+            "path": "weekly_coach.enabled",
+            "value": True,
+        }
+        assert mute["target"] == "nudges"
+
+
 class TestCmdDb:
     def test_status_shows_applied_migrations(self, tmp_path: Path, capsys) -> None:
         db_path = tmp_path / "test.db"
