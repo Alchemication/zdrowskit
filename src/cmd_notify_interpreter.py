@@ -54,7 +54,7 @@ class MuteChange(BaseModel):
     action: Literal["mute_until"]
     target: str = Field(description="Mute target, e.g. nudges or all.")
     expires_at: str = Field(description="ISO-8601 timestamp with offset.")
-    source_text: str = Field(description="The user's wording for the mute.")
+    source_text: str = Field(default="", description="The user's wording for the mute.")
 
 
 NotifyChange = SetChange | ResetChange | ResetAllChange | MuteChange

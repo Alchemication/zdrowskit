@@ -2780,6 +2780,29 @@ class TestNotifyResponseSchema:
             actions.add(definition["properties"]["action"]["const"])
         assert actions == {"set", "reset", "reset_all", "mute_until"}
 
+    def test_mute_without_source_text_defaults_to_empty(self) -> None:
+        """Validation always defaulted source_text; the schema must too."""
+        from cmd_notify_interpreter import NotifyResponse
+
+        parsed = NotifyResponse.model_validate(
+            {
+                "status": "proposal",
+                "intent": "mute_until",
+                "changes": [
+                    {
+                        "action": "mute_until",
+                        "target": "nudges",
+                        "expires_at": "2026-11-08T09:00:00+00:00",
+                    }
+                ],
+                "summary": "Mute nudges until tomorrow morning.",
+                "clarification_question": None,
+                "reason": "",
+            }
+        )
+
+        assert parsed.changes[0].source_text == ""
+
     def test_schema_converts_for_openai_strict_mode(self) -> None:
         """litellm sends Pydantic formats to OpenAI in strict mode."""
         from openai.lib._pydantic import to_strict_json_schema
