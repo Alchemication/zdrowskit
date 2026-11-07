@@ -1,0 +1,207 @@
+{
+  "data": {
+    "workouts": [
+      {
+        "name": "Outdoor Run",
+        "start": "2026-03-10 07:00:00 +0000",
+        "end": "2026-03-10 07:06:00 +0000",
+        "duration": 360.0,
+        "distance": {
+          "qty": 3.1,
+          "units": "mi"
+        },
+        "speed": {
+          "qty": 6.0,
+          "units": "mph"
+        },
+        "elevationUp": {
+          "qty": 20,
+          "units": "ft"
+        },
+        "activeEnergyBurned": {
+          "qty": 500,
+          "units": "kcal"
+        },
+        "temperature": {
+          "qty": 50,
+          "units": "degF"
+        },
+        "intensity": {
+          "qty": 8.0,
+          "units": "MET"
+        },
+        "humidity": {
+          "qty": 65,
+          "units": "%"
+        },
+        "heartRate": {
+          "avg": {
+            "qty": 150,
+            "units": "bpm"
+          },
+          "min": {
+            "qty": 120,
+            "units": "bpm"
+          },
+          "max": {
+            "qty": 170,
+            "units": "bpm"
+          }
+        },
+        "heartRateData": [
+          {
+            "date": "2026-03-10 07:00:00 +0000",
+            "Min": 140,
+            "Avg": 150,
+            "Max": 160,
+            "units": "bpm"
+          },
+          {
+            "date": "2026-03-10 07:01:00 +0000",
+            "Min": 140,
+            "Avg": 150,
+            "Max": 160,
+            "units": "bpm"
+          },
+          {
+            "date": "2026-03-10 07:02:00 +0000",
+            "Min": 140,
+            "Avg": 150,
+            "Max": 160,
+            "units": "bpm"
+          },
+          {
+            "date": "2026-03-10 07:03:00 +0000",
+            "Min": 140,
+            "Avg": 150,
+            "Max": 160,
+            "units": "bpm"
+          },
+          {
+            "date": "2026-03-10 07:04:00 +0000",
+            "Min": 140,
+            "Avg": 150,
+            "Max": 160,
+            "units": "bpm"
+          },
+          {
+            "date": "2026-03-10 07:05:00 +0000",
+            "Min": 140,
+            "Avg": 150,
+            "Max": 160,
+            "units": "bpm"
+          },
+          {
+            "date": "2026-03-10 07:06:00 +0000",
+            "Min": 140,
+            "Avg": 150,
+            "Max": 160,
+            "units": "bpm"
+          }
+        ],
+        "stepCount": [
+          {
+            "date": "2026-03-10 07:00:00 +0000",
+            "qty": 170,
+            "units": "count"
+          },
+          {
+            "date": "2026-03-10 07:01:00 +0000",
+            "qty": 170,
+            "units": "count"
+          },
+          {
+            "date": "2026-03-10 07:02:00 +0000",
+            "qty": 170,
+            "units": "count"
+          },
+          {
+            "date": "2026-03-10 07:03:00 +0000",
+            "qty": 170,
+            "units": "count"
+          },
+          {
+            "date": "2026-03-10 07:04:00 +0000",
+            "qty": 170,
+            "units": "count"
+          },
+          {
+            "date": "2026-03-10 07:05:00 +0000",
+            "qty": 170,
+            "units": "count"
+          },
+          {
+            "date": "2026-03-10 07:06:00 +0000",
+            "qty": 170,
+            "units": "count"
+          }
+        ],
+        "route": [
+          {
+            "latitude": 0.0,
+            "longitude": 0.0,
+            "altitude": 100.0,
+            "speed": 3.3,
+            "timestamp": "2026-03-10T07:00:00Z"
+          },
+          {
+            "latitude": 0.001348982,
+            "longitude": 0.0,
+            "altitude": 101.0,
+            "speed": 3.3,
+            "timestamp": "2026-03-10T07:00:45Z"
+          },
+          {
+            "latitude": 0.002697965,
+            "longitude": 0.0,
+            "altitude": 102.0,
+            "speed": 3.3,
+            "timestamp": "2026-03-10T07:01:30Z"
+          },
+          {
+            "latitude": 0.004046947,
+            "longitude": 0.0,
+            "altitude": 103.0,
+            "speed": 3.3,
+            "timestamp": "2026-03-10T07:02:15Z"
+          },
+          {
+            "latitude": 0.00539593,
+            "longitude": 0.0,
+            "altitude": 104.0,
+            "speed": 3.3,
+            "timestamp": "2026-03-10T07:03:00Z"
+          },
+          {
+            "latitude": 0.006744912,
+            "longitude": 0.0,
+            "altitude": 105.0,
+            "speed": 3.3,
+            "timestamp": "2026-03-10T07:03:45Z"
+          },
+          {
+            "latitude": 0.008093894,
+            "longitude": 0.0,
+            "altitude": 106.0,
+            "speed": 3.3,
+            "timestamp": "2026-03-10T07:04:30Z"
+          },
+          {
+            "latitude": 0.009442877,
+            "longitude": 0.0,
+            "altitude": 107.0,
+            "speed": 3.3,
+            "timestamp": "2026-03-10T07:05:15Z"
+          },
+          {
+            "latitude": 0.010791859,
+            "longitude": 0.0,
+            "altitude": 108.0,
+            "speed": 3.3,
+            "timestamp": "2026-03-10T07:06:00Z"
+          }
+        ]
+      }
+    ]
+  }
+}

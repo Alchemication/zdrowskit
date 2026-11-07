@@ -1,0 +1,110 @@
+{
+  "data": {
+    "metrics": [
+      {
+        "name": "walking_running_distance",
+        "units": "mi",
+        "data": [
+          {
+            "date": "2026-03-09 00:00:00 +0000",
+            "qty": 3.1
+          }
+        ]
+      },
+      {
+        "name": "active_energy",
+        "units": "kcal",
+        "data": [
+          {
+            "date": "2026-03-09 00:00:00 +0000",
+            "qty": 500
+          }
+        ]
+      },
+      {
+        "name": "walking_speed",
+        "units": "mi/hr",
+        "data": [
+          {
+            "date": "2026-03-09 00:00:00 +0000",
+            "qty": 3.0
+          }
+        ]
+      },
+      {
+        "name": "running_speed",
+        "units": "mph",
+        "data": [
+          {
+            "date": "2026-03-09 00:00:00 +0000",
+            "qty": 6.0
+          }
+        ]
+      },
+      {
+        "name": "walking_step_length",
+        "units": "in",
+        "data": [
+          {
+            "date": "2026-03-09 00:00:00 +0000",
+            "qty": 28
+          }
+        ]
+      },
+      {
+        "name": "running_stride_length",
+        "units": "ft",
+        "data": [
+          {
+            "date": "2026-03-09 00:00:00 +0000",
+            "qty": 3.5
+          }
+        ]
+      },
+      {
+        "name": "stair_speed_up",
+        "units": "ft/s",
+        "data": [
+          {
+            "date": "2026-03-09 00:00:00 +0000",
+            "qty": 1.0
+          }
+        ]
+      },
+      {
+        "name": "apple_sleeping_wrist_temperature",
+        "units": "degF",
+        "data": [
+          {
+            "date": "2026-03-10 01:00:00 +0000",
+            "qty": 97.7
+          },
+          {
+            "date": "2026-03-10 03:00:00 +0000",
+            "qty": 97.7
+          }
+        ]
+      },
+      {
+        "name": "resting_heart_rate",
+        "units": "count/min",
+        "data": [
+          {
+            "date": "2026-03-09 00:00:00 +0000",
+            "qty": 52
+          }
+        ]
+      },
+      {
+        "name": "totally_unknown_metric",
+        "units": "??",
+        "data": [
+          {
+            "date": "2026-03-09 00:00:00 +0000",
+            "qty": 1
+          }
+        ]
+      }
+    ]
+  }
+}
