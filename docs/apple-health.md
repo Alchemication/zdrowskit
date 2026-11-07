@@ -192,8 +192,9 @@ live in `src/parsers/normalise.py`.
 - Workout route points are always SI (metres, metres per second) whatever the
   phone's unit preferences, and are used as sent.
 
-Data imported before unit conversion existed is not corrected retroactively.
-Re-export the affected date range from Auto Export to re-import it correctly.
+Conversion applies as a payload is imported; values already stored are left
+as they are. To correct an earlier import, re-export the affected date range
+from Auto Export.
 
 ## Historical Backfill
 
