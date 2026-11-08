@@ -60,9 +60,9 @@ The weekly review that proposes changes to your plan, and must speak up when a g
 
 | Model | Reasoning | Repeat | Cases | Strict | Attempt | Flaky | Tool calls | Avg Latency | Cost/run | Commit | Not passing |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
-| gpt-5.6-luna | high | 3 | 6/6 | 100.0% | 100.0% | 0 | 0.9 avg (5 cases, 1-2), 1 varied | 14.67s | $0.0220 | c0bc6e1* | - |
+| gpt-5.6-luna | high | 3 | 6/6 | 100.0% | 100.0% | 0 | 0.8 avg (5 cases, 1 each) | 18.51s | $0.0204 | 4ea74e9* | - |
+| claude-haiku-5-5 | high | 3 | 6/6 | 100.0% | 100.0% | 0 | 1.1 avg (6 cases, up to 3), 2 varied | 17.25s | $0.0361 | 4ea74e9* | - |
 | **gpt-5.6-luna** (ships today) | high | 3 | 6/6 | 83.3% | 94.4% | 1 | 0.8 avg (5 cases, up to 1), 1 varied | 15.15s | $0.0175 | a722d28 | `coach_proposes_when_a_target_is_missed_most_weeks` 2/3 |
-| claude-haiku-5-5 | high | 3 | 6/6 | 66.7% | 66.7% | 0 | 0.9 avg (5 cases, 1-3), 1 varied | 15.95s | $0.0345 | c0bc6e1* | `coach_proposes_when_a_target_is_missed_most_weeks` 0/3<br>`coach_sunday_review_says_the_week_is_unfinished` 0/3 |
 
 Leading row (`gpt-5.6-luna`) passed every case on every attempt.
 
