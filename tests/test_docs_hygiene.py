@@ -52,7 +52,7 @@ class TestModelIdentifiersStayInCode:
         """A clean pass must mean the pattern works, not that it matches nothing."""
         assert MODEL_ID_RE.search("route it to anthropic/claude-opus-5 today")
         assert MODEL_ID_RE.search("`openai/gpt-5.6-luna`")
-        assert MODEL_ID_RE.search("deepseek/deepseek-v4-flash")
+        assert MODEL_ID_RE.search("deepseek/deepseek-flash")
         assert not MODEL_ID_RE.search("https://github.com/BerriAI/litellm")
         assert not MODEL_ID_RE.search("use the flash tier")
 

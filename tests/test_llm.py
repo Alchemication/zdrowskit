@@ -1280,7 +1280,7 @@ class TestCallLlm:
 
         result = call_llm(
             [{"role": "user", "content": "test"}],
-            model="openrouter/deepseek/deepseek-v4-flash",
+            model="openrouter/deepseek/deepseek-flash",
         )
 
         assert result.cost == 0.0123

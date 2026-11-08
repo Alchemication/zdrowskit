@@ -408,7 +408,7 @@ class TestFindWorkoutClone:
             assert mock_call.called
             call_kwargs = mock_call.call_args
             assert call_kwargs.kwargs.get("request_type") == "add_clone"
-            assert call_kwargs.kwargs.get("model") == "deepseek/deepseek-v4-flash"
+            assert call_kwargs.kwargs.get("model") == "deepseek/deepseek-flash"
             assert call_kwargs.kwargs.get("reasoning_effort") == "high"
             assert call_kwargs.kwargs.get("temperature") is None
             assert result["type"] == "Outdoor Run"

@@ -1,7 +1,7 @@
 """Run eval comparison matrices.
 
 Usage:
-    uv run python -m evals.matrix --feature chat --models deepseek/deepseek-v4-flash,deepseek/deepseek-v4-pro --reasoning-efforts high
+    uv run python -m evals.matrix --feature chat --models deepseek/deepseek-flash,deepseek/deepseek-v4-pro --reasoning-efforts high
     uv run python -m evals.matrix --feature insights --models anthropic/claude-opus-5-5,deepseek/deepseek-v4-pro --reasoning-efforts high
     uv run python -m evals.matrix --production --record
 """

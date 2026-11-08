@@ -292,7 +292,7 @@ class TestFallbackVisibility:
 
     def test_record_marks_a_case_answered_by_a_fallback(self) -> None:
         result = _eval_result("case-a", passed=True)
-        result.model = "deepseek/deepseek-v4-flash"
+        result.model = "deepseek/deepseek-flash"
         result.route = {
             **result.route,
             "primary": "openai/gpt-5.6-luna",
@@ -310,11 +310,11 @@ class TestFallbackVisibility:
         )
 
         assert record["per_case"][0]["fallback_used"] is True
-        assert record["per_case"][0]["model"] == "deepseek/deepseek-v4-flash"
+        assert record["per_case"][0]["model"] == "deepseek/deepseek-flash"
 
     def test_markdown_says_which_features_a_fallback_answered(self) -> None:
         result = _eval_result("case-a", passed=True, feature="nudge")
-        result.model = "deepseek/deepseek-v4-flash"
+        result.model = "deepseek/deepseek-flash"
         result.route = {
             **result.route,
             "primary": "openai/gpt-5.6-luna",

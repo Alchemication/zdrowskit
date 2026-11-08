@@ -214,7 +214,7 @@ Use `evals.matrix` for model or route comparisons:
 
 ```bash
 uv run python -m evals.matrix --production --record
-uv run python -m evals.matrix --feature chat --models deepseek/deepseek-v4-flash,deepseek/deepseek-v4-pro --reasoning-efforts high --no-temperature --record
+uv run python -m evals.matrix --feature chat --models deepseek/deepseek-flash,deepseek/deepseek-v4-pro --reasoning-efforts high --no-temperature --record
 uv run python -m evals.matrix --feature verification_judge --models deepseek/deepseek-v4-pro,anthropic/claude-sonnet-4-6 --reasoning-efforts high --no-temperature --record
 ```
 

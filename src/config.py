@@ -1228,7 +1228,7 @@ DEEPSEEK_PRO_MODEL: str = os.environ.get(
 
 DEEPSEEK_FLASH_MODEL: str = os.environ.get(
     "ZDROWSKIT_DEEPSEEK_FLASH_MODEL",
-    "deepseek/deepseek-v4-flash",
+    "deepseek/deepseek-flash",
 )
 """Lower-cost DeepSeek model used by lightweight feature defaults."""
 
