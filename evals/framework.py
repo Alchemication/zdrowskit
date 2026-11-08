@@ -1319,6 +1319,7 @@ def run_tool_loop(
     refresh_cache: bool,
     extra_metadata: dict[str, Any] | None = None,
     followup: Callable[[str, list[CapturedToolCall]], str | None] | None = None,
+    keep_tool_turn_text: bool = False,
 ) -> EvalExecution:
     """Drive a tool-calling LLM loop against fixture-seeded tool results.
 
@@ -1339,6 +1340,12 @@ def run_tool_loop(
             Called with the reply text and the tool calls so far each time the
             model stops; a returned message is sent as a user turn. The hook
             owns its own once-only bookkeeping.
+        keep_tool_turn_text: Join the text of every turn into the result, as
+            production coach does, instead of only the final reply. A model
+            that writes its review alongside a tool call and then ends on an
+            empty turn would otherwise be scored as having written nothing.
+            Chat, insights and nudge ship only the final reply, so they leave
+            this off.
 
     Returns:
         Aggregated ``EvalExecution`` with tokens, latency, cost, and the final
@@ -1396,6 +1403,10 @@ def run_tool_loop(
         _accumulate(last_result, cache_hit)
 
         tool_calls = _result_tool_calls(last_result)
+        if tool_calls and keep_tool_turn_text:
+            carried_text = _join_turn_text(
+                carried_text, getattr(last_result, "text", None)
+            )
         if not tool_calls and followup is not None:
             message = followup(str(getattr(last_result, "text", "") or ""), captured)
             if message:
@@ -1462,8 +1473,13 @@ def run_tool_loop(
         )
         _accumulate(last_result, cache_hit)
 
+    final_text = str(
+        getattr(last_result, "text", "") if last_result is not None else ""
+    )
+    if keep_tool_turn_text:
+        final_text = _join_turn_text(carried_text, final_text)
     return EvalExecution(
-        text=str(getattr(last_result, "text", "") if last_result is not None else ""),
+        text=final_text,
         tool_calls=captured,
         messages=messages,
         input_tokens=input_tokens,
@@ -1477,6 +1493,17 @@ def run_tool_loop(
         tools_offered=len(tools or []),
         hit_iteration_cap=hit_iteration_cap,
     )
+
+
+def _join_turn_text(carried: str, text: object) -> str:
+    """Append one turn's text to the carried narrative, dropping SKIP and blanks.
+
+    Mirrors production coach, which keeps every non-empty, non-SKIP turn.
+    """
+    part = str(text or "").strip()
+    if not part or part == "SKIP":
+        return carried
+    return "\n\n".join(p for p in (carried, part) if p)
 
 
 def _call_llm_for_eval(

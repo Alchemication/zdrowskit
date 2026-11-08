@@ -1618,3 +1618,70 @@ class TestOriginalPlanFrameRegression:
             result.passed
             for result in run_assertions(case.assertions, EvalExecution(text=corrected))
         )
+
+
+class TestRunToolLoopTurnText:
+    """Coach ships text from every turn; the eval must score the same text."""
+
+    @staticmethod
+    def _turn(text: str, *, tool: bool) -> SimpleNamespace:
+        calls = (
+            [
+                {
+                    "id": "t1",
+                    "type": "function",
+                    "function": {"name": "propose_challenge", "arguments": "{}"},
+                }
+            ]
+            if tool
+            else []
+        )
+        return SimpleNamespace(text=text, tool_calls=calls, raw_message=None, model="m")
+
+    def _run(self, monkeypatch, turns, *, keep: bool, cap: int = 5) -> str:
+        from evals import framework
+
+        queue = list(turns)
+        monkeypatch.setattr(
+            framework, "_call_llm_for_eval", lambda **_: (queue.pop(0), False)
+        )
+        return framework.run_tool_loop(
+            case=load_cases()[0],
+            fixture={"known_activity_types": ["running"]},
+            messages=[{"role": "user", "content": "review"}],
+            tools=[{"type": "function", "function": {"name": "propose_challenge"}}],
+            model="m",
+            max_tokens=100,
+            max_tool_iterations=cap,
+            reasoning_effort=None,
+            temperature=None,
+            cache=None,
+            refresh_cache=False,
+            keep_tool_turn_text=keep,
+        ).text
+
+    def test_review_written_beside_a_tool_call_is_kept(self, monkeypatch) -> None:
+        turns = [self._turn("Week review.", tool=True), self._turn("", tool=False)]
+        assert self._run(monkeypatch, turns, keep=True) == "Week review."
+
+    def test_default_keeps_only_the_final_reply(self, monkeypatch) -> None:
+        """Chat, insights and nudge ship only the final reply."""
+        turns = [self._turn("Week review.", tool=True), self._turn("", tool=False)]
+        assert self._run(monkeypatch, turns, keep=False) == ""
+
+    def test_turns_join_in_order_and_skip_is_dropped(self, monkeypatch) -> None:
+        turns = [
+            self._turn("First.", tool=True),
+            self._turn("SKIP", tool=True),
+            self._turn("Last.", tool=False),
+        ]
+        assert self._run(monkeypatch, turns, keep=True) == "First.\n\nLast."
+
+    def test_iteration_cap_synthesis_keeps_earlier_turns(self, monkeypatch) -> None:
+        turns = [
+            self._turn("First.", tool=True),
+            self._turn("Second.", tool=True),
+            self._turn("Synthesis.", tool=False),
+        ]
+        text = self._run(monkeypatch, turns, keep=True, cap=2)
+        assert text == "First.\n\nSecond.\n\nSynthesis."

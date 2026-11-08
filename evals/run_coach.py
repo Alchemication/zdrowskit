@@ -89,6 +89,7 @@ def run_coach_case(
         refresh_cache=refresh_cache,
         extra_metadata={"stage": "coach"},
         followup=_followup_for(fixture),
+        keep_tool_turn_text=True,
     )
     route = _eval_route(
         feature="coach",
