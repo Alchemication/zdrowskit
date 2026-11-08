@@ -237,43 +237,15 @@ def _feature_defaults(feature: str, primary: str) -> dict[str, Any]:
     entry.update(_feature_model_defaults(feature, primary))
     if feature in ASYNC_QUALITY_FEATURES and primary == ANTHROPIC_OPUS_MODEL:
         entry["fallback"] = PRIMARY_PRO_MODEL
-    elif feature == "insights":
-        # Reports left Opus 5 on cost, not on a measured quality win. Measured
-        # over the three insights cases at five runs each, Opus took 86.7%
-        # attempt-weighted against Luna's 73.3% and Flash's 66.7% — but at
-        # $0.5852 a covered run against $0.0117 and $0.0076, roughly 60x. Luna
-        # and Flash tied on strict accuracy and traded places between two
-        # consecutive runs of the same config, so three cases could not
-        # separate them; Luna wins on latency (20s against 56s) and did not
-        # show the empty-report failure Flash produced once.
-        #
-        # This is a judgement call on price and speed, not a quality result.
-        # Revisit once insights has enough cases to decide it properly.
-        entry["fallback"] = PRIMARY_FLASH_MODEL
-    elif feature == "coach":
-        # Coach left Opus 5 on 2026-08-09 with no eval coverage at all — the
-        # only surface with none. This is explicitly not a measured win: there
-        # was no result showing Opus 5 earned 23x Luna's price here ($0.0956
-        # against $0.0041 a review), so keeping it was as unfounded as moving
-        # it. Flash fallback for the same reason as insights and nudge, and
-        # because coach output is verified, which is the net under an
-        # unmeasured change.
-        #
-        # Treat any report of worse proposals after this date as a candidate
-        # regression, and write coach cases before defending the choice.
-        entry["fallback"] = PRIMARY_FLASH_MODEL
-    elif feature == "nudge":
-        # Nudges sit in the pro profile, whose fallback is Opus 5. That is the
-        # wrong safety net here: measured on the nudge cases Opus 5, DeepSeek
-        # Pro and DeepSeek Flash all scored the same 40%, so paying for a
-        # premium fallback buys nothing when the primary is down.
-        #
-        # Flash rather than Pro because of how Luna fails. It falls back on
-        # "unable to complete request: max_output_tokens" — it spends the
-        # output budget on reasoning and never emits text. Pro is itself a
-        # reasoning model and inherits the same effort and ceiling, so it is
-        # the one tier most likely to reproduce the failure it is catching.
-        entry["fallback"] = PRIMARY_FLASH_MODEL
+    elif feature in ("insights", "coach", "nudge"):
+        # Haiku 5.5 fallback, set 2026-11-08 to match chat and the other Luna
+        # routes. The same day's comparison at three runs per case put Haiku
+        # behind Luna as a primary (insights 3/7 against 6/7, coach 4/6 against
+        # 6/6, nudge 9/11 against 11/11, slower and pricier), so it is the
+        # safety net, not a contender. It replaces DeepSeek Flash, which these
+        # three had inherited when they left Opus 5 on cost. Coach and nudge
+        # need the explicit entry because their pro profile falls back to Opus.
+        entry["fallback"] = ANTHROPIC_HAIKU_MODEL
     return entry
 
 

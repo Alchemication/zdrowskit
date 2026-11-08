@@ -28,47 +28,44 @@ from model_prefs import (
 
 
 class TestModelPrefs:
-    def test_coach_defaults_to_luna_falling_back_to_flash(self, tmp_path):
-        """Coach left Opus 5 on 2026-08-09 without eval evidence either way.
+    def test_coach_defaults_to_luna_falling_back_to_haiku(self, tmp_path):
+        """Coach is Luna with a Haiku 5.5 safety net.
 
-        This is the one route change made on symmetry rather than measurement:
-        the harness has no coach runner, so no result ever showed Opus 5 earned
-        23x Luna's price here. The assertion pins the decision so a silent
-        revert is visible; it is not a claim that Luna scored better.
+        Haiku scored 4/6 against Luna's 6/6 on the coach cases on 2026-11-08,
+        so it is the fallback, not the primary. The explicit entry matters:
+        coach's pro profile would otherwise fall back to Opus.
         """
         route = resolve_model_route("coach", path=tmp_path / "models.json")
 
         assert route.primary == OPENAI_LUNA_MODEL
-        assert route.fallback == PRIMARY_FLASH_MODEL
+        assert route.fallback == ANTHROPIC_HAIKU_MODEL
         assert route.call_kwargs()["reasoning_effort"] == "high"
         assert route.call_kwargs()["temperature"] is None
 
-    def test_insights_defaults_to_luna_falling_back_to_flash(self, tmp_path):
-        """Reports left Opus 5 on price, not on a measured quality win.
+    def test_insights_defaults_to_luna_falling_back_to_haiku(self, tmp_path):
+        """Reports left Opus 5 on price; Haiku 5.5 is the fallback.
 
-        Opus led attempt-weighted accuracy over the three insights cases but
-        cost roughly 60x per covered run, and three cases could not separate
-        Luna from Flash — they traded places between consecutive runs of the
-        same config. Revisit when insights has enough cases to decide it.
+        Haiku scored 3/7 against Luna's 6/7 on the insights cases on
+        2026-11-08, so it backs Luna up rather than replacing it.
         """
         route = resolve_model_route("insights", path=tmp_path / "models.json")
 
         assert route.primary == OPENAI_LUNA_MODEL
-        assert route.fallback == PRIMARY_FLASH_MODEL
+        assert route.fallback == ANTHROPIC_HAIKU_MODEL
         assert route.primary != ANTHROPIC_OPUS_MODEL
         assert route.call_kwargs()["reasoning_effort"] == "high"
         assert route.call_kwargs()["temperature"] is None
 
-    def test_nudge_default_is_luna_falling_back_to_flash(self, tmp_path):
-        """Opus 5, DeepSeek Pro and DeepSeek Flash all scored 40% on the nudge
-        cases, so the fallback should be the cheapest of them. Pro is also a
-        reasoning model on the same effort and token ceiling as Luna, which
-        makes it liable to repeat the max_output_tokens failure it is there to
-        catch."""
+    def test_nudge_default_is_luna_falling_back_to_haiku(self, tmp_path):
+        """Nudges fall back to Haiku 5.5, not the pro profile's Opus.
+
+        A premium fallback bought nothing on the nudge cases, and Pro shares
+        Luna's reasoning effort and token ceiling, so it would repeat the
+        max_output_tokens failure it is there to catch."""
         route = resolve_model_route("nudge", path=tmp_path / "models.json")
 
         assert route.primary == OPENAI_LUNA_MODEL
-        assert route.fallback == PRIMARY_FLASH_MODEL
+        assert route.fallback == ANTHROPIC_HAIKU_MODEL
         assert route.fallback != ANTHROPIC_OPUS_MODEL
         assert route.fallback != PRIMARY_PRO_MODEL
         assert route.call_kwargs()["reasoning_effort"] == "high"
@@ -108,7 +105,7 @@ class TestModelPrefs:
 
         route = resolve_model_route("nudge", path=path)
         assert route.primary == OPENAI_LUNA_MODEL
-        assert route.fallback == PRIMARY_FLASH_MODEL
+        assert route.fallback == ANTHROPIC_HAIKU_MODEL
 
     def test_profile_route_updates_inherited_fallback(self, tmp_path):
         path = tmp_path / "models.json"
@@ -147,7 +144,7 @@ class TestModelPrefs:
         path.write_text(json.dumps({"features": {"insights": {}}}))
 
         route = resolve_model_route("insights", path=path)
-        assert route.fallback == PRIMARY_FLASH_MODEL
+        assert route.fallback == ANTHROPIC_HAIKU_MODEL
 
     def test_legacy_v1_default_async_routes_migrate_to_new_defaults(self, tmp_path):
         path = tmp_path / "models.json"
